@@ -6,11 +6,11 @@ import { GetBuildHash, GetVersion } from "@/lib/wailsjs/go/app/App";
 import GitHubIcon from "@/components/ui/GitHubIcon";
 import Logo from "@/components/Logo";
 
-const REPO_URL = "https://github.com/novelgo/novelgo";
-const SKILLS_REPO_URL = "https://github.com/novelgo/novelgo-skills";
+const REPO_URL = "https://github.com/ourvps1688/NovelGo";
+const SKILLS_REPO_URL = "https://github.com/ourvps1688/NovelGo-skills";
 // 上游项目（AGPL 第7条附加条款要求保留此署名，勿移除）
 const UPSTREAM_URL = "https://github.com/sigpanic/goink";
-const ISSUES_URL = "https://github.com/novelgo/novelgo/issues";
+const ISSUES_URL = "https://github.com/ourvps1688/NovelGo/issues";
 
 export default function AboutTab() {
   const { t } = useTranslation();

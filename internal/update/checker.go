@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	repoOwner   = "novelgo"
-	repoName    = "novelgo"
+	repoOwner   = "ourvps1688"
+	repoName    = "NovelGo"
 	apiBaseURL  = "https://api.github.com/repos/" + repoOwner + "/" + repoName
 	httpTimeout = 5 * time.Second
 )

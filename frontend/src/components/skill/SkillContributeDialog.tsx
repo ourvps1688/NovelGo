@@ -2,7 +2,7 @@ import { Heart, ExternalLink, FileText, GitFork } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BrowserOpenURL } from "@/lib/wailsjs/runtime/runtime";
 
-const REPO = "novelgo/novelgo-skills";
+const REPO = "ourvps1688/NovelGo-skills";
 const BRANCH = "main";
 
 interface Props {

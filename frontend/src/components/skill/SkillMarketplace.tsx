@@ -38,7 +38,7 @@ interface Props {
 type Phase = "browse" | "detail" | "confirm_overwrite";
 type InstallTarget = "user" | "novel";
 
-const REPO_URL = "https://github.com/novelgo/novelgo-skills";
+const REPO_URL = "https://github.com/ourvps1688/NovelGo-skills";
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_PAGE_SIZE = 20;
 const DEBOUNCE_MS = 300;

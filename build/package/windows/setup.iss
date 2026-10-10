@@ -11,10 +11,10 @@
 [Setup]
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppPublisher=novelgo
-AppPublisherURL=https://github.com/novelgo/novelgo
-AppSupportURL=https://github.com/novelgo/novelgo/issues
-AppUpdatesURL=https://github.com/novelgo/novelgo/releases
+AppPublisher=ourvps1688
+AppPublisherURL=https://github.com/ourvps1688/NovelGo
+AppSupportURL=https://github.com/ourvps1688/NovelGo/issues
+AppUpdatesURL=https://github.com/ourvps1688/NovelGo/releases
 AppId=NovelGo
 DefaultDirName={code:GetDefaultDir}
 DefaultGroupName={#MyAppName}

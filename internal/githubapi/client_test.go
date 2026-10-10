@@ -31,7 +31,7 @@ func TestGetRawContent_OK(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	body, rl, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "index.json")
+	body, rl, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.NoError(t, err)
 	assert.Equal(t, "# raw skill content", string(body))
 	require.NotNil(t, rl)
@@ -50,7 +50,7 @@ func TestGetRawContent_NotFound(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	body, rl, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "skills/missing.md")
+	body, rl, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "skills/missing.md")
 	require.Error(t, err)
 	assert.Nil(t, body)
 	var apiErr *Error
@@ -74,7 +74,7 @@ func TestGetRawContent_RateLimited403(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	_, _, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)
@@ -94,7 +94,7 @@ func TestGetRawContent_Forbidden403(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	_, _, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)
@@ -113,7 +113,7 @@ func TestGetRawContent_RateLimited429(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	_, _, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)
@@ -131,7 +131,7 @@ func TestGetRawContent_ServerError(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	_, _, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)
@@ -154,7 +154,7 @@ func TestGetRawContent_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, _, err := c.GetRawContent(ctx, "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(ctx, "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)
@@ -170,7 +170,7 @@ func TestGetRawContent_ConnectionRefused(t *testing.T) {
 	c := NewClient()
 	c.baseURL = srv.URL
 
-	_, _, err := c.GetRawContent(context.Background(), "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(context.Background(), "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)
@@ -194,7 +194,7 @@ func TestGetRawContent_CanceledContext(t *testing.T) {
 		cancel()
 	}()
 
-	_, _, err := c.GetRawContent(ctx, "novelgo", "novelgo-skills", "main", "index.json")
+	_, _, err := c.GetRawContent(ctx, "ourvps1688", "NovelGo-skills", "main", "index.json")
 	require.Error(t, err)
 	var apiErr *Error
 	require.ErrorAs(t, err, &apiErr)

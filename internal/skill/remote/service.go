@@ -21,8 +21,8 @@ import (
 
 // 远程 skill 仓库标识。
 const (
-	repoOwner = "novelgo"
-	repoName  = "novelgo-skills"
+	repoOwner = "ourvps1688"
+	repoName  = "NovelGo-skills"
 	branch    = "main"
 	indexPath = "index.json"
 	skillsDir = "skills"  // 仓库内 skills 目录
