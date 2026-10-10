@@ -34,7 +34,10 @@ export function useContentNavigation({
       path: "novelgo.md",
       title: describeFile("novelgo.md", t).title,
     });
-    contentRef.current?.openFile("novelgo.md", describeFile("novelgo.md", t).title);
+    contentRef.current?.openFile(
+      "novelgo.md",
+      describeFile("novelgo.md", t).title,
+    );
   }
 
   function handleSelectVolumeOutline(path: string, volumeName: string) {

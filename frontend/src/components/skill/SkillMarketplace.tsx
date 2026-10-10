@@ -44,7 +44,9 @@ const DEFAULT_PAGE_SIZE = 20;
 const DEBOUNCE_MS = 300;
 
 function pathForSource(target: InstallTarget, name: string): string {
-  return target === "user" ? `~/.novelgo/skills/${name}.md` : `skills/${name}.md`;
+  return target === "user"
+    ? `~/.novelgo/skills/${name}.md`
+    : `skills/${name}.md`;
 }
 
 function modeClass(mode: string): string {

@@ -26,16 +26,16 @@ func TestValidPath(t *testing.T) {
 	invalid := []string{
 		"chapters/001.md",
 		"outlines/001.md",
-		"chapters/new",        // 缺扩展名
-		"chapters/id_1.md/",   // 尾部斜杠
-		"plans/weekly.md",     // 不支持的目录
-		"volumes/3.md",        // 旧的无 id_ 前缀路径不再接受
-		"volumes/id_0.md",     // 卷 ID 必须为正整数
-		"volumes/id_01.md",    // 卷 ID 必须用规范整数表示
-		"volumes/id_1.txt",    // 扩展名错误
-		"skills/",             // 缺文件名
-		"skills/a/b.md",       // 多级技能名
-		"/etc/passwd",         // 绝对路径（builtin 前缀之外）
+		"chapters/new",          // 缺扩展名
+		"chapters/id_1.md/",     // 尾部斜杠
+		"plans/weekly.md",       // 不支持的目录
+		"volumes/3.md",          // 旧的无 id_ 前缀路径不再接受
+		"volumes/id_0.md",       // 卷 ID 必须为正整数
+		"volumes/id_01.md",      // 卷 ID 必须用规范整数表示
+		"volumes/id_1.txt",      // 扩展名错误
+		"skills/",               // 缺文件名
+		"skills/a/b.md",         // 多级技能名
+		"/etc/passwd",           // 绝对路径（builtin 前缀之外）
 		"~/.novelgo/other/x.md", // 用户目录下非 skills 路径
 	}
 	for _, p := range invalid {
