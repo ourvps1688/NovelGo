@@ -43,3 +43,6 @@ novelgo-skills/
 
 # Legacy Python prototype (NovelGo 前身，保留本地参考，不纳入版本控制)
 python-master/
+
+# Local secrets / tokens (DO NOT COMMIT — contains GitHub PAT)
+github_pat.txt
