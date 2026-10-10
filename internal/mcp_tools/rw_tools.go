@@ -430,6 +430,14 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	if ref.IsNew {
 		activity.NewStore(tc.DB, tc.LoggerOrDefault()).AddActivity(ctx, activity.ActivityDelta{ChaptersCreated: 1})
 		data["chapter_id"] = ch.ID
+		// 显式给出同源章节的另一条物理路径，避免 LLM 误用 new.md 再次建章：
+		// 大纲通道(outlines/new.md)创建的章节，写正文必须用返回的 body_path（chapters/id_X.md）；
+		// 正文通道(chapters/new.md)创建的章节，写大纲用 outline_path（outlines/id_X.md）。
+		if ref.IsOutline {
+			data["body_path"] = git.ChapterPath(ch.ID)
+		} else {
+			data["outline_path"] = git.OutlinePath(ch.ID)
+		}
 		if ch.VolumeID != nil {
 			data["volume_id"] = *ch.VolumeID
 		} else {
@@ -791,6 +799,7 @@ func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.C
 const editDescription = `编辑小说文件（章节正文、大纲、卷纲、故事状态 novelgo.md 或技能文件）。支持三种编辑模式：full_replace（全文替换）、search_replace（查找替换）、line_range_replace（行范围替换）。
 
 新建章节或大纲：path 使用 new.md 形式（格式见 path 参数说明），且只能 full_replace；成功后返回值携带分配的 chapter_id、volume_id 与物理路径，后续编辑一律使用返回的物理路径。
+重要——大纲与正文属于同一章节（共用 chapter_id）：通过 outlines/new.md 创建大纲后，该章节的正文必须写入返回值 body_path 指定的 chapters/id_{chapter_id}.md，严禁再用 chapters/new.md 新建（否则会产生两个重复章节）；反之通过 chapters/new.md 创建正文后，其大纲写入返回值 outline_path 指定的 outlines/id_{chapter_id}.md。只有当目标章节确实不存在时才使用 new.md。
 卷纲：path 使用 volumes/id_{卷ID}.md；卷必须存在，full_replace 可首次创建对应卷纲文件。
 
 各模式必填参数：
