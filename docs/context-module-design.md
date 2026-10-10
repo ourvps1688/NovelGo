@@ -46,4 +46,4 @@ internal/agentcfg/
 
 ## 当前状态
 
-System1（三个 Agent 提示词）和 System2（小说基础信息 + Goink 故事状态）已实现。layer3 等大纲系统实现后再做。
+System1（三个 Agent 提示词）和 System2（小说基础信息 + NovelGo 故事状态）已实现。layer3 等大纲系统实现后再做。

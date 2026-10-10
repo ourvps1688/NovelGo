@@ -1,10 +1,10 @@
 package app
 
 import (
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/storage"
-	"github.com/sigpanic/goink/internal/writing"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/writing"
 )
 
 // GetWritingActivity 返回最近 months 个月每日写作字数汇总。

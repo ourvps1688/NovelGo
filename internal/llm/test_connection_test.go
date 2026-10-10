@@ -88,7 +88,7 @@ func TestTestConnection_EmptySSE(t *testing.T) {
 }
 
 // TestTestConnection_NonChoicesChunk 验证 SSE 流里 JSON 不含 choices 字段时被拦下。
-// 模拟 GPT-5 Responses API 的 event: 格式（无 choices 字段，Goink parseSSE 会判空）。
+// 模拟 GPT-5 Responses API 的 event: 格式（无 choices 字段，NovelGo parseSSE 会判空）。
 func TestTestConnection_NonChoicesChunk(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

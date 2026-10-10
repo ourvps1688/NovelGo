@@ -9,9 +9,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/deletion"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/deletion"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // Store 管理 ChapterPlan 和 TimelineEntry 持久化。DB 导出供调用方做简单 CRUD。

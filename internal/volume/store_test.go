@@ -11,7 +11,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/git"
+	"github.com/novelgo/novelgo/internal/git"
 )
 
 // testVolLogger 返回丢弃输出的 logger（store 需要非 nil logger）。

@@ -7,7 +7,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/migrate/engine"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
 )
 
 func TestIsNewDatabaseRequiresNoBusinessTables(t *testing.T) {

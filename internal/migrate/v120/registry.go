@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/migrate/engine"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
 )
 
 const migration = "v1.2.0-chapter-number-column-names"

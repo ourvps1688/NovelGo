@@ -2,7 +2,7 @@ package web_test
 
 import (
 	"fmt"
-	"github.com/sigpanic/goink/internal/web"
+	"github.com/novelgo/novelgo/internal/web"
 	"testing"
 )
 

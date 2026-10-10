@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Goink · 年度创作回顾 Demo</title>
+    <title>NovelGo · 年度创作回顾 Demo</title>
     <style>
       :root {
         --background: hsl(42 27% 96%);
@@ -248,7 +248,7 @@
     </svg>
     <div class="shell">
       <header class="topbar">
-        <a class="brand" href="#top" aria-label="Goink 年度报告"><span class="brand-mark"><svg class="icon"><use href="#pen"/></svg></span>Goink<span class="demo-tag">DEMO</span></a>
+        <a class="brand" href="#top" aria-label="NovelGo 年度报告"><span class="brand-mark"><svg class="icon"><use href="#pen"/></svg></span>NovelGo<span class="demo-tag">DEMO</span></a>
         <div class="actions">
           <button class="button icon-button" id="theme-toggle" aria-label="切换为深色主题"><svg class="icon"><use id="theme-icon" href="#moon"/></svg></button>
           <button class="button button-primary" data-open-share><svg class="icon"><use href="#share"/></svg>分享我的年度</button>
@@ -312,12 +312,12 @@
         </section>
         <section class="closing"><div><div class="closing-title">故事还没结束，下一页仍然属于你。</div><div class="closing-note">把这一年的想象，留成一张小小的纪念。</div></div><button class="button" data-open-share><svg class="icon"><use href="#share"/></svg>生成年度卡片</button></section>
       </main>
-      <footer><span>Goink · 让每一个想象，都有地方生长。</span><span>模拟数据 · 全年效果示意 · 数据为近似统计</span></footer>
+      <footer><span>NovelGo · 让每一个想象，都有地方生长。</span><span>模拟数据 · 全年效果示意 · 数据为近似统计</span></footer>
     </div>
     <dialog id="share-dialog" aria-labelledby="share-title">
       <div class="dialog-top"><h2 id="share-title">你的年度创作卡片</h2><button class="button icon-button" id="close-share" aria-label="关闭分享预览"><svg class="icon"><use href="#close"/></svg></button></div>
       <div class="share-poster">
-        <div class="poster-brand">Goink</div><div class="poster-year"><span data-year>2026</span> · 林川的创作年鉴</div>
+        <div class="poster-brand">NovelGo</div><div class="poster-year"><span data-year>2026</span> · 林川的创作年鉴</div>
         <div class="poster-title">这一年，<br>我创造了一个世界。</div>
         <div class="poster-stats">
           <div class="poster-stat"><strong id="poster-words">28.6万</strong><small>累计新增字数</small></div>
@@ -495,7 +495,7 @@
       }
       function summary() {
         const sample = samples[year];
-        return year + '，我创造了一个世界。\n开启了 ' + sample.novels + ' 个故事，创建了 ' + sample.chapters + ' 个章节、' + sample.characters + ' 位人物和 ' + sample.locations + ' 个地点。\n累计新增 ' + (sample.words / 10000).toFixed(1) + ' 万字，大约投入 ' + sample.hours + ' 小时创作。\nGoink 年度创作回顾 · Demo 模拟数据';
+        return year + '，我创造了一个世界。\n开启了 ' + sample.novels + ' 个故事，创建了 ' + sample.chapters + ' 个章节、' + sample.characters + ' 位人物和 ' + sample.locations + ' 个地点。\n累计新增 ' + (sample.words / 10000).toFixed(1) + ' 万字，大约投入 ' + sample.hours + ' 小时创作。\nNovelGo 年度创作回顾 · Demo 模拟数据';
       }
       async function copySummary() {
         try {
@@ -532,7 +532,7 @@
           const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1440" viewBox="0 0 1080 1440">' +
             '<rect width="1080" height="1440" fill="' + background + '"/>' +
             '<g fill="' + foreground + '" font-family="system-ui, Microsoft YaHei, sans-serif">' +
-            '<text x="88" y="126" font-size="40" font-weight="600">Goink</text>' +
+            '<text x="88" y="126" font-size="40" font-weight="600">NovelGo</text>' +
             '<text x="88" y="182" fill="' + muted + '" font-size="24">' + year + ' · 林川的创作年鉴</text>' +
             '<g font-family="Songti SC, SimSun, serif" font-size="76"><text x="88" y="340">这一年，</text><text x="88" y="450">我创造了一个世界。</text></g>' +
             '<g font-size="56"><text x="88" y="610">' + (sample.words / 10000).toFixed(1) + '万</text><text x="425" y="610">' + sample.characters + '</text><text x="745" y="610">' + sample.hours + 'h</text></g>' +
@@ -553,7 +553,7 @@
           const downloadUrl = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = downloadUrl;
-          link.download = 'Goink-' + year + '-年度回顾-demo.png';
+          link.download = 'NovelGo-' + year + '-年度回顾-demo.png';
           document.body.append(link);
           link.click();
           link.remove();

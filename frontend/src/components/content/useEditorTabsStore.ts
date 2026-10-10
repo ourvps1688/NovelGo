@@ -16,7 +16,7 @@ import { isContentPath, type EditorTab } from "@/components/content/types";
 //   path 取各 mode 的实际文件路径（正文=chapters/NNN.md，大纲=outlines/NNN.md），
 //   天然契合未来统一容器 tab 模型（子 tab 即独立 path）。schema 变更走版本号迁移。
 
-const STORAGE_KEY = "goink_tabs_all";
+const STORAGE_KEY = "novelgo_tabs_all";
 const STORAGE_VERSION = 2;
 const PERSIST_DEBOUNCE_MS = 300;
 
@@ -193,8 +193,8 @@ function positionKeysForTab(
 ): string[] {
   const ns = `${novelId}:`;
   const keys = new Set<string>([`${ns}${tab.path}:content`]);
-  // chapters/NNN.md（goink.md 除外）才有对应的大纲文件键
-  if (isContentPath(tab.path) && tab.path !== "goink.md" && tab.outlinePath) {
+  // chapters/NNN.md（novelgo.md 除外）才有对应的大纲文件键
+  if (isContentPath(tab.path) && tab.path !== "novelgo.md" && tab.outlinePath) {
     keys.add(`${ns}${tab.outlinePath}:outline`);
     keys.add(`${ns}${tab.outlinePath}:outline-edit`);
   }

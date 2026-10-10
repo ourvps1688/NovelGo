@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/migrate"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/migrate"
 )
 
 func assertActivitySchema(t *testing.T, db *gorm.DB) {

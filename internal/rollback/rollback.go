@@ -6,9 +6,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // RollbackBeforeTurn 回退到 targetTurn 开始之前的状态。

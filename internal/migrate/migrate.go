@@ -7,27 +7,27 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/location"
-	"github.com/sigpanic/goink/internal/migrate/engine"
-	_ "github.com/sigpanic/goink/internal/migrate/v120" // blank：触发 v120.init 注册，Run 无需感知具体迁移
-	_ "github.com/sigpanic/goink/internal/migrate/v160" // blank：触发 v160.init 注册，Run 无需感知具体迁移
-	_ "github.com/sigpanic/goink/internal/migrate/v161" // blank：注册写作日志按日汇总迁移
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/preference"
-	"github.com/sigpanic/goink/internal/reader"
-	"github.com/sigpanic/goink/internal/rollback"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/setting"
-	"github.com/sigpanic/goink/internal/storage"
-	"github.com/sigpanic/goink/internal/storyarc"
-	"github.com/sigpanic/goink/internal/style"
-	"github.com/sigpanic/goink/internal/timeline"
-	"github.com/sigpanic/goink/internal/volume"
-	"github.com/sigpanic/goink/internal/writing"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/location"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
+	_ "github.com/novelgo/novelgo/internal/migrate/v120" // blank：触发 v120.init 注册，Run 无需感知具体迁移
+	_ "github.com/novelgo/novelgo/internal/migrate/v160" // blank：触发 v160.init 注册，Run 无需感知具体迁移
+	_ "github.com/novelgo/novelgo/internal/migrate/v161" // blank：注册写作日志按日汇总迁移
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/rollback"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/setting"
+	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/storyarc"
+	"github.com/novelgo/novelgo/internal/style"
+	"github.com/novelgo/novelgo/internal/timeline"
+	"github.com/novelgo/novelgo/internal/volume"
+	"github.com/novelgo/novelgo/internal/writing"
 )
 
 // Run 自动创建/更新全部数据表，幂等安全。作为外部入口，遍历 engine.Registry

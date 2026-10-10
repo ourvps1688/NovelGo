@@ -8,7 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/git"
+	"github.com/novelgo/novelgo/internal/git"
 )
 
 // ErrNotFound 卷不存在，或不属于该小说。

@@ -5,9 +5,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/location"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/location"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // GetLocations 返回指定小说的全部地点，供前端侧边栏嵌套树和关系图节点渲染。

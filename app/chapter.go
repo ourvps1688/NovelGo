@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/chapter"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/chapter"
 )
 
 // ensureChapterIDsInNovel 确认章节 ID 均属于当前小说。

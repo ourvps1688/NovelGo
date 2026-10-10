@@ -34,7 +34,7 @@ var Builtin = map[string]Provider{
 		Name:         "OpenCode Zen",
 		ChatURL:      "https://opencode.ai/zen/v1/chat/completions",
 		PlatformURL:  "https://opencode.ai/auth",
-		HelpText:     "OpenCode Zen 是 opencode.ai 的按量付费网关，提供 DeepSeek/GLM/Kimi/MiniMax 等精选模型及多个免费模型（均兼容 OpenAI chat/completions）。在 opencode.ai/auth 注册、添加账单信息后复制 API Key 填入。OpenCode 网关要求携带 x-opencode-session 会话头与自定义 User-Agent，Goink 已自动处理，无需额外配置。模型列表随时变动，可用下方「自动发现模型」拉取最新。",
+		HelpText:     "OpenCode Zen 是 opencode.ai 的按量付费网关，提供 DeepSeek/GLM/Kimi/MiniMax 等精选模型及多个免费模型（均兼容 OpenAI chat/completions）。在 opencode.ai/auth 注册、添加账单信息后复制 API Key 填入。OpenCode 网关要求携带 x-opencode-session 会话头与自定义 User-Agent，NovelGo 已自动处理，无需额外配置。模型列表随时变动，可用下方「自动发现模型」拉取最新。",
 		Temperature:  floatPtr(0.7),
 		BuildHeaders: opencodeBuildHeaders,
 		Models: []ModelInfo{
@@ -245,7 +245,7 @@ var Builtin = map[string]Provider{
 		Name:         "OpenCode Go",
 		ChatURL:      "https://opencode.ai/zen/go/v1/chat/completions",
 		PlatformURL:  "https://opencode.ai/auth",
-		HelpText:     "OpenCode Go 是 opencode.ai 的订阅制服务（$10/月），覆盖 Kimi/GLM/DeepSeek/MiMo/Hy 等开源模型。在 opencode.ai/auth 注册并订阅 Go 后复制 API Key 填入。OpenCode Go 强制要求携带 x-opencode-session 会话头与自定义 User-Agent，Goink 已自动处理，无需额外配置。模型列表随订阅变动，可用下方「自动发现模型」拉取最新。",
+		HelpText:     "OpenCode Go 是 opencode.ai 的订阅制服务（$10/月），覆盖 Kimi/GLM/DeepSeek/MiMo/Hy 等开源模型。在 opencode.ai/auth 注册并订阅 Go 后复制 API Key 填入。OpenCode Go 强制要求携带 x-opencode-session 会话头与自定义 User-Agent，NovelGo 已自动处理，无需额外配置。模型列表随订阅变动，可用下方「自动发现模型」拉取最新。",
 		Temperature:  floatPtr(0.7),
 		BuildHeaders: opencodeBuildHeaders,
 		Models: []ModelInfo{

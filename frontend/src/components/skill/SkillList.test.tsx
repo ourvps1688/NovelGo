@@ -195,7 +195,7 @@ describe("SkillList", () => {
   });
 
   it("closes a deleted user skill tab in every novel", async () => {
-    const path = "~/.goink/skills/Writer.md";
+    const path = "~/.novelgo/skills/Writer.md";
     useEditorTabsStore.getState().openTab(1, {
       type: "file",
       path,

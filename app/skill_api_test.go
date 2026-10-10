@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/sigpanic/goink/internal/apperr"
+	"github.com/novelgo/novelgo/internal/apperr"
 )
 
 func TestInstallRemoteSkillRequiresExpectedContent(t *testing.T) {

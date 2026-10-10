@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/migrate/engine"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
 )
 
 // migration 是本次迁移的标识，写入 migrate_state.migration，与 engine 注册名一致。

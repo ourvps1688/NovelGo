@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/migrate"
+	"github.com/novelgo/novelgo/internal/migrate"
 )
 
 // TestFullLegacyMigration 从 v1.6.0 前的实际表结构开始，只调用公开入口 migrate.Run：

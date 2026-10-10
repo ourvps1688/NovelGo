@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/sigpanic/goink/internal/config"
+	"github.com/novelgo/novelgo/internal/config"
 )
 
 // Store 负责每日统计的尽力记录；写入失败只告警，不向业务调用方返回错误。

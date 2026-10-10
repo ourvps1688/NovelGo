@@ -62,7 +62,7 @@
 ### 4. [#36](https://github.com/sigpanic/goink/issues/36) 工具连续失败直接中断对话
 
 - **承诺时间**：2026-08-10
-- **承诺内容**：Goink 侧加强打断机制，工具连续失败时直接中断对话，不再靠提醒
+- **承诺内容**：NovelGo 侧加强打断机制，工具连续失败时直接中断对话，不再靠提醒
 - **现状**：未达到承诺
   - `internal/agent/agent.go:343-351` 仍只 `appendMsg` 一条 `<system-reminder>已被禁用</system-reminder>` 提醒 LLM，**未真正禁用工具，也未中断对话**
   - `failCnt[name]` 只在 `!Success && ErrKind=="system"` 时计数（agent.go:343），**参数错误（ErrKind=""）不计入**——正是 issue #36 报告的场景未覆盖
@@ -78,7 +78,7 @@
   - `frontend/src/components/content/OutlineViewer.tsx` 只有只读渲染（`<Markdown content={content} />`），无 onChange/onSave
   - `ContentPanel.tsx:827` 用 OutlineViewer 渲染 outline tab
   - 全仓无 `OutlineEditor`/`editOutline`/`saveOutline`/`onOutlineChange`
-- **临时方案**（issue 中已告知用户）：直接编辑文件系统 `Goink/novels/{id}/outlines/NNN.md`
+- **临时方案**（issue 中已告知用户）：直接编辑文件系统 `NovelGo/novels/{id}/outlines/NNN.md`
 
 ### 6. [#33](https://github.com/sigpanic/goink/issues/33) 导出为 ZIP（每章一个 .md 文件）
 

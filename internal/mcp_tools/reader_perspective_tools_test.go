@@ -8,8 +8,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/reader"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/reader"
 )
 
 func TestCreateReaderPerspectiveEntry_ValidatesChapterNovel(t *testing.T) {

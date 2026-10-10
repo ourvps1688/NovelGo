@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/git"
+	"github.com/novelgo/novelgo/internal/git"
 )
 
 const checkpointCommitMessage = "checkpoint: save changes before chapter ID migration"

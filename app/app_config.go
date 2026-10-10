@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // GetAppConfig 返回当前运行时配置信息（供前端诊断）。

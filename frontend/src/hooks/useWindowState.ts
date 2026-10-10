@@ -8,11 +8,11 @@ import {
   WindowSetPosition,
 } from "@/lib/wailsjs/runtime/runtime";
 
-const W = "goink_window_width";
-const H = "goink_window_height";
-const X = "goink_window_x";
-const Y = "goink_window_y";
-const M = "goink_window_maximised";
+const W = "novelgo_window_width";
+const H = "novelgo_window_height";
+const X = "novelgo_window_x";
+const Y = "novelgo_window_y";
+const M = "novelgo_window_maximised";
 
 export function useWindowState() {
   const [isMaximised, setIsMaximised] = useState(false);
@@ -71,7 +71,7 @@ export function useWindowState() {
     }
 
     // 不依赖 beforeunload 保存：WebView2 关窗时 beforeunload 里的异步 IPC 来不及
-    // 完成，生产版 localStorage 中 goink_window_* 从未写入（tabs/面板宽度因
+    // 完成，生产版 localStorage 中 novelgo_window_* 从未写入（tabs/面板宽度因
     // debounce 定期写盘而正常）。改为事件驱动 + 定期轮询持续落盘：
     //   - resize 事件：缩放/最大化/还原（防抖 300ms）
     //   - 5s 轮询：窗口拖动（无 resize 事件）时兜底

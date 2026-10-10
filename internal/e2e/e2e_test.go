@@ -13,28 +13,28 @@ import (
 
 	ort "github.com/yalue/onnxruntime_go"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/migrate"
-	"github.com/sigpanic/goink/internal/platform"
-	"github.com/sigpanic/goink/internal/rag"
-	"github.com/sigpanic/goink/internal/storage"
-	"github.com/sigpanic/goink/internal/testsupport"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/migrate"
+	"github.com/novelgo/novelgo/internal/platform"
+	"github.com/novelgo/novelgo/internal/rag"
+	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/testsupport"
 )
 
 func TestMain(m *testing.M) {
 	// 1. Test environment must be marked and isolated.
-	// GOINK_TESTING marks the run as a test; GOINK_DATA_DIR keeps it out of the real
+	// NOVELGO_TESTING marks the run as a test; NOVELGO_DATA_DIR keeps it out of the real
 	// data directory — without it these tests would create novel git repos and the
-	// shared database under ~/Goink.
-	testsupport.RequireEnvOrExit("GOINK_TESTING", "E2E tests require GOINK_TESTING=1")
-	fmt.Println("OK: GOINK_TESTING is set")
+	// shared database under ~/NovelGo.
+	testsupport.RequireEnvOrExit("NOVELGO_TESTING", "E2E tests require NOVELGO_TESTING=1")
+	fmt.Println("OK: NOVELGO_TESTING is set")
 
-	testsupport.RequireEnvOrExit("GOINK_DATA_DIR", "E2E tests require an isolated data directory")
-	fmt.Println("OK: GOINK_DATA_DIR is set")
+	testsupport.RequireEnvOrExit("NOVELGO_DATA_DIR", "E2E tests require an isolated data directory")
+	fmt.Println("OK: NOVELGO_DATA_DIR is set")
 
-	// 2. GOINK_E2E_STRICT must be set (makes ResolveGit/ResolveOnnxLib skip system fallback)
-	testsupport.RequireEnvOrExit("GOINK_E2E_STRICT", "E2E tests require GOINK_E2E_STRICT=1")
-	fmt.Println("OK: GOINK_E2E_STRICT is set")
+	// 2. NOVELGO_E2E_STRICT must be set (makes ResolveGit/ResolveOnnxLib skip system fallback)
+	testsupport.RequireEnvOrExit("NOVELGO_E2E_STRICT", "E2E tests require NOVELGO_E2E_STRICT=1")
+	fmt.Println("OK: NOVELGO_E2E_STRICT is set")
 
 	// 3. ResolveGit() must find bundled git (not system git)
 	gitBin, err := platform.ResolveGit()

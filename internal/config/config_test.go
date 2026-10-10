@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/sigpanic/goink/internal/testsupport"
+	"github.com/novelgo/novelgo/internal/testsupport"
 )
 
 func TestExpandTilde_WithHome(t *testing.T) {

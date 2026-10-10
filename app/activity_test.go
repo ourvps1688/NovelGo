@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/config"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/config"
 )
 
 func TestSettingsSavePreservesActivityOrigin(t *testing.T) {

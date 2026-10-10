@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Goink — desktop AI novel-writing assistant built with Wails (Go + React).
+NovelGo — desktop AI novel-writing assistant built with Wails (Go + React).
 
 ## Build / Dev
 
@@ -27,7 +27,7 @@ This repo uses `git worktree` — see `.trae/rules/worktree协作流程.md` for 
 
 System deps (Ubuntu/Debian): `libsqlite3-dev libgtk-3-dev libwebkit2gtk-4.1-dev gcc`
 
-ONNX Runtime and models are bundled at build time via `scripts/download-onnx.sh` into `build/runtime/`. In dev mode, the ONNX lib fallback path is `~/Goink/runtime/` and models fall back to `~/Goink/models/`. Build constraint `//go:build cgo` guards all ONNX and sqlite-vec code.
+ONNX Runtime and models are bundled at build time via `scripts/download-onnx.sh` into `build/runtime/`. In dev mode, the ONNX lib fallback path is `~/NovelGo/runtime/` and models fall back to `~/NovelGo/models/`. Build constraint `//go:build cgo` guards all ONNX and sqlite-vec code.
 
 ## Architecture
 
@@ -68,8 +68,8 @@ frontend/         React 19 + TypeScript + Tailwind 4 + shadcn/ui
 ## Key conventions
 
 - **Build tags**: All ONNX and sqlite-vec code uses `//go:build cgo` (see `internal/rag/`, `internal/mcp_tools/memory_tools.go`)
-- **Data dir**: `~/Goink/` on Linux/macOS, exe-adjacent on Windows. Contains `models/`, `runtime/`, `novel-agent.db`, `novels/`
-- **Per-novel git repos**: Each novel at `{DataDir}/novels/{id}/` with `chapters/NNN.md`, `outlines/NNN.md`, `goink.md`
+- **Data dir**: `~/NovelGo/` on Linux/macOS, exe-adjacent on Windows. Contains `models/`, `runtime/`, `novel-agent.db`, `novels/`
+- **Per-novel git repos**: Each novel at `{DataDir}/novels/{id}/` with `chapters/NNN.md`, `outlines/NNN.md`, `novelgo.md`
 - **Preferences**: Global + per-novel, free-text category, LLM-classified
 - **Character relationships**: Append-only with `is_current` flag — updates create new rows, old rows become history
 - **Timeline entries**: `target_chapter` used for ORDER BY only, never WHERE (LLM estimates are imprecise)
@@ -86,8 +86,8 @@ frontend/         React 19 + TypeScript + Tailwind 4 + shadcn/ui
 - ONNX embedder is a global singleton (`InitEmbedder` / `GetEmbedder`)
 - VectorStore is a global singleton (`InitVectorStore` / `GetVectorStore`)
 - RefreshQueue is a global singleton with `sync.Once` (`InitRefreshQueue` / `GetRefreshQueue`)
-- `ResolveOnnxLib()` search chain: `<appdir>/runtime/` → `~/Goink/runtime/` → system paths
-- Models resolution: `<appdir>/runtime/models/` → `~/Goink/models/`
+- `ResolveOnnxLib()` search chain: `<appdir>/runtime/` → `~/NovelGo/runtime/` → system paths
+- Models resolution: `<appdir>/runtime/models/` → `~/NovelGo/models/`
 - Vec0 table per novel: `vec_novel_{id}`, cosine distance metric
 - Chunks: 420 tokens, 50 overlap, BERT WordPiece tokenizer
 - Embedding: 512-dim, CLS pooling + L2 normalization, BGE instruction prefix for queries only

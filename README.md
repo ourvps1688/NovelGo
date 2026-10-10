@@ -1,7 +1,12 @@
 <p align="center">
-  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Goink" />
-  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Goink" />
+  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="NovelGo" />
+  <img src="assets/logo-light.svg#gh-light-mode-only" alt="NovelGo" />
 </p>
+
+<blockquote align="center">
+  <sub>Based on <a href="https://github.com/sigpanic/goink">Goink by 响滩 (sigpanic)</a> — https://github.com/sigpanic/goink<br/>
+  This is a modified version of Goink. It is not endorsed by or affiliated with the original author.</sub>
+</blockquote>
 
 <h1 align="center">桌面 AI 写作系统<br><sub>Agent 实时决策 × 结构化记忆 × 写完自检状态</sub></h1>
 
@@ -18,21 +23,17 @@
   <a href="THANKS.md"><img src="https://img.shields.io/badge/Sponsors-Thanks-0FDC78?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsors" /></a>
 </p>
 
-<p align="center">
-  <a href="https://trendshift.io/repositories/162663?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-162663" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/162663/daily?language=Go" alt="sigpanic%2Fgoink | Trendshift" width="250" height="55"/></a>
-</p>
-
-<p align="center"><sub>如果 Goink 对你有帮助，欢迎 <a href="#赞赏">赞赏支持</a>；点个 Star 也是莫大的鼓励。</sub></p>
+<p align="center"><sub>如果 NovelGo 对你有帮助，欢迎 <a href="#赞赏">赞赏支持</a>；点个 Star 也是莫大的鼓励。</sub></p>
 
 <p align="center"><strong><a href="README_EN.md">English Version</a> | 本文档为中文版</strong></p>
 
 ---
 
-<p align="center"><strong>用过通用 AI 写长篇小说的人都知道——写到第五章它就忘了主角叫什么。到第三十章还要手动翻前文找那句伏笔。写完一章还得自己提醒它"更新角色状态""检查弧线进度"。Goink 不会。它是一个有结构化记忆的桌面 AI 写作系统——角色档案、伏笔状态、弧线进度、地点关系、读者认知，系统记着，Agent 自己查、自己改、自己维护。</strong></p>
+<p align="center"><strong>用过通用 AI 写长篇小说的人都知道——写到第五章它就忘了主角叫什么。到第三十章还要手动翻前文找那句伏笔。写完一章还得自己提醒它"更新角色状态""检查弧线进度"。NovelGo 不会。它是一个有结构化记忆的桌面 AI 写作系统——角色档案、伏笔状态、弧线进度、地点关系、读者认知，系统记着，Agent 自己查、自己改、自己维护。</strong></p>
 
 ## 跟通用 AI 聊天有什么不同
 
-| | 通用 AI 聊天 | Goink |
+| | 通用 AI 聊天 | NovelGo |
 |---|---|---|
 | 创作信息 | 每次对话重新交代 | 角色/关系/伏笔/弧线/地点/读者认知 全链路结构化追踪 |
 | 改正文 | 直接输出文本，改了什么不知道 | Diff 预览 + 逐行对比 + 点确认才写入 |
@@ -97,7 +98,7 @@
 
 ## 卷与章节：拖一下就重排
 
-长篇要分卷。Goink 把"卷"当作一等结构——新建卷、重命名、删除空卷，卷的先后顺序拖一下就调整。章节支持跨卷拖动搬运、同卷内拖动重排，松手即生效，章节序号自动按新的阅读顺序重排，不用手动改编号。还没归卷的章节放在"未分卷"里，随时拖进任意卷。
+长篇要分卷。NovelGo 把"卷"当作一等结构——新建卷、重命名、删除空卷，卷的先后顺序拖一下就调整。章节支持跨卷拖动搬运、同卷内拖动重排，松手即生效，章节序号自动按新的阅读顺序重排，不用手动改编号。还没归卷的章节放在"未分卷"里，随时拖进任意卷。
 
 每卷可折叠展开，实时显示章节数与字数；每卷还能单独挂一份"卷纲"，与全书大纲分开管理。
 
@@ -110,7 +111,7 @@
 > [!TIP]
 > **欢迎贡献你的 Skill！** 把你的写作方法论变成 `.md` 文件，[提交 PR](https://github.com/sigpanic/goink-skills) 分享给所有用户。
 
-Skill 是 Goink 的创作方法论模块。每个 Skill 由一个 `.md` 文件定义，包含 YAML frontmatter 元数据和 markdown 正文。**三层覆盖 + 三种模式 = 9 种策略维度**，精确控制"什么内容、在什么范围、以什么方式生效"。
+Skill 是 NovelGo 的创作方法论模块。每个 Skill 由一个 `.md` 文件定义，包含 YAML frontmatter 元数据和 markdown 正文。**三层覆盖 + 三种模式 = 9 种策略维度**，精确控制"什么内容、在什么范围、以什么方式生效"。
 
 ### 三层覆盖
 
@@ -228,21 +229,13 @@ make dev     # 开发模式（热重载）
 
 ## License
 
-Goink is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for additional terms under AGPLv3 Section 7.
+NovelGo is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for additional terms under AGPLv3 Section 7.
 
-## Star History
-
-<a href="https://www.star-history.com/#repos=sigpanic%2Fgoink&type=Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=sigpanic/goink&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=sigpanic/goink&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=sigpanic/goink&type=date&legend=top-left" />
- </picture>
-</a>
+NovelGo is a modified version of [Goink](https://github.com/sigpanic/goink) by 响滩 (sigpanic). It is not endorsed by or affiliated with the original author.
 
 ## 赞赏
 
-Goink 开发过程中使用了多种 AI 服务（含订阅费用）。如果 Goink 对你有帮助，欢迎赞赏支持，赞赏将用于覆盖开发过程中的 AI 订阅费用。如果方便，建议备注 GitHub 用户名，备注后默认会出现在[赞赏名单](THANKS.md)中。
+NovelGo 是 [Goink](https://github.com/sigpanic/goink)（作者 响滩 sigpanic）的二次开发版本。下方赞赏渠道为原作者的收款码，赞赏将直接支持原始项目的开发。如果方便，建议备注 GitHub 用户名，备注后默认会出现在[赞赏名单](THANKS.md)中。
 
 <p align="center">
   <img src="assets/wechat.jpg" alt="微信赞赏" width="220" />

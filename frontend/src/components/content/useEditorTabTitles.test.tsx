@@ -159,7 +159,7 @@ describe("useEditorTabTitles", () => {
       path: volume.outline_file_path,
       title: "旧小说",
     });
-    store.openTab(2, { type: "file", path: "goink.md", title: "故事状态" });
+    store.openTab(2, { type: "file", path: "novelgo.md", title: "故事状态" });
     const { rerender } = setup();
     act(() => {
       store.closeTab(1, id);

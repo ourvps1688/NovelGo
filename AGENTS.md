@@ -1,6 +1,6 @@
-# Goink 项目协作与编码规则
+# NovelGo 项目协作与编码规则
 
-Goink 是一个使用 Wails（Go + React）的桌面 AI 网文写作助手。用户主要使用中文沟通；回复用户时使用中文。
+NovelGo 是一个使用 Wails（Go + React）的桌面 AI 网文写作助手。用户主要使用中文沟通；回复用户时使用中文。
 
 ## 工作区与 Git
 
@@ -45,7 +45,7 @@ Goink 是一个使用 Wails（Go + React）的桌面 AI 网文写作助手。用
 - `internal/agent/`、`agentcfg/`、`llm/`、`session/`：LLM 对话、系统提示、传输和会话。
 - `internal/mcp_tools/`：MCP 工具；该目录的专门规则见 `internal/mcp_tools/AGENTS.md`。
 - `frontend/`：React 19 + TypeScript + Tailwind 4 + shadcn/ui。
-- 数据目录为 Linux/macOS 的 `~/Goink/`，Windows 为可执行文件附近；包含 `models/`、`runtime/`、数据库和小说仓库。
+- 数据目录为 Linux/macOS 的 `~/NovelGo/`，Windows 为可执行文件附近；包含 `models/`、`runtime/`、数据库和小说仓库。
 - 每个小说是独立 Git 仓库，章节位于 `chapters/NNN.md`，大纲位于 `outlines/NNN.md`。
 - ONNX 和 sqlite-vec 代码使用 `//go:build cgo`；Windows 诊断时 cgo 相关编译失败是已知限制。
 - 所有 ONNX、VectorStore、RefreshQueue 均按现有代码的全局 singleton 约定维护，不要随意引入第二个实例。

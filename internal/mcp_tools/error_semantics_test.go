@@ -12,9 +12,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/preference"
-	"github.com/sigpanic/goink/internal/setting"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/setting"
 )
 
 func testMCPRegistry(t *testing.T, tool Tool) *Registry {

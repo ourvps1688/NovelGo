@@ -67,7 +67,7 @@ const THEME_ICON: Record<Theme, React.ReactNode> = {
 };
 
 // 走 ContentPanel 的面板（activePanel 路由层）。ContentPanel 内部通过 tab 机制
-// 显示章节/skill/goink.md/diff/大纲，不经过 activePanel 路由。
+// 显示章节/skill/novelgo.md/diff/大纲，不经过 activePanel 路由。
 const CONTENT_PANEL_IDS = new Set<PanelId>(["chapters", "skills"]);
 
 interface Props {
@@ -204,7 +204,7 @@ export default function WorkspaceView({
 
   const {
     handleSelectChapter,
-    handleSelectGoink,
+    handleSelectNovelGo,
     handleSelectVolumeOutline,
     handleSelectSkill,
     handleEditSkill,
@@ -381,7 +381,7 @@ export default function WorkspaceView({
         >
           <Logo className="h-7 w-7 ml-3" />
           <span className="text-sm font-medium pl-2 flex-1">
-            {activeNovel?.title ?? "Goink"}
+            {activeNovel?.title ?? "NovelGo"}
           </span>
           <div
             className="flex items-center h-full"
@@ -433,7 +433,7 @@ export default function WorkspaceView({
               novelId={activeNovelId}
               onSelectNovel={handleSelectNovel}
               onSelectChapter={handleSelectChapter}
-              onSelectGoink={handleSelectGoink}
+              onSelectNovelGo={handleSelectNovelGo}
               onSelectVolumeOutline={handleSelectVolumeOutline}
               onExportNovel={(id) => setExportNovelId(id)}
               showCreate={showCreate}

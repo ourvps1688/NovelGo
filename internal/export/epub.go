@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/novel"
 
 	epub "github.com/bmaupin/go-epub"
 	"github.com/yuin/goldmark"
@@ -19,7 +19,7 @@ func exportEpub(n *novel.Novel, chapters []ChapterWithContent, author string) ([
 	if author != "" {
 		e.SetAuthor(author)
 	} else {
-		e.SetAuthor("Goink")
+		e.SetAuthor("NovelGo")
 	}
 	if n.Description != "" {
 		e.SetDescription(n.Description)

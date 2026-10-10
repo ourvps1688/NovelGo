@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/rag"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/rag"
 )
 
 // setupChinesePipelineTest returns the shared VectorStore and creates a git repo

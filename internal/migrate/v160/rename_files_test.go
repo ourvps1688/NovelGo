@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/migrate"
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/migrate"
+	"github.com/novelgo/novelgo/internal/novel"
 )
 
 // TestRenameFilesMigration 模拟"1.1-1.4 已跑、1.5/1.6 未跑"的老用户库：

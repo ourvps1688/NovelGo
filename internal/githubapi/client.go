@@ -15,12 +15,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sigpanic/goink/internal/apperr"
+	"github.com/novelgo/novelgo/internal/apperr"
 )
 
 const (
 	defaultTimeout = 5 * time.Second
-	userAgent      = "Goink"
+	userAgent      = "NovelGo"
 	acceptRaw      = "application/vnd.github.raw+json" // Contents API 直接返回原始内容，避免 base64 包装
 	apiBase        = "https://api.github.com"
 )
@@ -108,7 +108,7 @@ type Client struct {
 	baseURL   string // 默认为 apiBase，测试时可覆盖指向 httptest.Server
 }
 
-// NewClient 创建一个使用默认配置（5s 超时、Goink User-Agent）的客户端。
+// NewClient 创建一个使用默认配置（5s 超时、NovelGo User-Agent）的客户端。
 func NewClient() *Client {
 	return &Client{
 		http:      &http.Client{Timeout: defaultTimeout},

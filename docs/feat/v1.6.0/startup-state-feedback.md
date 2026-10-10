@@ -18,7 +18,7 @@ func (f *Frontend) Run(ctx context.Context) error {
 }
 ```
 
-因此**后端初始化与前端加载是并发的**。Goink 的 `OnStartup` → `initWithConfig` → `migrate.Run`
+因此**后端初始化与前端加载是并发的**。NovelGo 的 `OnStartup` → `initWithConfig` → `migrate.Run`
 在库较大时可达数十秒，而前端加载通常在数百毫秒内完成。
 
 ## 2. 问题

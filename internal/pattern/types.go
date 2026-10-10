@@ -1,6 +1,6 @@
 package pattern
 
-import "github.com/sigpanic/goink/internal/llm"
+import "github.com/novelgo/novelgo/internal/llm"
 
 type ExtractPatternInput struct {
 	TaskID          string  `json:"task_id,omitempty"`

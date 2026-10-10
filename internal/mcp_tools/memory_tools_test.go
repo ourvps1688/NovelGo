@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/rag"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/rag"
 )
 
 func TestSearchStoryMemorySchema_UsesChapterIDs(t *testing.T) {

@@ -39,8 +39,8 @@ func testRepo(t *testing.T, commits int) (*Repo, string, func()) {
 	}
 
 	// 仓库级 config
-	r.runInDir("config", "user.name", "Goink")
-	r.runInDir("config", "user.email", "goink@local")
+	r.runInDir("config", "user.name", "NovelGo")
+	r.runInDir("config", "user.email", "novelgo@local")
 
 	// 创建 commits
 	for i := 1; i <= commits; i++ {
@@ -101,7 +101,7 @@ func TestRunCmd_IsolatesGitConfig(t *testing.T) {
 	// 写入本该生效的干扰配置；若 runCmd 的 -c 覆盖失效，下面的 commit 必然失败。
 	for k, v := range map[string]string{
 		"commit.gpgsign": "true",
-		"gpg.program":    "nonexistent-goink-gpg",
+		"gpg.program":    "nonexistent-novelgo-gpg",
 		"core.hooksPath": hookDir,
 	} {
 		if _, stderr, err := r.runInDir("config", k, v); err != nil {
@@ -194,8 +194,8 @@ func TestLogDetailed_Basic(t *testing.T) {
 	if c.ShortHash == "" {
 		t.Error("expected non-empty short hash")
 	}
-	if c.AuthorName != "Goink" {
-		t.Errorf("expected author Goink, got %q", c.AuthorName)
+	if c.AuthorName != "NovelGo" {
+		t.Errorf("expected author NovelGo, got %q", c.AuthorName)
 	}
 	if c.Insertions <= 0 {
 		t.Errorf("expected positive insertions, got %d", c.Insertions)

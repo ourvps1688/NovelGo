@@ -13,9 +13,9 @@ func TestValidPath(t *testing.T) {
 		"outlines/id_1.md",
 		"outlines/3/new.md",
 		"volumes/id_3.md",
-		"goink.md",
+		"novelgo.md",
 		"skills/my-skill.md",
-		"~/.goink/skills/my-skill.md",
+		"~/.novelgo/skills/my-skill.md",
 	}
 	for _, p := range valid {
 		if !validPath(p) {
@@ -36,7 +36,7 @@ func TestValidPath(t *testing.T) {
 		"skills/",             // 缺文件名
 		"skills/a/b.md",       // 多级技能名
 		"/etc/passwd",         // 绝对路径（builtin 前缀之外）
-		"~/.goink/other/x.md", // 用户目录下非 skills 路径
+		"~/.novelgo/other/x.md", // 用户目录下非 skills 路径
 	}
 	for _, p := range invalid {
 		if validPath(p) {

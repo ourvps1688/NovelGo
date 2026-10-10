@@ -3,9 +3,9 @@ package app
 import (
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // GetCharacters 返回指定小说的全部角色，供前端侧边栏列表和关系图节点渲染。

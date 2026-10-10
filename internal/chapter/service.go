@@ -7,9 +7,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/deletion"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/volume"
+	"github.com/novelgo/novelgo/internal/deletion"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/volume"
 )
 
 // ChapterChunkCleaner 清理某章节派生的向量数据。

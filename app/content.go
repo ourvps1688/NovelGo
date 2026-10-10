@@ -7,11 +7,11 @@ import (
 	"path"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/rag"
-	"github.com/sigpanic/goink/internal/skill"
-	"github.com/sigpanic/goink/internal/text"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/rag"
+	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // SaveContentInput 是保存文件内容的入参。
@@ -144,5 +144,5 @@ func (a *App) validateVolumeContentPath(novelID int64, filePath string) error {
 }
 
 func isSkillPath(p string) bool {
-	return strings.HasPrefix(p, "skills/") || strings.HasPrefix(p, "~/.goink/skills/")
+	return strings.HasPrefix(p, "skills/") || strings.HasPrefix(p, "~/.novelgo/skills/")
 }

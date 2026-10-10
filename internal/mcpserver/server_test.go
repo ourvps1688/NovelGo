@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/mcpclient"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/mcpclient"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"

@@ -16,12 +16,12 @@ describe("useSaveContent", () => {
   it("invalidates user skill content across novels and every skill list", async () => {
     mockSaveContent.mockResolvedValue(undefined);
     const qc = new QueryClient();
-    const path = "~/.goink/skills/shared.md";
+    const path = "~/.novelgo/skills/shared.md";
     for (const novelId of [1, 2]) {
       qc.setQueryData(contentKeys.detail(novelId, path), "old");
       qc.setQueryData(skillKeys.list(novelId), ["old"]);
     }
-    qc.setQueryData(contentKeys.detail(2, "goink.md"), "other");
+    qc.setQueryData(contentKeys.detail(2, "novelgo.md"), "other");
     const { result } = renderHook(() => useSaveContent(), {
       wrapper: ({ children }: { children: ReactNode }) => (
         <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -41,7 +41,7 @@ describe("useSaveContent", () => {
       );
     }
     expect(
-      qc.getQueryState(contentKeys.detail(2, "goink.md"))?.isInvalidated,
+      qc.getQueryState(contentKeys.detail(2, "novelgo.md"))?.isInvalidated,
     ).toBe(false);
     qc.clear();
   });

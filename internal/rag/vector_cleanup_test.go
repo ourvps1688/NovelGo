@@ -13,9 +13,9 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/volume"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/volume"
 )
 
 // stubEmbedder 返回确定性向量，让这套单测不依赖 ONNX 模型。

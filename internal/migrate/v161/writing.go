@@ -6,7 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/migrate/engine"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
 )
 
 const writingIndex = "uk_writing_date_novel"

@@ -77,7 +77,7 @@ const secondVolume = {
 const defaultProps = {
   novelId: 1,
   onSelectChapter: vi.fn(),
-  onSelectGoink: vi.fn(),
+  onSelectNovelGo: vi.fn(),
   onSelectVolumeOutline: vi.fn(),
   onExportNovel: vi.fn(),
 };

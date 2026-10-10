@@ -40,7 +40,7 @@ func migrateDropLegacy(db *gorm.DB, log *slog.Logger) error {
 			return fmt.Errorf("migrate v160: 删除 %s.%s 的索引: %w", legacy.table, legacy.column, err)
 		}
 		// SQLite 的 GORM Migrator 在以字符串表名 DropColumn 时会因缺少 model schema
-		// 而 panic。Goink 的持久化数据库固定为 SQLite，直接使用其原生 DDL；table 和
+		// 而 panic。NovelGo 的持久化数据库固定为 SQLite，直接使用其原生 DDL；table 和
 		// column 均来自上方固定清单，不含外部输入。
 		query := fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", legacy.table, legacy.column)
 		if err := db.Exec(query).Error; err != nil {

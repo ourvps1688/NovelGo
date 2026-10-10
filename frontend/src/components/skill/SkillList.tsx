@@ -27,7 +27,7 @@ function skillPath(name: string, source: string): string {
     case "novel":
       return `skills/${name}.md`;
     case "user":
-      return `~/.goink/skills/${name}.md`;
+      return `~/.novelgo/skills/${name}.md`;
     case "builtin":
       return `/builtin/skills/${name}.md`;
     default:

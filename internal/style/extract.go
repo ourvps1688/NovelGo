@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/skill"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // Extract 分析样本文字的写作风格，生成仿写 skill。
@@ -62,7 +62,7 @@ func Extract(ctx context.Context, llmClient *llm.Client,
 		Name:        out.Name,
 		Description: out.Description,
 		RawContent:  buildStyleSkillMarkdown(out.Name, out.Description, out.Content),
-		FilePath:    fmt.Sprintf("~/.goink/skills/%s.md", safeName),
+		FilePath:    fmt.Sprintf("~/.novelgo/skills/%s.md", safeName),
 	}, nil
 }
 

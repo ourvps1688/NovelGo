@@ -7,14 +7,14 @@
 
 本次 v2 修订基于新一轮调研结论对原文档进行勘误与补充，关键变更：
 
-- **§1.1 根因修正为三层**：Bug C 不只是"中转站加严校验"，根源在 DeepSeek V4 官方协议要求 `reasoning_content` 回传，叠加中转站加严 + Goink 塞空字符串策略错误
+- **§1.1 根因修正为三层**：Bug C 不只是"中转站加严校验"，根源在 DeepSeek V4 官方协议要求 `reasoning_content` 回传，叠加中转站加严 + NovelGo 塞空字符串策略错误
 - **§1.2 业界调研补充**：DeepSeek V4（2026-04-24 发布）官方协议约束，旧模型 deepseek-chat / deepseek-reasoner 于 2026-07-24 下线
 - **§2.1 任意切换立论降级**：从"用户无感"降级为"协议层可行 / 语义层有损 / 用户可能感知质量下降"
 - **§2.3 跨族策略改为"目标要求明文才塞明文"**：修正原"明文 thinking 跨族都传"的错误策略，避免对要求加密的目标 provider 塞无意义明文
 - **§2.4 静默降级规则修正**：中转站空 reasoning_content 校验失败时塞非空内容重试（原"清空重试"在 DeepSeek V4 场景会更失败）
 - **新增 GPT reasoning summary opt-in 缺口**：GPT 默认不返回 summary，请求时需 opt-in `reasoning.summary`，否则 GPT 消息没明文 thinking 可塞给其他 provider
 - **新增 §3.5 CanSwitchToModel 切换前校验层**：复用现有 `CountMessagesTokens` / `ProviderModel` / `loadAPIMessages`，按 `ContextWindow - MaxOutputTokens` 预检
-- **新增 §6.x 上下文窗口超限 / compress 阈值 bug**：发现 Goink `agent.go:194` 的 80% 阈值用 `ContextWindow` 没扣 `MaxOutputTokens`，可能导致超过输入预算但不触发压缩
+- **新增 §6.x 上下文窗口超限 / compress 阈值 bug**：发现 NovelGo `agent.go:194` 的 80% 阈值用 `ContextWindow` 没扣 `MaxOutputTokens`，可能导致超过输入预算但不触发压缩
 - **核心原则**：永远塞非空内容（避免 Bug C 重演），宁可语义错位也不空字符串
 
 ## 1. 背景与动机
@@ -25,8 +25,8 @@
 
 - message[74] 用 `xiangliang/gpt-5.3-codex`（GPT 中转）生成
 - GPT 模型返回 `reasoning` 字段（OpenAI 标准），不返回 `reasoning_content`（DeepSeek 扩展）
-- Goink 的 [stream.go:325](file:///home/nianhe/projects/todo/internal/llm/stream.go#L325) **只解析 `reasoning_content`，不解析 `reasoning`** → `ThinkingContent=""`
-- 用户切换到 `向量引擎/deepseek-v4-flash`（DeepSeek 中转），Goink 把历史消息回传
+- NovelGo 的 [stream.go:325](file:///home/nianhe/projects/todo/internal/llm/stream.go#L325) **只解析 `reasoning_content`，不解析 `reasoning`** → `ThinkingContent=""`
+- 用户切换到 `向量引擎/deepseek-v4-flash`（DeepSeek 中转），NovelGo 把历史消息回传
 - [session/types.go:79-81](file:///home/nianhe/projects/todo/internal/session/types.go#L79-L81) 在 `ThinkingContent=""` 且含 `tool_calls` 时设 `payload["reasoning_content"]=""`
 - DeepSeek V4 官方协议要求 `reasoning_content` 在 tool_calls 场景必须回传（见下文三层根因 #1），中转站按协议加严校验拒绝空字符串 → 报 400
 
@@ -34,9 +34,9 @@
 
 1. **DeepSeek V4 官方协议要求 reasoning_content 完整回传**（2026-04-24 发布，[官方文档](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode) 原文："当模型进行了工具调用的轮次，在后续所有请求中，必须完整回传 reasoning_content 给 API"）。这是协议层硬约束，不是中转站自定义。openclaw 实测发现 DeepSeek 官方 API 后端只校验字段存在性、不校验内容（空字符串也能过），但协议文档措辞加严，中转站据此实现严格校验。旧模型 deepseek-chat / deepseek-reasoner 已于 2026-07-24 下线，所有用户强制迁 V4，此约束不可回避。
 2. **中转站按 DeepSeek 协议文档加严校验**（`vectorengine.cn` 行为）：协议文档说"必须完整回传"，中转站按字面要求非空。DeepSeek 官方后端宽松（接受空字符串）与协议文档措辞加严之间存在不一致，中转站倾向于按文档加严。
-3. **Goink 塞空字符串的策略错误**（[session/types.go:79-81](file:///home/nianhe/projects/todo/internal/session/types.go#L79-L81)）：`ThinkingContent=""` 时设 `payload["reasoning_content"]=""`——既不满足"完整回传"的协议要求，也撞中转站非空校验。**正确策略应永远塞非空内容**（源 thinking 明文或占位符），宁可语义错位也不空字符串。
+3. **NovelGo 塞空字符串的策略错误**（[session/types.go:79-81](file:///home/nianhe/projects/todo/internal/session/types.go#L79-L81)）：`ThinkingContent=""` 时设 `payload["reasoning_content"]=""`——既不满足"完整回传"的协议要求，也撞中转站非空校验。**正确策略应永远塞非空内容**（源 thinking 明文或占位符），宁可语义错位也不空字符串。
 
-**根本问题**：Goink 只支持 OpenAI Chat Completions + DeepSeek 协议同构的字段集，不支持 OpenAI 的 `reasoning` 字段，更不支持 Anthropic / Gemini 的异构协议；并且在 thinking 缺失时采用了错误的"塞空字符串"策略，叠加 DeepSeek V4 新协议约束与中转站加严校验，三方共同触发 Bug C。
+**根本问题**：NovelGo 只支持 OpenAI Chat Completions + DeepSeek 协议同构的字段集，不支持 OpenAI 的 `reasoning` 字段，更不支持 Anthropic / Gemini 的异构协议；并且在 thinking 缺失时采用了错误的"塞空字符串"策略，叠加 DeepSeek V4 新协议约束与中转站加严校验，三方共同触发 Bug C。
 
 ### 1.2 业界调研结论
 
@@ -65,11 +65,11 @@
 | 旧模型下线 | 2026-07-24 | deepseek-chat / deepseek-reasoner 下线，所有用户强制迁 V4 |
 | tool_calls 场景 | reasoning_content 必须回传 | 官方文档原文："当模型进行了工具调用的轮次，在后续所有请求中，必须完整回传 reasoning_content 给 API"。缺失或为空会触发 400 `The reasoning_content in the thinking mode must be passed back to the API` |
 | 官方后端实际行为 | 只校验字段存在性 | openclaw 实测：DeepSeek 官方 API 后端只校验 `reasoning_content` 字段存在、不校验内容，空字符串能过 400 校验。但中转站按协议文档措辞加严校验（要求非空）才会拒绝空字符串 |
-| 跨族影响 | 明文 thinking 必须塞非空 | 任意源 → DeepSeek V4（tool_calls）时，Goink 必须塞非空 `reasoning_content`（源 thinking 明文或占位符），不能塞空字符串 |
+| 跨族影响 | 明文 thinking 必须塞非空 | 任意源 → DeepSeek V4（tool_calls）时，NovelGo 必须塞非空 `reasoning_content`（源 thinking 明文或占位符），不能塞空字符串 |
 
 来源：[DeepSeek 官方文档 thinking_mode](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)
 
-**Goink 的 hook 机制（hooks_minimax.go / hooks_qwen.go / hooks_moonshot.go）是业界主流做法**，与 LobeChat 的 `model-runtime` 类似。当前缺失：GPT / Anthropic / Gemini 的 hook。
+**NovelGo 的 hook 机制（hooks_minimax.go / hooks_qwen.go / hooks_moonshot.go）是业界主流做法**，与 LobeChat 的 `model-runtime` 类似。当前缺失：GPT / Anthropic / Gemini 的 hook。
 
 ### 1.3 本版相对初稿的修正
 
@@ -92,10 +92,10 @@
 - **协议层任意切换可行**：DeepSeek V4 官方只校验 `reasoning_content` 字段存在性、不校验内容，塞非空内容能过；其他族目标忽略或重新推理，不会卡死对话
 - **语义层有损**：thinking 跨族是假保留，加密 token 丢、推理连续性断裂，新模型实际看不到老模型的推理过程
 - **用户可能感知到质量下降**：跨族切换后模型可能答非所问或重复推理，**不再是"用户无感"**；但仍优于限制切换（行业硬伤，Trae 也做不到）
-- **产品决策**：用户心智模型是"随便切"，"不能切"会被判定为软件垃圾；Trae / OpenRouter / Cherry Studio 都允许任意切换，Goink 限制切换等于主动让出竞争力
-- **跨 provider 加密 token 丢失是行业天花板**，Trae 也做不到，Goink 不必为此背锅
+- **产品决策**：用户心智模型是"随便切"，"不能切"会被判定为软件垃圾；Trae / OpenRouter / Cherry Studio 都允许任意切换，NovelGo 限制切换等于主动让出竞争力
+- **跨 provider 加密 token 丢失是行业天花板**，Trae 也做不到，NovelGo 不必为此背锅
 
-**Goink 的差异化卖点**改为：**同族内 thinking 真保留**（如 DeepSeek↔Qwen 切换 thinking 完整延续），这点 Trae 不一定做。跨族是行业硬伤，谁都没解。
+**NovelGo 的差异化卖点**改为：**同族内 thinking 真保留**（如 DeepSeek↔Qwen 切换 thinking 完整延续），这点 Trae 不一定做。跨族是行业硬伤，谁都没解。
 
 ### 2.2 四族分类（按 thinking 可互通性）
 
@@ -294,9 +294,9 @@ type Provider struct {
 
 ### 3.5 切换前校验层（CanSwitchToModel）
 
-**v2 新增**（2026-07-25 调研发现 Goink 切换模型时未做上下文窗口预检，可能灾难）。Goink 切换模型时如果当前会话 token 数超过目标模型可用输入窗口，会撞 400 或上下文截断（如 DeepSeek 1M 聊到 600K 切给 200K 模型）。
+**v2 新增**（2026-07-25 调研发现 NovelGo 切换模型时未做上下文窗口预检，可能灾难）。NovelGo 切换模型时如果当前会话 token 数超过目标模型可用输入窗口，会撞 400 或上下文截断（如 DeepSeek 1M 聊到 600K 切给 200K 模型）。
 
-**Goink 现有基础设施**（已确认可用）：
+**NovelGo 现有基础设施**（已确认可用）：
 
 - token 计数：[`internal/llm/token_counter.go`](file:///home/nianhe/projects/todo/internal/llm/token_counter.go) 的 `CountMessagesTokens`，用 `o200k_base` BPE 编码器，所有 provider 共用
 - ModelInfo 字段：`ContextWindow` 和 `MaxOutputTokens` 已存在（[`internal/llm/types.go:28-36`](file:///home/nianhe/projects/todo/internal/llm/types.go#L28-L36)）
@@ -330,7 +330,7 @@ func (a *App) CanSwitchToModel(providerName, modelID string) (*SwitchCheckResult
 inputBudget = ContextWindow - MaxOutputTokens
 ```
 
-比 Goink 现有 compress 阈值（`ContextWindow * 0.8`）更保守，因为 compress 阈值没扣 `MaxOutputTokens`（见 §6.x compress 阈值 bug）。
+比 NovelGo 现有 compress 阈值（`ContextWindow * 0.8`）更保守，因为 compress 阈值没扣 `MaxOutputTokens`（见 §6.x compress 阈值 bug）。
 
 **超窗处理策略**（推荐自动压缩 + 提示）：
 
@@ -456,7 +456,7 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 | 路径 | 工作量 | 主要问题 |
 |---|---|---|
 | **兼容端点 + signature 持久化（推荐）** | ~1.1 天 | 中转站可能过滤 `extra_content` 非标字段，需兜底 |
-| 集成 google.golang.org/genai SDK | ~3.8 天 | +35 个传递依赖（含 Google Cloud auth）；走 v1beta 原生端点，**中转站用户走不通**；SDK 自管 HTTP，绕过 Goink Provider hook 抽象 |
+| 集成 google.golang.org/genai SDK | ~3.8 天 | +35 个传递依赖（含 Google Cloud auth）；走 v1beta 原生端点，**中转站用户走不通**；SDK 自管 HTTP，绕过 NovelGo Provider hook 抽象 |
 | 自研 hooks_gemini.go 原生翻译层 | ~3.1 天 | role 体系/parts/streamGenerateContent SSE 全异构；Google 频繁迭代 signature 规则；中转站走不通 |
 
 **推荐路径：兼容端点 + signature 持久化**
@@ -561,7 +561,7 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 **场景**：用户用 GPT 生成几轮消息（含 reasoning_details.encrypted_content），切换到 Claude 继续对话
 
 **行为**（v2 修正，按 §2.3 矩阵对 Claude 不塞明文 thinking）：
-- Goink 把历史消息回传给 Claude
+- NovelGo 把历史消息回传给 Claude
 - reasoning_details 无法转成 signature，**丢弃**
 - **不塞明文 thinking block**（Claude 不认无 signature 的 thinking block，塞了也会被忽略）
 - Claude 看不到 GPT 的推理上下文，重新开始推理
@@ -644,7 +644,7 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 
 **行为**：
 - 兼容端点吐的 signature 在中转链路中丢失
-- Goink 持久化的 thought_signatures 为空
+- NovelGo 持久化的 thought_signatures 为空
 - 跨轮 thinking 失效，Gemini 每轮重新推理
 
 **应对**：
@@ -673,13 +673,13 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 **场景**：用户在 DeepSeek V4（1M 上下文）会话聊到 600K tokens，切换到 GPT（200K 上下文）或 Claude（200K 上下文）继续对话
 
 **行为**：
-- Goink 切换模型 = 下次发消息传不同 ProviderName + ModelID，无预检
+- NovelGo 切换模型 = 下次发消息传不同 ProviderName + ModelID，无预检
 - 历史消息 600K tokens 回传给 200K 模型，撞 400 "context length exceeded" 或被中转站截断
 - 用户可能误以为是模型 bug，实际是上下文窗口超限
 
 **应对**：
 - 新增 `CanSwitchToModel` binding（见 §3.5），前端 `handleSelectModel` 预检
-- inputBudget = ContextWindow - MaxOutputTokens（比 Goink 现有 compress 阈值更保守）
+- inputBudget = ContextWindow - MaxOutputTokens（比 NovelGo 现有 compress 阈值更保守）
 - 超窗时自动压缩 / 截断 / 开新会话 / 选更大模型（推荐自动压缩 + 提示）
 - 复用现有 `CountMessagesTokens`（o200k_base BPE，所有 provider 共用）/ `ProviderModel` / `loadAPIMessages`
 
@@ -687,13 +687,13 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 - token 计数用 `o200k_base` 编码器，对非 GPT 模型有偏差（DeepSeek / Claude 各自 tokenizer 不同），但误差在 10% 内，预检够用
 - compress 当前不能指定目标 token 数，需扩展（见 §6.12）
 
-### 6.12 compress 阈值未扣 MaxOutputTokens（v2 新增，Goink 潜在 bug）
+### 6.12 compress 阈值未扣 MaxOutputTokens（v2 新增，NovelGo 潜在 bug）
 
-**场景**：Goink 现有 [`internal/agent/agent.go:194`](file:///home/nianhe/projects/todo/internal/agent/agent.go#L194) 的 compress 阈值用 `ContextWindow * 0.8`，没扣 `MaxOutputTokens`
+**场景**：NovelGo 现有 [`internal/agent/agent.go:194`](file:///home/nianhe/projects/todo/internal/agent/agent.go#L194) 的 compress 阈值用 `ContextWindow * 0.8`，没扣 `MaxOutputTokens`
 
 **行为**：
 - 例如 GPT-5 ContextWindow=200K，MaxOutputTokens=32K，实际可用输入预算 = 168K
-- Goink 现有 compress 阈值 = 200K * 0.8 = 160K（未扣 MaxOutputTokens）
+- NovelGo 现有 compress 阈值 = 200K * 0.8 = 160K（未扣 MaxOutputTokens）
 - 修正后 compress 阈值应为 = 168K * 0.8 = 134.4K
 - 问题场景：会话 token 数在 (160K, 168K] 区间时，按现有 0.8 阈值（160K）算**未触发压缩**，但实际输入 168K + 输出 32K = 200K 已顶满 ContextWindow，留给输出的空间不足，可能撞长度上限或输出被截断
 - 更糟的情况：若 MaxOutputTokens 占比更大（如 Claude thinking 模式 budget_tokens 占一半），现有阈值的偏差更严重
@@ -709,7 +709,7 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 
 ### 7.1 测试不需要国外卡
 
-**核心洞察**：要测的是 Goink 的协议适配代码，不是 API 本身通不通。所以不需要真卡。
+**核心洞察**：要测的是 NovelGo 的协议适配代码，不是 API 本身通不通。所以不需要真卡。
 
 ### 7.2 测试方案（按性价比排）
 
@@ -780,7 +780,7 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 1. **产品决策优先**：用户看不懂加密 token 丢失，"不能切"会被判定软件垃圾
 2. **竞品对齐**：Trae / OpenRouter / Cherry Studio 都允许任意切换
 3. **行业硬伤**：跨 provider 加密 token 丢失是无解的，限制切换也救不回来
-4. **差异化在别处**：Goink 的卖点是同族内 thinking 真保留，不是限制切换
+4. **差异化在别处**：NovelGo 的卖点是同族内 thinking 真保留，不是限制切换
 
 ### 8.2 为什么按"thinking 可互通性"分四族，而非按协议分三族？
 
@@ -816,28 +816,28 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 
 **理由**：
 
-1. **事件粒度不对齐**：SDK 给的是协议原生事件（Claude 的 `ContentBlockDeltaEvent`、Gemini 的 chunk），Goink 的 `StreamEvent`（`EventToolCallStart`/`EventToolCallEnd` 等）是业务抽象。agent 层依赖业务事件驱动 agent loop，**SDK 事件 → Goink 业务事件**这层翻译无论用不用 SDK 都要写。SDK 节省的只是底层 SSE 字节流解析（~150 行），净收益小。
+1. **事件粒度不对齐**：SDK 给的是协议原生事件（Claude 的 `ContentBlockDeltaEvent`、Gemini 的 chunk），NovelGo 的 `StreamEvent`（`EventToolCallStart`/`EventToolCallEnd` 等）是业务抽象。agent 层依赖业务事件驱动 agent loop，**SDK 事件 → NovelGo 业务事件**这层翻译无论用不用 SDK 都要写。SDK 节省的只是底层 SSE 字节流解析（~150 行），净收益小。
 
-2. **类型系统阻抗**：Goink 现有体系用 `map[string]any`（Provider hook、ToAPIFormat、buildPayload），SDK 用强类型 struct（`[]anthropic.MessageParam` / `[]genai.Content`）。引入 SDK 必须做 `map ↔ struct` 双向转换层（~1 天工作量），且每种消息角色 + 每种 content block 都要写转换代码。
+2. **类型系统阻抗**：NovelGo 现有体系用 `map[string]any`（Provider hook、ToAPIFormat、buildPayload），SDK 用强类型 struct（`[]anthropic.MessageParam` / `[]genai.Content`）。引入 SDK 必须做 `map ↔ struct` 双向转换层（~1 天工作量），且每种消息角色 + 每种 content block 都要写转换代码。
 
-3. **破坏 Provider 抽象一致性**：Goink 的 `Provider` 结构（`BuildRequest` / `BuildHeaders` / `ParseStream` / `ParseError`）假设"自己发 HTTP"。SDK 自管 HTTP（发请求 + 解析 + 重试），引入 SDK 后该 provider 走完全不同的代码路径，7 个国产 provider 走 hook、Claude/Gemini 走 SDK，心智成本高，未来加新 provider 时分裂加剧。
+3. **破坏 Provider 抽象一致性**：NovelGo 的 `Provider` 结构（`BuildRequest` / `BuildHeaders` / `ParseStream` / `ParseError`）假设"自己发 HTTP"。SDK 自管 HTTP（发请求 + 解析 + 重试），引入 SDK 后该 provider 走完全不同的代码路径，7 个国产 provider 走 hook、Claude/Gemini 走 SDK，心智成本高，未来加新 provider 时分裂加剧。
 
 4. **依赖膨胀**：
    - anthropic-sdk-go 拖入 16 个传递依赖（AWS SDK for Bedrock、Google API for Vertex、gRPC、MCP SDK、OpenTelemetry）
    - google.golang.org/genai 拖入 35 个传递依赖（含 Google Cloud auth 系列库）
-   - go.sum 膨胀几百 MB，CVE 扫描面变大，与 Goink 当前轻量依赖风格不符
+   - go.sum 膨胀几百 MB，CVE 扫描面变大，与 NovelGo 当前轻量依赖风格不符
 
-5. **中转站生态不友好**：Gemini SDK 走 `v1beta/models/{model}:streamGenerateContent` 原生端点，国内中转站基本不代理这个路径，**用户用中转站走不通**。Goink 用户主要用国内中转站，这是硬约束。兼容端点 + 自研解析对中转站友好。
+5. **中转站生态不友好**：Gemini SDK 走 `v1beta/models/{model}:streamGenerateContent` 原生端点，国内中转站基本不代理这个路径，**用户用中转站走不通**。NovelGo 用户主要用国内中转站，这是硬约束。兼容端点 + 自研解析对中转站友好。
 
 6. **工作量反而更大**：
    - Claude：自研 3.5 天 vs SDK 4.4 天（多出 map↔struct 转换 + 职责冲突处理 + 依赖审计 + 关 SDK 自动重试）
    - Gemini：兼容端点 1.1 天 vs SDK 3.8 天（多出依赖解决 + adapter + 中转站兼容 + GenerateText 适配）
 
-7. **业界主流做法**：多 provider 适配框架（LiteLLM / Vercel AI SDK / LangChain / LobeChat model-runtime / one-api / OpenRouter）普遍**不引入各厂商 SDK**，自研统一 HTTP 层 + 按 provider 翻译。引入多个 SDK = N 套独立代码路径 + 依赖冲突。Goink 走派别 A 符合业界主流。
+7. **业界主流做法**：多 provider 适配框架（LiteLLM / Vercel AI SDK / LangChain / LobeChat model-runtime / one-api / OpenRouter）普遍**不引入各厂商 SDK**，自研统一 HTTP 层 + 按 provider 翻译。引入多个 SDK = N 套独立代码路径 + 依赖冲突。NovelGo 走派别 A 符合业界主流。
 
-8. **SDK 自动重试干扰**：SDK 默认重试 429/5xx 2 次，与 Goink agent 层的 signature 过期清空重试逻辑叠加。需手动 `WithMaxRetries(0)` 关闭，否则重试行为不可控。
+8. **SDK 自动重试干扰**：SDK 默认重试 429/5xx 2 次，与 NovelGo agent 层的 signature 过期清空重试逻辑叠加。需手动 `WithMaxRetries(0)` 关闭，否则重试行为不可控。
 
-**例外**：如果未来 Goink 要支持 Anthropic Bedrock / Vertex 部署，或集成 MCP 协议，那时再考虑引入 SDK 的对应子包（`bedrock/` / `vertex/` / MCP 工具）。当前 v1.3.0 目标只是消息 API + thinking + tool_use，不需要。
+**例外**：如果未来 NovelGo 要支持 Anthropic Bedrock / Vertex 部署，或集成 MCP 协议，那时再考虑引入 SDK 的对应子包（`bedrock/` / `vertex/` / MCP 工具）。当前 v1.3.0 目标只是消息 API + thinking + tool_use，不需要。
 
 **借鉴 SDK 源码**：虽然不引入 SDK 依赖，但自研翻译层时可参考 SDK 源码作为协议解析的最佳参考实现：
 - `anthropic-sdk-go/packages/ssestream`：SSE 解析逻辑（Go 写的，可直接移植）
@@ -854,4 +854,4 @@ OpenAI 官方明确"不暴露 raw reasoning tokens"，`reasoning` 字段返回�
 - 评估是否引入 Gemini Interactions API 有状态模式（`store:true` + `previous_interaction_id`，省 signature 管理；当前 Go SDK 未暴露，待官方支持后评估）
 - 评估 `skip_thought_signature_validator` 在 Gemini 3 所有版本是否都生效（dotnet-genai 代码引用，官方文档未明确，需实测）
 - 监控中转站兼容性（尤其 `extra_content` 非标字段透传情况），按需更新文档
-- 考虑 Goink 差异化：同族内 thinking 真保留的 UI 提示（"切换到同族模型，推理上下文完整保留"）
+- 考虑 NovelGo 差异化：同族内 thinking 真保留的 UI 提示（"切换到同族模型，推理上下文完整保留"）

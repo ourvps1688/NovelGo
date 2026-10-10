@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sigpanic/goink/internal/config"
+	"github.com/novelgo/novelgo/internal/config"
 )
 
 // ── 文件路径 ──────────────────────────────────────────────
@@ -24,8 +24,8 @@ func ChapterPath(id int64) string {
 	return fmt.Sprintf("chapters/id_%d.md", id)
 }
 
-func GoinkPath() string {
-	return "goink.md"
+func NovelGoPath() string {
+	return "novelgo.md"
 }
 
 func CoverPath() string {
@@ -101,7 +101,7 @@ func ParseVolumePath(path string) (int64, bool) {
 }
 
 // ── 文件读写 ──────────────────────────────────────────────
-// path 为相对于小说仓库根目录的路径，如 "chapters/id_1.md"、"goink.md"。
+// path 为相对于小说仓库根目录的路径，如 "chapters/id_1.md"、"novelgo.md"。
 
 var fileWriteMu sync.Mutex
 
@@ -190,15 +190,15 @@ func novelDir(novelID int64) string {
 }
 
 // ResolvePath 将用户输入路径解析为真实文件系统路径。
-// ~/.goink/ 展开到用户目录；其他相对路径基于小说目录。
+// ~/.novelgo/ 展开到用户目录；其他相对路径基于小说目录。
 func ResolvePath(path string, novelID int64) (string, error) {
-	if strings.HasPrefix(path, "~/.goink/") {
+	if strings.HasPrefix(path, "~/.novelgo/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("git: 获取用户目录失败: %w", err)
 		}
-		base := filepath.Join(home, ".goink")
-		rel := strings.TrimPrefix(path, "~/.goink/")
+		base := filepath.Join(home, ".novelgo")
+		rel := strings.TrimPrefix(path, "~/.novelgo/")
 		return SafePath(base, rel)
 	}
 

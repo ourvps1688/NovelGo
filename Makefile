@@ -1,9 +1,9 @@
 .PHONY: dev build frontend frontend-dev frontend-build clean deps package lint lint-frontend lint-go
 
-APP_NAME  := goink
+APP_NAME  := novelgo
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_DIR := build
-LDFLAGS   := -X github.com/sigpanic/goink/internal/version.Version=$(VERSION)
+LDFLAGS   := -X github.com/novelgo/novelgo/internal/version.Version=$(VERSION)
 
 # 启动 Wails 开发模式（Go 后端 + Vite HMR 前端）
 dev:
@@ -28,7 +28,7 @@ frontend:
 
 # 生产构建（需先 deps）
 # 动态注入版本号到 build/windows/info.json 的 fixed.file_version 和 fixed.product_version
-# （Wails v2 读这个文件用 winres 生成 .syso 嵌入 goink.exe PE 版本资源），构建后恢复原文件
+# （Wails v2 读这个文件用 winres 生成 .syso 嵌入 novelgo.exe PE 版本资源），构建后恢复原文件
 build: deps frontend
 	@cp build/windows/info.json build/windows/info.json.bak && \
 	trap 'mv build/windows/info.json.bak build/windows/info.json' EXIT && \
@@ -58,7 +58,7 @@ lint: lint-frontend lint-go
 
 # 代码统计（需安装 cloc）
 stats:
-	cloc --exclude-dir=node_modules,dist,wailsjs,build,python-master,goink-skills,dev_test,docs.local,release,assets,docs,.github,.githooks,.claude,.git \
+	cloc --exclude-dir=node_modules,dist,wailsjs,build,python-master,novelgo-skills,dev_test,docs.local,release,assets,docs,.github,.githooks,.claude,.git \
 		--not-match-f='(?i)(\.pb\.go$$|\.gen\.go$$|\.generated\.go$$|\.svg$$|\.png$$|\.jpg$$|\.ico$$)' \
 		.
 
@@ -96,7 +96,7 @@ package-macos: build
 clean:
 ifeq ($(OS),Windows_NT)
 	powershell -Command "Remove-Item -Recurse -Force frontend/dist, frontend/node_modules, $(BUILD_DIR)/runtime, $(BUILD_DIR)/dist, $(BUILD_DIR)/bin -ErrorAction SilentlyContinue"
-	powershell -Command "Remove-Item -Force goink.exe -ErrorAction SilentlyContinue"
+	powershell -Command "Remove-Item -Force novelgo.exe -ErrorAction SilentlyContinue"
 else
 	rm -rf frontend/dist frontend/node_modules $(BUILD_DIR)/runtime $(BUILD_DIR)/dist $(BUILD_DIR)/bin $(APP_NAME)
 endif

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sigpanic/goink/internal/mcpclient"
-	"github.com/sigpanic/goink/internal/mcpserver"
+	"github.com/novelgo/novelgo/internal/mcpclient"
+	"github.com/novelgo/novelgo/internal/mcpserver"
 	"github.com/stretchr/testify/require"
 )
 

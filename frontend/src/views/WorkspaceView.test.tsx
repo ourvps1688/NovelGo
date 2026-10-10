@@ -165,7 +165,7 @@ vi.mock("@/components/sidebar/SidePanel", () => ({
     activeSkillName?: string | null;
     onSelectNovel?: (n: { id: number; title: string }) => void;
     onSelectChapter?: (ch: chapter.Chapter) => void;
-    onSelectGoink?: () => void;
+    onSelectNovelGo?: () => void;
     onSelectVolumeOutline?: (path: string, name: string) => void;
     onSelectSkill?: (path: string, title: string, readOnly: boolean) => void;
     onEditSkill?: (path: string, title: string, readOnly: boolean) => void;
@@ -241,7 +241,7 @@ vi.mock("@/components/sidebar/SidePanel", () => ({
       >
         nav-select-chapter
       </button>
-      <button onClick={() => props.onSelectGoink?.()}>nav-goink</button>
+      <button onClick={() => props.onSelectNovelGo?.()}>nav-novelgo</button>
       <button
         onClick={() =>
           props.onSelectSkill?.("skills/read.md", "阅读技能", true)
@@ -616,12 +616,12 @@ describe("WorkspaceView search navigation", () => {
     );
     expect(useEditorStore.getState().tabTarget?.path).toBe("chapters/id_42.md");
 
-    fireEvent.click(screen.getByText("nav-goink"));
+    fireEvent.click(screen.getByText("nav-novelgo"));
     expect(contentRefSpies.openFile).toHaveBeenCalledWith(
-      "goink.md",
+      "novelgo.md",
       "content.storyStatus",
     );
-    expect(useEditorStore.getState().tabTarget?.path).toBe("goink.md");
+    expect(useEditorStore.getState().tabTarget?.path).toBe("novelgo.md");
 
     fireEvent.click(screen.getByText("nav-select-skill"));
     fireEvent.click(screen.getByText("nav-edit-skill"));

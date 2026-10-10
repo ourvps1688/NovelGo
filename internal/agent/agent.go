@@ -16,15 +16,15 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/agentcfg"
-	"github.com/sigpanic/goink/internal/approval"
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/search"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/skill"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/approval"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/search"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // Agent 是对话编排核心，持有运行所需的所有基础设施。

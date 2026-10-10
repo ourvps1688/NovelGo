@@ -8,7 +8,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/character"
+	"github.com/novelgo/novelgo/internal/character"
 )
 
 func TestCharacterGroupsMigrationPreservesExistingCharacters(t *testing.T) {

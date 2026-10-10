@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/llm"
+	"github.com/novelgo/novelgo/internal/llm"
 )
 
 // PreferencesTokenBudget 是注入 system 消息时偏好的软上限（token）。

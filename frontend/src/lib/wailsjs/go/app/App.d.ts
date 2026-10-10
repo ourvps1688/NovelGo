@@ -123,9 +123,9 @@ export function GetChapterPlans(arg1:number):Promise<Array<timeline.ChapterPlan>
 
 export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;
 
-export function GetCharacterGroupMembers(arg1:app.GetCharacterGroupMembersInput):Promise<storage.PageResult_github_com_sigpanic_goink_internal_character_GroupMember_>;
+export function GetCharacterGroupMembers(arg1:app.GetCharacterGroupMembersInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_character_GroupMember_>;
 
-export function GetCharacterGroups(arg1:app.GetCharacterGroupsInput):Promise<storage.PageResult_github_com_sigpanic_goink_internal_character_GroupView_>;
+export function GetCharacterGroups(arg1:app.GetCharacterGroupsInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_character_GroupView_>;
 
 export function GetCharacterRelations(arg1:number):Promise<Array<character.CharacterRelation>>;
 
@@ -165,7 +165,7 @@ export function GetSession(arg1:string):Promise<app.SessionDetail>;
 
 export function GetSessionMessages(arg1:string):Promise<Array<session.Message>>;
 
-export function GetSessions(arg1:app.GetSessionsInput):Promise<storage.PageResult_github_com_sigpanic_goink_app_SessionMeta_>;
+export function GetSessions(arg1:app.GetSessionsInput):Promise<storage.PageResult_github_com_novelgo_novelgo_app_SessionMeta_>;
 
 export function GetSettings():Promise<config.AppSettings>;
 
@@ -195,13 +195,13 @@ export function InstallRemoteSkill(arg1:app.InstallRemoteSkillInput):Promise<app
 
 export function IsInitialized():Promise<boolean>;
 
-export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_sigpanic_goink_internal_storage_PageResult_github_com_sigpanic_goink_internal_skill_remote_RemoteSkillMeta__>;
+export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_novelgo_novelgo_internal_storage_PageResult_github_com_novelgo_novelgo_internal_skill_remote_RemoteSkillMeta__>;
 
 export function ListSkills(arg1:app.ListSkillsInput):Promise<Array<skill.SkillMeta>>;
 
 export function ListSlashCommands(arg1:app.ListSlashCommandsInput):Promise<Array<app.SlashCommand>>;
 
-export function ListStyleSamples(arg1:app.ListStyleSamplesInput):Promise<storage.PageResult_github_com_sigpanic_goink_internal_style_Sample_>;
+export function ListStyleSamples(arg1:app.ListStyleSamplesInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_style_Sample_>;
 
 export function PickAndImportNovel():Promise<imp.ImportResult>;
 

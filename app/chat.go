@@ -11,14 +11,14 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/agent"
-	"github.com/sigpanic/goink/internal/agentcfg"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/rollback"
-	"github.com/sigpanic/goink/internal/session"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/agent"
+	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/rollback"
+	"github.com/novelgo/novelgo/internal/session"
 )
 
 // ChatInput 是一次对话请求的入参。
@@ -485,7 +485,7 @@ func (a *App) commitAIChanges(repo *git.Repo, turnID int, sessionID string, mode
 		return
 	}
 
-	msg := fmt.Sprintf("turn %d: AI changes\n\nSession: %s\n\nCo-authored-by: Goink (%s)", turnID, sessionID, modelName)
+	msg := fmt.Sprintf("turn %d: AI changes\n\nSession: %s\n\nCo-authored-by: NovelGo (%s)", turnID, sessionID, modelName)
 	a.doCommit(repo, turnID, sessionID, "ai", msg)
 }
 

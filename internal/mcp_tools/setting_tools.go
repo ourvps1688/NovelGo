@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/setting"
+	"github.com/novelgo/novelgo/internal/setting"
 )
 
 // ── upsert_setting ──────────────────────────────────

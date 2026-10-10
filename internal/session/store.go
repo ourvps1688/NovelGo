@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/storage"
 
 	"gorm.io/gorm"
 )

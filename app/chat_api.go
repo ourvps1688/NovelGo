@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // SessionMeta 是前端会话列表的轻量视图。

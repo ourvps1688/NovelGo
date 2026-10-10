@@ -5,7 +5,7 @@
 
 ## 背景与动机
 
-Goink 前端（React 19 + TypeScript + Tailwind 4 + shadcn/ui）目前功能完整，但随着面板和实体类型持续增加，几个结构性问题开始反复发作：
+NovelGo 前端（React 19 + TypeScript + Tailwind 4 + shadcn/ui）目前功能完整，但随着面板和实体类型持续增加，几个结构性问题开始反复发作：
 
 1. **`WorkspaceView` 膨胀到 786 行、34 个 `useState`**，承担 7 类互不相干的职责，每次加功能都要在这个文件里找透传链
 2. **`activePanel` 用字符串字面量散落全文件**，新增面板时极易漏改否定链
@@ -351,7 +351,7 @@ export default function WorkspaceView() {
 | 调试链路变长（state→store→subscription→re-render） | devtools + 日志 |
 | 学习成本 | Zustand/Query API 简单，但需熟悉 |
 
-**方向是对的，执行决定成败**。对 Goink 这种还在活跃开发、还会加新功能的项目，改了更好——新功能不再堆 WorkspaceView，收益真实。但必须分步 + 测试兜底 + 每步验证手感。
+**方向是对的，执行决定成败**。对 NovelGo 这种还在活跃开发、还会加新功能的项目，改了更好——新功能不再堆 WorkspaceView，收益真实。但必须分步 + 测试兜底 + 每步验证手感。
 
 ## useApp 模式分析与废弃路径
 

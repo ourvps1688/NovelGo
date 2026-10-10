@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/sigpanic/goink/internal/web"
+	"github.com/novelgo/novelgo/internal/web"
 )
 
 // WebFetchArgs 是 web_fetch 工具的参数。

@@ -575,9 +575,9 @@ describe("ContentPanel", () => {
     const ref = { current: null as ContentPanelHandle | null };
     render(<ContentPanel ref={ref} />);
 
-    await act(async () => ref.current?.openFile("goink.md", "故事状态"));
+    await act(async () => ref.current?.openFile("novelgo.md", "故事状态"));
 
-    expect(mockFetchContent).toHaveBeenCalledWith(1, "goink.md");
+    expect(mockFetchContent).toHaveBeenCalledWith(1, "novelgo.md");
     expect(screen.queryByTestId("content-editor")).not.toBeInTheDocument();
     await act(async () => resolveRead("新的故事状态"));
     expect(screen.getByTestId("content-editor")).toHaveTextContent(
@@ -597,13 +597,13 @@ describe("ContentPanel", () => {
     const ref = { current: null as ContentPanelHandle | null };
     render(<ContentPanel ref={ref} />);
 
-    await act(async () => ref.current?.openFile("goink.md", "故事状态"));
-    act(() => reportAIFileChange({ novelId: 1, path: "goink.md" }));
+    await act(async () => ref.current?.openFile("novelgo.md", "故事状态"));
+    act(() => reportAIFileChange({ novelId: 1, path: "novelgo.md" }));
     await act(async () => resolveRead("旧版"));
 
-    expect(mockGetContent).toHaveBeenCalledWith(1, "goink.md");
+    expect(mockGetContent).toHaveBeenCalledWith(1, "novelgo.md");
     expect(mockOpenTab).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "goink.md", content: "AI 新版" }),
+      expect.objectContaining({ path: "novelgo.md", content: "AI 新版" }),
     );
   });
 

@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/sigpanic/goink/internal/migrate"
-	"github.com/sigpanic/goink/internal/writing"
+	"github.com/novelgo/novelgo/internal/migrate"
+	"github.com/novelgo/novelgo/internal/writing"
 )
 
 func TestWritingDailyMigrationPreservesCounts(t *testing.T) {

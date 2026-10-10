@@ -3,7 +3,7 @@ package agentcfg
 import (
 	"strings"
 
-	"github.com/sigpanic/goink/internal/skill"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // BuildSkillCatalog 将 auto 模式的 skill 元数据格式化为 LLM 可用的技能目录。
@@ -64,7 +64,7 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	b.WriteString("---\n")
 	b.WriteString("使用 read 工具加载技能完整内容：\n")
 	b.WriteString("- skills/<name>.md（小说技能）\n")
-	b.WriteString("- ~/.goink/skills/<name>.md（用户技能）\n")
+	b.WriteString("- ~/.novelgo/skills/<name>.md（用户技能）\n")
 	b.WriteString("- /builtin/skills/<name>.md（内置技能，只读）\n")
 	b.WriteString("使用 edit 工具创建或修改技能。内置技能不可编辑。\n")
 	b.WriteString("</available_skills>")

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
 )
 
 // createE2ERepo creates a novel directory and initializes a git repo using bundled git.

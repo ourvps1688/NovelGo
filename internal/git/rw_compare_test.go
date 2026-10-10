@@ -4,12 +4,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/config"
+	"github.com/novelgo/novelgo/internal/config"
 )
 
 func TestWriteFileIfUnchanged(t *testing.T) {
 	config.Set(&config.AppConfig{DataDir: t.TempDir()})
-	const path = "goink.md"
+	const path = "novelgo.md"
 
 	if err := WriteFileIfUnchanged(1, path, "", "first"); err != nil {
 		t.Fatal(err)

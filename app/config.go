@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/rag"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/rag"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // SaveSettingsInput 是保存设置的入参。

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sigpanic/goink/internal/version"
+	"github.com/novelgo/novelgo/internal/version"
 )
 
 const (
-	repoOwner   = "sigpanic"
-	repoName    = "goink"
+	repoOwner   = "novelgo"
+	repoName    = "novelgo"
 	apiBaseURL  = "https://api.github.com/repos/" + repoOwner + "/" + repoName
 	httpTimeout = 5 * time.Second
 )

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/skill"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // ---------------------------------------------------------------------------

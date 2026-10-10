@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/rag"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/rag"
 )
 
 // setupRefreshQueueTest sets up dependencies for RefreshQueue E2E testing.
@@ -39,7 +39,7 @@ func setupRefreshQueueTest(t *testing.T) (*rag.RefreshQueue, int64, func()) {
 	novelID := n.ID
 
 	// Create the novel's git repo directory
-	repo, err := git.New(novelID, "Goink", "goink@local", testLogger(t))
+	repo, err := git.New(novelID, "NovelGo", "novelgo@local", testLogger(t))
 	if err != nil {
 		t.Fatalf("git.New() failed: %v", err)
 	}

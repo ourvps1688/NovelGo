@@ -72,7 +72,7 @@ func TestGetFileDiff(t *testing.T) {
 	})
 	require.NoError(t, err, "create novel with git repo")
 
-	// The initial commit from CreateNovel should include goink.md.
+	// The initial commit from CreateNovel should include novelgo.md.
 	// Find a commit that contains a known file and get its diff.
 	logs, err := app.GetCommitLog(n.ID, 5, "")
 	require.NoError(t, err)
@@ -86,7 +86,7 @@ func TestGetFileDiff(t *testing.T) {
 			continue
 		}
 		for _, f := range fileList.Files {
-			if f.Path == "goink.md" || f.Path == "chapters/.gitkeep" {
+			if f.Path == "novelgo.md" || f.Path == "chapters/.gitkeep" {
 				targetHash = c.Hash
 				targetFile = f.Path
 				break

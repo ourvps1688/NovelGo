@@ -29,7 +29,7 @@ func TestParseChapterLikePath(t *testing.T) {
 		{"empty volume", "chapters//id_5.md", ChapterPathRef{}, false},
 		{"non-numeric ID", "chapters/id_abc.md", ChapterPathRef{}, false},
 		{"trailing garbage", "chapters/id_5.md.bak", ChapterPathRef{}, false},
-		{"plain file", "goink.md", ChapterPathRef{}, false},
+		{"plain file", "novelgo.md", ChapterPathRef{}, false},
 	}
 
 	for _, tt := range cases {

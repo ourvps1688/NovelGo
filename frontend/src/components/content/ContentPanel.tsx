@@ -170,7 +170,7 @@ const ContentPanel = forwardRef<ContentPanelHandle>(
         if (
           tab.type !== "file" ||
           !isContentPath(tab.path) ||
-          tab.path === "goink.md"
+          tab.path === "novelgo.md"
         ) {
           return;
         }
@@ -337,7 +337,7 @@ const ContentPanel = forwardRef<ContentPanelHandle>(
         if (
           (mode === "outline" || mode === "outline-edit") &&
           isContentPath(tab.path) &&
-          tab.path !== "goink.md"
+          tab.path !== "novelgo.md"
         ) {
           if (!tab.outlinePath) return undefined;
           p = tab.outlinePath;

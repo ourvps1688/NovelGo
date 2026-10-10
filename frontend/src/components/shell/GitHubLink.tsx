@@ -5,7 +5,7 @@ import GitHubIcon from "@/components/ui/GitHubIcon";
 
 export default function GitHubLink() {
   const { t } = useTranslation();
-  const url = "https://github.com/sigpanic/goink";
+  const url = "https://github.com/novelgo/novelgo";
 
   const [showPopover, setShowPopover] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,7 +48,7 @@ export default function GitHubLink() {
             {t("shell.githubStar")}
           </p>
           <p className="text-[10px] text-muted-foreground font-mono">
-            github.com/sigpanic/goink
+            github.com/novelgo/novelgo
           </p>
         </div>
       )}

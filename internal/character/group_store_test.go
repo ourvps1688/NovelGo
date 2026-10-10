@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 func groupStoreFixture(t *testing.T) (*Store, Character, Character, *Group, *Group) {

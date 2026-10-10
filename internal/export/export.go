@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/novel"
 )
 
 var safeFilenameRe = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)

@@ -1,6 +1,6 @@
 package app
 
-import "github.com/sigpanic/goink/internal/git"
+import "github.com/novelgo/novelgo/internal/git"
 
 // CommitFileListResult 包含一次 commit 的详细信息和变更文件列表（不含内容）。
 type CommitFileListResult struct {

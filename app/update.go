@@ -3,9 +3,9 @@ package app
 import (
 	"time"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/update"
-	"github.com/sigpanic/goink/internal/version"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/update"
+	"github.com/novelgo/novelgo/internal/version"
 )
 
 // updateCheckInterval 自动检查的最小间隔。距上次检查不足此值时，自动检查跳过（不发包）；

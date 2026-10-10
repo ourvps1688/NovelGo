@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sigpanic/goink/internal/version"
+	"github.com/novelgo/novelgo/internal/version"
 )
 
 // Transport 表示外部 MCP server 的连接方式。
@@ -46,7 +46,7 @@ func Connect(ctx context.Context, config Config) (*Client, error) {
 		return nil, err
 	}
 
-	sdkClient := mcp.NewClient(&mcp.Implementation{Name: "goink", Version: version.Version}, nil)
+	sdkClient := mcp.NewClient(&mcp.Implementation{Name: "novelgo", Version: version.Version}, nil)
 	session, err := sdkClient.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect MCP server: %w", err)

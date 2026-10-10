@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/skill"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // SystemMessages 是注入对话的 system 消息集合。
@@ -17,7 +17,7 @@ type SystemMessages struct {
 	Always   string // 常驻技能正文
 	Catalog  string // auto 模式技能目录
 	Profile  string // NovelProfile（设定+偏好，稳定）
-	State    string // NovelState（基础信息+goink.md，动态）
+	State    string // NovelState（基础信息+novelgo.md，动态）
 }
 
 // BuildSystemMessages 统一构建 main agent 的 system 消息。

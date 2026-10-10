@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sigpanic/goink/internal/rag"
+	"github.com/novelgo/novelgo/internal/rag"
 )
 
 // TestOnnxConcurrent_Embed launches 10 goroutines each calling Embed()

@@ -33,7 +33,7 @@ export function useInstallRemoteSkill(novelId: number) {
       const path =
         input.target === "novel"
           ? `skills/${input.name}.md`
-          : `~/.goink/skills/${input.name}.md`;
+          : `~/.novelgo/skills/${input.name}.md`;
       if (input.target === "user") {
         void qc.invalidateQueries({ queryKey: skillKeys.all });
         void qc.invalidateQueries({

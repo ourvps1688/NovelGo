@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/chapter"
+	"github.com/novelgo/novelgo/internal/chapter"
 )
 
 // ensureChapterIDsInNovel 批量校验章节存在且属于当前小说。

@@ -53,7 +53,7 @@ gh pr merge dev --merge               # 不删 dev 分支，dev 永久存在
 - **Go 依赖**：模块缓存全局共享（`~/go/pkg/mod`），副工作区无需重装。
 - **前端 node_modules**：各工作区独立，副工作区需在 `frontend/` 跑 `npm install`。
 - **ONNX runtime**：副工作区 `build/runtime/` 下的 `.so` / `git/` / `.pc` 软链到主工作区共享；`models/vocab.txt` 是 git 跟踪的真实文件，勿动。`make clean` 只删软链不删目标，安全。
-- **运行时数据 `~/Goink/`**：两个工作区跑应用时共享同一 SQLite DB 与 novel git 仓库。避免两个 agent 同时 `wails dev` 跑应用（DB 锁冲突）；仅编辑/构建/lint 不受影响。
+- **运行时数据 `~/NovelGo/`**：两个工作区跑应用时共享同一 SQLite DB 与 novel git 仓库。避免两个 agent 同时 `wails dev` 跑应用（DB 锁冲突）；仅编辑/构建/lint 不受影响。
 
 ## 红线（呼应《编码规则.md》Git 写操作禁令）
 

@@ -4,7 +4,7 @@
 
 ### 现状：伪 PATCH 四不像
 
-Goink 所有 `Update*Input` 结构体字段用值类型 + `omitempty` tag，后端用 `if input.Field != ""` 判断是否更新。注释写"只更新非零值字段"，自我安慰是 PATCH 语义，实际是个四不像：
+NovelGo 所有 `Update*Input` 结构体字段用值类型 + `omitempty` tag，后端用 `if input.Field != ""` 判断是否更新。注释写"只更新非零值字段"，自我安慰是 PATCH 语义，实际是个四不像：
 
 ```go
 // 现状（伪 PATCH）
@@ -253,7 +253,7 @@ PUT 全量覆盖要求前端表单包含 input 的所有字段。当前 5 处漏
 >
 > 调研结论：维持现状是中-高风险。`UpdateTimelineEntry.detail_json` 已存在真实 lost update（前端预填 + 全量传 + PatchAndSave 退化 PUT，AI 写入后缓存陈旧时覆盖）。`UpdateCharacter.personality` / `UpdateLocation.detail_json` 当前安全但靠前端漏传兜底，脆弱。改 PUT 不移除 AI 字段会把这三个方法都变成 lost update，所以 **input 移除 AI 字段是 lost update 的根因解药，与 PUT/PATCH 之争无关**。
 >
-> PUT vs PATCH 权衡：PatchAndSave 的 `db.Save` 本身就是全量写回，并发上等价 PUT，改 PUT 不引入新并发风险。真 PATCH 走 `db.Updates(map)` 会破坏 oplog 的整行快照机制（newJSON 不完整）。Goink 是单用户桌面应用，并发风险可忽略。综合结论：走 PUT 方案。
+> PUT vs PATCH 权衡：PatchAndSave 的 `db.Save` 本身就是全量写回，并发上等价 PUT，改 PUT 不引入新并发风险。真 PATCH 走 `db.Updates(map)` 会破坏 oplog 的整行快照机制（newJSON 不完整）。NovelGo 是单用户桌面应用，并发风险可忽略。综合结论：走 PUT 方案。
 >
 > ChapterPlan 特例：`UpdateChapterPlan` 走 `timeline.SavePlan`（[store.go:49-51](../../../internal/timeline/store.go#L49)）调用 `git.WriteFile` 写文件，不走 DB，**不进 oplog**（设计如此）。它已经是 PUT 语义（直接赋值 `input.Content` + 全量替换文件），只需去 omitempty 让 TS 必填，无需其他改动。归入 timeline 领域 commit 顺手做。
 
@@ -413,7 +413,7 @@ db.Save(&item)                 // 3. 保存整个 entity
 
 **场景**：A 加载偏好 → B 加载同一偏好 → A 改了保存 → B 没改但回传原值保存 → A 的修改被覆盖。
 
-**缓解**：Goink 是单用户桌面应用，并发几乎不存在。可忽略。
+**缓解**：NovelGo 是单用户桌面应用，并发几乎不存在。可忽略。
 
 ### 风险 4：db.Save 全量覆盖的副作用
 

@@ -14,8 +14,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
-      GOINK_TESTING: 1
-      GOINK_E2E_STRICT: 1
+      NOVELGO_TESTING: 1
+      NOVELGO_E2E_STRICT: 1
     steps:
       - uses: actions/checkout@v6
 
@@ -51,7 +51,7 @@ jobs:
       - name: Setup test data directory
         shell: bash
         run: |
-          TEST_DIR="$RUNNER_TEMP/goink-e2e"
+          TEST_DIR="$RUNNER_TEMP/novelgo-e2e"
           mkdir -p "$TEST_DIR/runtime/git" "$TEST_DIR/runtime" "$TEST_DIR/models" "$TEST_DIR/novels" "$TEST_DIR/skills"
 
           # Copy bundled git (full directory structure including MinGit mingw64/)
@@ -64,7 +64,7 @@ jobs:
           # Copy models to DataDir/models/
           cp -r build/runtime/models/* "$TEST_DIR/models/"
 
-          echo "GOINK_DATA_DIR=$TEST_DIR" >> $GITHUB_ENV
+          echo "NOVELGO_DATA_DIR=$TEST_DIR" >> $GITHUB_ENV
           echo "Test data dir: $TEST_DIR"
           echo "=== Directory structure ==="
           find "$TEST_DIR" -type f | head -30
@@ -72,30 +72,30 @@ jobs:
       - name: Verify test environment
         shell: bash
         run: |
-          echo "=== Verify GOINK_TESTING is set ==="
-          echo "GOINK_TESTING=$GOINK_TESTING"
+          echo "=== Verify NOVELGO_TESTING is set ==="
+          echo "NOVELGO_TESTING=$NOVELGO_TESTING"
 
           echo "=== Verify bundled git exists ==="
           if [ "$RUNNER_OS" = "Windows" ]; then
-            GIT_BIN="$GOINK_DATA_DIR/runtime/git/mingw64/bin/git.exe"
+            GIT_BIN="$NOVELGO_DATA_DIR/runtime/git/mingw64/bin/git.exe"
           else
-            GIT_BIN="$GOINK_DATA_DIR/runtime/git/git"
+            GIT_BIN="$NOVELGO_DATA_DIR/runtime/git/git"
           fi
           if [ ! -f "$GIT_BIN" ]; then
             echo "FAIL: bundled git not found at $GIT_BIN"
             echo "=== Contents of runtime/git ==="
-            ls -laR "$GOINK_DATA_DIR/runtime/git/" || true
+            ls -laR "$NOVELGO_DATA_DIR/runtime/git/" || true
             exit 1
           fi
           "$GIT_BIN" --version
           echo "OK: bundled git works"
 
           echo "=== Verify ONNX lib exists ==="
-          ls -la "$GOINK_DATA_DIR/runtime/" | grep -i onnx
+          ls -la "$NOVELGO_DATA_DIR/runtime/" | grep -i onnx
           echo "OK: ONNX lib found"
 
           echo "=== Verify model files ==="
-          ls -la "$GOINK_DATA_DIR/models/"
+          ls -la "$NOVELGO_DATA_DIR/models/"
           echo "OK: models found"
 
       # Run E2E tests with cgo+e2e tags (real ONNX + bundled git, no system fallback)

@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // CharacterGroupInput 是分组创建/更新参数；更新采用 PUT 语义。

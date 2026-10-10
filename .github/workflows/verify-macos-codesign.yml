@@ -50,7 +50,7 @@ jobs:
           VERSION="${{ inputs.version }}"
           [ -z "$VERSION" ] && VERSION="dev"
           echo "VERSION=$VERSION"
-          wails build -tags webkit2_41 -o goink -ldflags "-X github.com/sigpanic/goink/internal/version.Version=$VERSION"
+          wails build -tags webkit2_41 -o novelgo -ldflags "-X github.com/novelgo/novelgo/internal/version.Version=$VERSION"
 
       - name: Package DMG
         run: |
@@ -58,15 +58,15 @@ jobs:
           [ -z "$VERSION" ] && VERSION="dev"
           bash build/package/macos/build-dmg.sh "$VERSION"
 
-      - name: Diagnose build/bin/goink.app
+      - name: Diagnose build/bin/novelgo.app
         run: |
           set +e
-          APP="build/bin/goink.app"
+          APP="build/bin/novelgo.app"
           LOG="$RUNNER_TEMP/codesign-diagnose.log"
           : > "$LOG"
 
           echo "=========================================="
-          echo "== build/bin/goink.app 完整文件结构"
+          echo "== build/bin/novelgo.app 完整文件结构"
           echo "=========================================="
           find "$APP" -maxdepth 5 -type f -o -type l 2>/dev/null | sort | tee -a "$LOG"
           echo "" | tee -a "$LOG"
@@ -92,7 +92,7 @@ jobs:
           echo "=========================================="
           echo "== 4. 主可执行文件架构"
           echo "=========================================="
-          file "$APP/Contents/MacOS/goink" 2>&1 | tee -a "$LOG"
+          file "$APP/Contents/MacOS/novelgo" 2>&1 | tee -a "$LOG"
           echo "" | tee -a "$LOG"
 
           echo "=========================================="
@@ -135,7 +135,7 @@ jobs:
           echo "== 7. otool -L 依赖检查"
           echo "=========================================="
           echo "--- 主可执行 ---"
-          otool -L "$APP/Contents/MacOS/goink" 2>&1 | head -20 | tee -a "$LOG"
+          otool -L "$APP/Contents/MacOS/novelgo" 2>&1 | head -20 | tee -a "$LOG"
           if [ -e "$GIT_BIN" ]; then
             echo "--- git ---"
             otool -L "$GIT_BIN" 2>&1 | head -20 | tee -a "$LOG"

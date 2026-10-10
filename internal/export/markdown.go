@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/novel"
 )
 
 func exportMarkdown(n *novel.Novel, chapters []ChapterWithContent) ([]byte, string, error) {

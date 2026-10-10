@@ -1,9 +1,9 @@
 # Contributing
 
-Goink 目前由单人维护，review 精力有限，核心模块暂不接受 PR，欢迎通过 Issue 提出改进建议。
+NovelGo 目前由单人维护，review 精力有限，核心模块暂不接受 PR，欢迎通过 Issue 提出改进建议。
 
-技能贡献欢迎提交到独立的 [goink-skills](https://github.com/sigpanic/goink-skills) 仓库。
+技能贡献欢迎提交到独立的 [novelgo-skills](https://github.com/novelgo/novelgo-skills) 仓库。
 
-> Goink is maintained by a single developer with limited review bandwidth. Core modules are not open for PRs for now — suggestions are welcome via Issues.
+> NovelGo is maintained by a single developer with limited review bandwidth. Core modules are not open for PRs for now — suggestions are welcome via Issues.
 >
-> Skill contributions are welcome at [goink-skills](https://github.com/sigpanic/goink-skills).
+> Skill contributions are welcome at [novelgo-skills](https://github.com/novelgo/novelgo-skills).

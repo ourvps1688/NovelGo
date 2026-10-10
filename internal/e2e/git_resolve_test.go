@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/platform"
+	"github.com/novelgo/novelgo/internal/platform"
 )
 
 func TestResolveGit_NoSystemFallback(t *testing.T) {
-	// In GOINK_E2E_STRICT mode, ResolveGit must NOT use system PATH fallback
+	// In NOVELGO_E2E_STRICT mode, ResolveGit must NOT use system PATH fallback
 	// Even if system git is available, it must return the bundled path
 	gitBin, err := platform.ResolveGit()
 	if err != nil {

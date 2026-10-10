@@ -5,7 +5,7 @@ package testsupport
 import (
 	"testing"
 
-	"github.com/sigpanic/goink/internal/platform"
+	"github.com/novelgo/novelgo/internal/platform"
 )
 
 // Isolate 把平台数据目录隔离到 t 的临时目录，返回该目录路径。
@@ -19,7 +19,7 @@ func Isolate(t *testing.T) string {
 	t.Helper()
 
 	dir := t.TempDir()
-	t.Setenv("GOINK_DATA_DIR", dir)
+	t.Setenv("NOVELGO_DATA_DIR", dir)
 	platform.ResetDataDirCache()
 	t.Cleanup(platform.ResetDataDirCache)
 

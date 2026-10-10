@@ -70,7 +70,7 @@ export default function ChapterRow({
   function handleDragStart(event: DragEvent<HTMLButtonElement>) {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(
-      "application/x-goink-chapter-id",
+      "application/x-novelgo-chapter-id",
       String(item.id),
     );
     onDragStart();

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 // useEditorStore: 编辑器/内容选择相关跨领域 UI 状态。
-// - tabTarget：SidePanel 选中章节/goink 的高亮指示（ChapterList 消费）
+// - tabTarget：SidePanel 选中章节/novelgo 的高亮指示（ChapterList 消费）
 // - activeContent：ContentPanel 当前 tab 内容（StatusBar 字数统计消费）
 // - isDirty：ContentPanel 当前 tab dirty 状态（StatusBar 保存状态点消费）
 //

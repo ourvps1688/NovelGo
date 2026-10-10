@@ -153,7 +153,7 @@ export default function GeneralConfigTab() {
             <input
               value={gitName}
               onChange={(e) => setGitName(e.target.value)}
-              placeholder="Goink"
+              placeholder="NovelGo"
               className="flex-1 h-8 rounded-md border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
@@ -164,7 +164,7 @@ export default function GeneralConfigTab() {
             <input
               value={gitEmail}
               onChange={(e) => setGitEmail(e.target.value)}
-              placeholder="goink@local"
+              placeholder="novelgo@local"
               className="flex-1 h-8 rounded-md border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>

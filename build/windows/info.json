@@ -5,13 +5,13 @@
   },
   "info": {
     "0000": {
-      "CompanyName": "sigpanic",
-      "FileDescription": "Goink - AI 小说创作助手",
+      "CompanyName": "novelgo",
+      "FileDescription": "NovelGo - AI 小说创作助手",
       "FileVersion": "0.0.0.0",
-      "ProductName": "Goink",
+      "ProductName": "NovelGo",
       "ProductVersion": "0.0.0.0",
-      "LegalCopyright": "Copyright © 2026 sigpanic",
-      "Comments": "Goink - AI 小说创作助手"
+      "LegalCopyright": "Copyright © 2026 novelgo",
+      "Comments": "NovelGo - AI 小说创作助手"
     }
   }
 }

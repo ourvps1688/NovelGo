@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/session"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/session"
 )
 
 func setupChatActivityTest(t *testing.T) (*App, ChatInput) {

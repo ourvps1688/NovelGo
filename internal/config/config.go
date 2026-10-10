@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sigpanic/goink/internal/platform"
+	"github.com/novelgo/novelgo/internal/platform"
 )
 
 // ErrNotInitialized 表示指针文件不存在，应用尚未完成首次初始化。没初始化弹出来初始化界面，如果初始化了但是还是出错就谈配置错误恢复
@@ -34,7 +34,7 @@ func Get() *AppConfig {
 	return globalCfg
 }
 
-// AppConfig 是启动指针文件 ~/.goink/config.json 的内容。
+// AppConfig 是启动指针文件 ~/.novelgo/config.json 的内容。
 // DataDir 字段保留用于未来扩展，当前数据目录由 platform.DataDir() 确定。
 type AppConfig struct {
 	DataDir string `json:"data_dir"` // 用户选择的数据根目录（保留字段）
@@ -55,13 +55,13 @@ func NovelDirPath(novelID int64) string {
 	return filepath.Join(platform.DataDir(), "novels", fmt.Sprintf("%d", novelID))
 }
 
-// LLMConfigPath 返回 LLM 加密配置文件的固定路径 ~/.goink/llm_config.enc。
+// LLMConfigPath 返回 LLM 加密配置文件的固定路径 ~/.novelgo/llm_config.enc。
 func LLMConfigPath() string {
 	dir, _ := configDir()
 	return filepath.Join(dir, "llm_config.enc")
 }
 
-// UserSkillsDir 返回用户级 skill 目录 ~/.goink/skills/。
+// UserSkillsDir 返回用户级 skill 目录 ~/.novelgo/skills/。
 func UserSkillsDir() string {
 	dir, _ := configDir()
 	return filepath.Join(dir, "skills")
@@ -72,7 +72,7 @@ func NovelSkillsDir(novelID int64) string {
 	return filepath.Join(NovelDirPath(novelID), "skills")
 }
 
-// StyleSamplesDir 返回全局风格素材目录 ~/.goink/style_samples/。
+// StyleSamplesDir 返回全局风格素材目录 ~/.novelgo/style_samples/。
 func StyleSamplesDir() string {
 	dir, _ := configDir()
 	return filepath.Join(dir, "style_samples")
@@ -91,13 +91,13 @@ func ModelsDir() string {
 	return filepath.Join(platform.DataDir(), "models")
 }
 
-// configDir 返回指针文件所在的目录 ~/.goink。
+// configDir 返回指针文件所在的目录 ~/.novelgo。
 func configDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("获取用户目录失败: %w", err)
 	}
-	return filepath.Join(home, ".goink"), nil
+	return filepath.Join(home, ".novelgo"), nil
 }
 
 // configPath 返回指针文件的完整路径。
@@ -152,7 +152,7 @@ func expandTilde(path string) string {
 }
 
 // Save 将数据目录路径写入指针文件。自动展开 ~ 并转为绝对路径。
-// 如果 ~/.goink/ 目录不存在则自动创建。
+// 如果 ~/.novelgo/ 目录不存在则自动创建。
 func Save(dataDir string) error {
 	dataDir = expandTilde(dataDir)
 	var err error

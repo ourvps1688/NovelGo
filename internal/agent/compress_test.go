@@ -12,8 +12,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/agentcfg"
-	"github.com/sigpanic/goink/internal/session"
+	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/session"
 )
 
 // newCompressTestAgent 建一个只迁移了 session/message 表的临时文件库，并写入一条 session 行。

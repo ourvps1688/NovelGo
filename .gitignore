@@ -18,8 +18,8 @@ models/
 /build/*.AppDir/
 /build/windows/*
 !/build/windows/info.json
-goink
-goink.exe
+novelgo
+novelgo.exe
 
 # Go
 *.mod.cache
@@ -39,7 +39,7 @@ frontend/package.json.md5
 
 /release/
 docs.local/
-goink-skills/
+novelgo-skills/
 
-# Legacy Python prototype (Goink 前身，保留本地参考，不纳入版本控制)
+# Legacy Python prototype (NovelGo 前身，保留本地参考，不纳入版本控制)
 python-master/

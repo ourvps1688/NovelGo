@@ -41,7 +41,7 @@ export const useThemeStore = create<ThemeState>()(
       },
     }),
     {
-      name: "goink-theme",
+      name: "novelgo-theme",
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({ theme: s.theme }),
       onRehydrateStorage: () => (state) => {

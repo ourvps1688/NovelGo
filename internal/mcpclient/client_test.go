@@ -16,7 +16,7 @@ import (
 )
 
 func protocolTestServer(waitStarted chan<- struct{}, releaseWait <-chan struct{}) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "goink-mcpclient-test", Version: "1.0.0"}, &mcp.ServerOptions{PageSize: 1})
+	server := mcp.NewServer(&mcp.Implementation{Name: "novelgo-mcpclient-test", Version: "1.0.0"}, &mcp.ServerOptions{PageSize: 1})
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -53,7 +53,7 @@ func protocolTestServer(waitStarted chan<- struct{}, releaseWait <-chan struct{}
 }
 
 func TestMCPServerProcess(t *testing.T) {
-	if os.Getenv("GOINK_MCP_TEST_SERVER") != "1" {
+	if os.Getenv("NOVELGO_MCP_TEST_SERVER") != "1" {
 		return
 	}
 	if err := protocolTestServer(nil, nil).Run(context.Background(), &mcp.StdioTransport{}); err != nil {
@@ -70,7 +70,7 @@ func TestStdioClient(t *testing.T) {
 		Transport: TransportStdio,
 		Command:   os.Args[0],
 		Args:      []string{"-test.run=^TestMCPServerProcess$"},
-		Env:       map[string]string{"GOINK_MCP_TEST_SERVER": "1"},
+		Env:       map[string]string{"NOVELGO_MCP_TEST_SERVER": "1"},
 	})
 	if err != nil {
 		t.Fatal(err)

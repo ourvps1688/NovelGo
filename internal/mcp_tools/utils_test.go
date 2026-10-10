@@ -8,7 +8,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/chapter"
+	"github.com/novelgo/novelgo/internal/chapter"
 )
 
 func TestEnsureChapterIDsInNovel(t *testing.T) {

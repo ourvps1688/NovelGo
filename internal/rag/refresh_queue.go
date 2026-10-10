@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/novel"
 )
 
 // RefreshTask 是一次向量刷新任务，以 chapters.id 稳定定位章节。

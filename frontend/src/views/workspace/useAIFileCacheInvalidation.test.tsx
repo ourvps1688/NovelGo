@@ -142,7 +142,7 @@ describe("useAIFileCacheInvalidation", () => {
   it("失效对应文件后，下次读取绕过 30 秒缓存，其他小说和路径保持缓存", async () => {
     const { qc } = setup();
     const changed = contentKeys.detail(1, "volumes/id_2.md");
-    const otherPath = contentKeys.detail(1, "goink.md");
+    const otherPath = contentKeys.detail(1, "novelgo.md");
     const otherNovel = contentKeys.detail(2, "volumes/id_2.md");
     qc.setQueryData(changed, "旧卷纲");
     qc.setQueryData(otherPath, "故事状态");
@@ -190,7 +190,7 @@ describe("useAIFileCacheInvalidation", () => {
   it.each([
     ["chapters/id_3.md", true],
     ["outlines/id_3.md", false],
-    ["goink.md", false],
+    ["novelgo.md", false],
   ])("%s 变更刷新章节列表，并按需刷新最大章节号", (path, refreshMax) => {
     const { qc } = setup();
     qc.setQueryData(chapterKeys.list(1), []);
@@ -211,11 +211,11 @@ describe("useAIFileCacheInvalidation", () => {
     qc.setQueryData(skillKeys.list(1), []);
     qc.setQueryData(skillKeys.list(2), []);
     qc.setQueryData(
-      contentKeys.detail(1, "~/.goink/skills/style.md"),
+      contentKeys.detail(1, "~/.novelgo/skills/style.md"),
       "旧内容",
     );
     qc.setQueryData(
-      contentKeys.detail(2, "~/.goink/skills/style.md"),
+      contentKeys.detail(2, "~/.novelgo/skills/style.md"),
       "旧内容",
     );
     qc.setQueryData(contentKeys.detail(2, "skills/style.md"), "小说专属");
@@ -225,15 +225,15 @@ describe("useAIFileCacheInvalidation", () => {
     expect(qc.getQueryState(skillKeys.list(2))?.isInvalidated).toBe(false);
 
     qc.setQueryData(skillKeys.list(1), []);
-    emit(1, "~/.goink/skills/style.md");
+    emit(1, "~/.novelgo/skills/style.md");
     expect(qc.getQueryState(skillKeys.list(1))?.isInvalidated).toBe(true);
     expect(qc.getQueryState(skillKeys.list(2))?.isInvalidated).toBe(true);
     expect(
-      qc.getQueryState(contentKeys.detail(1, "~/.goink/skills/style.md"))
+      qc.getQueryState(contentKeys.detail(1, "~/.novelgo/skills/style.md"))
         ?.isInvalidated,
     ).toBe(true);
     expect(
-      qc.getQueryState(contentKeys.detail(2, "~/.goink/skills/style.md"))
+      qc.getQueryState(contentKeys.detail(2, "~/.novelgo/skills/style.md"))
         ?.isInvalidated,
     ).toBe(true);
     expect(
@@ -243,12 +243,12 @@ describe("useAIFileCacheInvalidation", () => {
 
   it("忽略无效事件，并在工作区卸载时取消订阅", () => {
     const { qc, unmount } = setup();
-    qc.setQueryData(contentKeys.detail(1, "goink.md"), "旧内容");
+    qc.setQueryData(contentKeys.detail(1, "novelgo.md"), "旧内容");
 
-    act(() => onFileChanged?.({ path: "goink.md" }));
+    act(() => onFileChanged?.({ path: "novelgo.md" }));
     act(() => onFileChanged?.({ novel_id: 1 }));
     expect(
-      qc.getQueryState(contentKeys.detail(1, "goink.md"))?.isInvalidated,
+      qc.getQueryState(contentKeys.detail(1, "novelgo.md"))?.isInvalidated,
     ).toBe(false);
 
     unmount();

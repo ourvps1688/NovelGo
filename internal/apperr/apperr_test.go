@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sigpanic/goink/internal/apperr"
-	"github.com/sigpanic/goink/internal/githubapi"
-	"github.com/sigpanic/goink/internal/llm"
+	"github.com/novelgo/novelgo/internal/apperr"
+	"github.com/novelgo/novelgo/internal/githubapi"
+	"github.com/novelgo/novelgo/internal/llm"
 )
 
 // TestOk_ConstructsSuccess 验证 Ok 包装成功结果时 ErrCode 为空、ErrMsg 缺省、Data 透传。

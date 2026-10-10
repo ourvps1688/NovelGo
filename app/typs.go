@@ -1,6 +1,6 @@
 package app
 
-import "github.com/sigpanic/goink/internal/storage"
+import "github.com/novelgo/novelgo/internal/storage"
 
 // ListInput 是按小说分页查询的公共入参，排序由各接口在后端指定。
 type ListInput struct {

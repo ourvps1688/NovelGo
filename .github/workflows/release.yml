@@ -58,9 +58,9 @@ jobs:
           else
             VERSION_INFO="0.0.0.0"
           fi
-          # 注入 build/windows/info.json（goink.exe PE 版本资源，Wails 用 winres 读它生成 .syso）
+          # 注入 build/windows/info.json（novelgo.exe PE 版本资源，Wails 用 winres 读它生成 .syso）
           jq --arg v "$VERSION_INFO" '.fixed.file_version = $v | .fixed.product_version = $v | .info."0000".FileVersion = $v | .info."0000".ProductVersion = $v' build/windows/info.json > build/windows/info.json.tmp && mv build/windows/info.json.tmp build/windows/info.json
-          wails build -tags webkit2_41 -o goink.exe -ldflags "-X github.com/sigpanic/goink/internal/version.Version=$VERSION"
+          wails build -tags webkit2_41 -o novelgo.exe -ldflags "-X github.com/novelgo/novelgo/internal/version.Version=$VERSION"
 
       - name: Install Inno Setup
         run: choco install innosetup -y --limit-output
@@ -87,8 +87,8 @@ jobs:
         run: |
           set -e
           echo "=== 1. wails build 产物架构检查 ==="
-          file build/bin/goink.exe
-          file build/bin/goink.exe | grep -q "PE32+" || { echo "::error::goink.exe 不是 PE32+ 格式"; exit 1; }
+          file build/bin/novelgo.exe
+          file build/bin/novelgo.exe | grep -q "PE32+" || { echo "::error::novelgo.exe 不是 PE32+ 格式"; exit 1; }
 
           echo "=== 2. 安装包存在性检查 ==="
           ls -la build/dist/*.exe | head -3
@@ -149,7 +149,7 @@ jobs:
           cd frontend && npm ci && npm run build && cd ..
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"; fi
-          wails build -tags webkit2_41 -o goink -ldflags "-X github.com/sigpanic/goink/internal/version.Version=$VERSION"
+          wails build -tags webkit2_41 -o novelgo -ldflags "-X github.com/novelgo/novelgo/internal/version.Version=$VERSION"
 
       - name: Package (AppImage)
         run: |
@@ -161,12 +161,12 @@ jobs:
         run: |
           set -e
           echo "=== 1. wails build 产物架构检查 ==="
-          file build/bin/goink
-          file build/bin/goink | grep -q "x86-64" || { echo "::error::goink 不是 x86-64"; exit 1; }
+          file build/bin/novelgo
+          file build/bin/novelgo | grep -q "x86-64" || { echo "::error::novelgo 不是 x86-64"; exit 1; }
 
           echo "=== 2. 依赖检查（关键库可解析）==="
-          ldd build/bin/goink | head -10
-          ldd build/bin/goink | grep -q "not found" && { echo "::error::ldd 报 not found"; exit 1; } || true
+          ldd build/bin/novelgo | head -10
+          ldd build/bin/novelgo | grep -q "not found" && { echo "::error::ldd 报 not found"; exit 1; } || true
 
           echo "=== 3. AppImage 存在性 + 可执行性 ==="
           APPIMAGE=$(ls build/dist/*.AppImage 2>/dev/null | head -1)
@@ -217,7 +217,7 @@ jobs:
           cd frontend && npm ci && npm run build && cd ..
           VERSION="${GITHUB_REF_NAME#v}"
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"; fi
-          wails build -tags webkit2_41 -o goink -ldflags "-X github.com/sigpanic/goink/internal/version.Version=$VERSION"
+          wails build -tags webkit2_41 -o novelgo -ldflags "-X github.com/novelgo/novelgo/internal/version.Version=$VERSION"
 
       - name: Package (DMG)
         run: |
@@ -228,7 +228,7 @@ jobs:
       - name: Smoke test (macOS)
         run: |
           set -e
-          APP="build/bin/goink.app"
+          APP="build/bin/novelgo.app"
 
           echo "=== 1. codesign --verify --deep --strict（seal 一致性，关键）==="
           codesign --verify --deep --strict --verbose=4 "$APP"
@@ -243,8 +243,8 @@ jobs:
           fi
 
           echo "=== 3. 主可执行文件架构 ==="
-          file "$APP/Contents/MacOS/goink"
-          file "$APP/Contents/MacOS/goink" | grep -q "arm64" || { echo "::error::主二进制不是 arm64"; exit 1; }
+          file "$APP/Contents/MacOS/novelgo"
+          file "$APP/Contents/MacOS/novelgo" | grep -q "arm64" || { echo "::error::主二进制不是 arm64"; exit 1; }
 
           echo "=== 4. 嵌套二进制架构 + 签名 ==="
           GIT_BIN="$APP/Contents/Resources/runtime/git/git"

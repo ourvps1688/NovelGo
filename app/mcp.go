@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/mcpserver"
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/mcpserver"
+	"github.com/novelgo/novelgo/internal/novel"
 	"gorm.io/gorm"
 )
 

@@ -22,7 +22,7 @@ interface Props {
   novelId: number;
   onSelectNovel: (n: novel.Novel) => void;
   onSelectChapter: (ch: chapter.Chapter) => void;
-  onSelectGoink: () => void;
+  onSelectNovelGo: () => void;
   onSelectVolumeOutline: (path: string, volumeName: string) => void;
   onExportNovel: (novelId: number) => void;
   showCreate: boolean;
@@ -59,7 +59,7 @@ export default function SidePanel({
   novelId,
   onSelectNovel,
   onSelectChapter,
-  onSelectGoink,
+  onSelectNovelGo,
   onSelectVolumeOutline,
   onExportNovel,
   showCreate,
@@ -150,7 +150,7 @@ export default function SidePanel({
           key={novelId}
           novelId={novelId}
           onSelectChapter={onSelectChapter}
-          onSelectGoink={onSelectGoink}
+          onSelectNovelGo={onSelectNovelGo}
           onSelectVolumeOutline={onSelectVolumeOutline}
           onExportNovel={() => onExportNovel(novelId)}
         />

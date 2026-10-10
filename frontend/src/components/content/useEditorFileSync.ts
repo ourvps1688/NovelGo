@@ -327,7 +327,7 @@ export function useEditorFileSync({
     return subscribeAIFileChanges(({ novelId: changedNovelId, path }) => {
       if (
         changedNovelId !== novelIdRef.current &&
-        !path.startsWith("~/.goink/skills/")
+        !path.startsWith("~/.novelgo/skills/")
       )
         return;
       const currentTabs =

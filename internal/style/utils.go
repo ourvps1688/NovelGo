@@ -4,7 +4,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/text"
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 const PreviewMaxRunes = 120

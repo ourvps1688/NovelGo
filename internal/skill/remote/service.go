@@ -12,17 +12,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sigpanic/goink/internal/apperr"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/githubapi"
-	"github.com/sigpanic/goink/internal/skill"
+	"github.com/novelgo/novelgo/internal/apperr"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/githubapi"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // 远程 skill 仓库标识。
 const (
-	repoOwner = "sigpanic"
-	repoName  = "goink-skills"
+	repoOwner = "novelgo"
+	repoName  = "novelgo-skills"
 	branch    = "main"
 	indexPath = "index.json"
 	skillsDir = "skills"  // 仓库内 skills 目录
@@ -161,7 +161,7 @@ func (s *Service) GetRemoteSkillContent(ctx context.Context, name string) (strin
 //
 // 流程：
 //  1. 拉取 skill 内容
-//  2. 解析目标目录（user → ~/.goink/skills/，novel → {novel_dir}/skills/）
+//  2. 解析目标目录（user → ~/.novelgo/skills/，novel → {novel_dir}/skills/）
 //  3. MkdirAll + WriteFile 写入 {name}.md
 //  4. 触发热重载（失败只 Warn，不返回 error，因为文件已成功写入）
 //

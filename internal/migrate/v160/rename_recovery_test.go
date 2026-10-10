@@ -11,18 +11,18 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/testsupport"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/testsupport"
 )
 
 func TestMigrateRenameFilesCanRerunBeforeStateRecorded(t *testing.T) {
 	gitBin := testsupport.RequireGit(t)
 	dataDir := testsupport.Isolate(t)
-	t.Setenv("GOINK_TESTING", "1")
-	t.Setenv("GOINK_GIT_BIN", gitBin)
+	t.Setenv("NOVELGO_TESTING", "1")
+	t.Setenv("NOVELGO_GIT_BIN", gitBin)
 	t.Setenv("HOME", t.TempDir())
 	config.Set(&config.AppConfig{})
 

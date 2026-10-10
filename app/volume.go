@@ -5,8 +5,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/volume"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/volume"
 )
 
 // PlaceVolume 创建或移动卷，并将其置于锚点卷前或小说末尾。

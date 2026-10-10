@@ -8,7 +8,7 @@
 ### A1. style_sample 迁移到全局存储
 
 **现状**: 素材存储在 `novels/{id}/style_samples/` 下，跟小说绑定
-**目标**: 迁移到 `~/.Goink/style_samples/`，全局共享
+**目标**: 迁移到 `~/.NovelGo/style_samples/`，全局共享
 **方案**:
 - 参照 `internal/skill/store.go` 的 Store 模式，改为结构体：
   ```go

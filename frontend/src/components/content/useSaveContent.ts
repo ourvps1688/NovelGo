@@ -15,7 +15,7 @@ export function useSaveContent() {
   return useMutation({
     mutationFn: (input: app.SaveContentInput) => SaveContent(input),
     onSuccess: (_data, input) => {
-      if (input.path.startsWith("~/.goink/skills/")) {
+      if (input.path.startsWith("~/.novelgo/skills/")) {
         void qc.invalidateQueries({
           predicate: ({ queryKey }) =>
             queryKey[0] === contentKeys.all[0] && queryKey[2] === input.path,

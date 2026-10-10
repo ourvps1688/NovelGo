@@ -140,7 +140,7 @@ git blame 证实 [ChatPanel.tsx:1039-1045](file:///home/nianhe/projects/todo/fro
 - **纯对话场景**：reasoning_content 不需要回传，回传会被**忽略**（不报错）
 - **工具调用场景**：reasoning_content **必须**回传，不回传触发 400
 
-**Goink 当前行为**（[types.go:62-66](file:///home/nianhe/projects/todo/internal/session/types.go) `ToAPIFormat` 把 reasoning_content 拼入 payload）**完全符合协议**：纯对话场景被忽略，工具调用场景必需回传。
+**NovelGo 当前行为**（[types.go:62-66](file:///home/nianhe/projects/todo/internal/session/types.go) `ToAPIFormat` 把 reasoning_content 拼入 payload）**完全符合协议**：纯对话场景被忽略，工具调用场景必需回传。
 
 **真正的实际缺陷**：partial tool_calls 在流式中断时被丢弃，导致**上下文缺失**（不是协议破坏）。
 
@@ -222,7 +222,7 @@ git blame 证实 [ChatPanel.tsx:1039-1045](file:///home/nianhe/projects/todo/fro
 | Anthropic SDK / Claude Code | 自动重试 429/529，**必读 Retry-After header** | tool 层不重试 | Claude Code 显示错误前已自动重试多轮 |
 | LangChain | ModelRetry middleware 指数退避 | ToolRetry middleware | 强调"瞬态异常才重试，永久异常直接退出" |
 
-**关于"AI 创建角色成功后能不能看到不再创建"**：这是 LLM 自身上下文能力问题，不是重试问题。Goink 的 `appendMsg` 已经把 `create_character` 的成功结果（含角色 ID）写入 `opts.Messages`，LLM 下一轮必然看到。重试 LLM 调用（messages 不变）也不会丢失这个信息。真正的风险是"LLM 上下文太长被压缩后丢失角色信息"——这是 `Compress` 的责任，与重试无关。
+**关于"AI 创建角色成功后能不能看到不再创建"**：这是 LLM 自身上下文能力问题，不是重试问题。NovelGo 的 `appendMsg` 已经把 `create_character` 的成功结果（含角色 ID）写入 `opts.Messages`，LLM 下一轮必然看到。重试 LLM 调用（messages 不变）也不会丢失这个信息。真正的风险是"LLM 上下文太长被压缩后丢失角色信息"——这是 `Compress` 的责任，与重试无关。
 
 **P2 策略**：
 
@@ -294,9 +294,9 @@ git blame 证实 [ChatPanel.tsx:1039-1045](file:///home/nianhe/projects/todo/fro
 | stream.go:338-344（SSE 中断） | `"sse stream interrupted"`, `err` | Warn |
 | stream.go:370-376（空响应） | `"empty sse response"` | Warn |
 
-日志输出位置：`~/Goink/goink.log`（[internal/logger/logger.go:41](file:///home/nianhe/projects/todo/internal/logger/logger.go)），10MB 轮转保留 3 份，Debug 级别，文本格式，同时写 stderr。
+日志输出位置：`~/NovelGo/goink.log`（[internal/logger/logger.go:41](file:///home/nianhe/projects/todo/internal/logger/logger.go)），10MB 轮转保留 3 份，Debug 级别，文本格式，同时写 stderr。
 
-用户上报 bug 时让用户上传 `~/Goink/goink.log`，搜 `对话失败` / `agent event error` / `llm http error` 关键字即可看到真实 `[StatusCode] Message`。
+用户上报 bug 时让用户上传 `~/NovelGo/goink.log`，搜 `对话失败` / `agent event error` / `llm http error` 关键字即可看到真实 `[StatusCode] Message`。
 
 ## 实施计划
 
@@ -335,13 +335,13 @@ git blame 证实 [ChatPanel.tsx:1039-1045](file:///home/nianhe/projects/todo/fro
 - **不改名 `system_interrupted` 字符串**（保持向后兼容），仅调整其语义边界
 - **不迁移历史 `system_interrupted` 数据**（无可靠判据回溯区分），只向前区分
 - **不用 `http.Client.Timeout`**（整体超时会切断 DeepSeek 思考模型长输出）
-- **不修改 partial 消息的 ToAPI 标记**（DeepSeek 协议允许 reasoning_content 回传，纯对话场景被忽略，工具调用场景必需，Goink 当前行为正确）
+- **不修改 partial 消息的 ToAPI 标记**（DeepSeek 协议允许 reasoning_content 回传，纯对话场景被忽略，工具调用场景必需，NovelGo 当前行为正确）
 - **不修复 partial tool_calls 丢失**（独立 issue 跟进，需要 parseSSE 在 scanner.Err 时 flush accumulated + agent 层暴露累积器，改动较大）
 
 ## 风险与权衡
 
 1. **前端 catch 块状态保护可能漏边界**：需要确认 EventError 事件和 Chat reject 的时序。若 EventError 先到，前端正确设置 `failed`，catch 块跳过；若 EventError 后到（极端时序），catch 先设 `interrupted`，EventError 再设 `failed`，最终正确。两种时序都需测试
-2. **agent 重试不担心副作用**：业界共识是"tool 已执行不回滚，只重试 LLM 调用本身"。Goink 的 `appendMsg` 已经把 tool 成功结果写入 opts.Messages，LLM 下一轮必然看到，重试 LLM 调用（messages 不变）不会丢失信息，也不会重复执行 tool。真正的风险是上下文被 `Compress` 压缩后丢失 tool 结果，与重试无关
+2. **agent 重试不担心副作用**：业界共识是"tool 已执行不回滚，只重试 LLM 调用本身"。NovelGo 的 `appendMsg` 已经把 tool 成功结果写入 opts.Messages，LLM 下一轮必然看到，重试 LLM 调用（messages 不变）不会丢失信息，也不会重复执行 tool。真正的风险是上下文被 `Compress` 压缩后丢失 tool 结果，与重试无关
 3. **首字节超时设置不当可能误杀**：60s 是首字节超时（不含 body 读取），DeepSeek 思考模型即使长思考也会很快返回首个 SSE chunk（reasoning_content 增量），60s 足够覆盖网络抖动和服务商排队。**注意**：DeepSeek-reasoner 长推理期间会持续吐 reasoning_content chunk，不算首字节超时
 4. **MaxTurns 提高可能掩盖死循环**：50→100 后死循环检测更晚触发。但死循环检测（safety.go）本身只注入提醒不 cancel，影响有限
 5. **EventType 新增 `error` 的向后兼容**：前端老版本读到 `event_type='error'` 会走 default 分支（保持 `streaming`/`done`），不会显示错误 UI，但也不会显示"对话被中断"。建议前端版本对齐发布
@@ -389,7 +389,7 @@ issue #26 用户 Snorlax-bit 上传了完整 `goink.log`（8065 行，4.9MB）�
 
 **现象**：DeepSeek 返回 `[400] Duplicate value for 'tool_call_id' of call_a9hDhfmLkboHAaoTtIsHKedq in message[74]`，明确指出 message[74] 的 `tool_calls` 数组里 `call_a9hDhfmLkboHAaoTtIsHKedq` 出现了两次。
 
-**根因**：GPT（`xiangliang/gpt-5.3-codex` 中转）在单次响应中给不同 `index` 的 parallel tool_call 偶发分配了相同 `id`（GPT 服务端偶发行为，非 Goink bug），Goink 全链路**无任何 id 去重逻辑**，重复 id 被原样持久化到 DB，切换到 DeepSeek 时被 400 拒绝（DeepSeek 比 GPT 更严格地校验 tool_call_id 唯一性）。
+**根因**：GPT（`xiangliang/gpt-5.3-codex` 中转）在单次响应中给不同 `index` 的 parallel tool_call 偶发分配了相同 `id`（GPT 服务端偶发行为，非 NovelGo bug），NovelGo 全链路**无任何 id 去重逻辑**，重复 id 被原样持久化到 DB，切换到 DeepSeek 时被 400 拒绝（DeepSeek 比 GPT 更严格地校验 tool_call_id 唯一性）。
 
 **全链路无去重的 8 个环节**：
 
@@ -536,8 +536,8 @@ run_subagent 被执行两次（日志 7212 + 7309 行），每次都启动了完
 
 1. message[74] 用 `xiangliang/gpt-5.3-codex`（GPT 中转）生成
 2. GPT 模型返回 `reasoning` 字段（OpenAI 标准），不返回 `reasoning_content`（DeepSeek 扩展）
-3. Goink 的 [internal/llm/stream.go:316](file:///home/nianhe/projects/todo/internal/llm/stream.go#L316) **只解析 `reasoning_content`，不解析 `reasoning`** → `ThinkingContent=""` 被存入 DB
-4. 用户切换到 `向量引擎/deepseek-v4-flash`（DeepSeek 中转），Goink 把历史消息回传
+3. NovelGo 的 [internal/llm/stream.go:316](file:///home/nianhe/projects/todo/internal/llm/stream.go#L316) **只解析 `reasoning_content`，不解析 `reasoning`** → `ThinkingContent=""` 被存入 DB
+4. 用户切换到 `向量引擎/deepseek-v4-flash`（DeepSeek 中转），NovelGo 把历史消息回传
 5. [internal/session/types.go:79-81](file:///home/nianhe/projects/todo/internal/session/types.go#L79-L81) 在 `ThinkingContent=""` 且含 `tool_calls` 时设 `payload["reasoning_content"]=""`
 6. **DeepSeek 官方接受空字符串**，但中转站 `vectorengine.cn` 自己加了更严格的 schema 校验（Pydantic "required" 语义），要求非空 → 报 400
 
@@ -563,12 +563,12 @@ run_subagent 被执行两次（日志 7212 + 7309 行），每次都启动了完
 
 - **v1（初稿）**：识别 8 层根因，提出 P0-P3 + 配套方案
 - **v2（修订）**：增加根因 #9（误判 reasoning_content 破坏协议），新增 P1.5（partial ToAPI=false）
-- **v3（最终）**：核对 DeepSeek 官方文档后确认 v2 的根因 #9 完全错误。DeepSeek 协议是：纯对话场景 reasoning_content 回传被忽略，工具调用场景必须回传。Goink 当前行为完全符合协议。删除根因 #9 错误判断和 P1.5 错误方案。重新归因为 partial tool_calls 丢失导致上下文缺失（但不破坏协议），作为独立 issue 跟进。本次修复聚焦 P0-P3 + 配套方案
+- **v3（最终）**：核对 DeepSeek 官方文档后确认 v2 的根因 #9 完全错误。DeepSeek 协议是：纯对话场景 reasoning_content 回传被忽略，工具调用场景必须回传。NovelGo 当前行为完全符合协议。删除根因 #9 错误判断和 P1.5 错误方案。重新归因为 partial tool_calls 丢失导致上下文缺失（但不破坏协议），作为独立 issue 跟进。本次修复聚焦 P0-P3 + 配套方案
 - **v4（P1 实施记录）**：实施 P1 方案 C。后端 EventType 新增 `error` 类型，前端 rebuildTurns 加 `error` → `failed` 映射，app/chat.go 增加 EventType 选择逻辑（context.Canceled → user_stopped / apiErr 存在 → error / 其他 → system_interrupted）。session/types.go EventType 字段注释更新为 5 种值
 - **v5（P3 实施记录）**：实施 P3 流式超时方案。internal/llm/stream.go 引入 newHTTPClient() 工厂函数，配置 http.Transport.ResponseHeaderTimeout=60s + DialContext=10s，http.Client.Timeout 保持 0。首字节超时触发时返回 APIError{StatusCode:0, Retryable:true, Message:"服务器响应超时（首字节超过 60s）"}，由 P2 重试逻辑处理
 - **v6（配套实施记录）**：实施配套方案。agent.go MaxTurns 50→100；agent.go EventError 分支加 Warn 日志（含 status_code/retryable 字段）；stream.go HTTP 4xx/5xx 分支加 Warn 日志（body 截断 500 字符）；stream.go SSE 中断 / 空响应分支加 Warn 日志；stream.go 网络错误分支扩展为超时和非超时两类日志
 - **v7（配套补充）**：app/chat.go L161 主对话 MaxTurns 50→100；app/chat.go L392 压缩路径 `MaxTurns: 50` 删除（Grep 确认 compress.go 不读 opts.MaxTurns，Compress 走 GenerateText 单次调用不进入 agent loop，原字段是死代码）
-- **v8（用户日志实证分析）**：issue #26 用户上传完整 goink.log（8065 行，2026-07-21）。实证发现 3 个独立 bug（与 P0-P3 正交）：Bug A — Duplicate tool_call_id（GPT parallel tool calls 偶发分配相同 id + Goink 全链路 8 个环节无去重，导致对话彻底中断）；Bug B — read 工具切片越界 panic（AI 传 start_line > end_line 时 rw_tools.go:638 无校验直接切片，对比 edit 工具已有校验）；Bug C — reasoning_content 缺失（thinking 模式 + tool-call 场景触发 DeepSeek 400）。新增"用户日志实证分析"章节，含错误分布统计、全链路去重缺失分析、修复方案对比、优先级建议。所有修复均未动代码，待用户决定方案
+- **v8（用户日志实证分析）**：issue #26 用户上传完整 goink.log（8065 行，2026-07-21）。实证发现 3 个独立 bug（与 P0-P3 正交）：Bug A — Duplicate tool_call_id（GPT parallel tool calls 偶发分配相同 id + NovelGo 全链路 8 个环节无去重，导致对话彻底中断）；Bug B — read 工具切片越界 panic（AI 传 start_line > end_line 时 rw_tools.go:638 无校验直接切片，对比 edit 工具已有校验）；Bug C — reasoning_content 缺失（thinking 模式 + tool-call 场景触发 DeepSeek 400）。新增"用户日志实证分析"章节，含错误分布统计、全链路去重缺失分析、修复方案对比、优先级建议。所有修复均未动代码，待用户决定方案
 - **v9（Bug A 深度分析 + 实施方案 1+3）**：深度分析 turn 340 的 7312 行 INSERT 实证，确认 GPT（xiangliang/gpt-5.3-codex 中转）在一次响应里发了 10 个不同 index 的 tool_calls（index 0-4 和 index 5-9 的 id/name/arguments 完全相同），导致主 agent 在一个 streamLoop 迭代内执行 10 次 tool（含 run_subagent 被执行两次共 130s）。排除 retry/subagent 合并/ctx 取消等其他路径。实施方案 1（stream.go:397-430 源头去重，维护 seenToolIDs map 跳过重复 id）+ 方案 3（app/chat.go loadAPIMessages 出口防御，assistant 去重 tool_calls + tool 消息跳过 orphan/重复）。方案 2（buildToolCalls 构造时去重）不推荐，因方案 1 实施后为死代码且不能避免 tool 副作用。go build + go test ./internal/... ./app/... 全部通过
 - **v10（compress 路径评估 + 测试补充）**：评估压缩路径的 tool_call_id 去重覆盖情况。手动压缩入口（CompressContext）走 loadAPIMessages 已防御；自动压缩的 LLM 调用（generateSummary）用 opts.Messages（来自 Chat 的 loadAPIMessages）已防御；压缩后重新加载（compress.go:105-113）绕过防御，但触发条件窄（需 Bug A 脏数据被 retainMessages 保留），且 Bug A 源头已修，**接受不修（方案 D）**。新增 app/chat_test.go 单元测试覆盖 loadAPIMessages 的 5 个场景（正常无重复 / assistant.tool_calls 重复 id 去重 / orphan tool 消息跳过 / 重复 tool 消息只保留首次 / 跨 turn 不误判），go test 全部通过
 - **v11（Bug C 根因定位 + 指向 v1.3.0）**：v1.3.0 多 Provider 适配文档已完成根因分析，Bug C 的根因不是 ToAPIFormat 未透传 reasoning_content，而是 stream.go:316 只解析 reasoning_content 不解析 reasoning，导致 GPT 模型生成的消息 ThinkingContent="" 被存入 DB，后续 ToAPIFormat 把空 ThinkingContent 透传成 reasoning_content=""，被中转站 vectorengine.cn 严格 schema 校验拒绝。更新 Bug C 章节（L529-546）为"根因已定位"，错误分布表（L381）和优先级表（L560）状态同步更新，指向 v1.3.0 文档。Bug C 由 v1.3.0 阶段 1 GPT 适配解决（stream.go 加 delta.reasoning 解析），v1.2.0 不修

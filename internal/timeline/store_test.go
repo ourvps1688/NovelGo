@@ -9,7 +9,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 func openTlDB(t *testing.T) *gorm.DB {

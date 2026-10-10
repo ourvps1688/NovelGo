@@ -8,13 +8,13 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/location"
-	"github.com/sigpanic/goink/internal/preference"
-	"github.com/sigpanic/goink/internal/reader"
-	"github.com/sigpanic/goink/internal/setting"
-	"github.com/sigpanic/goink/internal/storyarc"
-	"github.com/sigpanic/goink/internal/timeline"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/location"
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/setting"
+	"github.com/novelgo/novelgo/internal/storyarc"
+	"github.com/novelgo/novelgo/internal/timeline"
 )
 
 // ── delete_record ──────────────────────────────────────

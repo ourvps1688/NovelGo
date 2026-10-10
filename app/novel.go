@@ -9,21 +9,21 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/export"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/location"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/preference"
-	"github.com/sigpanic/goink/internal/reader"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/setting"
-	"github.com/sigpanic/goink/internal/storage"
-	"github.com/sigpanic/goink/internal/storyarc"
-	"github.com/sigpanic/goink/internal/timeline"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/export"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/location"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/setting"
+	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/storyarc"
+	"github.com/novelgo/novelgo/internal/timeline"
 )
 
 // ── 小说 ──────────────────────────────────────────────────
@@ -69,10 +69,10 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 		return nil, fmt.Errorf("failed to init novel repo: %w", err)
 	}
 
-	// 为新小说创建 goink.md 空文件
-	if err := git.WriteFile(n.ID, git.GoinkPath(), ""); err != nil {
-		a.logger.Error("创建小说失败: goink.md 写入失败", "novelID", n.ID, "error", err)
-		return nil, fmt.Errorf("failed to create goink.md: %w", err)
+	// 为新小说创建 novelgo.md 空文件
+	if err := git.WriteFile(n.ID, git.NovelGoPath(), ""); err != nil {
+		a.logger.Error("创建小说失败: novelgo.md 写入失败", "novelID", n.ID, "error", err)
+		return nil, fmt.Errorf("failed to create novelgo.md: %w", err)
 	}
 
 	a.logger.Info("小说创建成功", "novelID", n.ID, "title", n.Title)

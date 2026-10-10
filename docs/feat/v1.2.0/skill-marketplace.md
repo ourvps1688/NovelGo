@@ -92,7 +92,7 @@ rate limit 实际返回 `403` + body 含 `"message": "API rate limit exceeded"` 
 
 新建 `internal/githubapi/client.go`：
 
-- `Client` struct：持有 `*http.Client`（5s 超时）、`User-Agent: Goink` header
+- `Client` struct：持有 `*http.Client`（5s 超时）、`User-Agent: NovelGo` header
 - `GetRawContent(ctx, owner, repo, branch, path) ([]byte, *RateLimit, error)` — 通用方法
   - 请求时带 `Accept: application/vnd.github.raw+json` header 直接拿原始内容
   - 解析 response header 的 `X-RateLimit-Remaining` / `X-RateLimit-Reset`

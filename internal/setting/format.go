@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/llm"
+	"github.com/novelgo/novelgo/internal/llm"
 )
 
 // SettingsTokenBudget 是注入 system 消息时设定的软上限（token）。

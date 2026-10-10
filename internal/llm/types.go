@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sigpanic/goink/internal/apperr"
+	"github.com/novelgo/novelgo/internal/apperr"
 )
 
 // Provider 定义一个大模型供应商的完整配置。
@@ -75,7 +75,7 @@ type CallOptions struct {
 	ReasoningEffort *string  // 不传从 ModelInfo 取
 	ThinkingEnabled *bool    // 不传从 ModelInfo 判断
 	ToolChoice      any      // OpenAI tool_choice payload; nil = provider default
-	SessionID       string   // 会话标识（如 Goink session_id），仅需要会话感知的服务商消费；空=无会话上下文（hook 内部兜底）
+	SessionID       string   // 会话标识（如 NovelGo session_id），仅需要会话感知的服务商消费；空=无会话上下文（hook 内部兜底）
 }
 
 // StreamEventType 流式事件的类型。

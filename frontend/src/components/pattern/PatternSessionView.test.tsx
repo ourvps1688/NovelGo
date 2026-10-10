@@ -52,7 +52,7 @@ describe("PatternSessionView generated skill save", () => {
       task_id: "task-1",
       name: "Generated",
       description: "desc",
-      file_path: "~/.goink/skills/generated.md",
+      file_path: "~/.novelgo/skills/generated.md",
       raw_content: "new skill",
     });
     mockSaveContent.mockResolvedValue(undefined);
@@ -66,7 +66,7 @@ describe("PatternSessionView generated skill save", () => {
     await vi.waitFor(() => {
       expect(mockSaveContent).toHaveBeenCalledWith({
         novel_id: 3,
-        path: "~/.goink/skills/generated.md",
+        path: "~/.novelgo/skills/generated.md",
         content: "new skill",
         expected_content: "",
       });
@@ -96,7 +96,7 @@ describe("PatternSessionView generated skill save", () => {
     ).toBeInTheDocument();
     expect(mockSaveContent).toHaveBeenCalledWith({
       novel_id: 3,
-      path: "~/.goink/skills/generated.md",
+      path: "~/.novelgo/skills/generated.md",
       content: "new skill",
       expected_content: "original skill",
     });
@@ -109,7 +109,7 @@ describe("PatternSessionView generated skill save", () => {
     await vi.waitFor(() => {
       expect(mockSaveContent).toHaveBeenLastCalledWith({
         novel_id: 3,
-        path: "~/.goink/skills/generated.md",
+        path: "~/.novelgo/skills/generated.md",
         content: "new skill",
         expected_content: "newer skill",
       });

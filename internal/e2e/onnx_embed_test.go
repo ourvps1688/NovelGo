@@ -8,8 +8,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/rag"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/rag"
 )
 
 func TestOnnxEmbedder_Init(t *testing.T) {

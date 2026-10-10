@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 describe("editor tab persistence", () => {
   it("drops legacy numeric paths and persists backend-provided outline paths", async () => {
     localStorage.setItem(
-      "goink_tabs_all",
+      "novelgo_tabs_all",
       JSON.stringify({
         version: 1,
         byNovel: {
@@ -33,7 +33,7 @@ describe("editor tab persistence", () => {
       title: "第一卷 · 卷纲",
     });
     window.dispatchEvent(new Event("beforeunload"));
-    const stored = JSON.parse(localStorage.getItem("goink_tabs_all") ?? "{}");
+    const stored = JSON.parse(localStorage.getItem("novelgo_tabs_all") ?? "{}");
     expect(stored.version).toBe(2);
     expect(stored.byNovel["1"].tabs[0]).toMatchObject({
       path: "chapters/id_42.md",

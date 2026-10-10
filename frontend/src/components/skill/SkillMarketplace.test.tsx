@@ -78,7 +78,7 @@ describe("SkillMarketplace installation", () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
     });
-    const path = "~/.goink/skills/my-skill.md";
+    const path = "~/.novelgo/skills/my-skill.md";
     qc.setQueryData(contentKeys.detail(1, path), "stale cached body");
     qc.setQueryData(contentKeys.detail(2, path), "other novel cached body");
     qc.setQueryData(skillKeys.list(2), []);

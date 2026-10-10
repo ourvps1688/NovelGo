@@ -8,12 +8,12 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/preference"
-	"github.com/sigpanic/goink/internal/setting"
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/setting"
 )
 
 // NovelProfile 构建小说稳定设定快照（设定+偏好），独立 system 消息。
-// 与 NovelState 区分：Profile 装长期稳定内容（设定/偏好），State 装动态内容（goink.md）。
+// 与 NovelState 区分：Profile 装长期稳定内容（设定/偏好），State 装动态内容（novelgo.md）。
 // KV cache 友好：Profile 跨轮稳定，State 每轮可能变。
 //
 // 调用方负责事务外构建（compress 模式）：传入的 db 应为带 ctx 的非事务句柄，

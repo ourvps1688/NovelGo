@@ -8,11 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/rollback"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/rollback"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 func TestCharacterGroupAPI(t *testing.T) {

@@ -2,7 +2,7 @@
 
 ## 设计概览
 
-Goink 是一个 [Wails v2](https://wails.io) 桌面应用，需要在 Windows、Linux、macOS 三平台构建和分发。核心依赖：Git CLI（本地版本控制）和 ONNX Runtime 动态库（文本向量化）。
+NovelGo 是一个 [Wails v2](https://wails.io) 桌面应用，需要在 Windows、Linux、macOS 三平台构建和分发。核心依赖：Git CLI（本地版本控制）和 ONNX Runtime 动态库（文本向量化）。
 
 ### 关键决策
 
@@ -13,14 +13,14 @@ Goink 是一个 [Wails v2](https://wails.io) 桌面应用，需要在 Windows、
 | ONNX Runtime | 捆绑自带动态库 | 体积 ~15MB，值得打包 |
 | ONNX 模型 | 运行时从 HF 镜像下载 | ~400MB，太大不放进安装包 |
 | 安装包 | NSIS (Win) / AppImage (Linux) / DMG (macOS) | 各自平台标准格式 |
-| 数据目录 | 不依赖 config.json | Windows=exe同目录，其他=~/Goink/ |
+| 数据目录 | 不依赖 config.json | Windows=exe同目录，其他=~/NovelGo/ |
 
 ### 目录结构
 
 #### 安装包内（构建时产生）
 
 ```
-{D:\Goink\ | /Applications/Goink.app/ | AppImage 内}
+{D:\NovelGo\ | /Applications/NovelGo.app/ | AppImage 内}
 ├── goink / goink.exe              ← Wails 产物
 ├── runtime/                       ← 构建脚本下载，安装器写入
 │   ├── git/                       ← Windows: MinGit; Linux/macOS: 单文件 git
@@ -53,7 +53,7 @@ Goink 是一个 [Wails v2](https://wails.io) 桌面应用，需要在 Windows、
 - `AppDir()` — `os.Executable()` + `filepath.Dir`，返回 exe 所在目录
 - `ResolveGit()` — `<appdir>/runtime/git/...` → `exec.LookPath("git")` fallback
 - `ResolveOnnxLib()` — `<appdir>/runtime/<lib>` → 系统路径 fallback
-- `DataDir()` — Windows 返回 AppDir，其他返回 `~/Goink/`
+- `DataDir()` — Windows 返回 AppDir，其他返回 `~/NovelGo/`
 
 ### 调用链改动
 

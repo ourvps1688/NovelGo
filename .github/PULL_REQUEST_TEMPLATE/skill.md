@@ -1,9 +1,9 @@
----
-name: Skill Contribution
-about: 提交一个新的写作 Skill
-title: "skill: "
-labels: skill-contribution
----
+\---  
+name: Skill Contribution  
+about: 提交一个新的写作 Skill  
+title: "skill: "  
+labels: skill-contribution  
+\---
 
 ## Checklist
 

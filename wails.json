@@ -1,6 +1,6 @@
 {
-  "name": "goink",
-  "outputfilename": "goink",
+  "name": "novelgo",
+  "outputfilename": "novelgo",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
@@ -10,10 +10,10 @@
     "email": ""
   },
   "info": {
-    "companyName": "sigpanic",
-    "productName": "Goink",
+    "companyName": "novelgo",
+    "productName": "NovelGo",
     "productVersion": "1.4.0",
-    "copyright": "Copyright © 2026 sigpanic",
-    "comments": "Goink - AI 小说创作助手"
+    "copyright": "Copyright © 2026 novelgo",
+    "comments": "NovelGo - AI 小说创作助手"
   }
 }

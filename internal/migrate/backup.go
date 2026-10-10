@@ -15,9 +15,9 @@ import (
 	"github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/migrate/engine"
-	"github.com/sigpanic/goink/internal/platform"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
+	"github.com/novelgo/novelgo/internal/platform"
 )
 
 const (

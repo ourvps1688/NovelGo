@@ -1,10 +1,10 @@
 # MCP Client 接入设计（外部 MCP server 消费）
 
-> 状态：设计稿暂存，未实现。本文记录"外部 agent 经 MCP 调用 Goink 工具"的反向设计——**Goink 作为 MCP client，消费外部 MCP server 的工具**。
+> 状态：设计稿暂存，未实现。本文记录"外部 agent 经 MCP 调用 NovelGo 工具"的反向设计——**NovelGo 作为 MCP client，消费外部 MCP server 的工具**。
 
 ## 设计目标
 
-- 让 Goink 的 agent 能调用外部 MCP server（如生图、知识库、云服务）提供的工具，而不把外部工具塞进 `tools` 数组。
+- 让 NovelGo 的 agent 能调用外部 MCP server（如生图、知识库、云服务）提供的工具，而不把外部工具塞进 `tools` 数组。
 - **tools 数组保持稳定**：不改 tools 定义，缓存不因外部工具增删失效。
 - 结构化的保证来自"原生 function calling 调稳定包装工具"，外部工具的 schema 按需由 agent 用 `Read` 读取。
 
@@ -16,7 +16,7 @@ Trae 环境就是这种形态的完整落地：
 - 真实工具的 descriptor 是磁盘上的 JSON 文件，agent 用 `Read`/`LS` 按需拉取；
 - 发起调用时 agent 对 `run_mcp` 发原生 tool_call，内层 args 由客户端路由执行。
 
-Goink 照搬这套，两层：
+NovelGo 照搬这套，两层：
 
 ```
 LLM 视角:

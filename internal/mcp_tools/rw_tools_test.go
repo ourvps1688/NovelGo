@@ -17,14 +17,14 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/testsupport"
-	"github.com/sigpanic/goink/internal/volume"
-	"github.com/sigpanic/goink/internal/writing"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/testsupport"
+	"github.com/novelgo/novelgo/internal/volume"
+	"github.com/novelgo/novelgo/internal/writing"
 )
 
 // ── 测试环境 ──────────────────────────────────────────────
@@ -37,7 +37,7 @@ import (
 func setupRWEnv(t *testing.T) (*gorm.DB, mcp_tools.ToolContext, context.Context) {
 	t.Helper()
 	testsupport.Isolate(t)
-	t.Setenv("GOINK_TESTING", "1")
+	t.Setenv("NOVELGO_TESTING", "1")
 	config.Set(&config.AppConfig{})
 
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "rw.db")), &gorm.Config{})
@@ -799,15 +799,15 @@ func TestNewChapter_VolumeQueryFailureIsSystemError(t *testing.T) {
 
 // ── 通用文件流程回归 ─────────────────────────────────────
 
-// goink.md 不触发章节记录逻辑。
-func TestEditPlainFile_GoinkMD(t *testing.T) {
+// novelgo.md 不触发章节记录逻辑。
+func TestEditPlainFile_NovelGoMD(t *testing.T) {
 	db, tc, ctx := setupRWEnv(t)
-	res := execEdit(t, ctx, tc, editArgs("goink.md", "full_replace", "# 故事状态\n- 时间线：…"))
+	res := execEdit(t, ctx, tc, editArgs("novelgo.md", "full_replace", "# 故事状态\n- 时间线：…"))
 	if !res.Success {
 		t.Fatalf("expected success, got: %s", res.Error)
 	}
-	if got := mustReadFile(t, novelFile(t, 1, "goink.md")); got == "" {
-		t.Error("goink.md should be written")
+	if got := mustReadFile(t, novelFile(t, 1, "novelgo.md")); got == "" {
+		t.Error("novelgo.md should be written")
 	}
 	if got := chapterCount(t, db, 1); got != 0 {
 		t.Errorf("chapter count = %d, want 0", got)

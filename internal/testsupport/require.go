@@ -34,7 +34,7 @@ func RequireEnv(t *testing.T, name string) string {
 
 // RequireGit 返回系统 git 的可执行文件路径；系统无 git 时跳过当前测试。
 //
-// 调用方通常紧接着把返回值注入 GOINK_GIT_BIN：测试模式下 ResolveGit 默认只认
+// 调用方通常紧接着把返回值注入 NOVELGO_GIT_BIN：测试模式下 ResolveGit 默认只认
 // DataDir 下的 bundled git，而测试代码造不出 bundled 布局（Windows 上尤其如此）。
 func RequireGit(t *testing.T) string {
 	t.Helper()

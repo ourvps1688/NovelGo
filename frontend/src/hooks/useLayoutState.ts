@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 
-const SIDEPANEL_KEY = "goink_sidepanel_width";
-const CHATPANEL_KEY = "goink_chatpanel_width";
+const SIDEPANEL_KEY = "novelgo_sidepanel_width";
+const CHATPANEL_KEY = "novelgo_chatpanel_width";
 
 const SIDEPANEL_DEFAULT = 224;
 const CHATPANEL_DEFAULT = 360;

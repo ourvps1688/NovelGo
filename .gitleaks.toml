@@ -1,7 +1,7 @@
 # Gitleaks secret detection config
 # See: https://github.com/gitleaks/gitleaks?tab=readme-ov-file#configuration
 
-title = "Goink Gitleaks config"
+title = "NovelGo Gitleaks config"
 
 # Use default rules as baseline, then customize
 [extend]

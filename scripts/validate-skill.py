@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a Goink skill markdown file.
+"""Validate a NovelGo skill markdown file.
 
 Usage: validate-skill.py <file_path> <expected_name>
 

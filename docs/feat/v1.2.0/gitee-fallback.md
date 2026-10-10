@@ -148,7 +148,7 @@ func (c *Client) GetRawContent(ctx, owner, repo, branch, path string) ([]byte, *
 | 返回格式 | `Accept: raw` header 直接返回原文 | JSON 含 `content` 字段（base64 编码）+ `encoding` 字段，需 base64 解码 |
 | 鉴权 | 匿名 | 匿名访问公开仓库（应用内不内置 token） |
 | rate limit | 403 + `X-RateLimit-Remaining: 0` | 未文档化，暂按 HTTP 状态码分类（429 → rate_limited，403 → forbidden，404 → not_found） |
-| User-Agent | `Goink` | `Goink`（gitee 也建议带） |
+| User-Agent | `NovelGo` | `NovelGo`（gitee 也建议带） |
 
 gitee API 返回 JSON 结构：
 ```json

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 VERSION="${1:-dev}"
-APP_NAME="goink"
-# Wails on macOS outputs a .app bundle at build/bin/goink.app
+APP_NAME="novelgo"
+# Wails on macOS outputs a .app bundle at build/bin/novelgo.app
 APP_BUNDLE="build/bin/${APP_NAME}.app"
 RUNTIME_DIR="build/runtime"
 
@@ -29,17 +29,17 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Goink</string>
+    <string>NovelGo</string>
     <key>CFBundleDisplayName</key>
-    <string>Goink</string>
+    <string>NovelGo</string>
     <key>CFBundleIdentifier</key>
-    <string>com.goink.app</string>
+    <string>com.novelgo.app</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>
     <string>${VERSION}</string>
     <key>CFBundleExecutable</key>
-    <string>goink</string>
+    <string>novelgo</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -56,11 +56,11 @@ EOF
 codesign --force --sign - "$APP_BUNDLE"
 
 # 图标占位
-[ -f build/package/macos/goink.icns ] && cp build/package/macos/goink.icns "$APP_BUNDLE/Contents/Resources/"
+[ -f build/package/macos/novelgo.icns ] && cp build/package/macos/novelgo.icns "$APP_BUNDLE/Contents/Resources/"
 
 # 生成 DMG
 mkdir -p build/dist
-hdiutil create -volname "Goink" -srcfolder "$APP_BUNDLE" -ov -format UDZO \
-    "build/dist/goink-v${VERSION}-macos-arm64.dmg"
+hdiutil create -volname "NovelGo" -srcfolder "$APP_BUNDLE" -ov -format UDZO \
+    "build/dist/novelgo-v${VERSION}-macos-arm64.dmg"
 
-echo "DMG → build/dist/goink-v${VERSION}-macos-arm64.dmg"
+echo "DMG → build/dist/novelgo-v${VERSION}-macos-arm64.dmg"

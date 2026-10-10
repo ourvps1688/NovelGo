@@ -9,7 +9,7 @@
 
 ## 背景
 
-当前 Goink 的 agent 在跨 session 协作上存在明显短板：新 session 完全不继承旧 session 的任何内容（[chat.go loadOrCreateSession](file:///home/nianhe/projects/goink/app/chat.go) 不读旧 session）。用户每次开新对话，agent 都"失忆"。同时用户提出的"世界观/设定系统"在当前代码里不存在，相关内容散落在 `novel.description`、`goink.md`、`preference_items`、`locations` 各处。
+当前 NovelGo 的 agent 在跨 session 协作上存在明显短板：新 session 完全不继承旧 session 的任何内容（[chat.go loadOrCreateSession](file:///home/nianhe/projects/goink/app/chat.go) 不读旧 session）。用户每次开新对话，agent 都"失忆"。同时用户提出的"世界观/设定系统"在当前代码里不存在，相关内容散落在 `novel.description`、`goink.md`、`preference_items`、`locations` 各处。
 
 本设计引入两个独立但互补的机制：
 - **长期记忆系统**：跨 session 的协作记忆（agent 与用户之间发生的事情）
@@ -38,7 +38,7 @@
 
 ### 五个机制各司其职（认知科学对应）
 
-业界 LLM agent 普遍按认知科学（Tulving 1972, *Episodic and Semantic Memory*；后续 ENGRAM arxiv:2511.12960；Claude Code Memory 等）把 agent 记忆分 3-4 类。Goink 的 5 个机制与之**完全对应**：
+业界 LLM agent 普遍按认知科学（Tulving 1972, *Episodic and Semantic Memory*；后续 ENGRAM arxiv:2511.12960；Claude Code Memory 等）把 agent 记忆分 3-4 类。NovelGo 的 5 个机制与之**完全对应**：
 
 | goink 机制 | 认知科学对应 | 性质 | 时效 | 谁写 | 管什么 | 例子 |
 |---|---|---|---|---|---|---|

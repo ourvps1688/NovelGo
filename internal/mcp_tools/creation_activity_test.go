@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/location"
-	"github.com/sigpanic/goink/internal/session"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/location"
+	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 func requireToolCreationActivity(t *testing.T, db *gorm.DB, want activity.ActivityDelta) {

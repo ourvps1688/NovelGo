@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/migrate"
-	"github.com/sigpanic/goink/internal/platform"
-	"github.com/sigpanic/goink/internal/rag"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/migrate"
+	"github.com/novelgo/novelgo/internal/platform"
+	"github.com/novelgo/novelgo/internal/rag"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 func TestAppLifecycle_InitWithConfig(t *testing.T) {
@@ -70,7 +70,7 @@ func TestAppLifecycle_NovelDirectoryCreation(t *testing.T) {
 	dataDir := platform.DataDir()
 
 	// Verify DataDir is correct
-	expectedDir := os.Getenv("GOINK_DATA_DIR")
+	expectedDir := os.Getenv("NOVELGO_DATA_DIR")
 	if dataDir != expectedDir {
 		t.Errorf("DataDir() = %q, expected %q", dataDir, expectedDir)
 	}

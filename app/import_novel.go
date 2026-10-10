@@ -5,7 +5,7 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	imp "github.com/sigpanic/goink/internal/import"
+	imp "github.com/novelgo/novelgo/internal/import"
 )
 
 // ImportNovelResult 是导入小说的返回结果。

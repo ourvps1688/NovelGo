@@ -8,11 +8,11 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/novel"
-	"github.com/sigpanic/goink/internal/text"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // ImportResult 是完整导入流程的结果。
@@ -102,10 +102,10 @@ func doImport(ctx context.Context, logger *slog.Logger, db *gorm.DB, result *Res
 		return nil, fmt.Errorf("初始化小说仓库失败: %w", err)
 	}
 
-	if err := git.WriteFile(n.ID, git.GoinkPath(), ""); err != nil {
+	if err := git.WriteFile(n.ID, git.NovelGoPath(), ""); err != nil {
 		cleanupImport(db, ctx, logger, n.ID)
-		onProgress("error", "创建 goink.md 失败", 0, chapterCount, 0, n.ID)
-		return nil, fmt.Errorf("创建 goink.md 失败: %w", err)
+		onProgress("error", "创建 novelgo.md 失败", 0, chapterCount, 0, n.ID)
+		return nil, fmt.Errorf("创建 novelgo.md 失败: %w", err)
 	}
 
 	// ── Step 2: DB 事务写入 Chapters（原子操作，拿 id） ──

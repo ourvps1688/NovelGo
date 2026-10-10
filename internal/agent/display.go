@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
 )
 
 // toolDisplayNames 工具名 → 中文展示名称。
@@ -159,8 +159,8 @@ func (a *Agent) buildDisplay(ctx context.Context, name string, args map[string]a
 			}
 		}
 
-		// rw 工具的 goink.md 路径特殊处理
-		if path, ok := args["path"].(string); ok && path == "goink.md" {
+		// rw 工具的 novelgo.md 路径特殊处理
+		if path, ok := args["path"].(string); ok && path == "novelgo.md" {
 			switch name {
 			case "edit":
 				baseText = "编辑 故事状态"

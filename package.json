@@ -1,5 +1,5 @@
 {
-  "name": "goink",
+  "name": "novelgo",
   "private": true,
   "scripts": {
     "build": "npm --prefix frontend run build",

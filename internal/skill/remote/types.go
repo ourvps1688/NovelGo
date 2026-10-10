@@ -1,11 +1,11 @@
 // Package remote 提供远程 skill 市场功能。
 //
-// 通过 GitHub Contents API 拉取 goink-skills 仓库的 index.json 和 skill 文件，
+// 通过 GitHub Contents API 拉取 novelgo-skills 仓库的 index.json 和 skill 文件，
 // 支持本地缓存、安装到用户层或小说层 skill 目录，并触发热重载。
 // 网络错误按语义类别（githubapi.Kind）透传给调用方，便于前端给出针对性提示。
 package remote
 
-// IndexFile 对应远程仓库 goink-skills/index.json 的结构。
+// IndexFile 对应远程仓库 novelgo-skills/index.json 的结构。
 // 该文件由仓库内的 scripts/generate-index.py 生成。
 type IndexFile struct {
 	Updated string            `json:"updated"` // ISO 8601 UTC 时间戳

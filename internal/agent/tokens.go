@@ -8,8 +8,8 @@ import (
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/llm"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/llm"
 )
 
 // InitRunningTokens 对初始消息列表逐条 token 计数，返回按 role 的分组统计。

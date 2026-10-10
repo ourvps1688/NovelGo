@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/storage"
-	"github.com/sigpanic/goink/internal/timeline"
+	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/timeline"
 )
 
 // GetChapterPlans 返回指定小说的章节计划（next/near/far 三个槽位）。

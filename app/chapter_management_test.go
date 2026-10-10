@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/character"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/reader"
-	"github.com/sigpanic/goink/internal/storyarc"
-	"github.com/sigpanic/goink/internal/timeline"
+	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/storyarc"
+	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

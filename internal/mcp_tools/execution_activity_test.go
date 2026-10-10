@@ -13,7 +13,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
+	"github.com/novelgo/novelgo/internal/activity"
 )
 
 type activityToolArgs struct {

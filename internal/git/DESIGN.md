@@ -2,7 +2,7 @@
 
 ## 概述
 
-每部小说一个 Git 仓库，章节正文以 Markdown 文件存储在 `chapters/` 目录下，故事状态文档 `goink.md` 放在小说根目录。调用系统 Git CLI 执行所有版本控制操作，文件 I/O 走标准库 `os` 包。
+每部小说一个 Git 仓库，章节正文以 Markdown 文件存储在 `chapters/` 目录下，故事状态文档 `novelgo.md` 放在小说根目录。调用系统 Git CLI 执行所有版本控制操作，文件 I/O 走标准库 `os` 包。
 
 正文的版本历史、差异对比、回退走标准 Git 操作。章节元数据（标题、编号、字数等）存 SQLite，不在此包职责范围。
 
@@ -22,7 +22,7 @@
 
 ```
 {config.DataDir}/novels/{novel_id}/
-    goink.md              ← 故事状态文档（自由文本）
+    novelgo.md              ← 故事状态文档（自由文本）
     chapters/
         001.md
         002.md
@@ -111,9 +111,9 @@ func ChapterPath(id int64) string                           // "chapters/id_1.md
 func ReadFile(novelID int64, path string) (string, error)   // 读全文
 func WriteFile(novelID int64, path, content string) error   // 全量覆写，章节内容天然小（几千字），无需增量写入
 
-func (r *Repo) GoinkPath() string
-func (r *Repo) ReadGoink() (string, error)
-func (r *Repo) WriteGoink(content string) error
+func (r *Repo) NovelGoPath() string
+func (r *Repo) ReadNovelGo() (string, error)
+func (r *Repo) WriteNovelGo(content string) error
 
 // ── Diff ──
 
@@ -180,7 +180,7 @@ Git 包不实现 search/replace 逻辑，不感知审批流。
 | agent loop（turn 管理） | HasUncommitted, StageAll, Commit, Revert |
 | MCP edit_chapter 工具 | ReadChapter, WriteChapter, DiffContent |
 | MCP get_chapter_content 工具 | ReadChapter |
-| MCP 故事状态工具 | ReadGoink, WriteGoink, DiffContent |
+| MCP 故事状态工具 | ReadNovelGo, WriteNovelGo, DiffContent |
 | 审批流 | DiffContent |
 | 前端（用户手动编辑） | 编辑器 autosave 到文件（不经过此包），turn 开始时由 agent loop 检测并 commit |
 

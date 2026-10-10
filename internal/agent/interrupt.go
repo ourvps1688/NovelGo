@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
 )
 
 // flushInterruptedTools 排干 stream 中待执行的 tool_call_end 事件，

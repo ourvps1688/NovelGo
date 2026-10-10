@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/novel"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/novel"
 )
 
 func testNovel() *novel.Novel {
@@ -248,8 +248,8 @@ func TestExportEpub_FallbackAuthor(t *testing.T) {
 			buf := new(bytes.Buffer)
 			buf.ReadFrom(rc)
 			rc.Close()
-			if !strings.Contains(buf.String(), "Goink") {
-				t.Error("expected fallback author Goink")
+			if !strings.Contains(buf.String(), "NovelGo") {
+				t.Error("expected fallback author NovelGo")
 			}
 		}
 	}

@@ -17,7 +17,7 @@ import SidebarChapterGroup, { SIDEBAR_BLOCK_SIZE } from "./SidebarChapterGroup";
 interface Props {
   novelId: number;
   onSelectChapter: (ch: chapter.Chapter) => void;
-  onSelectGoink: () => void;
+  onSelectNovelGo: () => void;
   onSelectVolumeOutline: (path: string, volumeName: string) => void;
   onExportNovel: () => void;
 }
@@ -42,7 +42,7 @@ function groupKey(volumeId: number | null): string {
 export default function ChapterList({
   novelId,
   onSelectChapter,
-  onSelectGoink,
+  onSelectNovelGo,
   onSelectVolumeOutline,
   onExportNovel,
 }: Props) {
@@ -222,10 +222,10 @@ export default function ChapterList({
 
       <button
         type="button"
-        onClick={onSelectGoink}
-        className={`relative flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-1.5 text-left transition-colors hover:bg-muted/50 ${selectedPath === "goink.md" ? "bg-primary/10 font-medium" : ""}`}
+        onClick={onSelectNovelGo}
+        className={`relative flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-1.5 text-left transition-colors hover:bg-muted/50 ${selectedPath === "novelgo.md" ? "bg-primary/10 font-medium" : ""}`}
       >
-        {selectedPath === "goink.md" && (
+        {selectedPath === "novelgo.md" && (
           <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-primary" />
         )}
         <FileText

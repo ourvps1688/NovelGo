@@ -9,7 +9,7 @@ const versions = new Map<string, number>();
 const listeners = new Set<(change: AIFileChange) => void>();
 
 function key(novelId: number, path: string): string {
-  return path.startsWith("~/.goink/skills/")
+  return path.startsWith("~/.novelgo/skills/")
     ? `user:${path}`
     : `${novelId}:${path}`;
 }
@@ -33,7 +33,7 @@ export function reportAIFileChange(change: AIFileChange): void {
   const tabsStore = useEditorTabsStore.getState();
   for (const [novelKey, entry] of Object.entries(tabsStore.byNovel)) {
     const tabNovelId = Number(novelKey);
-    if (tabNovelId !== novelId && !path.startsWith("~/.goink/skills/"))
+    if (tabNovelId !== novelId && !path.startsWith("~/.novelgo/skills/"))
       continue;
     for (const tab of entry.tabs) {
       if (tab.type !== "file") continue;

@@ -56,7 +56,7 @@ describe("fileDescription", () => {
       "volumes/id_1.md",
       "content",
     ],
-    ["goink.md", "故事状态", "diff: 故事状态", "goink.md", "content"],
+    ["novelgo.md", "故事状态", "diff: 故事状态", "novelgo.md", "content"],
     [
       "skills/style.md",
       "技能: style",

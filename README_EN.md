@@ -1,7 +1,12 @@
 <p align="center">
-  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="Goink" />
-  <img src="assets/logo-light.svg#gh-light-mode-only" alt="Goink" />
+  <img src="assets/logo-dark.svg#gh-dark-mode-only" alt="NovelGo" />
+  <img src="assets/logo-light.svg#gh-light-mode-only" alt="NovelGo" />
 </p>
+
+<blockquote align="center">
+  <sub>Based on <a href="https://github.com/sigpanic/goink">Goink by 响滩 (sigpanic)</a> — https://github.com/sigpanic/goink<br/>
+  This is a modified version of Goink. It is not endorsed by or affiliated with the original author.</sub>
+</blockquote>
 
 <h1 align="center">Desktop AI Novel-Writing System<br><sub>Agent Real-Time Decisions × Structured Memory × Post-Writing Self-Check</sub></h1>
 
@@ -18,21 +23,17 @@
   <a href="THANKS.md"><img src="https://img.shields.io/badge/Sponsors-Thanks-0FDC78?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsors" /></a>
 </p>
 
-<p align="center">
-  <a href="https://trendshift.io/repositories/162663?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-162663" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/162663/daily?language=Go" alt="sigpanic%2Fgoink | Trendshift" width="250" height="55"/></a>
-</p>
-
-<p align="center"><sub>If Goink helps you, please consider <a href="#donate">donating</a>; a Star is also a great encouragement.</sub></p>
+<p align="center"><sub>If NovelGo helps you, please consider <a href="#donate">donating</a>; a Star is also a great encouragement.</sub></p>
 
 <p align="center"><strong><a href="README.md">中文版</a> | English Version</strong></p>
 
 ---
 
-<p align="center"><strong>Anyone who has tried to write a novel with a general-purpose AI knows the pain—by chapter five it forgets the protagonist's name. By chapter thirty you're manually flipping through earlier chapters hunting for that one foreshadowing line. After finishing a chapter you have to remind it yourself to "update character status" and "check arc progress." Goink doesn't have these problems. It's a desktop AI writing system with structured memory—character profiles, foreshadowing states, arc progress, location relationships, reader knowledge—the system remembers, and the Agent looks it up, edits it, and maintains it on its own.</strong></p>
+<p align="center"><strong>Anyone who has tried to write a novel with a general-purpose AI knows the pain—by chapter five it forgets the protagonist's name. By chapter thirty you're manually flipping through earlier chapters hunting for that one foreshadowing line. After finishing a chapter you have to remind it yourself to "update character status" and "check arc progress." NovelGo doesn't have these problems. It's a desktop AI writing system with structured memory—character profiles, foreshadowing states, arc progress, location relationships, reader knowledge—the system remembers, and the Agent looks it up, edits it, and maintains it on its own.</strong></p>
 
 ## What Makes It Different From General AI Chat
 
-| | General AI Chat | Goink |
+| | General AI Chat | NovelGo |
 |---|---|---|
 | Creative context | Re-explain everything in every conversation | Full structured tracking: characters, relationships, foreshadowing, arcs, locations, reader knowledge |
 | Editing | Outputs text directly; no idea what changed | Diff preview + line-by-line comparison + approve before writing |
@@ -97,7 +98,7 @@ Two-tier management: global preferences and per-novel preferences. By chapter th
 
 ## Volumes & Chapters: Drag to Reorder
 
-Long novels need volumes. Goink treats a volume as a first-class structure — create, rename, delete, and reorder volumes by dragging. Chapters can be dragged across volumes or reordered within one; drop to apply, and chapter numbers are automatically re-numbered in the new reading order — no manual renumbering. Unassigned chapters sit in an "Unassigned" bucket, ready to be dragged into any volume.
+Long novels need volumes. NovelGo treats a volume as a first-class structure — create, rename, delete, and reorder volumes by dragging. Chapters can be dragged across volumes or reordered within one; drop to apply, and chapter numbers are automatically re-numbered in the new reading order — no manual renumbering. Unassigned chapters sit in an "Unassigned" bucket, ready to be dragged into any volume.
 
 Each volume collapses and expands, showing its chapter count and word count in real time; a volume can also carry its own "volume outline", managed separately from the book-wide outline.
 
@@ -110,7 +111,7 @@ Each volume collapses and expands, showing its chapter count and word count in r
 > [!TIP]
 > **Contribute your own Skill!** Turn your writing methodology into a `.md` file and [submit a PR](https://github.com/sigpanic/goink-skills) to share it.
 
-Skills are Goink's creative methodology modules. Each Skill is defined by a single `.md` file with YAML frontmatter metadata and markdown body. **3 layers × 3 modes = 9 strategic dimensions** — precise control over what content, at what scope, with what activation model.
+Skills are NovelGo's creative methodology modules. Each Skill is defined by a single `.md` file with YAML frontmatter metadata and markdown body. **3 layers × 3 modes = 9 strategic dimensions** — precise control over what content, at what scope, with what activation model.
 
 ### Three Layers
 
@@ -228,21 +229,13 @@ make dev     # dev mode (hot reload)
 
 ## License
 
-Goink is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for additional terms under AGPLv3 Section 7.
+NovelGo is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for additional terms under AGPLv3 Section 7.
 
-## Star History
-
-<a href="https://www.star-history.com/#repos=sigpanic%2Fgoink&type=Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=sigpanic/goink&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=sigpanic/goink&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=sigpanic/goink&type=date&legend=top-left" />
- </picture>
-</a>
+NovelGo is a modified version of [Goink](https://github.com/sigpanic/goink) by 响滩 (sigpanic). It is not endorsed by or affiliated with the original author.
 
 ## Donate
 
-Goink development relies on several AI services (including subscription costs). If Goink helps you, donations are welcome—they go toward covering the AI subscription costs during development. If convenient, please note your GitHub username—it will appear in the [thank-you list](THANKS.md) by default.
+NovelGo is a modified version of [Goink](https://github.com/sigpanic/goink) by 响滩 (sigpanic). The donation QR codes below belong to the original author—donations go directly to supporting the original project's development. If convenient, please note your GitHub username—it will appear in the [thank-you list](THANKS.md) by default.
 
 <p align="center">
   <img src="assets/wechat.jpg" alt="WeChat donate" width="220" />

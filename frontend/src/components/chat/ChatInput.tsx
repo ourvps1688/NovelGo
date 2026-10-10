@@ -3,8 +3,8 @@ import { ArrowUp, Square, Zap, Play, Star, Loader2 } from "lucide-react";
 import type { app } from "@/lib/wailsjs/go/models";
 import SlashMenu from "./SlashMenu";
 
-// 草稿 localStorage key 前缀（per-session 持久化，沿用 goink_ 惯例）
-const DRAFT_PREFIX = "goink_chat_draft_";
+// 草稿 localStorage key 前缀（per-session 持久化，沿用 novelgo_ 惯例）
+const DRAFT_PREFIX = "novelgo_chat_draft_";
 
 // charMatch 检查 q 的所有字符是否按顺序出现在 s 中（模糊匹配）
 const charMatch = (s: string, q: string): boolean => {

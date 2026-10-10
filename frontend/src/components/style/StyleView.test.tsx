@@ -297,7 +297,7 @@ describe("StyleView", () => {
     ]);
     mockExtractStyle.mockResolvedValue({
       name: "Generated",
-      file_path: "~/.goink/skills/generated.md",
+      file_path: "~/.novelgo/skills/generated.md",
       raw_content: "new skill",
     });
     mockGetContent.mockResolvedValue("old skill");
@@ -315,7 +315,7 @@ describe("StyleView", () => {
     await vi.waitFor(() => {
       expect(mockSaveContent).toHaveBeenCalledWith({
         novel_id: 1,
-        path: "~/.goink/skills/generated.md",
+        path: "~/.novelgo/skills/generated.md",
         content: "new skill",
         expected_content: "old skill",
       });
@@ -347,7 +347,7 @@ describe("StyleView", () => {
     ]);
     mockExtractStyle.mockResolvedValue({
       name: "Generated",
-      file_path: "~/.goink/skills/generated.md",
+      file_path: "~/.novelgo/skills/generated.md",
       raw_content: "new skill",
     });
     mockGetContent.mockResolvedValue("old skill");

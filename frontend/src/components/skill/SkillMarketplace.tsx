@@ -38,13 +38,13 @@ interface Props {
 type Phase = "browse" | "detail" | "confirm_overwrite";
 type InstallTarget = "user" | "novel";
 
-const REPO_URL = "https://github.com/sigpanic/goink-skills";
+const REPO_URL = "https://github.com/novelgo/novelgo-skills";
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const DEFAULT_PAGE_SIZE = 20;
 const DEBOUNCE_MS = 300;
 
 function pathForSource(target: InstallTarget, name: string): string {
-  return target === "user" ? `~/.goink/skills/${name}.md` : `skills/${name}.md`;
+  return target === "user" ? `~/.novelgo/skills/${name}.md` : `skills/${name}.md`;
 }
 
 function modeClass(mode: string): string {

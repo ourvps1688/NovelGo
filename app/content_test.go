@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/writing"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/writing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,7 +54,7 @@ func TestVolumeOutlineContentPath(t *testing.T) {
 		"volumes/id_999999.md",
 		"./" + path,
 		strings.Replace(path, "/", "\\", 1),
-		"volumes/../goink.md",
+		"volumes/../novelgo.md",
 		fmt.Sprintf("/volumes/id_%d.md", v.ID),
 	}
 	for _, invalidPath := range invalidPaths {
@@ -69,7 +69,7 @@ func TestVolumeOutlineContentPath(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-	content, err = app.GetContent(novel.ID, "goink.md")
+	content, err = app.GetContent(novel.ID, "novelgo.md")
 	require.NoError(t, err)
 	assert.NotEqual(t, "should not be written", content)
 
@@ -211,12 +211,12 @@ func TestSaveAndGetContent(t *testing.T) {
 
 	err := app.SaveContent(SaveContentInput{
 		NovelID: novelID,
-		Path:    "goink.md",
+		Path:    "novelgo.md",
 		Content: "Hello, world!",
 	})
 	require.NoError(t, err)
 
-	content, err := app.GetContent(novelID, "goink.md")
+	content, err := app.GetContent(novelID, "novelgo.md")
 	require.NoError(t, err)
 	assert.Equal(t, "Hello, world!", content)
 }
@@ -224,7 +224,7 @@ func TestSaveAndGetContent(t *testing.T) {
 func TestSaveContentRejectsStaleEditorVersion(t *testing.T) {
 	app := setupTestApp(t)
 	novel := createTestNovel(t, app)
-	path := "goink.md"
+	path := "novelgo.md"
 	initial, err := app.GetContent(novel.ID, path)
 	require.NoError(t, err)
 	require.NoError(t, git.WriteFile(novel.ID, path, "AI update"))

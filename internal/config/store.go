@@ -18,8 +18,8 @@ type AppSettings struct {
 	ApprovalMode      string    `gorm:"column:approval_mode;default:manual"   json:"approval_mode"`
 	LastSessionID     string    `gorm:"column:last_session_id;default:''"     json:"last_session_id"`
 	UserName          string    `gorm:"column:user_name;default:''"            json:"user_name"`
-	GitName           string    `gorm:"column:git_name;default:'Goink'"         json:"git_name"`
-	GitEmail          string    `gorm:"column:git_email;default:'goink@local'"  json:"git_email"`
+	GitName           string    `gorm:"column:git_name;default:'NovelGo'"         json:"git_name"`
+	GitEmail          string    `gorm:"column:git_email;default:'novelgo@local'"  json:"git_email"`
 	DismissedVersion  string    `gorm:"column:dismissed_version;default:''"     json:"dismissed_version"`     // 用户已忽略的更新版本号
 	LastUpdateCheckAt time.Time `gorm:"column:last_update_check_at"              json:"last_update_check_at"` // 上次自动更新检查时间，用于 12h 节流；零值表示从未检查
 

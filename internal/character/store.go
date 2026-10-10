@@ -7,8 +7,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/deletion"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/deletion"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // Store 管理 Character 和 CharacterRelation 持久化。DB 导出供调用方做简单 CRUD。

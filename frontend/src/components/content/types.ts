@@ -26,12 +26,12 @@ export type EditorTab = {
   toolId?: string;
 };
 
-export function goinkPath(): string {
-  return "goink.md";
+export function novelgoPath(): string {
+  return "novelgo.md";
 }
 
 export function isContentPath(p: string): boolean {
-  return p.startsWith("chapters/") || p === "goink.md";
+  return p.startsWith("chapters/") || p === "novelgo.md";
 }
 
 export function isOutlinePath(p: string): boolean {
@@ -43,13 +43,13 @@ export function isVolumeOutlinePath(p: string): boolean {
 }
 
 export function isStandaloneMarkdownPath(p: string): boolean {
-  return p === "goink.md" || isVolumeOutlinePath(p);
+  return p === "novelgo.md" || isVolumeOutlinePath(p);
 }
 
 export function isSkillPath(p: string): boolean {
   return (
     p.startsWith("skills/") ||
-    p.startsWith("~/.goink/skills/") ||
+    p.startsWith("~/.novelgo/skills/") ||
     p.startsWith("/builtin/skills/")
   );
 }
@@ -60,7 +60,7 @@ export type SkillSource = "builtin" | "user" | "novel";
 // Mirrors the path conventions in SkillList.skillPath.
 export function sourceFromPath(p: string): SkillSource {
   if (p.startsWith("/builtin/skills/")) return "builtin";
-  if (p.startsWith("~/.goink/skills/")) return "user";
+  if (p.startsWith("~/.novelgo/skills/")) return "user";
   return "novel";
 }
 

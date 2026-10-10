@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/agent"
-	"github.com/sigpanic/goink/internal/storage"
-	"github.com/sigpanic/goink/internal/style"
-	"github.com/sigpanic/goink/internal/text"
+	"github.com/novelgo/novelgo/internal/agent"
+	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/style"
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // ListStyleSamplesInput 是列出风格素材的入参。

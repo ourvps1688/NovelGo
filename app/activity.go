@@ -1,6 +1,6 @@
 package app
 
-import "github.com/sigpanic/goink/internal/activity"
+import "github.com/novelgo/novelgo/internal/activity"
 
 // RecordCreativeActivity 累计近似活跃秒数，单次最多计一分钟；统计失败不向前端返回错误。
 func (a *App) RecordCreativeActivity(seconds int64) {

@@ -15,12 +15,12 @@ import (
 	"github.com/invopop/jsonschema"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/activity"
-	"github.com/sigpanic/goink/internal/approval"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/search"
-	"github.com/sigpanic/goink/internal/skill"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/approval"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/search"
+	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // ── 接口 ──────────────────────────────────────────────

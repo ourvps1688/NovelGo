@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
 )
 
 func TestGetChapterListGroupsByVolume(t *testing.T) {

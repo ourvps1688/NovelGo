@@ -3,7 +3,7 @@ package version
 
 import "runtime/debug"
 
-// Version 由 Makefile 通过 -ldflags "-X github.com/sigpanic/goink/internal/version.Version=xxx" 注入。
+// Version 由 Makefile 通过 -ldflags "-X github.com/novelgo/novelgo/internal/version.Version=xxx" 注入。
 // 未注入时默认为 "dev"。
 var Version = "dev"
 

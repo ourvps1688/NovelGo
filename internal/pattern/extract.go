@@ -13,12 +13,12 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/chapter"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/llm"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/skill"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 const (
@@ -238,7 +238,7 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		Name:        sk.Name,
 		Description: sk.Description,
 		RawContent:  sk.RawContent,
-		FilePath:    fmt.Sprintf("~/.goink/skills/%s.md", safeName),
+		FilePath:    fmt.Sprintf("~/.novelgo/skills/%s.md", safeName),
 		Trace:       trace,
 	}, nil
 }

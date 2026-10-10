@@ -46,7 +46,7 @@ export function describeFile(
     );
     diffLabel = title;
     resolved = true;
-  } else if (path === "goink.md") {
+  } else if (path === "novelgo.md") {
     title = t("content.storyStatus");
     diffLabel = t("chat.diffStoryStatus");
     resolved = true;

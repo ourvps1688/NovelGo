@@ -6,10 +6,11 @@ import { GetBuildHash, GetVersion } from "@/lib/wailsjs/go/app/App";
 import GitHubIcon from "@/components/ui/GitHubIcon";
 import Logo from "@/components/Logo";
 
-const REPO_URL = "https://github.com/sigpanic/goink";
-const SKILLS_REPO_URL = "https://github.com/sigpanic/goink-skills";
-const AUTHOR_URL = "https://github.com/sigpanic";
-const ISSUES_URL = "https://github.com/sigpanic/goink/issues";
+const REPO_URL = "https://github.com/novelgo/novelgo";
+const SKILLS_REPO_URL = "https://github.com/novelgo/novelgo-skills";
+// 上游项目（AGPL 第7条附加条款要求保留此署名，勿移除）
+const UPSTREAM_URL = "https://github.com/sigpanic/goink";
+const ISSUES_URL = "https://github.com/novelgo/novelgo/issues";
 
 export default function AboutTab() {
   const { t } = useTranslation();
@@ -78,7 +79,7 @@ export default function AboutTab() {
           <Logo className="w-7 h-7" />
         </div>
         <div>
-          <div className="text-base font-semibold">Goink</div>
+          <div className="text-base font-semibold">NovelGo</div>
           <div className="text-xs text-muted-foreground">
             {t("update.currentVersion")} v{appVersion}
             {buildHash && <> · {buildHash}</>}
@@ -129,10 +130,10 @@ export default function AboutTab() {
           <ExternalLink className="w-3 h-3" />
         </button>
         <button
-          onClick={() => BrowserOpenURL(AUTHOR_URL)}
+          onClick={() => BrowserOpenURL(UPSTREAM_URL)}
           className="flex items-center gap-1.5 text-xs text-primary hover:underline cursor-pointer"
         >
-          {t("settings.aboutAuthor")}: sigpanic
+          Based on Goink by 响滩 (sigpanic)
           <ExternalLink className="w-3 h-3" />
         </button>
         <button
@@ -148,6 +149,11 @@ export default function AboutTab() {
         </p>
         <p className="text-xs text-muted-foreground">
           {t("settings.aboutLicense")}: AGPL-3.0
+        </p>
+        {/* AGPL 第7条附加条款要求的声明，勿移除 */}
+        <p className="text-[11px] leading-4 text-muted-foreground">
+          This is a modified version of Goink. It is not endorsed by or
+          affiliated with the original author.
         </p>
       </div>
 

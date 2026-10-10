@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/preference"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // ── 创作偏好 ──────────────────────────────────────────────

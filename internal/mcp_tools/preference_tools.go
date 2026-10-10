@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/preference"
+	"github.com/novelgo/novelgo/internal/preference"
 )
 
 // ── upsert_preference ─────────────────────────────────

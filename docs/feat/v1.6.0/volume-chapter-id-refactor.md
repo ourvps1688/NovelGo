@@ -235,7 +235,7 @@ migrate.Run 流程（注册表驱动，框架见 `internal/migrate/engine`，具
 
 migrate 触发时第一步先备份，避免破坏性变更失败后无法恢复：
 
-- 备份根目录：`filepath.Join(platform.DataDir(), "backups", migration)`，其中 `migration` 是迁移组标识；`platform.DataDir()` 平台相关（Windows exe 目录可写时为 exe 目录，不可写时为 `%LOCALAPPDATA%\Goink`；其他平台 `~/Goink/`；可被 `GOINK_DATA_DIR` 覆盖）
+- 备份根目录：`filepath.Join(platform.DataDir(), "backups", migration)`，其中 `migration` 是迁移组标识；`platform.DataDir()` 平台相关（Windows exe 目录可写时为 exe 目录，不可写时为 `%LOCALAPPDATA%\NovelGo`；其他平台 `~/NovelGo/`；可被 `GOINK_DATA_DIR` 覆盖）
 - 备份内容：
   - 使用 SQLite Online Backup API 将已打开数据库写为 `backups/{migration}/novel-agent.db` 的一致性快照；WAL 中的已提交事务已包含在快照内，不单独复制 `-wal` / `-shm`
   - `cp -r novels/ → backups/{migration}/novels/`

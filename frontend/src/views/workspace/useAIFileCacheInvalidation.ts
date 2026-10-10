@@ -40,7 +40,7 @@ export function useAIFileCacheInvalidation() {
         return;
       }
 
-      if (filePath.startsWith("~/.goink/skills/")) {
+      if (filePath.startsWith("~/.novelgo/skills/")) {
         const filter = {
           predicate: ({ queryKey }: { queryKey: readonly unknown[] }) =>
             queryKey[0] === contentKeys.all[0] && queryKey[2] === filePath,
@@ -61,7 +61,7 @@ export function useAIFileCacheInvalidation() {
       if (
         filePath.startsWith("chapters/") ||
         filePath.startsWith("outlines/") ||
-        filePath === "goink.md"
+        filePath === "novelgo.md"
       ) {
         void qc.invalidateQueries({ queryKey: chapterKeys.list(novelId) });
       }
@@ -72,7 +72,7 @@ export function useAIFileCacheInvalidation() {
       }
       if (filePath.startsWith("skills/")) {
         void qc.invalidateQueries({ queryKey: skillKeys.list(novelId) });
-      } else if (filePath.startsWith("~/.goink/skills/")) {
+      } else if (filePath.startsWith("~/.novelgo/skills/")) {
         void qc.invalidateQueries({ queryKey: skillKeys.all });
       }
 

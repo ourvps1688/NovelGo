@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sigpanic/goink/internal/rag"
+	"github.com/novelgo/novelgo/internal/rag"
 )
 
 // 删除小说必须连带 DROP 它的向量表，否则派生索引会永久残留。

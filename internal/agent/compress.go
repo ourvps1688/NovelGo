@@ -12,8 +12,8 @@ import (
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 
-	"github.com/sigpanic/goink/internal/agentcfg"
-	"github.com/sigpanic/goink/internal/session"
+	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/session"
 )
 
 const compressionPrompt = `<system-reminder>

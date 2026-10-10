@@ -1,4 +1,4 @@
-module github.com/sigpanic/goink
+module github.com/novelgo/novelgo
 
 go 1.25.0
 

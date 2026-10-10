@@ -63,17 +63,17 @@ describe("EditorSaveQueue", () => {
     const markSecond = vi.fn();
 
     queue.schedule(
-      draft("goink.md", "第一版"),
+      draft("novelgo.md", "第一版"),
       saveFirst,
       vi.fn(),
       markFirst,
       vi.fn(),
     );
-    const finished = queue.flush(1, "goink.md");
+    const finished = queue.flush(1, "novelgo.md");
     expect(saveFirst).toHaveBeenCalledOnce();
 
     queue.schedule(
-      draft("goink.md", "第二版"),
+      draft("novelgo.md", "第二版"),
       saveSecond,
       vi.fn(),
       markSecond,
@@ -143,17 +143,17 @@ describe("EditorSaveQueue", () => {
     const onSaved = vi.fn();
     const onError = vi.fn();
     queue.schedule(
-      { ...draft("goink.md", "本地稿"), expectedContent: "旧版" },
+      { ...draft("novelgo.md", "本地稿"), expectedContent: "旧版" },
       save,
       vi.fn(),
       onSaved,
       onError,
     );
 
-    expect(await queue.flush(1, "goink.md")).toBe(false);
+    expect(await queue.flush(1, "novelgo.md")).toBe(false);
     expect(onSaved).not.toHaveBeenCalled();
     queue.schedule(
-      { ...draft("goink.md", "本地新稿"), expectedContent: "旧版" },
+      { ...draft("novelgo.md", "本地新稿"), expectedContent: "旧版" },
       save,
       vi.fn(),
       onSaved,
@@ -161,17 +161,17 @@ describe("EditorSaveQueue", () => {
     );
     await vi.advanceTimersByTimeAsync(500);
     expect(save).toHaveBeenCalledOnce();
-    expect(await queue.flush(1, "goink.md")).toBe(false);
+    expect(await queue.flush(1, "novelgo.md")).toBe(false);
 
-    queue.discard(1, "goink.md");
+    queue.discard(1, "novelgo.md");
     queue.schedule(
-      { ...draft("goink.md", "本地新稿"), expectedContent: "AI 新版" },
+      { ...draft("novelgo.md", "本地新稿"), expectedContent: "AI 新版" },
       save,
       vi.fn(),
       onSaved,
       onError,
     );
-    expect(await queue.flush(1, "goink.md")).toBe(true);
+    expect(await queue.flush(1, "novelgo.md")).toBe(true);
     expect(save).toHaveBeenLastCalledWith("AI 新版");
     expect(onSaved).toHaveBeenCalledOnce();
   });

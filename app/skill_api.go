@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/apperr"
-	"github.com/sigpanic/goink/internal/config"
-	"github.com/sigpanic/goink/internal/git"
-	"github.com/sigpanic/goink/internal/skill"
-	"github.com/sigpanic/goink/internal/skill/remote"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/apperr"
+	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/skill/remote"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // ListSkillsInput 是 ListSkills 的入参。

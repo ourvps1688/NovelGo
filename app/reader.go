@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/sigpanic/goink/internal/reader"
-	"github.com/sigpanic/goink/internal/storage"
+	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/storage"
 )
 
 // CreateReaderPerspectiveInput 是创建读者认知条目的入参。

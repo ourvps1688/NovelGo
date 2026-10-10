@@ -17,12 +17,12 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sigpanic/goink/internal/mcp_tools"
-	"github.com/sigpanic/goink/internal/version"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/version"
 	"gorm.io/gorm"
 )
 
-// ErrNoCurrentNovel 表示 Goink 界面当前没有打开的小说。
+// ErrNoCurrentNovel 表示 NovelGo 界面当前没有打开的小说。
 var ErrNoCurrentNovel = errors.New("当前没有打开的小说")
 
 // CurrentNovel 是每次 MCP 调用看到的当前小说快照。
@@ -76,7 +76,7 @@ func (instance *runningServer) track(handler mcp.ToolHandler) mcp.ToolHandler {
 	}
 }
 
-// Server 将明确选中的 Goink 工具提供为本地 MCP 协议端点。
+// Server 将明确选中的 NovelGo 工具提供为本地 MCP 协议端点。
 type Server struct {
 	registry *mcp_tools.Registry
 	db       *gorm.DB
@@ -132,7 +132,7 @@ func (s *Server) Start() (Endpoint, error) {
 		done: make(chan struct{}), ctx: serverCtx, cancel: cancel,
 		stopped: make(chan struct{}),
 	}
-	protocolServer := mcp.NewServer(&mcp.Implementation{Name: "goink", Version: version.Version}, nil)
+	protocolServer := mcp.NewServer(&mcp.Implementation{Name: "novelgo", Version: version.Version}, nil)
 	s.addTools(protocolServer, instance)
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return protocolServer
@@ -224,7 +224,7 @@ func allowedOrigin(origin string) bool {
 func (s *Server) addTools(protocolServer *mcp.Server, instance *runningServer) {
 	protocolServer.AddTool(&mcp.Tool{
 		Name:        "get_current_novel",
-		Description: "获取 Goink 界面当前打开的小说 ID 和书名。",
+		Description: "获取 NovelGo 界面当前打开的小说 ID 和书名。",
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false},
 	}, instance.track(func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		novel, err := s.current(ctx)

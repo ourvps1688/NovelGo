@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sigpanic/goink/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/mcp_tools"
 )
 
 // 只读工具集合，死循环检测用。
