@@ -104,6 +104,8 @@
     "skills": "Skills",
     "extract": "Extract",
     "comingSoon": "(Coming Soon)",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
     "wordCount": "Words",
     "lineCount": "Lines",
     "wordStats": "Word Count",

@@ -100,6 +100,8 @@
     "skills": "技能",
     "extract": "提取",
     "comingSoon": "（即将推出）",
+    "collapse": "收起导航",
+    "expand": "展开导航",
     "wordCount": "字数",
     "lineCount": "行数",
     "wordStats": "字数统计",
