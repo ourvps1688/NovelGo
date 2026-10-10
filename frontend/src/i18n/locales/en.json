@@ -583,28 +583,10 @@
     "typePalace": "Building",
     "typeWater": "Water",
     "typeKeywords": {
-      "nature": [
-        "Forest",
-        "Cave",
-        "Mountain",
-        "Swamp"
-      ],
-      "settlement": [
-        "City",
-        "Town",
-        "Village",
-        "Market"
-      ],
-      "palace": [
-        "Palace",
-        "Castle",
-        "Temple"
-      ],
-      "water": [
-        "Ocean",
-        "River",
-        "Lake"
-      ]
+      "nature": ["Forest", "Cave", "Mountain", "Swamp"],
+      "settlement": ["City", "Town", "Village", "Market"],
+      "palace": ["Palace", "Castle", "Temple"],
+      "water": ["Ocean", "River", "Lake"]
     }
   },
   "storyarc": {

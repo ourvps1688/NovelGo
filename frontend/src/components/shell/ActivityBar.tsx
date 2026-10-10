@@ -130,7 +130,10 @@ export default function ActivityBar({ onSelect }: Props) {
               {isActive && !a.disabled && (
                 <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
               )}
-              <a.icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+              <a.icon
+                className="h-[18px] w-[18px] shrink-0"
+                strokeWidth={1.75}
+              />
               {!collapsed && (
                 <span className="truncate text-sm font-medium">
                   {t(a.labelKey)}
