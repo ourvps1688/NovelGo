@@ -76,7 +76,9 @@ export default function LocationGraph({ novelId, focus }: Props) {
 
   // F-6: 增量更新支持——ref 持有最新数据；hasData 作为创建依赖（仅有无数据翻转时重建）。
   const locationsRef = useRef(locations);
-  locationsRef.current = locations;
+  useEffect(() => {
+    locationsRef.current = locations;
+  }, [locations]);
   const skipNextGraphUpdateRef = useRef(false);
   const hasData = locations.length > 0;
 

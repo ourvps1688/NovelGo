@@ -128,7 +128,9 @@ export default function CharacterGraph({ novelId, focus }: Props) {
   // F-6: 增量更新支持——用 ref 持有最新数据，使一次性创建的图实例的点击处理器不依赖旧闭包；
   // hasData 作为创建效果的依赖（仅「有无数据」翻转时重建，而非每次数据变化都重建）。
   const charactersRef = useRef(characters);
-  charactersRef.current = characters;
+  useEffect(() => {
+    charactersRef.current = characters;
+  }, [characters]);
   const skipNextGraphUpdateRef = useRef(false);
   const hasData = characters.length > 0;
 
