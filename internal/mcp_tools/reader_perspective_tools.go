@@ -159,10 +159,11 @@ func formatReaderPerspective(known, suspenses, misconceptions []reader.ReaderPer
 
 // CreateReaderPerspectiveEntryItem 是 create_reader_perspective_entry 的单条参数。
 type CreateReaderPerspectiveEntryItem struct {
-	Type             string `json:"type" jsonschema:"required,description=条目类型,enum=known,enum=suspense,enum=misconception" validate:"required,oneof=known suspense misconception"`
-	Content          string `json:"content" jsonschema:"required,description=内容描述"          validate:"required"`
-	PlantedChapterID int64  `json:"planted_chapter_id" jsonschema:"required,description=种下该信息的稳定章节 ID" validate:"required,min=1"`
-	RelatedTruth     string `json:"related_truth" jsonschema:"description=仅 misconception：真实情况是什么"`
+	Type              string `json:"type" jsonschema:"required,description=条目类型,enum=known,enum=suspense,enum=misconception" validate:"required,oneof=known suspense misconception"`
+	Content           string `json:"content" jsonschema:"required,description=内容描述"          validate:"required"`
+	PlantedChapterID  int64  `json:"planted_chapter_id" jsonschema:"required,description=种下该信息的稳定章节 ID" validate:"required,min=1"`
+	RelatedTruth      string `json:"related_truth" jsonschema:"description=仅 misconception：真实情况是什么"`
+	RevealedChapterID *int64 `json:"revealed_chapter_id" jsonschema:"description=可选：创建时即已揭露/回收的章节 ID。通常留空，后续回收请改用 update_reader_perspective_entry" validate:"omitempty,min=1"`
 }
 
 // CreateReaderPerspectiveEntryArgs 是 create_reader_perspective_entry 的参数。
@@ -179,6 +180,7 @@ func (t *CreateReaderPerspectiveEntryTool) Description() string {
 		"- known：读者在某章之后知道了什么\n" +
 		"- suspense：读者当前在等待解答的悬念\n" +
 		"- misconception：读者以为的情况（用于未来反转）\n" +
+		"创建时只需 planted_chapter_id；revealed_chapter_id 通常留空，后续回收悬念或揭露误知时用 update_reader_perspective_entry 设置。" +
 		"每章写完后如有新揭露的信息或新种下的悬念，应主动添加。"
 }
 func (t *CreateReaderPerspectiveEntryTool) Category() ToolCategory { return CategoryWritingAssistant }
@@ -199,9 +201,12 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 			return &ToolResult{Success: false, Error: "misconception 类型必须提供 related_truth（实际真相）"}, nil
 		}
 	}
-	chapterIDs := make([]int64, 0, len(a.Entries))
+	chapterIDs := make([]int64, 0, len(a.Entries)*2)
 	for _, item := range a.Entries {
 		chapterIDs = append(chapterIDs, item.PlantedChapterID)
+		if item.RevealedChapterID != nil {
+			chapterIDs = append(chapterIDs, *item.RevealedChapterID)
+		}
 	}
 	if result, err := ensureChapterIDsInNovel(ctx, tc, chapterIDs); err != nil || result != nil {
 		return result, err
@@ -214,11 +219,12 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 		for _, item := range a.Entries {
 			chapterID := item.PlantedChapterID
 			rp := reader.ReaderPerspective{
-				NovelID:          tc.NovelID,
-				Type:             item.Type,
-				Content:          item.Content,
-				PlantedChapterID: &chapterID,
-				RelatedTruth:     item.RelatedTruth,
+				NovelID:           tc.NovelID,
+				Type:              item.Type,
+				Content:           item.Content,
+				PlantedChapterID:  &chapterID,
+				RelatedTruth:      item.RelatedTruth,
+				RevealedChapterID: item.RevealedChapterID,
 			}
 			if err := tx.Create(&rp).Error; err != nil {
 				failedName = item.Content

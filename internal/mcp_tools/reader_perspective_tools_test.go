@@ -2,6 +2,9 @@ package mcp_tools
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -70,5 +73,40 @@ func TestFormatReaderPerspective_MissingPlantedChapter(t *testing.T) {
 	)
 	if !strings.Contains(formatted, "章节信息缺失") {
 		t.Errorf("formatted = %q, want missing chapter label", formatted)
+	}
+}
+
+// 回归测试：LLM 会在 create 参数里带上 revealed_chapter_id（update 工具的字段），
+// 框架层 DisallowUnknownFields 曾直接拒绝（json: unknown field "revealed_chapter_id"）。
+// 修复后 create schema 接受该可选字段，并正确落库。
+func TestCreateReaderPerspectiveEntry_AcceptsRevealedChapterID(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&chapter.Chapter{}, &reader.ReaderPerspective{}); err != nil {
+		t.Fatal(err)
+	}
+	ch := chapter.Chapter{NovelID: 1, SortOrder: 1, Title: "第一章"}
+	if err := db.Create(&ch).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reg := NewRegistry(logger)
+	RegisterReaderPerspectiveTools(reg)
+
+	raw := json.RawMessage(`{"entries":[{"type":"misconception","content":"读者以为主角死了","planted_chapter_id":1,"related_truth":"主角假死","revealed_chapter_id":1}]}`)
+	res := reg.Execute(context.Background(), "create_reader_perspective_entry", raw, ToolContext{DB: db, NovelID: 1}, nil)
+	if res.Error != "" || !res.Success {
+		t.Fatalf("create with revealed_chapter_id failed: %+v", res)
+	}
+
+	var created reader.ReaderPerspective
+	if err := db.First(&created).Error; err != nil {
+		t.Fatal(err)
+	}
+	if created.RevealedChapterID == nil || *created.RevealedChapterID != 1 {
+		t.Errorf("revealed chapter ID = %v, want 1", created.RevealedChapterID)
 	}
 }
