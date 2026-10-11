@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Target, Lightbulb } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useFocusStore } from "@/stores/useFocusStore";
@@ -53,6 +54,15 @@ export default function SidebarTimelineList({ novelId }: Props) {
     }
   };
 
+  // F-5: 虚拟滚动——条目可能上千条，全量渲染会卡顿；用 @tanstack/react-virtual 仅渲染可视区。
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 44,
+    overscan: 8,
+  });
+
   return (
     <>
       <div className="flex items-center justify-between px-3 py-2.5 border-b">
@@ -67,7 +77,10 @@ export default function SidebarTimelineList({ novelId }: Props) {
           placeholder={t("timeline.searchTimeline")}
         />
       </div>
-      <div className="flex-1 overflow-y-auto overscroll-contain">
+      <div
+        ref={parentRef}
+        className="flex-1 overflow-y-auto overscroll-contain"
+      >
         {isError ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-xs text-destructive">
@@ -76,35 +89,57 @@ export default function SidebarTimelineList({ novelId }: Props) {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-xs text-muted-foreground">
+            <p className="px-3 py-4 text-xs text-muted-foreground">
               {search
                 ? t("timeline.noMatchingEntries")
                 : t("timeline.noEntries")}
             </p>
           </div>
         ) : (
-          filtered.map((e) => (
-            <div
-              key={e.id}
-              onClick={() => focusEntity("timeline", e.id)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-muted hover:rounded-md transition-colors group"
-            >
-              {catIcon(e.category)}
-              <div className="flex-1 min-w-0">
-                <span className="text-xs truncate block text-foreground">
-                  {e.title}
-                </span>
-                <span className="text-[10px] text-muted-foreground">
-                  {t("timeline.targetChapterN2", {
-                    n: e.target_reading_number,
-                  })}
-                </span>
-              </div>
-              <span
-                className={`shrink-0 h-1.5 w-1.5 rounded-full ${statusDot(e.status)}`}
-              />
-            </div>
-          ))
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              position: "relative",
+              width: "100%",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((vi) => {
+              const e = filtered[vi.index];
+              return (
+                <div
+                  key={e.id}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                  onClick={() => focusEntity("timeline", e.id)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-muted hover:rounded-md transition-colors group"
+                >
+                  {catIcon(e.category)}
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs truncate block text-foreground">
+                      {e.title}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {t("timeline.targetChapterN2", {
+                        n: e.target_reading_number,
+                      })}
+                    </span>
+                  </div>
+                  <span
+                    className={`shrink-0 h-1.5 w-1.5 rounded-full ${statusDot(
+                      e.status,
+                    )}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </>

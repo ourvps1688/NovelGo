@@ -125,6 +125,13 @@ export default function CharacterGraph({ novelId, focus }: Props) {
   // loading 合成：两个 query 任一在拉时整体显示 loading（同时拉难以独立区分）。
   const loading = charsLoading || relsLoading;
 
+  // F-6: 增量更新支持——用 ref 持有最新数据，使一次性创建的图实例的点击处理器不依赖旧闭包；
+  // hasData 作为创建效果的依赖（仅「有无数据」翻转时重建，而非每次数据变化都重建）。
+  const charactersRef = useRef(characters);
+  charactersRef.current = characters;
+  const skipNextGraphUpdateRef = useRef(false);
+  const hasData = characters.length > 0;
+
   const [selectedCharacter, setSelectedCharacter] =
     useState<character.Character | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -216,16 +223,18 @@ export default function CharacterGraph({ novelId, focus }: Props) {
     return { nodes, edges: allEdges };
   }, [characters, relations, C]);
 
+  // F-6: 图实例仅创建一次（数据可用 / 主题变化时），数据变化走增量 setData，保留平移/缩放。
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || loading || characters.length === 0) return;
+    if (!container || loading || !hasData) return;
 
     let graph: Graph | null = null;
     try {
       graph = new Graph({
         container,
         data: graphData,
-        autoFit: "view",
+        // 不传 autoFit：默认不自动适配，首次渲染后手动 fitView 一次即可，
+        // 后续数据增量更新（setData+render）不会重置用户的平移/缩放。
         background: C.bg,
         animation: false,
         layout: {
@@ -262,9 +271,15 @@ export default function CharacterGraph({ novelId, focus }: Props) {
         ],
       });
       graphRef.current = graph;
-      graph.render().catch((err: unknown) => {
-        console.error("Graph render failed:", err);
-      });
+      // 首次渲染后手动适配视图；autoFit 已关闭，数据增量更新时不再重置视图。
+      graph
+        .render()
+        .then(() => graph!.fitView())
+        .catch((err: unknown) => {
+          console.error("Graph render failed:", err);
+        });
+      // 创建时已使用当前 graphData，跳过紧随的首次增量更新，避免重复渲染。
+      skipNextGraphUpdateRef.current = true;
     } catch (err) {
       console.error("Graph init/render failed:", err);
       if (graph) {
@@ -280,7 +295,9 @@ export default function CharacterGraph({ novelId, focus }: Props) {
 
     graph.on("node:click", (event: any) => {
       const rawId = event.target?.id || "";
-      const char = characters.find((c) => rawId.startsWith(nodeId(c.id)));
+      const char = charactersRef.current.find((c) =>
+        rawId.startsWith(nodeId(c.id)),
+      );
       if (char) {
         setSelectedCharacter((prev) => (prev?.id === char.id ? null : char));
         setExpanded(false);
@@ -295,7 +312,23 @@ export default function CharacterGraph({ novelId, focus }: Props) {
       graph!.destroy();
       if (graphRef.current === graph) graphRef.current = null;
     };
-  }, [characters, C.bg, C.edge, graphData, loading]);
+  }, [loading, C.bg, C.edge, hasData]);
+
+  // F-6: 数据变化且图已存在时，仅增量 setData + render，不重建实例（保留平移/缩放）。
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph || loading || !hasData) return;
+    if (skipNextGraphUpdateRef.current) {
+      skipNextGraphUpdateRef.current = false;
+      return;
+    }
+    try {
+      graph.setData(graphData);
+      graph.render();
+    } catch (err) {
+      console.error("Graph data update failed:", err);
+    }
+  }, [graphData, loading, hasData]);
 
   const treeEdgeCount = (graphData.edges ?? []).filter(
     (e) => e.type === "polyline",
