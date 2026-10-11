@@ -61,7 +61,10 @@ interface Props {
   chatPanelWidth: number;
   onChatPanelResize: (w: number) => void;
 }
-const EVENT_REORDER_TIMEOUT = 120;
+// 文本流式事件（Content/Thinking）的批量 flush 窗口（毫秒）。
+// 同一窗口内的多个 token 合并为一次 setTurns（React 18 自动批处理），
+// 避免每个 token 都触发全量 Markdown 重解析带来的 O(n²) 卡顿。
+const TEXT_FLUSH_MS = 60;
 
 interface EventQueue {
   nextSeq: number;
@@ -985,13 +988,24 @@ export default function ChatPanel({
       if (event.seq < queue.nextSeq) return;
 
       queue.pending.set(event.seq, event);
-      flushEventQueue(turnId);
 
-      if (queue.pending.size > 0 && !queue.flushTimer) {
-        queue.flushTimer = setTimeout(() => {
-          queue.flushTimer = null;
-          flushEventQueue(turnId, true);
-        }, EVENT_REORDER_TIMEOUT);
+      const isText =
+        event.type === AgentEventType.Content ||
+        event.type === AgentEventType.Thinking;
+
+      if (isText) {
+        // 文本流式事件按时间窗口批量 flush：同一窗口内的 token 合并为一次
+        // setTurns（React 18 同 tick 自动批处理），避免每个 token 触发全量
+        // Markdown 重解析造成的 O(n²) 卡顿。结构性事件仍立即 flush。
+        if (!queue.flushTimer) {
+          queue.flushTimer = setTimeout(() => {
+            queue.flushTimer = null;
+            flushEventQueue(turnId, true);
+          }, TEXT_FLUSH_MS);
+        }
+      } else {
+        // 结构性事件（工具调用/结束/错误等）立即 flush，并顺带把已缓冲文本刷出
+        flushEventQueue(turnId, true);
       }
     },
     [applyAgentEvent, flushEventQueue],
