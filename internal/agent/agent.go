@@ -57,6 +57,9 @@ type RunOptions struct {
 	EventSeq        *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
 	MaxTurns        int
 	ReasoningEffort string // 用户选择的推理等级
+	// RunningTokens 由调用方预计算的 token 预算（来自持久化的 token_count 累加）。
+	// 非空时 Run 直接复用，跳过对整段历史消息的重新 BPE 编码；为空则退回 InitRunningTokens。
+	RunningTokens map[string]int
 }
 
 // New 创建 Agent 实例。
@@ -169,7 +172,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	isThinking := false
 	recentPatterns := make([]string, 0, 6)
 	tracker := newInterruptTracker() // 工具连续失败计数（system 5/args 5/全局 10 中断）
-	runningTokens := a.InitRunningTokens(opts.Messages)
+	runningTokens := opts.RunningTokens
+	if runningTokens == nil {
+		runningTokens = a.InitRunningTokens(opts.Messages)
+	}
 	tools := a.registry.OpenAI(opts.AllowedTools)
 	agentEventName := "agent:" + strconv.Itoa(opts.TurnID)
 	eventSeq := opts.EventSeq
@@ -602,16 +608,22 @@ func (a *Agent) appendMsg(role, content, thinkingContent string, extra map[strin
 		ToFrontend:      role == "assistant",
 	}
 	a.logger.Debug("appendMsg", "role", role, "agentType", opts.AgentType, "subTaskID", opts.SubTaskID, "turnID", opts.TurnID)
-	if err := a.db.Create(msg).Error; err != nil {
-		a.logger.Error("持久化消息失败", "role", role, "turnID", opts.TurnID, "err", err)
-	}
 
+	// 先算出 API 格式与 token 数，把 token_count 写回消息再持久化，
+	// 这样后续回放（loadAPIMessages）可直接累加持久化的 token_count，
+	// 免去每轮对整段历史重新 BPE 编码的 CPU 开销（见 tokens.go:InitRunningTokensFast）。
 	apiFormat := msg.ToAPIFormat(a.logger)
-	opts.Messages = append(opts.Messages, apiFormat)
 	n, err := llm.CountMessageTokens(apiFormat)
 	if err != nil {
 		a.logger.Warn("token count failed", "role", role, "err", err)
 	}
+	msg.TokenCount = n
+
+	if err := a.db.Create(msg).Error; err != nil {
+		a.logger.Error("持久化消息失败", "role", role, "turnID", opts.TurnID, "err", err)
+	}
+
+	opts.Messages = append(opts.Messages, apiFormat)
 	runningTokens[role] += n
 }
 

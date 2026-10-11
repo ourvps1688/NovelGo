@@ -31,7 +31,19 @@ const C = {
   },
 } as const;
 
+// 主边色绑定到主题 primary 设计令牌，而非写死的 blue-500，
+// 保证关系图强调色随明暗主题与用户主题配置保持一致。
+// 解析失败时回退到原硬编码蓝，避免画布无色。
+function primaryEdgeColor(): string {
+  if (typeof window === "undefined") return "#3b82f6";
+  const v = getComputedStyle(document.documentElement)
+    .getPropertyValue("--primary")
+    .trim();
+  return v || "#3b82f6";
+}
+
 export function useGraphColors() {
   const { theme } = useThemeStore();
-  return C[theme];
+  const base = C[theme];
+  return { ...base, edge: primaryEdgeColor() };
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/session"
 )
 
 // InitRunningTokens 对初始消息列表逐条 token 计数，返回按 role 的分组统计。
@@ -24,6 +25,24 @@ func (a *Agent) InitRunningTokens(messages []map[string]any) map[string]int {
 			}
 			tokens[role] += n
 		}
+	}
+	return tokens
+}
+
+// InitRunningTokensFast 优先累加已持久化的 message.token_count，避免每轮对整段历史
+// 重新 BPE 编码。对升级前写入、token_count 仍为 0 的历史消息，回退到实时 CountMessageTokens。
+// 调用方负责只传入真正进入上下文的消息（与 InitRunningTokens 统计口径一致）。
+func (a *Agent) InitRunningTokensFast(msgs []*session.Message) map[string]int {
+	tokens := map[string]int{"system": 0, "user": 0, "assistant": 0, "tool": 0}
+	for _, m := range msgs {
+		if _, ok := tokens[m.Role]; !ok {
+			continue
+		}
+		n := m.TokenCount
+		if n == 0 {
+			n, _ = llm.CountMessageTokens(m.ToAPIFormat(a.logger))
+		}
+		tokens[m.Role] += n
 	}
 	return tokens
 }

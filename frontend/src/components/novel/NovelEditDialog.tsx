@@ -97,7 +97,7 @@ export default function NovelEditDialog({
         </h2>
 
         {error && (
-          <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-4">
+          <p className="text-sm text-destructive bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-4">
             {error}
           </p>
         )}
@@ -106,7 +106,7 @@ export default function NovelEditDialog({
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">
               {t("novel.bookTitle")}{" "}
-              {!isEdit && <span className="text-red-500">*</span>}
+              {!isEdit && <span className="text-destructive">*</span>}
             </label>
             <input
               type="text"

@@ -76,7 +76,7 @@ export default function ExportDialog({ novelTitle, onClose, onExport }: Props) {
         <p className="text-sm text-muted-foreground mb-5">{novelTitle}</p>
 
         {error && (
-          <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-4">
+          <p className="text-sm text-destructive bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-4">
             {error}
           </p>
         )}

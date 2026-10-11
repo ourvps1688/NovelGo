@@ -69,7 +69,7 @@ export default function NovelDeleteDialog({
         </h2>
 
         {error && (
-          <p className="text-sm text-red-600 bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-3">
+          <p className="text-sm text-destructive bg-danger-bg border border-danger-border rounded-md px-3 py-2 mb-3">
             {error}
           </p>
         )}

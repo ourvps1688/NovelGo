@@ -159,7 +159,8 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	}
 
 	// 8. 构建消息列表：全部来自 DB（含系统消息/历史/用户消息）
-	messages, err := a.loadAPIMessages(ctx, sess.SessionID, sess.ActiveVersion)
+	// runningTokens 由 loadAPIMessages 基于已持久化的 token_count 累加返回，避免重编码整段历史。
+	messages, runningTokens, err := a.loadAPIMessages(ctx, sess.SessionID, sess.ActiveVersion)
 	if err != nil {
 		return nil, fmt.Errorf("加载 API 消息失败: %w", err)
 	}
@@ -172,6 +173,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 
 	result, runErr := a.agent.Run(ctx, agent.RunOptions{
 		TurnID:          turnID,
+		RunningTokens:   runningTokens,
 		SessionID:       sess.SessionID,
 		NovelID:         input.NovelID,
 		Messages:        messages,
@@ -276,12 +278,14 @@ func writeSystemMessages(tx *gorm.DB, sessionID string, turnID int, msgs *agentc
 // loadAPIMessages 加载指定 version 的所有 to_api 消息，转为 map 格式。
 // 出口防御：历史 DB 数据可能存在重复 tool_call_id（DeepSeek 偶发 bug + 早期未去重），
 // 这里按 id 去重 assistant.tool_calls 和对应的 tool 消息，避免发给 DeepSeek 时触发 400。
-func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int) ([]map[string]any, error) {
+func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int) ([]map[string]any, map[string]int, error) {
 	msgs, err := a.session.GetMessagesForAPI(ctx, sessionID, version)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	result := make([]map[string]any, 0, len(msgs))
+	// tokens: 各角色 token 预算，优先累加持久化的 token_count，避免每轮重编码整段历史。
+	tokens := map[string]int{"system": 0, "user": 0, "assistant": 0, "tool": 0}
 	// validToolCallIDs: assistant 消息去重后的 tool_call id 集合
 	// seenToolMsgIDs: 已保留的 tool 消息 tool_call_id 集合（每个 id 只保留一条 tool 消息）
 	validToolCallIDs := make(map[string]bool)
@@ -335,8 +339,17 @@ func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int
 		}
 
 		result = append(result, api)
+		// 仅对真正进入上下文的消息累加 token（与 InitRunningTokens 口径一致）。
+		// 优先用持久化的 token_count，升级前写入的 0 值回退到实时编码。
+		if _, ok := tokens[m.Role]; ok {
+			n := m.TokenCount
+			if n == 0 {
+				n, _ = llm.CountMessageTokens(api)
+			}
+			tokens[m.Role] += n
+		}
 	}
-	return result, nil
+	return result, tokens, nil
 }
 
 // generateTitle 用 LLM 为非流式调用生成对话标题（≤10 字）。
@@ -432,7 +445,8 @@ func (a *App) CompressContext(input CompressInput) (*CompressResult, error) {
 	}
 
 	// 4. 构建消息列表：全部来自 DB
-	messages, err := a.loadAPIMessages(context.Background(), sess.SessionID, sess.ActiveVersion)
+	// runningTokens 由 loadAPIMessages 基于已持久化的 token_count 累加返回，避免重编码整段历史。
+	messages, runningTokens, err := a.loadAPIMessages(context.Background(), sess.SessionID, sess.ActiveVersion)
 	if err != nil {
 		return nil, fmt.Errorf("加载 API 消息失败: %w", err)
 	}
@@ -443,13 +457,11 @@ func (a *App) CompressContext(input CompressInput) (*CompressResult, error) {
 	a.agent.RegisterCancel(sess.SessionID, cancel)
 	defer a.agent.UnregisterCancel(sess.SessionID)
 
-	// 6. 初始化 runningTokens
-	runningTokens := a.agent.InitRunningTokens(messages)
-
 	// 7. 执行压缩
 	// 注意：Compress 走 GenerateText 单次调用，不进入 agent loop，不需要 MaxTurns
 	opts := agent.RunOptions{
 		TurnID:        turnID,
+		RunningTokens: runningTokens,
 		SessionID:     sess.SessionID,
 		NovelID:       sess.NovelID,
 		Messages:      messages,

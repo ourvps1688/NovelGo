@@ -139,7 +139,7 @@ export default function ModelEditForm({
           {t("settings.vision")}
         </label>
       </div>
-      {error && <div className="text-xs text-red-500">{error}</div>}
+      {error && <div className="text-xs text-destructive">{error}</div>}
       <div className="flex justify-end gap-2 pt-1">
         <button
           onClick={onCancel}

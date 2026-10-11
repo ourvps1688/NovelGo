@@ -67,6 +67,12 @@ type Message struct {
 	AgentType string    `gorm:"column:agent_type;not null;default:'main';index"              json:"agent_type"`            // "main" | "review" | "memory"
 	SubTaskID string    `gorm:"column:sub_task_id;index"                                     json:"sub_task_id,omitempty"` // run_subagent 的 tool call ID，前端路由子 Agent 消息用
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime;index"                       json:"created_at"`
+	// apiCache / apiCached: ToAPIFormat result cache. Message is append-only,
+	// so once rendered the payload never changes; caching avoids repeated
+	// ExtraMetadata JSON parsing during history replay (loadAPIMessages).
+	// gorm:"-" keeps these fields out of the table schema.
+	apiCache  map[string]any `gorm:"-"`
+	apiCached bool           `gorm:"-"`
 }
 
 func (Message) TableName() string { return "messages" }
@@ -74,6 +80,14 @@ func (Message) TableName() string { return "messages" }
 // ToAPIFormat 转为 OpenAI Chat Completions 兼容的消息格式。
 // 从 ExtraMetadata 提取 tool_calls、thinking_content、tool_call_id 拼入对应字段。
 func (m *Message) ToAPIFormat(logger *slog.Logger) map[string]any {
+	if m.apiCached {
+		cp := make(map[string]any, len(m.apiCache))
+		for k, v := range m.apiCache {
+			cp[k] = v
+		}
+		return cp
+	}
+
 	payload := map[string]any{
 		"role":    m.Role,
 		"content": m.Content,
@@ -134,5 +148,7 @@ func (m *Message) ToAPIFormat(logger *slog.Logger) map[string]any {
 		}
 	}
 
+	m.apiCache = payload
+	m.apiCached = true
 	return payload
 }

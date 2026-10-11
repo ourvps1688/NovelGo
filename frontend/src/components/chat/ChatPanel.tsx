@@ -28,6 +28,7 @@ import ToolCallCard from "./ToolCallCard";
 import WebSearchCard from "./WebSearchCard";
 import WebFetchCard from "./WebFetchCard";
 import SubagentCard from "./SubagentCard";
+import { StatusState } from "@/components/common/StatusState";
 import CompressionBlock from "./CompressionBlock";
 import type { UsageInfo } from "./ContextRing";
 import SettingsDialog from "@/components/settings/SettingsDialog";
@@ -1344,35 +1345,23 @@ export default function ChatPanel({
             onViewAll={handleOpenHistory}
           />
         ) : messagesQuery.isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
+          <StatusState variant="loading" />
         ) : (
           <>
             {/* 消息列表 */}
             {messagesQuery.isError ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <p className="text-sm text-red-500 mb-2">
-                    {t("chat.loadMessagesFailed")}
-                  </p>
-                  <button
-                    onClick={() => messagesQuery.refetch()}
-                    className="text-xs text-primary underline cursor-pointer"
-                  >
-                    {t("chat.retry")}
-                  </button>
-                </div>
-              </div>
+              <StatusState
+                variant="error"
+                title={t("chat.loadMessagesFailed")}
+                onRetry={() => messagesQuery.refetch()}
+                retryLabel={t("chat.retry")}
+              />
             ) : !hasTurns && !isLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <MessageSquare className="w-10 h-10 text-muted-foreground/20 mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">
-                    {t("chat.startConversation")}
-                  </p>
-                </div>
-              </div>
+              <StatusState
+                variant="empty"
+                icon={<MessageSquare className="w-10 h-10" />}
+                title={t("chat.startConversation")}
+              />
             ) : (
               <div className="space-y-4">
                 {turns.map((turn) => (
@@ -1482,14 +1471,14 @@ export default function ChatPanel({
 
                     {turn.status === "failed" && turn.errorMessage && (
                       <div className="flex justify-start">
-                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-red-600 max-w-[80%]">
+                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-destructive max-w-[80%]">
                           {turn.errorMessage}
                         </div>
                       </div>
                     )}
                     {turn.status === "interrupted" && (
                       <div className="flex justify-center">
-                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-red-500 max-w-[80%]">
+                        <div className="bg-danger-bg border border-danger-border rounded-lg px-3 py-2 text-xs text-destructive max-w-[80%]">
                           {turn.errorMessage || t("chat.chatInterrupted")}
                         </div>
                       </div>
