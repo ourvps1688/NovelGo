@@ -3,7 +3,6 @@ package search
 import (
 	"context"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -66,6 +65,19 @@ func (s *Service) SearchAll(ctx context.Context, novelID int64, query string) ([
 		return nil, nil
 	}
 
+	// 阶段2 B-8：入口只取一次章节列表 + 阅读编号映射，注入三路搜索，
+	// 消除 searchContent / searchRAG 各自再全表扫描一次、以及 SearchByNovel 内部重复 Pluck。
+	allChapters, err := s.chapStore.ListAllByNovel(ctx, nil, novelID)
+	if err != nil {
+		s.logger.Warn("search: 获取章节列表失败", "err", err)
+		allChapters = nil
+	}
+	readingNumbers, err := s.chapStore.GetReadingNumbersByNovel(ctx, nil, novelID)
+	if err != nil {
+		s.logger.Warn("search: 获取阅读编号失败", "err", err)
+		readingNumbers = nil
+	}
+
 	var (
 		wg             sync.WaitGroup
 		entityResults  []Result
@@ -74,9 +86,9 @@ func (s *Service) SearchAll(ctx context.Context, novelID int64, query string) ([
 	)
 
 	wg.Add(3)
-	go func() { defer wg.Done(); entityResults = s.searchEntities(ctx, novelID, query) }()
-	go func() { defer wg.Done(); contentResults = s.searchContent(ctx, novelID, query) }()
-	go func() { defer wg.Done(); ragResults = s.searchRAG(ctx, novelID, query) }()
+	go func() { defer wg.Done(); entityResults = s.searchEntities(ctx, novelID, query, readingNumbers) }()
+	go func() { defer wg.Done(); contentResults = s.searchContent(ctx, novelID, query, allChapters) }()
+	go func() { defer wg.Done(); ragResults = s.searchRAG(ctx, novelID, query, allChapters) }()
 	wg.Wait()
 
 	var results []Result
@@ -88,12 +100,17 @@ func (s *Service) SearchAll(ctx context.Context, novelID int64, query string) ([
 }
 
 // searchEntities 在各实体 store 上执行 LIKE 搜索。
-func (s *Service) searchEntities(ctx context.Context, novelID int64, query string) []Result {
+// readingNumbers 由 SearchAll 统一获取后注入，避免重复查询。
+func (s *Service) searchEntities(ctx context.Context, novelID int64, query string, readingNumbers map[int64]int) []Result {
 	var results []Result
-	readingNumbers, err := s.chapStore.GetReadingNumbersByNovel(ctx, nil, novelID)
-	if err != nil {
-		s.logger.Warn("chapter list for entity search failed", "err", err)
-		readingNumbers = nil
+	if readingNumbers == nil {
+		// 兜底（仅 SearchAll 注入失败时）：单独查询一次。
+		rn, err := s.chapStore.GetReadingNumbersByNovel(ctx, nil, novelID)
+		if err != nil {
+			s.logger.Warn("chapter list for entity search failed", "err", err)
+		} else {
+			readingNumbers = rn
+		}
 	}
 
 	// 人物
@@ -301,7 +318,7 @@ func (s *Service) searchEntities(ctx context.Context, novelID int64, query strin
 	}
 
 	// 章节
-	chapters, err := s.chapStore.SearchByNovel(ctx, nil, novelID, query, EntityLimit)
+	chapters, err := s.chapStore.SearchByNovel(ctx, nil, novelID, query, EntityLimit, readingNumbers)
 	if err != nil {
 		s.logger.Warn("chapter title search failed", "err", err)
 	} else {
@@ -323,20 +340,17 @@ func (s *Service) searchEntities(ctx context.Context, novelID int64, query strin
 }
 
 // searchContent 在章节正文中做精确字符串匹配，使用内存缓存避免重复读文件。
-func (s *Service) searchContent(ctx context.Context, novelID int64, query string) []Result {
-	s.ensureContentCache(novelID)
-
-	s.mu.RLock()
-	srcMap := s.cache[novelID]
-	// 拷贝一份防止 UpdateCachedChapter 并发写入
-	chapMap := make(map[int64]string, len(srcMap))
-	for k, v := range srcMap {
-		chapMap[k] = v
-	}
-	s.mu.RUnlock()
-
-	if len(chapMap) == 0 {
-		return nil
+// allChapters 由 SearchAll 统一查询后注入，避免二次全表扫描（阶段2 B-8）。
+// 正文按需懒加载（阶段2 B-10），仅在命中章节上保留内容，内存占用受 maxCachedChaptersPerNovel 限制。
+func (s *Service) searchContent(ctx context.Context, novelID int64, query string, allChapters []chapter.Chapter) []Result {
+	if len(allChapters) == 0 {
+		// 兜底：未注入章节列表时再查一次（极少路径）。
+		var err error
+		allChapters, err = s.chapStore.ListAllByNovel(ctx, nil, novelID)
+		if err != nil {
+			s.logger.Warn("search content: 获取章节列表失败，退化为仅搜已缓存章节", "err", err)
+			allChapters = nil
+		}
 	}
 
 	type match struct {
@@ -344,25 +358,32 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 		position  int // 命中字符偏移（按 rune 计）
 	}
 	var matches []match
+	// 仅缓存命中章节的正文（命中数受 ContentLimit 约束，内存可控），避免整本驻留。
+	matchedContent := make(map[int64]string)
 
-	allChapters, err := s.chapStore.ListAllByNovel(ctx, nil, novelID)
-	chapterIDs := make([]int64, 0, len(chapMap))
-	if err != nil {
-		s.logger.Warn("chapter list for search content failed; searching cached content without metadata", "err", err)
-		for chapterID := range chapMap {
-			chapterIDs = append(chapterIDs, chapterID)
+	// 迭代目标：正常路径遍历注入/回退查到的章节；DB 不可用时退化为仅遍历已缓存章节。
+	type chapterRef struct {
+		id       int64
+		filePath string
+	}
+	var refs []chapterRef
+	if len(allChapters) == 0 {
+		s.mu.RLock()
+		for chID := range s.cache[novelID] {
+			refs = append(refs, chapterRef{id: chID})
 		}
-		slices.Sort(chapterIDs)
+		s.mu.RUnlock()
 	} else {
 		for _, ch := range allChapters {
-			if _, ok := chapMap[ch.ID]; ok {
-				chapterIDs = append(chapterIDs, ch.ID)
-			}
+			refs = append(refs, chapterRef{id: ch.ID, filePath: ch.FilePath})
 		}
 	}
 
-	for _, chapterID := range chapterIDs {
-		content := chapMap[chapterID]
+	for _, ref := range refs {
+		content, ok := s.loadChapterContent(novelID, ref.id, ref.filePath)
+		if !ok {
+			continue
+		}
 		pos := 0
 		for {
 			idx := strings.Index(content[pos:], query)
@@ -370,16 +391,20 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 				break
 			}
 			absPos := utf8.RuneCountInString(content[:pos+idx])
-			matches = append(matches, match{chapterID: chapterID, position: absPos})
+			matches = append(matches, match{chapterID: ref.id, position: absPos})
+			matchedContent[ref.id] = content
 			pos = pos + idx + len(query)
+			if len(matches) >= ContentLimit {
+				break
+			}
 		}
 		if len(matches) >= ContentLimit {
 			break
 		}
 	}
 
-	if len(matches) > ContentLimit {
-		matches = matches[:ContentLimit]
+	if len(matches) == 0 {
+		return nil
 	}
 
 	chapMeta := make(map[int64]chapter.Chapter, len(allChapters))
@@ -389,7 +414,13 @@ func (s *Service) searchContent(ctx context.Context, novelID int64, query string
 
 	var results []Result
 	for _, m := range matches {
-		content := chapMap[m.chapterID]
+		content, ok := matchedContent[m.chapterID]
+		if !ok {
+			content, ok = s.loadChapterContent(novelID, m.chapterID, chapMeta[m.chapterID].FilePath)
+		}
+		if !ok {
+			continue
+		}
 		prefix, hit, suffix := buildContext(content, m.position, query)
 		meta := chapMeta[m.chapterID]
 		results = append(results, Result{
@@ -441,39 +472,37 @@ func buildContext(content string, matchRunePos int, query string) (prefix, hit, 
 	return prefix, hit, suffix
 }
 
-// ensureContentCache 懒加载指定小说的全部章节内容到内存。
-func (s *Service) ensureContentCache(novelID int64) {
+// loadChapterContent 返回指定章节的正文，按需懒加载并缓存（带容量上限）。
+// 阶段2 B-10：取代原先“首次搜索即把整本读进内存”的 ensureContentCache，
+// 避免长篇小说首次搜索占用数百 MB 且同步阻塞；仅缓存命中章节，超出上限不再缓存。
+func (s *Service) loadChapterContent(novelID, chapterID int64, filePath string) (string, bool) {
 	s.mu.RLock()
-	_, ok := s.cache[novelID]
+	if m, ok := s.cache[novelID]; ok {
+		if c, ok2 := m[chapterID]; ok2 {
+			s.mu.RUnlock()
+			return c, true
+		}
+	}
 	s.mu.RUnlock()
-	if ok {
-		return
+
+	content, err := git.ReadFile(novelID, filePath)
+	if err != nil {
+		return "", false
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.cache[novelID]; ok {
-		return
+	m := s.cache[novelID]
+	if m == nil {
+		m = make(map[int64]string)
+		s.cache[novelID] = m
 	}
-
-	chapters, err := s.chapStore.ListAllByNovel(context.Background(), nil, novelID)
-	if err != nil {
-		s.logger.Warn("搜索缓存: 获取章节列表失败", "novel_id", novelID, "err", err)
-		return
+	// 容量上限：超出后仅本次搜索可用、不写缓存，避免无限增长。
+	if len(m) < maxCachedChaptersPerNovel {
+		m[chapterID] = content
 	}
+	s.mu.Unlock()
 
-	chapMap := make(map[int64]string, len(chapters))
-	for _, ch := range chapters {
-		content, err := git.ReadFile(novelID, ch.FilePath)
-		if err != nil {
-			continue
-		}
-		chapMap[ch.ID] = content
-	}
-
-	s.cache[novelID] = chapMap
-	s.logger.Debug("搜索缓存: 已加载章节内容", "novel_id", novelID, "chapters", len(chapMap))
+	return content, true
 }
 
 // UpdateCachedChapter 在章节保存后更新缓存中的对应章节内容。
@@ -495,7 +524,8 @@ func (s *Service) DeleteCachedChapter(novelID, chapterID int64) {
 }
 
 // searchRAG 执行向量语义搜索。
-func (s *Service) searchRAG(ctx context.Context, novelID int64, query string) []Result {
+// allChapters 由 SearchAll 统一查询后注入，避免二次全表扫描（阶段2 B-8）。
+func (s *Service) searchRAG(ctx context.Context, novelID int64, query string, allChapters []chapter.Chapter) []Result {
 	if s.vectorStore == nil {
 		return nil
 	}
@@ -523,14 +553,9 @@ func (s *Service) searchRAG(ctx context.Context, novelID int64, query string) []
 
 	reranked := rag.MMRRerank(query, filtered, RagTopK, 0.7)
 
-	allChapters, err := s.chapStore.ListAllByNovel(ctx, nil, novelID)
-	chapMeta := make(map[int64]chapter.Chapter)
-	if err != nil {
-		s.logger.Warn("chapter list for RAG search failed", "err", err)
-	} else {
-		for _, ch := range allChapters {
-			chapMeta[ch.ID] = ch
-		}
+	chapMeta := make(map[int64]chapter.Chapter, len(allChapters))
+	for _, ch := range allChapters {
+		chapMeta[ch.ID] = ch
 	}
 
 	var results []Result

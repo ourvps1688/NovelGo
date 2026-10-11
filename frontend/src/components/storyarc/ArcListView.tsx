@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useMemo } from "react";
+import { useCallback, useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { GitBranch, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -6,7 +6,8 @@ import { useThemeStore } from "@/stores/useThemeStore";
 import { arcPalette } from "./arcColors";
 import { storyarcKeys, arcNodeKeys, maxChapterKeys } from "@/lib/queryKeys";
 import type { storyarc } from "@/lib/wailsjs/go/models";
-import StoryArcGraph from "@/components/storyarc/StoryArcGraph";
+// 阶段2 F-2：关系图依赖 @antv/g6（体积大、仅 swimlane 标签页用到），按需懒加载。
+const StoryArcGraph = lazy(() => import("@/components/storyarc/StoryArcGraph"));
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import AutoGrowTextarea from "@/components/ui/AutoGrowTextarea";
@@ -800,7 +801,15 @@ export default function ArcListView({ novelId }: Props) {
       </div>
 
       {viewTab === "swimlane" ? (
-        <StoryArcGraph novelId={novelId} />
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {t("storyarc.loading")}
+            </div>
+          }
+        >
+          <StoryArcGraph novelId={novelId} />
+        </Suspense>
       ) : loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
           {t("storyarc.loading")}

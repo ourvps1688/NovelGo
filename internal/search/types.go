@@ -24,4 +24,8 @@ const (
 	RagTopK       = 8  // RAG 返回数
 	ContentLimit  = 10 // 正文精确匹配最多返回数
 	ContextRadius = 15 // 命中上下文半径（中文字符），mark 居中简短
+
+	// maxCachedChaptersPerNovel 是单本小说正文缓存的容量上限（阶段2 B-10）。
+	// 超出后仅本次搜索可用、不再写缓存，避免长篇小说首次搜索占用数百 MB。
+	maxCachedChaptersPerNovel = 400
 )

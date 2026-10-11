@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { ChevronRight, MapPin, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import type { location } from "@/lib/wailsjs/go/models";
-import LocationGraph from "@/components/location/LocationGraph";
+// 阶段2 F-2：关系图依赖 @antv/g6（体积大、仅 graph 标签页用到），按需懒加载。
+const LocationGraph = lazy(() => import("@/components/location/LocationGraph"));
 import TagInput from "@/components/shared/TagInput";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
@@ -406,7 +407,15 @@ export default function LocationListView({ novelId }: Props) {
       </div>
 
       {viewTab === "graph" ? (
-        <LocationGraph novelId={novelId} focus={focus} />
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {t("location.loading")}
+            </div>
+          }
+        >
+          <LocationGraph novelId={novelId} focus={focus} />
+        </Suspense>
       ) : loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
           {t("location.loading")}

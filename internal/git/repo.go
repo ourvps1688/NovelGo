@@ -171,15 +171,56 @@ func (r *Repo) StageAll() error {
 }
 
 func (r *Repo) Commit(msg string) (string, error) {
-	_, stderr, err := r.runInDir("commit", "-m", msg)
+	out, stderr, err := r.runInDir("commit", "-m", msg)
 	if err != nil {
 		return "", fmt.Errorf("git: commit: %s: %w", stderr, err)
 	}
-	hash, _, err := r.runInDir("rev-parse", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("git: rev-parse after commit: %s: %w", stderr, err)
+	// 阶段2 B-11：直接从 commit 自身输出解析 hash，省去原先再单独
+	// `git rev-parse HEAD` 的一次进程调用（每 turn 提交从 3 进程降为 2 进程）。
+	// 普通 `git commit` 把 `[<branch> <hash>] <subject>` 打到 stderr，
+	// hash 为短哈希，对 revert / log 已足够；解析失败才回退 rev-parse。
+	if h := parseCommitHash(out + "\n" + stderr); h != "" {
+		return h, nil
+	}
+	hash, _, e2 := r.runInDir("rev-parse", "HEAD")
+	if e2 != nil {
+		return "", fmt.Errorf("git: rev-parse after commit: %s: %w", stderr, e2)
 	}
 	return strings.TrimSpace(hash), nil
+}
+
+// parseCommitHash 从 `git commit` 的 stdout/stderr 提取 commit hash。
+// 形如： [main a1b2c3d] subject 或 [a1b2c3d4...(HEAD -> main)] subject
+// 兼容短哈希（≥7 位）与完整 40 位 SHA-1。
+func parseCommitHash(out string) string {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if !strings.HasPrefix(line, "[") {
+			continue
+		}
+		end := strings.IndexByte(line, ' ')
+		if end < 0 {
+			end = len(line)
+		}
+		h := strings.TrimPrefix(line[:end], "[")
+		if isHexHash(h) {
+			return h
+		}
+	}
+	return ""
+}
+
+// isHexHash 判断字符串是否全为十六进制字符（7~40 位，兼容短/完整 git SHA-1）。
+func isHexHash(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Repo) HasUncommitted() (bool, error) {

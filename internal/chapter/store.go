@@ -381,7 +381,10 @@ func (s *Store) Delete(ctx context.Context, tx *gorm.DB, novelID, chapterID int6
 }
 
 // SearchByNovel 按关键词搜索某小说的章节，匹配标题和摘要。
-func (s *Store) SearchByNovel(ctx context.Context, tx *gorm.DB, novelID int64, query string, limit int) ([]Chapter, error) {
+// SearchByNovel 按标题/摘要模糊匹配章节。
+// readingNumbers 为可选参数：传入非 nil 时直接复用（避免重复查询，阶段2 B-8）；
+// 为 nil 时内部自行查询（兼容前端直接调用等场景）。
+func (s *Store) SearchByNovel(ctx context.Context, tx *gorm.DB, novelID int64, query string, limit int, readingNumbers map[int64]int) ([]Chapter, error) {
 	var chapters []Chapter
 	if err := s.orderedByNovel(ctx, tx, novelID).
 		Where("chapters.title LIKE ? OR chapters.summary LIKE ?", "%"+query+"%", "%"+query+"%").
@@ -394,9 +397,12 @@ func (s *Store) SearchByNovel(ctx context.Context, tx *gorm.DB, novelID int64, q
 		chapters[i].FilePath = git.ChapterPath(chapters[i].ID)
 		chapters[i].OutlineFilePath = git.OutlinePath(chapters[i].ID)
 	}
-	readingNumbers, err := s.GetReadingNumbersByNovel(ctx, tx, novelID)
-	if err != nil {
-		return nil, err
+	if readingNumbers == nil {
+		rn, err := s.GetReadingNumbersByNovel(ctx, tx, novelID)
+		if err != nil {
+			return nil, err
+		}
+		readingNumbers = rn
 	}
 	for i := range chapters {
 		chapters[i].ReadingNumber = readingNumbers[chapters[i].ID]

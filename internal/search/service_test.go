@@ -129,7 +129,7 @@ func TestSearchEntities_Character(t *testing.T) {
 	db.Create(&character.Character{NovelID: 1, Name: "李四"})
 	db.Create(&character.Character{NovelID: 2, Name: "张三丰"})
 
-	results := svc.searchEntities(ctx, 1, "张三")
+	results := svc.searchEntities(ctx, 1, "张三", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -152,7 +152,7 @@ func TestSearchEntities_Location(t *testing.T) {
 	db.Create(&location.Location{NovelID: 1, Name: "华山"})
 	db.Create(&location.Location{NovelID: 1, Name: "少林寺"})
 
-	results := svc.searchEntities(ctx, 1, "华")
+	results := svc.searchEntities(ctx, 1, "华", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -168,7 +168,7 @@ func TestSearchEntities_Timeline(t *testing.T) {
 
 	db.Create(&timeline.TimelineEntry{NovelID: 1, Category: "foreshadowing", Title: "张三复仇", Content: "复仇之路", TargetReadingNumber: 20, Status: "pending"})
 
-	results := svc.searchEntities(ctx, 1, "复仇")
+	results := svc.searchEntities(ctx, 1, "复仇", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -188,7 +188,7 @@ func TestSearchEntities_StoryArc(t *testing.T) {
 
 	db.Create(&storyarc.StoryArc{NovelID: 1, Name: "复仇之路", Description: "主角复仇", ArcType: "main", Status: "active"})
 
-	results := svc.searchEntities(ctx, 1, "复仇")
+	results := svc.searchEntities(ctx, 1, "复仇", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -205,7 +205,7 @@ func TestSearchEntities_Chapter(t *testing.T) {
 	db.Create(&chapter.Chapter{NovelID: 1, SortOrder: 1, Title: "初入江湖"})
 	db.Create(&chapter.Chapter{NovelID: 1, SortOrder: 2, Title: "华山论剑"})
 
-	results := svc.searchEntities(ctx, 1, "江湖")
+	results := svc.searchEntities(ctx, 1, "江湖", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -221,7 +221,7 @@ func TestSearchEntities_NoMatch(t *testing.T) {
 
 	db.Create(&character.Character{NovelID: 1, Name: "张三"})
 
-	results := svc.searchEntities(ctx, 1, "不存在的")
+	results := svc.searchEntities(ctx, 1, "不存在的", nil)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}
@@ -236,7 +236,7 @@ func TestSearchEntities_Limit(t *testing.T) {
 		db.Create(&character.Character{NovelID: 1, Name: "测试人"})
 	}
 
-	results := svc.searchEntities(ctx, 1, "测试")
+	results := svc.searchEntities(ctx, 1, "测试", nil)
 	if len(results) > EntityLimit {
 		t.Errorf("expected at most %d results, got %d", EntityLimit, len(results))
 	}
@@ -249,7 +249,7 @@ func TestSearchRAG_NilVectorStore(t *testing.T) {
 	svc := newTestService(db)
 	ctx := context.Background()
 
-	results := svc.searchRAG(ctx, 1, "测试")
+	results := svc.searchRAG(ctx, 1, "测试", nil)
 	if results != nil {
 		t.Errorf("expected nil results when vectorStore is nil, got %d", len(results))
 	}
@@ -379,7 +379,7 @@ func TestUpdateCachedChapter_UsesChapterID(t *testing.T) {
 
 	svc.UpdateCachedChapter(1, 42, "更新后的正文包含唯一关键词")
 
-	results := svc.searchContent(ctx, 1, "唯一关键词")
+	results := svc.searchContent(ctx, 1, "唯一关键词", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -407,7 +407,7 @@ func TestSearchContent_UsesCacheWhenChapterMetadataUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	results := svc.searchContent(context.Background(), 1, "唯一关键词")
+	results := svc.searchContent(context.Background(), 1, "唯一关键词", nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result from cache fallback, got %d", len(results))
 	}
@@ -470,7 +470,7 @@ func TestSearchContent_NoCache(t *testing.T) {
 	ctx := context.Background()
 
 	// 没有任何缓存，也没有章节文件，应返回空
-	results := svc.searchContent(ctx, 1, "测试")
+	results := svc.searchContent(ctx, 1, "测试", nil)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results without cache, got %d", len(results))
 	}
@@ -496,7 +496,7 @@ func TestSearchContent_MatchPosition(t *testing.T) {
 	svc.cache[1] = map[int64]string{1: content}
 	svc.mu.Unlock()
 
-	results := svc.searchContent(ctx, 1, query)
+	results := svc.searchContent(ctx, 1, query, nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -527,7 +527,7 @@ func TestSearchContent_MultipleMatches(t *testing.T) {
 	svc.cache[2] = map[int64]string{1: content}
 	svc.mu.Unlock()
 
-	results := svc.searchContent(ctx, 2, query)
+	results := svc.searchContent(ctx, 2, query, nil)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -568,7 +568,7 @@ func TestSearchRAG_EmptyResults(t *testing.T) {
 	ctx := context.Background()
 
 	// vectorStore 为 nil 时返回 nil
-	results := svc.searchRAG(ctx, 999, "查询")
+	results := svc.searchRAG(ctx, 999, "查询", nil)
 	if results != nil {
 		t.Errorf("expected nil, got %d results", len(results))
 	}

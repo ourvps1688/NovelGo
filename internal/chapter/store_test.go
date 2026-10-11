@@ -466,7 +466,7 @@ func TestChSearchByNovelOrdersBySortOrder(t *testing.T) {
 	db.Create(&Chapter{NovelID: 1, SortOrder: 2, Title: "相同"})
 	db.Create(&Chapter{NovelID: 1, SortOrder: 1, Title: "相同"})
 
-	chapters, err := s.SearchByNovel(ctx, nil, 1, "相同", 10)
+	chapters, err := s.SearchByNovel(ctx, nil, 1, "相同", 10, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

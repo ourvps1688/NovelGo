@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { Pencil, Plus, Trash2, UsersRound, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import type { character } from "@/lib/wailsjs/go/models";
-import CharacterGraph from "@/components/character/CharacterGraph";
+// 阶段2 F-2：关系图依赖 @antv/g6（体积大、仅 graph 标签页用到），按需懒加载。
+const CharacterGraph = lazy(() => import("@/components/character/CharacterGraph"));
 import TagInput from "@/components/shared/TagInput";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
@@ -351,7 +352,15 @@ function CharacterListViewContent({ novelId }: Props) {
       {viewTab === "list" && <CharacterGroupToolbar novelId={novelId} />}
 
       {viewTab === "graph" ? (
-        <CharacterGraph novelId={novelId} focus={focus} />
+        <Suspense
+          fallback={
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {t("character.loading")}
+            </div>
+          }
+        >
+          <CharacterGraph novelId={novelId} focus={focus} />
+        </Suspense>
       ) : loading ? (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
           {t("character.loading")}

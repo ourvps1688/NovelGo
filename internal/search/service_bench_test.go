@@ -108,7 +108,7 @@ func BenchmarkSearchContent_3000Chapters(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		results := svc.searchContent(ctx, novelID, query)
+		results := svc.searchContent(ctx, novelID, query, nil)
 		_ = results
 	}
 }
@@ -122,7 +122,7 @@ func BenchmarkSearchContent_CacheCopy(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		results := svc.searchContent(ctx, novelID, query)
+		results := svc.searchContent(ctx, novelID, query, nil)
 		_ = results
 	}
 }
@@ -136,7 +136,7 @@ func BenchmarkSearchEntities_3000Chapters(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		results := svc.searchEntities(ctx, novelID, query)
+		results := svc.searchEntities(ctx, novelID, query, nil)
 		_ = results
 	}
 }
@@ -213,12 +213,12 @@ func TestSearchContent_PrintStats(t *testing.T) {
 	t.Logf("缓存大小: %d 字节 (%.1f MB)", totalBytes, totalMB)
 
 	// 预热：确保缓存已加载
-	svc.searchContent(context.Background(), novelID, "预热")
+	svc.searchContent(context.Background(), novelID, "预热", nil)
 
 	// 测 searchContent 耗时
 	query := "张三拔剑"
 	start := time.Now()
-	results := svc.searchContent(context.Background(), novelID, query)
+	results := svc.searchContent(context.Background(), novelID, query, nil)
 	elapsed := time.Since(start)
 	t.Logf("searchContent(%q) 耗时: %v, 命中 %d 条", query, elapsed, len(results))
 
@@ -234,7 +234,7 @@ func TestSearchContent_PrintStats(t *testing.T) {
 	// 测空查询（缓存拷贝开销）
 	emptyQuery := "不存在的词xyz123"
 	startEmpty := time.Now()
-	svc.searchContent(context.Background(), novelID, emptyQuery)
+	svc.searchContent(context.Background(), novelID, emptyQuery, nil)
 	elapsedEmpty := time.Since(startEmpty)
 	t.Logf("searchContent(空查询) 遍历 27 MB 耗时: %v", elapsedEmpty)
 }
