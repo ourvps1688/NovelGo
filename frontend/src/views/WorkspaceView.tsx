@@ -372,7 +372,7 @@ export default function WorkspaceView({
     <>
       <div className="h-screen flex flex-col overflow-hidden">
         <header
-          className="h-11 flex items-center border-b bg-sidebar shrink-0 select-none cursor-default"
+          className="h-11 flex items-center border-b bg-sidebar shadow-sm relative z-10 shrink-0 select-none cursor-default"
           style={{ "--wails-draggable": "drag" } as React.CSSProperties}
           onDoubleClick={() => {
             WindowToggleMaximise();

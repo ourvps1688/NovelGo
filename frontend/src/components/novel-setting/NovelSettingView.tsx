@@ -217,7 +217,7 @@ export default function NovelSettingView({ novelId }: Props) {
             ) : (
               <div className="space-y-2">
                 {editMode?.type === "create" && (
-                  <div className="rounded-lg border border-dashed border-border bg-card/60 p-4">
+                  <div className="rounded-xl border border-dashed border-border bg-card/60 p-4 shadow-xs">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-xs font-semibold text-foreground">
                         {t("novelSetting.newSetting")}
@@ -256,7 +256,7 @@ export default function NovelSettingView({ novelId }: Props) {
                   return isEditing ? (
                     <div
                       key={item.id}
-                      className="rounded-lg border border-border bg-card p-4"
+                      className="rounded-xl border border-border bg-card p-4 shadow-xs"
                     >
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-xs font-semibold text-foreground">
@@ -300,12 +300,12 @@ export default function NovelSettingView({ novelId }: Props) {
                     <div
                       key={item.id}
                       data-setting-id={item.id}
-                      className={`rounded-lg border border-border bg-card hover:border-border hover:shadow-sm transition-shadow group ${
+                      className={`rounded-xl border border-border bg-card shadow-xs hover:border-border/60 hover:shadow-md hover:-translate-y-px transition-all group ${
                         highlightedId === item.id ? "ring-2 ring-primary" : ""
                       }`}
                     >
                       <div className="flex items-start gap-3 px-4 py-3">
-                        <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-secondary text-muted-foreground">
+                        <span className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium bg-secondary text-muted-foreground border border-border/50">
                           {item.category || t("novelSetting.uncategorized")}
                         </span>
                         <p className="flex-1 text-sm text-foreground leading-relaxed whitespace-pre-wrap">

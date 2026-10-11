@@ -54,9 +54,9 @@ export default function SettingsDialog({
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
 
       {/* 弹窗 */}
-      <div className="relative bg-background rounded-xl shadow-2xl border flex w-[880px] h-[700px] max-w-[95vw] max-h-[90vh]">
+      <div className="relative bg-background rounded-xl shadow-2xl border flex w-[880px] h-[700px] max-w-[95vw] max-h-[90vh] overflow-hidden">
         {/* 左侧导航 */}
-        <nav className="w-[160px] border-r py-4 px-2 flex flex-col gap-1 shrink-0">
+        <nav className="w-[180px] border-r py-4 px-3 flex flex-col gap-1 shrink-0">
           <div className="text-sm font-medium px-3 pb-3 text-foreground">
             {t("settings.title")}
           </div>
@@ -64,10 +64,10 @@ export default function SettingsDialog({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left ${
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left border-l-2 ${
                 activeTab === tab.id
-                  ? "bg-primary/10 text-primary font-medium"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  ? "bg-primary/10 text-primary font-medium border-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border-transparent"
               }`}
             >
               {tab.icon}

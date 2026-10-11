@@ -179,6 +179,13 @@
   --contribution-2: oklch(0.42 0.15 155);
   --contribution-3: oklch(0.52 0.18 155);
   --contribution-4: oklch(0.65 0.22 155);
+  /* 暗色下加深阴影以拉开层级（亮色阴影在深色背景上看不见） */
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-xs: 0 1px 2px -1px rgb(0 0 0 / 0.6), 0 1px 3px -2px rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 2px 4px -2px rgb(0 0 0 / 0.7), 0 1px 2px -2px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 10px -4px rgb(0 0 0 / 0.8), 0 2px 6px -4px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 10px 24px -10px rgb(0 0 0 / 0.9), 0 4px 12px -8px rgb(0 0 0 / 0.7);
+  --shadow-xl: 0 18px 44px -12px rgb(0 0 0 / 0.95), 0 8px 22px -12px rgb(0 0 0 / 0.8);
 }
 
 * {
@@ -269,6 +276,14 @@ body {
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  /* ── 柔和中性阴影体系（墨色风格，统一层级）──────────
+     通过 @theme inline 让工具类引用变量，便于暗色主题运行时覆盖。 */
+  --shadow-2xs: 0 1px 2px 0 rgb(15 15 15 / 0.05);
+  --shadow-xs: 0 1px 2px -1px rgb(15 15 15 / 0.07), 0 1px 3px -2px rgb(15 15 15 / 0.06);
+  --shadow-sm: 0 2px 4px -2px rgb(15 15 15 / 0.10), 0 1px 2px -2px rgb(15 15 15 / 0.06);
+  --shadow-md: 0 4px 10px -4px rgb(15 15 15 / 0.12), 0 2px 6px -4px rgb(15 15 15 / 0.08);
+  --shadow-lg: 0 10px 24px -10px rgb(15 15 15 / 0.16), 0 4px 12px -8px rgb(15 15 15 / 0.10);
+  --shadow-xl: 0 18px 44px -12px rgb(15 15 15 / 0.22), 0 8px 22px -12px rgb(15 15 15 / 0.14);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -289,6 +304,42 @@ body {
     overflow: hidden;
     @apply font-sans;
   }
+  /* 更柔和、克制的全局焦点环 */
+  :where(
+    button,
+    a,
+    input,
+    textarea,
+    select,
+    [role="button"],
+    [tabindex]
+  ):focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) * 0.6);
+  }
+  /* 文本选区与品牌主色呼应 */
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+}
+
+/* ── 背景质感：极淡渐变去除死板，明暗双主题 ───────────── */
+[data-theme="light"] body {
+  background-image: radial-gradient(
+    120% 80% at 50% -20%,
+    oklch(0.992 0 0) 0%,
+    oklch(0.984 0 0) 60%
+  );
+}
+
+[data-theme="dark"] body {
+  background-image: radial-gradient(
+    130% 100% at 50% -10%,
+    oklch(0.21 0 0) 0%,
+    oklch(0.16 0 0) 55%,
+    oklch(0.145 0 0) 100%
+  );
 }
 
 /* 桌面端窄滚动条 */

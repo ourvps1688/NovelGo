@@ -323,7 +323,7 @@ export default function ChatInput({
           </span>
         </div>
       )}
-      <div className="flex items-end gap-2 bg-muted/30 rounded-2xl border px-2 py-2">
+      <div className="flex items-end gap-2 bg-muted/40 rounded-2xl border border-border px-2 py-2 transition-colors focus-within:border-primary/40 focus-within:shadow-xs focus-within:bg-muted/50">
         <textarea
           ref={textareaRef}
           placeholder={placeholder}

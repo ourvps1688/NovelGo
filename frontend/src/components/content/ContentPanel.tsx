@@ -898,10 +898,10 @@ const ContentPanel = forwardRef<ContentPanelHandle>(
     // ── 渲染 ────────────────────────────────────────────────
 
     const tabBtnClass = (active: boolean) =>
-      `px-3 py-1 text-xs rounded transition-colors cursor-pointer ${
+      `px-3 py-1 text-xs rounded-md transition-colors cursor-pointer ${
         active
-          ? "bg-muted text-foreground font-medium"
-          : "text-muted-foreground hover:text-foreground"
+          ? "bg-background text-foreground font-medium shadow-xs"
+          : "text-muted-foreground hover:text-foreground hover:bg-background/70"
       }`;
 
     // 空状态
@@ -1017,11 +1017,11 @@ const ContentPanel = forwardRef<ContentPanelHandle>(
           onSelect={setActiveTabId}
           onClose={handleCloseTab}
         />
-        <div className="flex items-center justify-between px-4 py-2 border-b shrink-0 select-none">
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/20 shrink-0 select-none">
           <span className="text-sm font-medium truncate">
             {activeTab.title}
           </span>
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0 bg-muted/60 p-0.5 rounded-lg">
             {isStandaloneMarkdownPath(activeTab.path) ? (
               <button
                 onClick={() =>

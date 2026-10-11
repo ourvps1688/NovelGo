@@ -117,9 +117,11 @@ export default function BookshelfView({
 
       {/* 空状态 */}
       {novels.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
-          <BookOpen className="w-12 h-12 opacity-30" />
-          <p className="text-sm">{t("novel.noWorksYet")}</p>
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex flex-col items-center gap-3 text-muted-foreground border-2 border-dashed border-border rounded-2xl px-16 py-12">
+            <BookOpen className="w-12 h-12 opacity-40" />
+            <p className="text-sm">{t("novel.noWorksYet")}</p>
+          </div>
         </div>
       ) : (
         /* 书架网格 */
@@ -128,8 +130,8 @@ export default function BookshelfView({
             {novels.map((n) => (
               <div
                 key={n.id}
-                className={`group relative flex flex-col rounded-lg border bg-card hover:shadow-md transition-shadow cursor-pointer select-none
-                  ${n.id === activeNovelId ? "ring-2 ring-primary" : ""}`}
+                className={`group relative flex flex-col rounded-xl border bg-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:border-foreground/15 cursor-pointer select-none overflow-hidden
+                  ${n.id === activeNovelId ? "ring-2 ring-primary border-primary/30" : ""}`}
               >
                 {/* 点击卡片主体切换书 */}
                 <div
@@ -165,11 +167,11 @@ export default function BookshelfView({
                     {n.title}
                   </h3>
                   {n.genre ? (
-                    <span className="inline-block self-start text-[11px] px-1.5 py-0.5 rounded bg-primary/10 text-primary mb-1.5">
+                    <span className="inline-block self-start text-[11px] px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium border border-primary/15 mb-1.5">
                       {n.genre}
                     </span>
                   ) : (
-                    <span className="inline-block self-start text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground mb-1.5">
+                    <span className="inline-block self-start text-[11px] px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border mb-1.5">
                       {t("novel.uncategorized")}
                     </span>
                   )}

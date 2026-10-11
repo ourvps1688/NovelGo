@@ -572,7 +572,7 @@ export default function TimelineView({ novelId }: Props) {
                 </button>
               ))}
             </div>
-            <div className="rounded-lg border border-border bg-card p-4 min-h-[80px] relative group">
+            <div className="rounded-xl border border-border bg-card p-4 min-h-[80px] relative group shadow-xs">
               {editMode?.type === "plan" && editMode.scope === planTab ? (
                 <div className="space-y-3">
                   <AutoGrowTextarea
@@ -707,7 +707,7 @@ export default function TimelineView({ novelId }: Props) {
 
             {/* Create form */}
             {editMode?.type === "create" && (
-              <div className="rounded-lg border border-border bg-card p-4 mb-4">
+              <div className="rounded-xl border border-border bg-card p-4 mb-4 shadow-xs">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-foreground">
                     {t("timeline.newEntry")}
@@ -797,7 +797,7 @@ export default function TimelineView({ novelId }: Props) {
                         return isEditing ? (
                           <div
                             key={entry.id}
-                            className="rounded-lg border border-border bg-card p-4"
+                            className="rounded-xl border border-border bg-card p-4 shadow-xs"
                           >
                             <div className="flex items-center justify-between mb-3">
                               <span className="text-xs font-semibold text-foreground">
@@ -848,7 +848,7 @@ export default function TimelineView({ novelId }: Props) {
                           <div
                             key={entry.id}
                             data-entry-id={entry.id}
-                            className={`rounded-lg border border-border bg-card hover:border-border hover:shadow-sm transition-shadow group ${highlightedId === entry.id ? "ring-2 ring-primary" : ""}`}
+                            className={`rounded-xl border border-border bg-card shadow-xs hover:border-border/60 hover:shadow-md hover:-translate-y-px transition-all group ${highlightedId === entry.id ? "ring-2 ring-primary" : ""}`}
                           >
                             <div className="flex items-center gap-3 px-4 py-3">
                               <span

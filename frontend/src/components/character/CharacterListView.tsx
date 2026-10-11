@@ -429,7 +429,7 @@ function CharacterListViewContent({ novelId }: Props) {
 
             {/* Create form */}
             {editMode?.type === "create" && (
-              <div className="rounded-lg border border-border bg-card p-4">
+              <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-foreground">
                     新建角色
@@ -485,7 +485,7 @@ function CharacterListViewContent({ novelId }: Props) {
                       <div
                         key={c.id}
                         data-character-id={c.id}
-                        className="rounded-lg border border-border bg-card p-4"
+                        className="rounded-xl border border-border bg-card p-4 shadow-xs"
                       >
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-xs font-semibold text-foreground">
@@ -522,7 +522,7 @@ function CharacterListViewContent({ novelId }: Props) {
                     <div
                       key={c.id}
                       data-character-id={c.id}
-                      className={`rounded-lg border border-border bg-card hover:border-border hover:shadow-sm transition-shadow group ${highlightedId === c.id ? "ring-2 ring-primary" : ""}`}
+                      className={`rounded-xl border border-border bg-card shadow-xs hover:border-border/60 hover:shadow-md hover:-translate-y-px transition-all group ${highlightedId === c.id ? "ring-2 ring-primary" : ""}`}
                     >
                       <div className="flex items-start gap-3 px-4 py-3">
                         {groups.length > 0 && (
@@ -542,7 +542,7 @@ function CharacterListViewContent({ novelId }: Props) {
                             className="mt-2 accent-primary"
                           />
                         )}
-                        <span className="shrink-0 w-8 h-8 rounded-full bg-tag-blue text-tag-blue-foreground text-xs font-medium flex items-center justify-center">
+                        <span className="shrink-0 w-9 h-9 rounded-full bg-tag-blue text-tag-blue-foreground text-xs font-semibold flex items-center justify-center ring-1 ring-inset ring-black/5 shadow-xs">
                           {(c.name ?? "").charAt(0) || "?"}
                         </span>
                         <div className="flex-1 min-w-0">

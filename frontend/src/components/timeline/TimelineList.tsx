@@ -87,7 +87,7 @@ export default function SidebarTimelineList({ novelId }: Props) {
             <div
               key={e.id}
               onClick={() => focusEntity("timeline", e.id)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-muted transition-colors group"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left cursor-pointer hover:bg-muted hover:rounded-md transition-colors group"
             >
               {catIcon(e.category)}
               <div className="flex-1 min-w-0">

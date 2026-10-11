@@ -61,7 +61,7 @@ export default function TabBar({
             ref={isActive ? activeTabRef : undefined}
             className={`group flex items-center gap-1 px-3 py-1.5 text-xs cursor-pointer border-r shrink-0 transition-colors select-none ${
               isActive
-                ? "bg-background text-foreground border-t-2 border-t-blue-500 -mt-[1px] hover:bg-primary/5"
+                ? "bg-background text-foreground border-t-2 border-t-primary -mt-[1px] hover:bg-primary/5"
                 : "text-muted-foreground hover:bg-primary/15 hover:text-foreground"
             } ${tab.type === "diff" ? "italic" : ""}`}
             onClick={() => onSelect(tab.id)}
