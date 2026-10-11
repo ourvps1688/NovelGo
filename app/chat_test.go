@@ -107,7 +107,7 @@ func TestLoadAPIMessages_NoDuplicates(t *testing.T) {
 	}
 	createMsgsInOrder(t, app, msgs...)
 
-	result, err := app.loadAPIMessages(ctx, sessionID, 1)
+	result, _, err := app.loadAPIMessages(ctx, sessionID, 1)
 	require.NoError(t, err)
 	require.Len(t, result, 4, "无重复时所有消息应保留")
 
@@ -148,7 +148,7 @@ func TestLoadAPIMessages_AssistantToolCallsDeduped(t *testing.T) {
 	}
 	createMsgsInOrder(t, app, msgs...)
 
-	result, err := app.loadAPIMessages(ctx, sessionID, 1)
+	result, _, err := app.loadAPIMessages(ctx, sessionID, 1)
 	require.NoError(t, err)
 	require.Len(t, result, 2, "user + assistant 两条消息")
 
@@ -183,7 +183,7 @@ func TestLoadAPIMessages_OrphanToolMessageSkipped(t *testing.T) {
 	}
 	createMsgsInOrder(t, app, msgs...)
 
-	result, err := app.loadAPIMessages(ctx, sessionID, 1)
+	result, _, err := app.loadAPIMessages(ctx, sessionID, 1)
 	require.NoError(t, err)
 	require.Len(t, result, 3, "orphan tool 消息应被跳过")
 
@@ -211,7 +211,7 @@ func TestLoadAPIMessages_DuplicateToolMessageSkipped(t *testing.T) {
 	}
 	createMsgsInOrder(t, app, msgs...)
 
-	result, err := app.loadAPIMessages(ctx, sessionID, 1)
+	result, _, err := app.loadAPIMessages(ctx, sessionID, 1)
 	require.NoError(t, err)
 	require.Len(t, result, 3, "重复 tool 消息应只保留一条")
 
@@ -246,7 +246,7 @@ func TestLoadAPIMessages_MultipleTurns(t *testing.T) {
 	}
 	createMsgsInOrder(t, app, msgs...)
 
-	result, err := app.loadAPIMessages(ctx, sessionID, 1)
+	result, _, err := app.loadAPIMessages(ctx, sessionID, 1)
 	require.NoError(t, err)
 	require.Len(t, result, 6, "跨 turn 消息应全部保留")
 

@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import type { character } from "@/lib/wailsjs/go/models";
 // 阶段2 F-2：关系图依赖 @antv/g6（体积大、仅 graph 标签页用到），按需懒加载。
-const CharacterGraph = lazy(() => import("@/components/character/CharacterGraph"));
+const CharacterGraph = lazy(
+  () => import("@/components/character/CharacterGraph"),
+);
 import TagInput from "@/components/shared/TagInput";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";

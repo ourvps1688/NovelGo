@@ -1,4 +1,11 @@
-import { useCallback, useState, useEffect, useMemo, lazy, Suspense } from "react";
+import {
+  useCallback,
+  useState,
+  useEffect,
+  useMemo,
+  lazy,
+  Suspense,
+} from "react";
 import { GitBranch, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";

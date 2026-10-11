@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export type StatusVariant = "loading" | "empty" | "error";
 
@@ -34,6 +35,7 @@ export function StatusState({
   icon,
   className,
 }: StatusStateProps) {
+  const { t } = useTranslation();
   return (
     <div
       className={`flex items-center justify-center h-full ${className ?? ""}`}
@@ -56,7 +58,7 @@ export function StatusState({
             onClick={onRetry}
             className="text-xs text-primary underline cursor-pointer"
           >
-            {retryLabel ?? "重试"}
+            {retryLabel ?? t("common.retry")}
           </button>
         )}
       </div>
