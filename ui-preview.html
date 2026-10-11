@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NovelGo UI 刷新预览</title>
+<style>
+/* ── 设计 token（同步自 frontend/src/index.css，含新增阴影与背景质感）── */
+:root,
+[data-theme="light"] {
+  --background: oklch(0.984 0 0);
+  --foreground: oklch(0.205 0 0);
+  --card: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --primary: oklch(0.24 0.005 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.965 0 0);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: oklch(0.955 0 0);
+  --border: oklch(0.92 0 0);
+  --input: oklch(0.92 0 0);
+  --ring: oklch(0.4 0 0);
+  --sidebar: oklch(0.995 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --danger-bg: oklch(0.97 0.015 15);
+  --danger-border: oklch(0.88 0.06 18);
+  --radius: 0.625rem;
+  --shadow-2xs: 0 1px 2px 0 rgb(15 15 15 / 0.05);
+  --shadow-xs: 0 1px 2px -1px rgb(15 15 15 / 0.07), 0 1px 3px -2px rgb(15 15 15 / 0.06);
+  --shadow-sm: 0 2px 4px -2px rgb(15 15 15 / 0.10), 0 1px 2px -2px rgb(15 15 15 / 0.06);
+  --shadow-md: 0 4px 10px -4px rgb(15 15 15 / 0.12), 0 2px 6px -4px rgb(15 15 15 / 0.08);
+  --shadow-lg: 0 10px 24px -10px rgb(15 15 15 / 0.16), 0 4px 12px -8px rgb(15 15 15 / 0.10);
+  --shadow-xl: 0 18px 44px -12px rgb(15 15 15 / 0.22), 0 8px 22px -12px rgb(15 15 15 / 0.14);
+}
+[data-theme="dark"] {
+  --background: oklch(0.16 0 0);
+  --foreground: oklch(0.93 0 0);
+  --card: oklch(0.2 0 0);
+  --popover: oklch(0.23 0 0);
+  --primary: oklch(0.93 0 0);
+  --primary-foreground: oklch(0.2 0 0);
+  --secondary: oklch(0.26 0 0);
+  --muted: oklch(0.26 0 0);
+  --muted-foreground: oklch(0.65 0 0);
+  --accent: oklch(0.26 0 0);
+  --border: oklch(0.3 0 0);
+  --input: oklch(0.28 0 0);
+  --ring: oklch(0.6 0 0);
+  --sidebar: oklch(0.18 0 0);
+  --destructive: oklch(0.55 0.18 22);
+  --danger-bg: oklch(0.48 0.18 15 / 0.12);
+  --danger-border: oklch(0.5 0.18 15 / 0.25);
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+  --shadow-xs: 0 1px 2px -1px rgb(0 0 0 / 0.6), 0 1px 3px -2px rgb(0 0 0 / 0.5);
+  --shadow-sm: 0 2px 4px -2px rgb(0 0 0 / 0.7), 0 1px 2px -2px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 4px 10px -4px rgb(0 0 0 / 0.8), 0 2px 6px -4px rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 10px 24px -10px rgb(0 0 0 / 0.9), 0 4px 12px -8px rgb(0 0 0 / 0.7);
+  --shadow-xl: 0 18px 44px -12px rgb(0 0 0 / 0.95), 0 8px 22px -12px rgb(0 0 0 / 0.8);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+[data-theme="light"] body {
+  background: radial-gradient(120% 80% at 50% -20%, oklch(0.992 0 0) 0%, oklch(0.984 0 0) 60%);
+  background-attachment: fixed;
+}
+[data-theme="dark"] body {
+  background: radial-gradient(130% 100% at 50% -10%, oklch(0.21 0 0) 0%, oklch(0.16 0 0) 55%, oklch(0.145 0 0) 100%);
+  background-attachment: fixed;
+}
+:where(button, a, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ring) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: calc(var(--radius) * 0.6);
+}
+::selection { background: color-mix(in oklab, var(--primary) 22%, transparent); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 24px 64px; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 22px;
+}
+.topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+.topbar p { margin: 2px 0 0; font-size: 13px; color: var(--muted-foreground); }
+.toggle { display: flex; gap: 6px; }
+.toggle button {
+  border: 1px solid var(--border); background: var(--card); color: var(--muted-foreground);
+  padding: 6px 12px; border-radius: calc(var(--radius) * 0.8); font-size: 13px; cursor: pointer;
+  transition: all .15s ease;
+}
+.toggle button.active { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+
+.frame {
+  display: grid; grid-template-columns: 64px 1fr 320px;
+  height: 620px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+  box-shadow: var(--shadow-xl); background: var(--background);
+}
+
+/* 活动栏 */
+.activity {
+  background: var(--sidebar); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0;
+}
+.activity .item {
+  width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+  border-radius: 10px; color: var(--muted-foreground); cursor: pointer; transition: all .15s ease;
+}
+.activity .item:hover { background: var(--muted); color: var(--foreground); }
+.activity .item.active { background: var(--muted); color: var(--foreground); position: relative; }
+.activity .item.active::before {
+  content: ""; position: absolute; left: -12px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 20px; background: var(--primary); border-radius: 0 3px 3px 0;
+}
+
+/* 中间 */
+.center { display: flex; flex-direction: column; min-width: 0; }
+.header {
+  height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  border-bottom: 1px solid var(--border); background: var(--sidebar); box-shadow: var(--shadow-sm); position: relative; z-index: 2;
+}
+.logo {
+  width: 26px; height: 26px; border-radius: 7px; background: var(--primary); color: var(--primary-foreground);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px;
+}
+.header .title { font-size: 14px; font-weight: 600; flex: 1; }
+.header .ico { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--muted-foreground); cursor: pointer; transition: all .15s ease; }
+.header .ico:hover { background: var(--muted); color: var(--foreground); }
+
+.toolbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.toolbar .count { font-size: 13px; color: var(--muted-foreground); }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: all .15s ease; border: 1px solid var(--border); background: var(--card); color: var(--foreground); }
+.btn:hover { background: var(--muted); }
+.btn.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.btn.primary:hover { opacity: .9; }
+
+.grid { flex: 1; overflow: auto; padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px; align-content: start; }
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  cursor: pointer; transition: all .2s ease; display: flex; flex-direction: column;
+}
+.card:hover { transform: translateY(-5px); box-shadow: var(--shadow-lg); border-color: color-mix(in oklab, var(--foreground) 15%, transparent); }
+.card.active { border-color: color-mix(in oklab, var(--primary) 30%, transparent); box-shadow: 0 0 0 2px var(--primary); }
+.cover { aspect-ratio: 3/4; display: flex; align-items: flex-end; padding: 12px; color: #fff; font-weight: 700; font-size: 15px; letter-spacing: .02em; }
+.card .meta { padding: 12px; }
+.card .meta h3 { margin: 0 0 8px; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 6px; background: color-mix(in oklab, var(--primary) 10%, transparent); color: var(--primary); border: 1px solid color-mix(in oklab, var(--primary) 15%, transparent); font-weight: 500; }
+.chip.muted { background: var(--muted); color: var(--muted-foreground); border-color: var(--border); }
+.card .desc { margin: 8px 0 0; font-size: 12px; color: var(--muted-foreground); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* 右侧聊天 */
+.chat { border-left: 1px solid var(--border); background: var(--background); display: flex; flex-direction: column; min-width: 0; }
+.chat .chead { padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.messages { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.bubble { max-width: 86%; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.6; }
+.bubble.user { align-self: flex-end; background: var(--primary); color: var(--primary-foreground); border-bottom-right-radius: 4px; }
+.bubble.ai { align-self: flex-start; background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow-xs); border-bottom-left-radius: 4px; }
+.cinput { margin: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--muted-foreground); background: var(--card); }
+
+/* 编辑器标签栏（底部示意） */
+.tabs { display: flex; gap: 4px; padding: 8px 12px 0; border-bottom: 1px solid var(--border); background: var(--sidebar); }
+.tab { padding: 7px 12px; font-size: 12.5px; border-radius: 8px 8px 0 0; color: var(--muted-foreground); cursor: pointer; border: 1px solid transparent; border-bottom: none; }
+.tab.active { background: var(--background); color: var(--foreground); border-color: var(--border); }
+
+.note { margin-top: 22px; font-size: 12.5px; color: var(--muted-foreground); line-height: 1.7; border-left: 3px solid var(--border); padding-left: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>NovelGo · UI 刷新预览</h1>
+      <p>墨色极简风 · 统一柔和阴影层级 · 暗色背景质感 · 统一焦点环</p>
+    </div>
+    <div class="toggle">
+      <button id="lightBtn" class="active" onclick="setTheme('light')">☀ 浅色</button>
+      <button id="darkBtn" onclick="setTheme('dark')">🌙 暗色</button>
+    </div>
+  </div>
+
+  <div class="frame">
+    <!-- 活动栏 -->
+    <div class="activity">
+      <div class="item active" title="大纲">⌘</div>
+      <div class="item" title="书架">▤</div>
+      <div class="item" title="章节">≡</div>
+      <div class="item" title="角色">◍</div>
+      <div class="item" title="设定">✦</div>
+      <div class="item" title="时间线">◷</div>
+      <div class="item" title="检索">⌕</div>
+    </div>
+
+    <!-- 中间：顶栏 + 书架 -->
+    <div class="center">
+      <div class="header">
+        <div class="logo">N</div>
+        <div class="title">剑起苍茫</div>
+        <div class="ico">◔</div>
+        <div class="ico">?</div>
+        <div class="ico">☾</div>
+        <div class="ico">⚙</div>
+      </div>
+      <div class="toolbar">
+        <span class="count">共 4 部作品</span>
+        <div style="display:flex; gap:8px;">
+          <span class="btn">导入</span>
+          <span class="btn primary">+ 新建作品</span>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card active">
+          <div class="cover" style="background:linear-gradient(135deg,#3a3a3a,#111)">剑起苍茫</div>
+          <div class="meta">
+            <h3>剑起苍茫</h3>
+            <span class="chip">仙侠</span>
+            <p class="desc">少年持残剑入世，于宗门倾轧中窥见千年秘辛，一剑斩开迷雾。</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cover" style="background:linear-gradient(135deg,#4a4a4a,#1a1a1a)">长安遗梦</div>
+          <div class="meta">
+            <h3>长安遗梦</h3>
+            <span class="chip">历史</span>
+            <p class="desc">盛唐余晖里，一桩旧案牵出朝堂与江湖的纠葛。</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cover" style="background:linear-gradient(135deg,#2e2e2e,#0d0d0d)">星海孤舟</div>
+          <div class="meta">
+            <h3>星海孤舟</h3>
+            <span class="chip muted">未分类</span>
+            <p class="desc">深空漂流者醒来，发现飞船已偏离航道千年。</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="cover" style="background:linear-gradient(135deg,#555,#222)">春风十里</div>
+          <div class="meta">
+            <h3>春风十里</h3>
+            <span class="chip">都市</span>
+            <p class="desc">小镇青年的北漂日记，温柔又狼狈。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧聊天 -->
+    <div class="chat">
+      <div class="chead">创作助手</div>
+      <div class="messages">
+        <div class="bubble user">帮我把第三章的大纲收敛成三个核心冲突。</div>
+        <div class="bubble ai">已读取《剑起苍茫》第三章大纲。建议聚焦：① 残剑认主的反噬；② 师姐立场的动摇；③ 幕后推手的初次现身。需要我直接改写为正文吗？</div>
+        <div class="bubble user">可以，按这个方向写。</div>
+        <div class="bubble ai">正在生成正文……（已写入 chapters/id_3.md，未重复建章）</div>
+      </div>
+      <div class="cinput">输入消息，或 / 调用指令…</div>
+      <div class="tabs">
+        <div class="tab active">chapters/id_3.md</div>
+        <div class="tab">outlines/id_3.md</div>
+        <div class="tab">+ 新标签</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    说明：本页为离线静态预览，用于验收「墨色极简」设计方向的统一感（阴影层级、圆角、暗色背景渐变、焦点环、书架卡片悬浮微抬升）。
+    真实组件已同步更新：<code>frontend/src/index.css</code>（全局阴影/焦点/背景）、<code>BookshelfView.tsx</code>（卡片与空状态）、<code>WorkspaceView.tsx</code>（顶栏投影）。
+    更多信息面板（角色/时间线/设定/设置/聊天内部气泡等）可在此基础上继续细化。
+  </p>
+</div>
+
+<script>
+function setTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  document.getElementById("lightBtn").classList.toggle("active", t === "light");
+  document.getElementById("darkBtn").classList.toggle("active", t === "dark");
+}
+</script>
+</body>
+</html>
