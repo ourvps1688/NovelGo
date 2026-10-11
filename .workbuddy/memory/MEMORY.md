@@ -16,5 +16,8 @@
 - 沙箱 Bash 外网被拦；AI-NWA 视觉以用户贴图为准（微信截图_20260813220038.png）。
 
 ## 环境注意
-- 沙箱无 gcc → sqlite-vec/onnxruntime 两个 CGO 包无法编译，完整构建需开发机。
+- **沙箱已装 MinGW/gcc**：winlibs GCC 16.2.0 (UCRT,x86_64) 在 `C:/tools/mingw64/bin`；`go` 在 `C:/Program Files/Go/bin`、`wails` 在 `C:/Users/Administrator/go/bin`（均已在 PATH）。wails dev 已跑通（见每日日志）。
+- **Windows 构建前置**：CGO 编译需 `sqlite3.h` → 设 `CGO_CFLAGS=-IC:/tools/sqlite3-headers`（该目录由 mattn/go-sqlite3@v1.14.44 的 `sqlite3-binding.h` 复制而来，详 cross-platform-build.md §7）。构建命令须显式 `export PATH="/c/tools/mingw64/bin:$PATH"`（新 shell 不继承 User PATH）。
+- 本地 ONNX 向量检索为可选能力，缺 `onnxruntime.dll`+`build/bin/models/vocab.txt` 时仅该功能不可用，不影响主程序。
 - 仓库 autocrlf=true 检出为 CRLF，`gofmt -l` 会全量误报，勿据此改格式。
+- **wails 版本自动对齐**：本机 wails CLI = v2.16.0（`C:/Users/Administrator/go/bin/wails`，Sep 19 安装）。`wails dev` 启动会把 go.mod 的 wails 版本自动改写为 CLI 版本。仓库 baseline 是 v2.12.0，但工作区会不断被 dev 改回 v2.16.0——回退 2.12 无意义。**结论：正式把项目锁定到 v2.16.0**（go mod tidy 后提交 go.mod/go.sum），该升级对业务代码零影响（仅用 pkg/runtime 基础 API，v2.12→v2.16 签名未变，go build 通过）。
