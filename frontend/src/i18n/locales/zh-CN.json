@@ -900,6 +900,11 @@
     "genreConstraintHint": "选中后自动创建一条本书「创作约束」偏好，每轮常驻注入；关闭即删除",
     "genreNone": "不启用",
     "genreApplied": "已启用：{{name}}",
+    "genreActiveConstraint": "当前生效约束",
+    "genreWords": "约 {{count}} 字",
+    "genreCollapse": "收起",
+    "genreExpand": "展开",
+    "genreListHint": "该约束已作为本书偏好每轮常驻注入，可在下方偏好列表中查看与微调。",
     "genreApplyFailed": "题材约束切换失败",
     "tokenOverBudget": "偏好已超 4k 软上限（{{count}} tokens），建议精简"
   },

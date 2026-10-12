@@ -923,6 +923,11 @@
     "genreConstraintHint": "Selecting one creates a book-level \"constraint\" preference injected every turn; None removes it",
     "genreNone": "None",
     "genreApplied": "Active: {{name}}",
+    "genreActiveConstraint": "Active constraint",
+    "genreWords": "≈ {{count}} chars",
+    "genreCollapse": "Collapse",
+    "genreExpand": "Expand",
+    "genreListHint": "This constraint is injected every turn as a book-level preference; view or tweak it in the list below.",
     "genreApplyFailed": "Failed to switch genre constraint",
     "tokenOverBudget": "Preferences exceed 4k soft budget ({{count}} tokens), consider trimming"
   },

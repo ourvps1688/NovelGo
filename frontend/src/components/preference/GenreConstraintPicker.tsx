@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { BookOpenCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toastError } from "@/utils/toast";
@@ -37,6 +37,15 @@ export default function GenreConstraintPicker({ novelId }: Props) {
   const templateItems = useMemo(() => findTemplateItems(items), [items]);
   const selectedId = templateItems[0]?.templateId ?? null;
   const pending = createMutation.isPending || deleteMutation.isPending;
+  // 选中题材后，在下方展示其完整约束正文，让使用者清楚约束了什么
+  const [expanded, setExpanded] = useState(true);
+  const activeTemplate = useMemo(
+    () =>
+      selectedId
+        ? (GENRE_TEMPLATES.find((x) => x.id === selectedId) ?? null)
+        : null,
+    [selectedId],
+  );
 
   const isEn = i18n.language.startsWith("en");
   const nameOf = (tpl: (typeof GENRE_TEMPLATES)[number]) =>
@@ -121,6 +130,45 @@ export default function GenreConstraintPicker({ novelId }: Props) {
               </span>
             )}
           </div>
+
+          {activeTemplate && (
+            <div className="mt-3 rounded-md border border-border bg-background/60">
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <span className="min-w-0 truncate text-[11px] font-medium text-foreground">
+                  {t("preference.genreActiveConstraint")}
+                  <span className="text-primary">
+                    ：{nameOf(activeTemplate)}
+                  </span>
+                  <span className="ml-1 text-muted-foreground">
+                    （
+                    {t("preference.genreWords", {
+                      count: activeTemplate.content.length,
+                    })}
+                    ）
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+                >
+                  {expanded
+                    ? t("preference.genreCollapse")
+                    : t("preference.genreExpand")}
+                </button>
+              </div>
+              {expanded && (
+                <div className="max-h-80 overflow-auto border-t border-border px-3 py-2">
+                  <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted-foreground">
+                    {activeTemplate.content}
+                  </p>
+                  <p className="mt-2 text-[10px] text-muted-foreground/80">
+                    {t("preference.genreListHint")}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </section>
