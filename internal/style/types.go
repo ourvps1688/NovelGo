@@ -76,12 +76,37 @@ type Stats struct {
 }
 
 // ExtractResult 是风格提取的返回值。
+// 改造后不再产出 skill 文件（旧的 frontmatter + ~/.novelgo/skills 路径已废弃），
+// 而是返回一段可直接沉淀为「风格画像」的分析正文，由前端调用 CreateStyleProfile 入库。
 type ExtractResult struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	RawContent  string `json:"raw_content"`
-	FilePath    string `json:"file_path"`
+	Content     string `json:"content"`
 }
+
+// Profile 是一条「风格画像」的 GORM model。
+// 与 style_samples（用户贴的原始素材）区分：Profile 是 LLM 从素材中提炼出的
+// 结构化风格分析，作为本书「写作风格」偏好选择项的知识库（library）。
+type Profile struct {
+	ID          int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	NovelID     int64     `gorm:"column:novel_id;not null"            json:"novel_id"`
+	IsGlobal    bool      `gorm:"column:is_global;not null"           json:"is_global"`
+	Name        string    `gorm:"column:name;not null"                json:"name"`
+	Description string    `gorm:"column:description;not null"         json:"description"`
+	Content     string    `gorm:"column:content;not null"             json:"content"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime"     json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime"     json:"updated_at"`
+}
+
+func (Profile) TableName() string { return "style_profiles" }
+
+// 写作风格偏好的固定分类名（与前端 STYLE_CONSTRAINT_CATEGORY 对齐）。
+// 由 StyleConstraintPicker 选中后创建为本书偏好（content 首行带 marker）。
+const StyleConstraintCategory = "写作风格"
+
+// StyleMarkerPrefix 是「激活的写作风格偏好」content 首行 marker 的前缀，
+// 完整形如 【写作风格·{profileID}】。用于识别与回链画像。
+const StyleMarkerPrefix = "【写作风格·"
 
 // StyleSkillOutput 是风格提取 toolcall 的结构化输出，由 LLM 调用 output_style_skill 工具填充。
 type StyleSkillOutput struct {

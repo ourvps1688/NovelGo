@@ -8,18 +8,23 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { toastError } from "@/utils/toast";
+import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import {
   ExtractStyle,
   CancelExtract,
-  GetContent,
 } from "@/lib/wailsjs/go/app/App";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
-import { useSaveContent } from "@/components/content/useSaveContent";
-import { isContentConflict } from "@/components/content/editorSaveQueue";
-import { reportAIFileChange } from "@/components/content/aiFileChanges";
+import { useCreateStyleProfile } from "@/components/preference/useCreateStyleProfile";
+import { usePreferences } from "@/components/preference/usePreferences";
+import { useCreatePreference } from "@/components/preference/useCreatePreference";
+import { useDeletePreference } from "@/components/preference/useDeletePreference";
+import {
+  STYLE_CONSTRAINT_CATEGORY,
+  styleMarkerOf,
+  detectStyleProfileId,
+} from "@/components/preference/styleTemplates";
 import type { llm } from "@/lib/wailsjs/go/models";
 import { useNovels } from "@/components/novel/useNovels";
 import { useStyleSamples } from "./useStyleSamples";
@@ -29,7 +34,6 @@ import { useUpdateStyleSample } from "./useUpdateStyleSample";
 import { useDeleteStyleSample } from "./useDeleteStyleSample";
 import StyleSampleCard from "./StyleSampleCard";
 import Markdown from "@/components/Markdown";
-import { splitFrontmatter } from "@/components/content/types";
 import PopSelect from "@/components/shared/PopSelect";
 import ModelPicker from "@/components/model/ModelPicker";
 import TagInput from "@/components/shared/TagInput";
@@ -62,8 +66,12 @@ export default function StyleView({
   const createMutation = useCreateStyleSample();
   const updateMutation = useUpdateStyleSample();
   const deleteMutation = useDeleteStyleSample();
-  // SaveContent 走 content 领域 mutation（5.2 建，onSuccess 失效 contentKeys.detail 保持缓存一致）。
-  const saveMutation = useSaveContent();
+  // 提取结果沉淀为「风格画像」库（本书偏好选择项的知识库），不再写入 skill 文件。
+  const createProfileMutation = useCreateStyleProfile(novelId);
+  // 一步到位：保存后立即启用为本书「写作风格」偏好（依赖偏好 hooks）。
+  const preferencesQuery = usePreferences(novelId);
+  const createPrefMutation = useCreatePreference(novelId);
+  const deletePrefMutation = useDeletePreference(novelId);
 
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -92,11 +100,9 @@ export default function StyleView({
   const [error, setError] = useState("");
   const [result, setResult] = useState<{
     name: string;
-    filePath: string;
-    rawContent: string;
+    description: string;
+    content: string;
   } | null>(null);
-  const [overwriteContent, setOverwriteContent] = useState<string | null>(null);
-  const [checkingSave, setCheckingSave] = useState(false);
 
   // 3.9: novels 走 useNovels query（与 WorkspaceView/GeneralConfigTab/PatternExtractView 共享缓存）。
   const { data: novels = [] } = useNovels();
@@ -283,8 +289,8 @@ export default function StyleView({
       if (runningTaskIdRef.current !== taskId) return;
       setResult({
         name: res.name,
-        filePath: res.file_path,
-        rawContent: res.raw_content,
+        description: res.description,
+        content: res.content,
       });
       setPhase("preview");
     } catch (e) {
@@ -301,47 +307,49 @@ export default function StyleView({
     }
   }, [selected, selectedModel, reasoningEffort, phase, t]);
 
-  const saveGenerated = useCallback(
-    async (expectedContent: string) => {
-      if (!result) return;
-      try {
-        await saveMutation.mutateAsync({
-          novel_id: novelId,
-          path: result.filePath,
-          content: result.rawContent,
-          expected_content: expectedContent,
-        });
-        reportAIFileChange({ novelId, path: result.filePath });
-        setOverwriteContent(null);
-        setPhase("browse");
-        setResult(null);
-        setSelected(new Set());
-      } catch (e) {
-        setOverwriteContent(null);
-        setError(
-          isContentConflict(e)
-            ? t("skill.generatedTargetChanged")
-            : toErrorMessage(e, t("styleSample.saveFailed")),
-        );
-      }
-    },
-    [result, saveMutation.mutateAsync, t, novelId],
-  );
-
-  const handleSave = useCallback(async () => {
+  const handleSaveStyle = useCallback(async () => {
     if (!result) return;
-    setError("");
-    setCheckingSave(true);
     try {
-      const existing = await GetContent(novelId, result.filePath);
-      if (existing) setOverwriteContent(existing);
-      else await saveGenerated(existing);
+      const profile = await createProfileMutation.mutateAsync({
+        novel_id: novelId,
+        name: result.name,
+        description: result.description,
+        content: result.content,
+      });
+      // 一步到位：保存后立即启用为本书「写作风格」偏好。
+      // 仅移除旧的、带 marker 的提取风格偏好（保持单一激活），保留用户自定义的本书偏好。
+      const prefs = preferencesQuery.data;
+      if (prefs) {
+        for (const it of [...prefs.global, ...prefs.novel]) {
+          if (
+            it.category === STYLE_CONSTRAINT_CATEGORY &&
+            detectStyleProfileId(it.content) !== null
+          ) {
+            await deletePrefMutation.mutateAsync(it.id);
+          }
+        }
+      }
+      await createPrefMutation.mutateAsync({
+        is_global: false,
+        category: STYLE_CONSTRAINT_CATEGORY,
+        content: `${styleMarkerOf(profile.id)}\n\n${result.content}`,
+      });
+      toastSuccess(t("styleSample.styleSavedAndApplied"));
+      setPhase("browse");
+      setResult(null);
+      setSelected(new Set());
     } catch (e) {
       setError(toErrorMessage(e, t("styleSample.saveFailed")));
-    } finally {
-      setCheckingSave(false);
     }
-  }, [result, novelId, saveGenerated, t]);
+  }, [
+    result,
+    createProfileMutation.mutateAsync,
+    preferencesQuery.data,
+    deletePrefMutation.mutateAsync,
+    createPrefMutation.mutateAsync,
+    t,
+    novelId,
+  ]);
 
   const handleUpdate = useCallback(async () => {
     if (!detailId) return;
@@ -369,10 +377,6 @@ export default function StyleView({
     t,
   ]);
 
-  const { meta, body } = result
-    ? splitFrontmatter(result.rawContent)
-    : { meta: {}, body: "" };
-
   return (
     <div
       className={`flex-1 flex flex-col min-h-0 ${embedded ? "" : "bg-background"}`}
@@ -387,7 +391,7 @@ export default function StyleView({
             </span>
             <div className="flex items-center gap-2">
               <button
-                disabled={checkingSave || saveMutation.isPending}
+                disabled={createProfileMutation.isPending}
                 onClick={() => {
                   setPhase("browse");
                   setResult(null);
@@ -398,7 +402,7 @@ export default function StyleView({
                 {t("styleSample.cancel")}
               </button>
               <button
-                disabled={checkingSave || saveMutation.isPending}
+                disabled={createProfileMutation.isPending}
                 onClick={() => {
                   setPhase("browse");
                   setResult(null);
@@ -409,13 +413,13 @@ export default function StyleView({
                 {t("styleSample.reExtract")}
               </button>
               <button
-                onClick={handleSave}
-                disabled={checkingSave || saveMutation.isPending}
+                onClick={handleSaveStyle}
+                disabled={createProfileMutation.isPending}
                 className="h-8 px-5 rounded-lg text-sm font-medium bg-action-save text-action-save-foreground hover:bg-action-save/80 disabled:opacity-50 transition-colors"
               >
-                {checkingSave || saveMutation.isPending
+                {createProfileMutation.isPending
                   ? t("styleSample.saving")
-                  : t("styleSample.saveToUserSkill")}
+                  : t("styleSample.saveAsMyStyle")}
               </button>
             </div>
           </>
@@ -568,26 +572,26 @@ export default function StyleView({
       {/* 预览结果 */}
       {phase === "preview" && result && (
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-3">
-          {Object.keys(meta).length > 0 && (
+          {(result.name || result.description) && (
             <table className="border bg-muted/20 w-full text-sm rounded-lg overflow-hidden">
               <tbody>
-                {meta.name && (
+                {result.name && (
                   <tr className="border-b">
                     <td className="px-4 py-2 text-muted-foreground whitespace-nowrap w-16">
                       {t("styleSample.name")}
                     </td>
                     <td className="px-4 py-2 text-foreground font-semibold">
-                      {meta.name}
+                      {result.name}
                     </td>
                   </tr>
                 )}
-                {meta.description && (
+                {result.description && (
                   <tr className="border-b">
                     <td className="px-4 py-2 text-muted-foreground whitespace-nowrap w-16">
                       {t("styleSample.summary")}
                     </td>
                     <td className="px-4 py-2 text-foreground">
-                      {meta.description}
+                      {result.description}
                     </td>
                   </tr>
                 )}
@@ -595,7 +599,7 @@ export default function StyleView({
             </table>
           )}
           <div className="rounded-lg border bg-muted/10 p-4">
-            <Markdown content={body} />
+            <Markdown content={result.content} />
           </div>
         </div>
       )}
@@ -778,20 +782,6 @@ export default function StyleView({
         confirmText={t("common.delete")}
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
-      />
-      <ConfirmDialog
-        open={overwriteContent !== null}
-        title={t("skill.generatedOverwriteTitle")}
-        message={t("skill.generatedOverwriteMessage", { name: result?.name })}
-        confirmText={t("skill.generatedConfirmOverwrite")}
-        danger
-        loading={saveMutation.isPending}
-        onClose={() => {
-          if (!saveMutation.isPending) setOverwriteContent(null);
-        }}
-        onConfirm={() => {
-          if (overwriteContent !== null) void saveGenerated(overwriteContent);
-        }}
       />
     </div>
   );

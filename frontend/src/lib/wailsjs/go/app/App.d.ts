@@ -65,6 +65,8 @@ export function CreateReaderPerspective(arg1:number,arg2:app.CreateReaderPerspec
 
 export function CreateStoryArc(arg1:number,arg2:app.CreateStoryArcInput):Promise<storyarc.StoryArc>;
 
+export function CreateStyleProfile(arg1:app.CreateStyleProfileInput):Promise<style.Profile>;
+
 export function CreateStyleSample(arg1:app.CreateStyleSampleInput):Promise<style.Sample>;
 
 export function CreateTimelineEntry(arg1:number,arg2:app.CreateTimelineEntryInput):Promise<timeline.TimelineEntry>;
@@ -94,6 +96,8 @@ export function DeleteSession(arg1:string):Promise<void>;
 export function DeleteSkill(arg1:app.DeleteSkillInput):Promise<void>;
 
 export function DeleteStoryArc(arg1:number,arg2:number):Promise<void>;
+
+export function DeleteStyleProfile(arg1:app.DeleteStyleProfileInput):Promise<void>;
 
 export function DeleteStyleSample(arg1:app.DeleteStyleSampleInput):Promise<void>;
 
@@ -202,6 +206,8 @@ export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.
 export function ListSkills(arg1:app.ListSkillsInput):Promise<Array<skill.SkillMeta>>;
 
 export function ListSlashCommands(arg1:app.ListSlashCommandsInput):Promise<Array<app.SlashCommand>>;
+
+export function ListStyleProfiles(arg1:app.ListStyleProfilesInput):Promise<Array<style.Profile>>;
 
 export function ListStyleSamples(arg1:app.ListStyleSamplesInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_style_Sample_>;
 

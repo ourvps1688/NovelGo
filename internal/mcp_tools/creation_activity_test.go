@@ -75,7 +75,12 @@ func TestToolChapterCreationActivity(t *testing.T) {
 	for _, prefix := range []string{"chapters", "outlines"} {
 		t.Run(prefix, func(t *testing.T) {
 			db, tc, ctx := setupRWEnv(t)
-			res := execEdit(t, ctx, tc, editArgs(prefix+"/new.md", "full_replace", "新章节"))
+			initial := "新章节"
+			if prefix == "outlines" {
+				// 大纲需至少 30 字有效内容，否则后续写正文会被大纲写前门禁拒绝
+				initial = "开篇大纲：主角潜入皇城，守卫盘查，需避开识破，子时赴约与线人接头，由此引出后续冲突与伏笔。"
+			}
+			res := execEdit(t, ctx, tc, editArgs(prefix+"/new.md", "full_replace", initial))
 			require.True(t, res.Success, "%+v", res)
 			id := res.Data["chapter_id"].(int64)
 			res = execEdit(t, ctx, tc, editArgs(fmt.Sprintf("chapters/id_%d.md", id), "full_replace", "补写正文"))

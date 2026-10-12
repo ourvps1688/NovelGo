@@ -94,7 +94,10 @@ func TestEditRecordsTextChanges(t *testing.T) {
 	require.True(t, result.Success, result.Error)
 	result = execEdit(t, ctx, tc, editArgs(path, "full_replace", "主角房间"))
 	require.True(t, result.Success, result.Error)
-	result = execEdit(t, ctx, tc, editArgs(git.OutlinePath(id), "full_replace", "大纲内容"))
+	result = execEdit(t, ctx, tc, editArgs(git.OutlinePath(id), "full_replace", "本章大纲：主角走进房间，发现桌上密信，引出后续冲突与伏笔。"))
+	if !result.Success {
+		t.Fatalf("seed outline failed: %s", result.Error)
+	}
 	require.True(t, result.Success, result.Error)
 	args = editArgs(path, "search_replace", "失败内容")
 	args["search_text"] = "不存在"
@@ -483,7 +486,7 @@ func TestEditOutlineNewChannel_OutlineFirst(t *testing.T) {
 	db, tc, ctx := setupRWEnv(t)
 	vol := seedVolume(t, db, 1, "第一卷", 1)
 
-	res := execEdit(t, ctx, tc, editArgsTitle(fmt.Sprintf("outlines/%d/new.md", vol), "full_replace", "# 夜入皇城\n- 场景：皇城", "夜入皇城"))
+	res := execEdit(t, ctx, tc, editArgsTitle(fmt.Sprintf("outlines/%d/new.md", vol), "full_replace", "# 夜入皇城\n- 场景：皇城深夜，主角陆沉渊借商队掩护潜入城门\n- 冲突：守卫盘查，需避开识破\n- 目标：入城后于子时赴约", "夜入皇城"))
 	if !res.Success {
 		t.Fatalf("outline new channel failed: %s", res.Error)
 	}
@@ -510,6 +513,69 @@ func TestEditOutlineNewChannel_OutlineFirst(t *testing.T) {
 	}
 	if got := fetchChapter(t, db, chapterID).WordCount; got == 0 {
 		t.Error("word_count should be updated after body write")
+	}
+}
+
+// ── 大纲写前门禁（P1-C）─────────────────────────────────
+
+// 本书已有大纲时，禁止用 chapters/new.md 直接建正文（须先 outlines/new.md 建纲）。
+func TestEditNewChannel_BlockedWhenOutlinesExist(t *testing.T) {
+	db, tc, ctx := setupRWEnv(t)
+	vol := seedVolume(t, db, 1, "第一卷", 1)
+
+	// 先建一个大纲 → 本书进入大纲工作流
+	res := execEdit(t, ctx, tc, editArgs("outlines/new.md", "full_replace",
+		"# 开篇大纲\n- 场景：皇城深夜，主角借商队掩护潜入城门\n- 冲突：守卫盘查，需避开识破\n- 目标：入城后于子时赴约"))
+	if !res.Success {
+		t.Fatalf("seed outline failed: %s", res.Error)
+	}
+
+	res = execEdit(t, ctx, tc, editArgsTitle(fmt.Sprintf("chapters/%d/new.md", vol), "full_replace", "正文内容。", "夜入皇城"))
+	if res.Success {
+		t.Fatal("expected block for chapters/new.md when outlines exist")
+	}
+	if !contains(res.Error, "outlines/new.md") {
+		t.Errorf("error should instruct outlines/new.md: %s", res.Error)
+	}
+}
+
+// 本书尚无大纲时，chapters/new.md 仍可正常建正文（不误伤纯即兴写作本书）。
+func TestEditNewChannel_AllowedWhenNoOutlines(t *testing.T) {
+	_, tc, ctx := setupRWEnv(t)
+	res := execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "直接起草的正文。"))
+	if !res.Success {
+		t.Fatalf("expected success for body-first when no outlines exist, got: %s", res.Error)
+	}
+}
+
+// 已有章节：大纲存在但不足 30 字有效内容时写正文被拒；补满后放行。
+func TestEditExistingBody_BlockedWhenOutlineEmpty(t *testing.T) {
+	_, tc, ctx := setupRWEnv(t)
+
+	// 大纲先行，但只写极短内容
+	res := execEdit(t, ctx, tc, editArgsTitle("outlines/new.md", "full_replace", "短纲", "夜入皇城"))
+	if !res.Success {
+		t.Fatalf("seed outline failed: %s", res.Error)
+	}
+	chapterID := res.Data["chapter_id"].(int64)
+
+	res = execEdit(t, ctx, tc, editArgs(fmt.Sprintf("chapters/id_%d.md", chapterID), "full_replace", "正文若干字。"))
+	if res.Success {
+		t.Fatal("expected block when outline effectively empty")
+	}
+	if !contains(res.Error, "大纲为空") {
+		t.Errorf("error should mention empty outline: %s", res.Error)
+	}
+
+	// 补满大纲后放行
+	res = execEdit(t, ctx, tc, editArgs(fmt.Sprintf("outlines/id_%d.md", chapterID), "full_replace",
+		"# 夜入皇城\n- 场景：皇城深夜，主角借商队掩护潜入城门\n- 冲突：守卫盘查，需避开识破\n- 目标：入城后于子时赴约"))
+	if !res.Success {
+		t.Fatalf("refill outline failed: %s", res.Error)
+	}
+	res = execEdit(t, ctx, tc, editArgs(fmt.Sprintf("chapters/id_%d.md", chapterID), "full_replace", "正文若干字。"))
+	if !res.Success {
+		t.Fatalf("expected success after outline filled, got: %s", res.Error)
 	}
 }
 

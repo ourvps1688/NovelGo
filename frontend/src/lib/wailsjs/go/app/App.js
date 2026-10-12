@@ -82,6 +82,10 @@ export function CreateStoryArc(arg1, arg2) {
   return window['go']['app']['App']['CreateStoryArc'](arg1, arg2);
 }
 
+export function CreateStyleProfile(arg1) {
+  return window['go']['app']['App']['CreateStyleProfile'](arg1);
+}
+
 export function CreateStyleSample(arg1) {
   return window['go']['app']['App']['CreateStyleSample'](arg1);
 }
@@ -140,6 +144,10 @@ export function DeleteSkill(arg1) {
 
 export function DeleteStoryArc(arg1, arg2) {
   return window['go']['app']['App']['DeleteStoryArc'](arg1, arg2);
+}
+
+export function DeleteStyleProfile(arg1) {
+  return window['go']['app']['App']['DeleteStyleProfile'](arg1);
 }
 
 export function DeleteStyleSample(arg1) {
@@ -356,6 +364,10 @@ export function ListSkills(arg1) {
 
 export function ListSlashCommands(arg1) {
   return window['go']['app']['App']['ListSlashCommands'](arg1);
+}
+
+export function ListStyleProfiles(arg1) {
+  return window['go']['app']['App']['ListStyleProfiles'](arg1);
 }
 
 export function ListStyleSamples(arg1) {

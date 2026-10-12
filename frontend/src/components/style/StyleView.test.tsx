@@ -68,8 +68,10 @@ const {
   mockGetModels,
   mockGetSettings,
   mockExtractStyle,
-  mockGetContent,
-  mockSaveContent,
+  mockCreateStyleProfile,
+  mockGetPreferences,
+  mockCreatePreference,
+  mockDeletePreference,
   mockI18n,
 } = vi.hoisted(() => ({
   mockListStyleSamples: vi.fn(),
@@ -80,8 +82,10 @@ const {
   mockGetModels: vi.fn(),
   mockGetSettings: vi.fn(),
   mockExtractStyle: vi.fn(),
-  mockGetContent: vi.fn(),
-  mockSaveContent: vi.fn(),
+  mockCreateStyleProfile: vi.fn(),
+  mockGetPreferences: vi.fn(),
+  mockCreatePreference: vi.fn(),
+  mockDeletePreference: vi.fn(),
   // 中间件用 i18n.exists/t，mock 让 exists 返回 true + t 返回 key 本身（对齐现有断言文案）。
   mockI18n: {
     exists: vi.fn().mockReturnValue(true),
@@ -105,8 +109,10 @@ vi.mock("@/lib/wailsjs/go/app/App", async (importOriginal) => {
     GetSettings: mockGetSettings,
     ExtractStyle: mockExtractStyle,
     CancelExtract: vi.fn(),
-    GetContent: mockGetContent,
-    SaveContent: mockSaveContent,
+    CreateStyleProfile: mockCreateStyleProfile,
+    GetPreferences: mockGetPreferences,
+    CreatePreference: mockCreatePreference,
+    DeletePreference: mockDeletePreference,
   };
 });
 
@@ -137,7 +143,15 @@ describe("StyleView", () => {
     });
     mockGetModels.mockResolvedValue([]);
     mockGetSettings.mockResolvedValue({ selected_model_key: "" });
-    mockSaveContent.mockResolvedValue(undefined);
+    mockCreateStyleProfile.mockResolvedValue(undefined);
+    mockGetPreferences.mockResolvedValue({
+      global: [],
+      novel: [],
+      token_count: 0,
+      over_budget: false,
+    });
+    mockCreatePreference.mockResolvedValue(undefined);
+    mockDeletePreference.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -272,7 +286,7 @@ describe("StyleView", () => {
     });
   });
 
-  it("confirms overwriting a nonempty user skill with its original content", async () => {
+  it("saves the extracted style into the style-profile library when save button clicked", async () => {
     mockListStyleSamples.mockResolvedValue({
       items: [
         {
@@ -297,72 +311,83 @@ describe("StyleView", () => {
     ]);
     mockExtractStyle.mockResolvedValue({
       name: "Generated",
-      file_path: "~/.novelgo/skills/generated.md",
-      raw_content: "new skill",
+      description: "a generated style",
+      content: "new style content",
     });
-    mockGetContent.mockResolvedValue("old skill");
+    mockCreateStyleProfile.mockResolvedValue({
+      id: 7,
+      name: "Generated",
+      description: "a generated style",
+      content: "new style content",
+    });
 
     renderWithProvider(<StyleView novelId={1} />);
     fireEvent.click(await screen.findByText("select"));
     fireEvent.click(screen.getByText("styleSample.startExtract"));
-    fireEvent.click(await screen.findByText("styleSample.saveToUserSkill"));
-    expect(
-      await screen.findByText("skill.generatedOverwriteTitle"),
-    ).toBeInTheDocument();
-    expect(mockSaveContent).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByText("skill.generatedConfirmOverwrite"));
-    await vi.waitFor(() => {
-      expect(mockSaveContent).toHaveBeenCalledWith({
-        novel_id: 1,
-        path: "~/.novelgo/skills/generated.md",
-        content: "new skill",
-        expected_content: "old skill",
-      });
-    });
-  });
-
-  it("keeps the generated result when the target changes after confirmation", async () => {
-    mockListStyleSamples.mockResolvedValue({
-      items: [
-        {
-          id: 1,
-          name: "Sample",
-          content: "sample",
-          tags: [],
-          is_global: true,
-          novel_id: 0,
-        },
-      ],
-      total: 1,
-      total_pages: 1,
-    });
-    mockGetModels.mockResolvedValue([
-      {
-        Key: "test/model",
-        ModelName: "Test",
-        ProviderName: "test",
-        ModelID: "model",
-      },
-    ]);
-    mockExtractStyle.mockResolvedValue({
-      name: "Generated",
-      file_path: "~/.novelgo/skills/generated.md",
-      raw_content: "new skill",
-    });
-    mockGetContent.mockResolvedValue("old skill");
-    mockSaveContent.mockRejectedValueOnce(
-      new Error("CONTENT_CONFLICT: changed"),
+    fireEvent.click(
+      await screen.findByText("styleSample.saveAsMyStyle"),
     );
 
+    await vi.waitFor(() => {
+      expect(mockCreateStyleProfile).toHaveBeenCalledWith({
+        novel_id: 1,
+        name: "Generated",
+        description: "a generated style",
+        content: "new style content",
+      });
+    });
+    // 一步到位：同时创建并启用「写作风格」本书偏好（marker 回链画像 id=7）。
+    expect(mockCreatePreference).toHaveBeenCalledWith(1, {
+      is_global: false,
+      category: "写作风格",
+      content: "【写作风格·7】\n\nnew style content",
+    });
+    expect(mockDeletePreference).not.toHaveBeenCalled();
+    // 保存后回到浏览态（结果清空）。
+    expect(screen.queryByText("styleSample.saveAsMyStyle")).toBeNull();
+  });
+
+  it("keeps the generated result and shows an error when saving the style profile fails", async () => {
+    mockListStyleSamples.mockResolvedValue({
+      items: [
+        {
+          id: 1,
+          name: "Sample",
+          content: "sample",
+          tags: [],
+          is_global: true,
+          novel_id: 0,
+        },
+      ],
+      total: 1,
+      total_pages: 1,
+    });
+    mockGetModels.mockResolvedValue([
+      {
+        Key: "test/model",
+        ModelName: "Test",
+        ProviderName: "test",
+        ModelID: "model",
+      },
+    ]);
+    mockExtractStyle.mockResolvedValue({
+      name: "Generated",
+      description: "a generated style",
+      content: "new style content",
+    });
+    mockCreateStyleProfile.mockRejectedValueOnce(new Error("db error"));
+
     renderWithProvider(<StyleView novelId={1} />);
     fireEvent.click(await screen.findByText("select"));
     fireEvent.click(screen.getByText("styleSample.startExtract"));
-    fireEvent.click(await screen.findByText("styleSample.saveToUserSkill"));
-    fireEvent.click(await screen.findByText("skill.generatedConfirmOverwrite"));
+    fireEvent.click(
+      await screen.findByText("styleSample.saveAsMyStyle"),
+    );
+
+    expect(await screen.findByText("db error")).toBeInTheDocument();
+    // 失败不清除结果，保存按钮仍在。
     expect(
-      await screen.findByText("skill.generatedTargetChanged"),
+      screen.getByText("styleSample.saveAsMyStyle"),
     ).toBeInTheDocument();
-    expect(screen.getByText("styleSample.saveToUserSkill")).toBeInTheDocument();
   });
 });

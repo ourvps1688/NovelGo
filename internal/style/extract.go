@@ -8,7 +8,6 @@ import (
 
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
-	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // Extract 分析样本文字的写作风格，生成仿写 skill。
@@ -57,29 +56,11 @@ func Extract(ctx context.Context, llmClient *llm.Client,
 		return nil, fmt.Errorf("LLM 返回的风格技能内容不完整")
 	}
 
-	safeName := skill.SanitizeFileName(out.Name)
 	return &ExtractResult{
 		Name:        out.Name,
 		Description: out.Description,
-		RawContent:  buildStyleSkillMarkdown(out.Name, out.Description, out.Content),
-		FilePath:    fmt.Sprintf("~/.novelgo/skills/%s.md", safeName),
+		Content:     strings.TrimSpace(out.Content),
 	}, nil
-}
-
-// buildStyleSkillMarkdown 组装完整的风格仿写 skill markdown：固定 frontmatter + 正文。
-func buildStyleSkillMarkdown(name, description, content string) string {
-	var b strings.Builder
-	b.WriteString("---\n")
-	fmt.Fprintf(&b, "name: %s\n", name)
-	fmt.Fprintf(&b, "description: %s\n", description)
-	b.WriteString("category: 风格仿写\n")
-	b.WriteString("mode: auto\n")
-	b.WriteString("author: ai\n")
-	b.WriteString("version: 1\n")
-	b.WriteString("---\n\n")
-	b.WriteString(strings.TrimSpace(content))
-	b.WriteString("\n")
-	return b.String()
 }
 
 func buildExtractMessages(sample string) []map[string]any {

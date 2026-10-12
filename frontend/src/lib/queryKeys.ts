@@ -82,6 +82,11 @@ export const novelSettingKeys = {
   detail: (id: number) => ["novel-setting", id] as const,
 };
 
+export const styleProfileKeys = {
+  // list: 某小说的风格画像库（提取结果的沉淀），供偏好面板选择启用。
+  list: (novelId: number) => ["style-profiles", novelId] as const,
+};
+
 export const styleSampleKeys = {
   // all: 前缀失效用（invalidateQueries 失效 list + infiniteList 全部缓存）。
   all: ["style-samples"] as const,

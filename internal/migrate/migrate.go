@@ -97,6 +97,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&storage.OperationLogRecord{},
 		&rollback.TurnCommit{},
 		&style.Sample{},
+		&style.Profile{},
 		&writing.WritingLog{},
 		&activity.DailyActivity{},
 		&activity.DailyLLMUsage{},

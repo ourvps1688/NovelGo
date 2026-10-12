@@ -12,6 +12,7 @@ import { useDeletePreference } from "./useDeletePreference";
 import { useCreatePreference } from "./useCreatePreference";
 import { useUpdatePreference } from "./useUpdatePreference";
 import GenreConstraintPicker from "./GenreConstraintPicker";
+import StyleConstraintPicker from "./StyleConstraintPicker";
 
 interface Props {
   novelId: number;
@@ -382,6 +383,8 @@ export default function PreferenceView({ novelId }: Props) {
           </div>
 
           <GenreConstraintPicker novelId={novelId} />
+
+          <StyleConstraintPicker novelId={novelId} />
 
           {renderSection(t("preference.globalPreference"), global, true)}
 

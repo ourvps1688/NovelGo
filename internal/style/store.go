@@ -73,3 +73,33 @@ func (s *Store) GetByIDs(ctx context.Context, ids []int64) ([]Sample, error) {
 	}
 	return samples, nil
 }
+
+// ── Profile（风格画像）─────────────────────────────────
+
+// ListProfiles 列出某小说的风格画像（本书知识库），按创建时间升序。
+func (s *Store) ListProfiles(ctx context.Context, novelID int64) ([]Profile, error) {
+	var list []Profile
+	if err := s.DB.WithContext(ctx).
+		Where("novel_id = ?", novelID).
+		Order("created_at ASC").
+		Find(&list).Error; err != nil {
+		return nil, fmt.Errorf("style store: list profiles: %w", err)
+	}
+	return list, nil
+}
+
+// CreateProfile 创建一条风格画像。
+func (s *Store) CreateProfile(ctx context.Context, p *Profile) error {
+	if err := s.DB.WithContext(ctx).Create(p).Error; err != nil {
+		return fmt.Errorf("style store: create profile: %w", err)
+	}
+	return nil
+}
+
+// DeleteProfile 删除一条风格画像。
+func (s *Store) DeleteProfile(ctx context.Context, id int64) error {
+	if err := s.DB.WithContext(ctx).Delete(&Profile{}, id).Error; err != nil {
+		return fmt.Errorf("style store: delete profile: %w", err)
+	}
+	return nil
+}

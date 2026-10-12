@@ -296,6 +296,24 @@ export namespace app {
 	        this.importance = source["importance"];
 	    }
 	}
+	export class CreateStyleProfileInput {
+	    novel_id: number;
+	    name: string;
+	    description: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateStyleProfileInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.content = source["content"];
+	    }
+	}
 	export class CreateStyleSampleInput {
 	    novel_id: number;
 	    is_global: boolean;
@@ -356,6 +374,18 @@ export namespace app {
 	        this.novel_id = source["novel_id"];
 	        this.name = source["name"];
 	        this.source = source["source"];
+	    }
+	}
+	export class DeleteStyleProfileInput {
+	    id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeleteStyleProfileInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
 	    }
 	}
 	export class DeleteStyleSampleInput {
@@ -527,6 +557,18 @@ export namespace app {
 	
 	    static createFrom(source: any = {}) {
 	        return new ListSlashCommandsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	    }
+	}
+	export class ListStyleProfilesInput {
+	    novel_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListStyleProfilesInput(source);
 	    }
 	
 	    constructor(source: any = {}) {
@@ -2761,8 +2803,7 @@ export namespace style {
 	export class ExtractResult {
 	    name: string;
 	    description: string;
-	    raw_content: string;
-	    file_path: string;
+	    content: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExtractResult(source);
@@ -2772,9 +2813,54 @@ export namespace style {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.description = source["description"];
-	        this.raw_content = source["raw_content"];
-	        this.file_path = source["file_path"];
+	        this.content = source["content"];
 	    }
+	}
+	export class Profile {
+	    id: number;
+	    novel_id: number;
+	    is_global: boolean;
+	    name: string;
+	    description: string;
+	    content: string;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Profile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.novel_id = source["novel_id"];
+	        this.is_global = source["is_global"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.content = source["content"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Sample {
 	    id: number;

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/novelgo/novelgo/internal/agent"
+	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/style"
 	"github.com/novelgo/novelgo/internal/text"
@@ -168,4 +169,69 @@ func (a *App) ExtractStyle(input ExtractStyleInput) (*style.ExtractResult, error
 // CancelExtract 取消指定 taskID 的风格提取任务。
 func (a *App) CancelExtract(taskID string) {
 	a.cancelMgr.Cancel(agent.CancelPrefixStyle + taskID)
+}
+
+// ── 风格画像（提取结果的知识库，作为本书「写作风格」偏好选择项）──────────
+
+// ListStyleProfilesInput 是列出风格画像的入参。
+type ListStyleProfilesInput struct {
+	NovelID int64 `json:"novel_id"`
+}
+
+// ListStyleProfiles 列出某小说的风格画像（本书知识库）。
+func (a *App) ListStyleProfiles(input ListStyleProfilesInput) ([]style.Profile, error) {
+	list, err := a.style.ListProfiles(a.ctx, input.NovelID)
+	if err != nil {
+		return nil, fmt.Errorf("list style profiles: %w", err)
+	}
+	return list, nil
+}
+
+// CreateStyleProfileInput 是创建风格画像的入参。
+type CreateStyleProfileInput struct {
+	NovelID     int64  `json:"novel_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"`
+}
+
+// CreateStyleProfile 将一次风格提取的结果沉淀为「风格画像」，供偏好面板选择启用。
+func (a *App) CreateStyleProfile(input CreateStyleProfileInput) (*style.Profile, error) {
+	if input.NovelID == 0 {
+		return nil, fmt.Errorf("请先打开一本书再保存风格画像")
+	}
+	if input.Name == "" || input.Content == "" {
+		return nil, fmt.Errorf("风格画像缺少名称或内容")
+	}
+	profile := &style.Profile{
+		NovelID:     input.NovelID,
+		IsGlobal:    false,
+		Name:        input.Name,
+		Description: input.Description,
+		Content:     input.Content,
+	}
+	if err := a.style.CreateProfile(a.ctx, profile); err != nil {
+		return nil, fmt.Errorf("create style profile: %w", err)
+	}
+	return profile, nil
+}
+
+// DeleteStyleProfileInput 是删除风格画像的入参。
+type DeleteStyleProfileInput struct {
+	ID int64 `json:"id"`
+}
+
+// DeleteStyleProfile 删除一条风格画像，并级联移除由此画像创建的、仍处于激活态的
+// 「写作风格」本书偏好（content 首行带 【写作风格·{id}】 marker），避免孤儿偏好继续注入。
+func (a *App) DeleteStyleProfile(input DeleteStyleProfileInput) error {
+	marker := style.StyleMarkerPrefix + fmt.Sprintf("%d】", input.ID)
+	if err := a.preference.DB.WithContext(a.ctx).
+		Where("category = ? AND content LIKE ?", style.StyleConstraintCategory, marker+"%").
+		Delete(&preference.PreferenceItem{}).Error; err != nil {
+		return fmt.Errorf("delete active style preference: %w", err)
+	}
+	if err := a.style.DeleteProfile(a.ctx, input.ID); err != nil {
+		return fmt.Errorf("delete style profile: %w", err)
+	}
+	return nil
 }

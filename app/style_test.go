@@ -1,11 +1,15 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/style"
 )
 
 // ---------------------------------------------------------------------------
@@ -186,4 +190,104 @@ func TestComputeStyleStats_NoSamples(t *testing.T) {
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "没有选中的素材")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// CreateStyleProfile
+// ---------------------------------------------------------------------------
+
+func TestCreateStyleProfile(t *testing.T) {
+	app := setupTestApp(t)
+	novel := createTestNovel(t, app)
+
+	// 缺书名（novel_id=0）应报错。
+	_, err := app.CreateStyleProfile(CreateStyleProfileInput{
+		NovelID: 0,
+		Name:    "X",
+		Content: "C",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "请先打开一本书")
+
+	// 缺名称或内容应报错。
+	_, err = app.CreateStyleProfile(CreateStyleProfileInput{
+		NovelID: novel.ID,
+		Name:    "",
+		Content: "C",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "缺少名称或内容")
+
+	// 正常创建。
+	profile, err := app.CreateStyleProfile(CreateStyleProfileInput{
+		NovelID:     novel.ID,
+		Name:        "古风雅致",
+		Description: "适合历史正剧",
+		Content:     "# 古风雅致\n## 句式特征\n...",
+	})
+	require.NoError(t, err)
+	require.NotZero(t, profile.ID)
+	assert.Equal(t, novel.ID, profile.NovelID)
+	assert.False(t, profile.IsGlobal)
+	assert.Equal(t, "古风雅致", profile.Name)
+
+	// 可被 ListStyleProfiles 取回。
+	list, err := app.ListStyleProfiles(ListStyleProfilesInput{NovelID: novel.ID})
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, profile.ID, list[0].ID)
+}
+
+// ---------------------------------------------------------------------------
+// DeleteStyleProfile（级联移除激活偏好）
+// ---------------------------------------------------------------------------
+
+func TestDeleteStyleProfile_Cascade(t *testing.T) {
+	app := setupTestApp(t)
+	novel := createTestNovel(t, app)
+
+	profile, err := app.CreateStyleProfile(CreateStyleProfileInput{
+		NovelID: novel.ID,
+		Name:    "古风雅致",
+		Content: "# 古风雅致\n...",
+	})
+	require.NoError(t, err)
+
+	// 由该画像派生的激活偏好（content 首行带 marker）。
+	marker := fmt.Sprintf("%s%d】", style.StyleMarkerPrefix, profile.ID)
+	active := &preference.PreferenceItem{
+		NovelID:  novel.ID,
+		IsGlobal: false,
+		Category: style.StyleConstraintCategory,
+		Content:  marker + "\n\n" + profile.Content,
+	}
+	require.NoError(t, app.db.Create(active).Error)
+
+	// 用户自定义的同分类偏好（无 marker），不应被级联删除。
+	custom := &preference.PreferenceItem{
+		NovelID:  novel.ID,
+		IsGlobal: false,
+		Category: style.StyleConstraintCategory,
+		Content:  "我自己手写的一段写作风格偏好，没有 marker。",
+	}
+	require.NoError(t, app.db.Create(custom).Error)
+
+	// 删除画像 → 级联清理激活偏好，但自定义偏好保留。
+	require.NoError(t, app.DeleteStyleProfile(DeleteStyleProfileInput{ID: profile.ID}))
+
+	// 画像已不存在。
+	remaining, err := app.ListStyleProfiles(ListStyleProfilesInput{NovelID: novel.ID})
+	require.NoError(t, err)
+	assert.Empty(t, remaining)
+
+	// 激活偏好被删除。
+	var cnt int64
+	require.NoError(t, app.db.Model(&preference.PreferenceItem{}).
+		Where("id = ?", active.ID).Count(&cnt).Error)
+	assert.Equal(t, int64(0), cnt)
+
+	// 自定义偏好仍在。
+	require.NoError(t, app.db.Model(&preference.PreferenceItem{}).
+		Where("id = ?", custom.ID).Count(&cnt).Error)
+	assert.Equal(t, int64(1), cnt)
 }

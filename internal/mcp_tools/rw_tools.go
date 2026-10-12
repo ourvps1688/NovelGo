@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/config"
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/skill"
@@ -198,6 +201,55 @@ func physicalRWPath(isOutline bool, id int64) string {
 	return git.ChapterPath(id)
 }
 
+// ── 大纲写前门禁辅助 ─────────────────────────────────────
+
+// outlineMinContent 是大纲判空的阈值（有效非空白字符数），复用 oh-story 的
+// "非空白字符 < 30" 口径：低于此值视为该章尚无实质细纲。
+const outlineMinContent = 30
+
+// novelUsesOutlines 判断本书是否已启用大纲工作流：outlines 目录下存在任意
+// 大纲文件即视为启用。用于门禁的「是否启用」前置判断，避免对纯即兴写作的
+// 本书强制大纲，符合「宁可漏拦」原则。
+func novelUsesOutlines(novelID int64) bool {
+	dir := filepath.Join(config.NovelDirPath(novelID), "outlines")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			return true
+		}
+	}
+	return false
+}
+
+// outlineState 返回本章大纲的状态。missing=true 表示大纲文件不存在；
+// empty=true 表示大纲文件存在但有效内容不足 outlineMinContent 字（视为空纲）。
+// 二者皆否表示大纲已就绪。
+func outlineState(novelID int64, chapterID int64) (missing, empty bool) {
+	content, err := git.ReadFile(novelID, git.OutlinePath(chapterID))
+	if err != nil {
+		return true, false
+	}
+	if countNonBlank(content) < outlineMinContent {
+		return false, true
+	}
+	return false, false
+}
+
+// countNonBlank 统计字符串中非空非空白的 rune 数量（中文按字计，不计入
+// 空格/制表/换行/全角空格等）。
+func countNonBlank(s string) int {
+	n := 0
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			n++
+		}
+	}
+	return n
+}
+
 // editPlainFile 编辑通用文件（novelgo.md、技能文件），无章节记录联动。
 func (t *EditTool) editPlainFile(ctx context.Context, a *EditArgs, tc ToolContext) (*ToolResult, error) {
 	current, err := readFileForEdit(tc.NovelID, a.Path, a.ChangeType)
@@ -273,6 +325,21 @@ func (t *EditTool) editVolumeOutline(ctx context.Context, a *EditArgs, tc ToolCo
 func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolContext, ref git.ChapterPathRef) (*ToolResult, error) {
 	physical := physicalRWPath(ref.IsOutline, ref.ID)
 	chStore := chapter.NewStore(tc.DB, tc.LoggerOrDefault())
+
+	// 大纲写前门禁（P1-C，蒸馏自 oh-story guard-outline-before-prose）：
+	// 仅对「正文」且「本书已启用大纲工作流」生效，不影响人工 UI（走独立 API），也不误伤
+	// 纯即兴写作的本书。两条确定性规则：
+	//  1) 新建正文通道（chapters/new.md）：本书已有任意大纲时，要求先 outlines/new.md 建纲；
+	//  2) 已有章节写正文：若本章大纲文件存在但有效内容 < 30 字，拒绝，提示先补细纲。
+	//     大纲文件完全不存在则视为即兴章节，放行（宁可漏拦，避免误伤 body-first 章节/混合本书）。
+	if !ref.IsOutline && novelUsesOutlines(tc.NovelID) {
+		if ref.IsNew {
+			return &ToolResult{Success: false, Error: "本书已启用大纲工作流（已存在大纲）。请先通过 outlines/new.md 创建本章大纲，再写正文；不要改用 chapters/new.md 直接建正文（否则会产生无纲章节）。"}, nil
+		}
+		if missing, empty := outlineState(tc.NovelID, ref.ID); !missing && empty {
+			return &ToolResult{Success: false, Error: fmt.Sprintf("本章（id=%d）大纲为空，请先用 outlines/id_%d.md 补充细纲（至少 30 字有效内容）再写正文。", ref.ID, ref.ID)}, nil
+		}
+	}
 
 	var (
 		ch       *chapter.Chapter
@@ -806,6 +873,8 @@ func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.C
 // ── 工具描述 ──────────────────────────────────────────────
 
 const editDescription = `编辑小说文件（章节正文、大纲、卷纲、故事状态 novelgo.md 或技能文件）。支持三种编辑模式：full_replace（全文替换）、search_replace（查找替换）、line_range_replace（行范围替换）。
+
+大纲写前门禁（系统硬规则）：若本书已存在任意大纲，则正文必须走「先 outlines/new.md 建纲 → 再写 chapters/id_{chapter_id}.md 正文」流程；严禁用 chapters/new.md 直接建正文（会被拒绝）。已有章节若大纲文件存在但实质为空（不足 30 字有效内容），写正文也会被拒绝，需先补细纲。无大纲的本书按即兴写作放行。
 
 新建章节或大纲：path 使用 new.md 形式（格式见 path 参数说明），且只能 full_replace；成功后返回值携带分配的 chapter_id、volume_id 与物理路径，后续编辑一律使用返回的物理路径。
 重要——大纲与正文属于同一章节（共用 chapter_id）：通过 outlines/new.md 创建大纲后，该章节的正文必须写入返回值 body_path 指定的 chapters/id_{chapter_id}.md，严禁再用 chapters/new.md 新建（否则会产生两个重复章节）；反之通过 chapters/new.md 创建正文后，其大纲写入返回值 outline_path 指定的 outlines/id_{chapter_id}.md。只有当目标章节确实不存在时才使用 new.md。
