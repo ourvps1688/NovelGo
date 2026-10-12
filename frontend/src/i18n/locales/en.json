@@ -919,6 +919,14 @@
     "scope": "Scope",
     "global": "Global",
     "book": "Book",
+    "genreConstraint": "Genre constraint template",
+    "genreConstraintHint": "Selecting one creates a book-level \"constraint\" preference injected every turn; None removes it",
+    "genreNone": "None",
+    "genre_shuangwen": "Shuangwen / Web novel",
+    "genre_suspense": "Suspense / Mystery",
+    "genre_romance": "Romance / Emotional",
+    "genre_literary": "Literary / Serious",
+    "genreApplyFailed": "Failed to switch genre constraint",
     "tokenOverBudget": "Preferences exceed 4k soft budget ({{count}} tokens), consider trimming"
   },
   "search": {
