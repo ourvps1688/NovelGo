@@ -238,6 +238,10 @@ if (emptyErrors === 0) {
 console.log('📋 Checking for hardcoded Chinese in source files...')
 
 // Recursively find all .tsx/.ts files, excluding i18n locale JSONs
+// 数据素材文件（内容为特定语言的写作约束正文，按设计不入 i18n 翻译，
+// 其内中文非可翻译 UI 文案），跳过硬编码中文检查。
+const ALLOWLIST_FILES = new Set(['genreTemplates.ts'])
+
 function findSourceFiles(dir, exts = ['.tsx', '.ts']) {
   const results = []
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -250,6 +254,8 @@ function findSourceFiles(dir, exts = ['.tsx', '.ts']) {
     } else if (exts.some(ext => entry.name.endsWith(ext))) {
       // 跳过测试文件：测试夹具中的中文是后端错误消息测例，非 UI 文案
       if (/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) continue
+      // 跳过数据素材文件：内容为特定语言写作约束正文，非可翻译 UI
+      if (ALLOWLIST_FILES.has(entry.name)) continue
       results.push(fullPath)
     }
   }
