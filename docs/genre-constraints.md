@@ -1,7 +1,11 @@
 # 题材约束模板（档A：创作偏好可选项）
 
 > 来源：借鉴 [xindoo/ai-novel-lab](https://github.com/xindoo/ai-novel-lab) 的「爽文写作法则 + 质量门禁」方法论，  
-> 蒸馏为可在本项目的 **创作偏好（PreferenceList）** 面板里直接粘贴的常驻约束文本。
+> 以及 [zenstory-ai/oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) 的 31 张经语料校准的题材文风卡（开场抓手/冲突发动机/章尾钩子/禁止漂移），  
+> 蒸馏为可在本项目的 **创作偏好（PreferenceList）** 面板里直接粘贴或一键选用的常驻约束文本。
+
+> **档B 一键选用**：创作偏好面板顶部的「题材约束模板」下拉框已内置 **33 套**题材（通用 4 + 男频 7 + 女频言情 12 + 悬疑 4 + 历史脑洞 2 + 幻想科幻 1 + 种田日常 3）。  
+> 选中即创建一条本书「创作约束」偏好，从下一轮起每轮常驻注入；切到「不启用」即删除模板条目。详见 `frontend/src/components/preference/genreTemplates.ts`。
 >
 > **为什么放创作偏好而不是技能**：偏好（`NovelProfile`）本身就是每轮注入的常驻 system 消息，  
 > 适合承载"什么不许写 / 要达到什么密度"这类**硬约束**；技能适合承载"怎么写"的过程方法论。  

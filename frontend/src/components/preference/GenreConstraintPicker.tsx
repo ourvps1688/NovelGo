@@ -8,6 +8,7 @@ import { useCreatePreference } from "./useCreatePreference";
 import { useDeletePreference } from "./useDeletePreference";
 import {
   GENRE_TEMPLATES,
+  GENRE_GROUPS,
   GENRE_CONSTRAINT_CATEGORY,
   findTemplateItems,
 } from "./genreTemplates";
@@ -16,12 +17,11 @@ interface Props {
   novelId: number;
 }
 
-// GenreConstraintPicker: 题材约束模板选择器（档B）。
-// 从 docs/genre-constraints.md 的四套模板中一键选用，
+// GenreConstraintPicker: 题材约束模板选择器（档B，P0-B 扩展为分组下拉）。
 // 选中 = 创建一条本书偏好（category=创作约束），关闭 = 删除模板条目。
 // 只动能按 marker 识别的模板条目，用户自定义创作约束不受影响。
 export default function GenreConstraintPicker({ novelId }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const preferencesQuery = usePreferences(novelId);
   const createMutation = useCreatePreference(novelId);
   const deleteMutation = useDeletePreference(novelId);
@@ -35,18 +35,27 @@ export default function GenreConstraintPicker({ novelId }: Props) {
   );
 
   const templateItems = useMemo(() => findTemplateItems(items), [items]);
-
-  // 当前选中：取第一个命中的模板条目（多套并存时以最新一条为准不现实，
-  // 偏好列表按 updated_at 排序，这里简单取首个命中用于回显）。
   const selectedId = templateItems[0]?.templateId ?? null;
   const pending = createMutation.isPending || deleteMutation.isPending;
 
+  const isEn = i18n.language.startsWith("en");
+  const nameOf = (tpl: (typeof GENRE_TEMPLATES)[number]) =>
+    isEn ? tpl.labelEn : tpl.label;
+
+  // 按 group 归类，保持 GENRE_GROUPS 顺序
+  const groupMap = useMemo(() => {
+    const m = new Map<string, (typeof GENRE_TEMPLATES)[number][]>();
+    for (const tpl of GENRE_TEMPLATES) {
+      if (!m.has(tpl.group)) m.set(tpl.group, []);
+      m.get(tpl.group)!.push(tpl);
+    }
+    return m;
+  }, []);
+
   async function apply(templateId: string | null) {
     if (pending) return;
-    // 选中同一套 → 无操作
     if (templateId !== null && templateId === selectedId) return;
     try {
-      // 先建新（失败时旧约束仍在），再删旧模板条目；自定义条目不在 templateItems 内，不会被删。
       if (templateId !== null) {
         const tpl = GENRE_TEMPLATES.find((x) => x.id === templateId);
         if (!tpl) return;
@@ -65,6 +74,10 @@ export default function GenreConstraintPicker({ novelId }: Props) {
     }
   }
 
+  const activeLabel = selectedId
+    ? nameOf(GENRE_TEMPLATES.find((x) => x.id === selectedId)!)
+    : null;
+
   return (
     <section className="rounded-lg border border-border bg-card px-4 py-3">
       <div className="flex items-start gap-3">
@@ -80,38 +93,33 @@ export default function GenreConstraintPicker({ novelId }: Props) {
               {t("preference.genreConstraintHint")}
             </span>
           </div>
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            <button
-              type="button"
-              disabled={pending || selectedId === null}
-              onClick={() => apply(null)}
-              className={`px-2.5 py-1 rounded text-xs transition-colors disabled:opacity-50 ${
-                selectedId === null
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-muted-foreground hover:text-foreground"
-              }`}
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <select
+              value={selectedId ?? ""}
+              disabled={pending}
+              onChange={(e) => apply(e.target.value || null)}
+              className="h-8 max-w-full rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             >
-              {t("preference.genreNone")}
-            </button>
-            {GENRE_TEMPLATES.map((tpl) => {
-              const active = selectedId === tpl.id;
-              return (
-                <button
-                  key={tpl.id}
-                  type="button"
-                  disabled={pending}
-                  title={tpl.marker}
-                  onClick={() => apply(tpl.id)}
-                  className={`px-2.5 py-1 rounded text-xs transition-colors disabled:opacity-50 ${
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t(`preference.genre_${tpl.id}`)}
-                </button>
-              );
-            })}
+              <option value="">{t("preference.genreNone")}</option>
+              {GENRE_GROUPS.map((g) => {
+                const list = groupMap.get(g.key);
+                if (!list || list.length === 0) return null;
+                return (
+                  <optgroup key={g.key} label={isEn ? g.labelEn : g.label}>
+                    {list.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>
+                        {nameOf(tpl)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+            {activeLabel && (
+              <span className="text-[10px] text-muted-foreground truncate">
+                {t("preference.genreApplied", { name: activeLabel })}
+              </span>
+            )}
           </div>
         </div>
       </div>

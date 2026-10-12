@@ -899,10 +899,7 @@
     "genreConstraint": "题材约束模板",
     "genreConstraintHint": "选中后自动创建一条本书「创作约束」偏好，每轮常驻注入；关闭即删除",
     "genreNone": "不启用",
-    "genre_shuangwen": "爽文 / 网文",
-    "genre_suspense": "悬疑 / 推理",
-    "genre_romance": "言情 / 情感",
-    "genre_literary": "传统文学 / 严肃",
+    "genreApplied": "已启用：{{name}}",
     "genreApplyFailed": "题材约束切换失败",
     "tokenOverBudget": "偏好已超 4k 软上限（{{count}} tokens），建议精简"
   },

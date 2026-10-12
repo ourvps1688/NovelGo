@@ -1,23 +1,38 @@
 import { describe, expect, it } from "vitest";
 import {
   GENRE_TEMPLATES,
+  GENRE_GROUPS,
   detectTemplateId,
   findTemplateItems,
 } from "./genreTemplates";
 
 describe("genreTemplates", () => {
-  it("exposes four templates with matching marker prefix", () => {
-    expect(GENRE_TEMPLATES).toHaveLength(4);
+  it("every template has valid id/marker/label and unique id", () => {
+    const ids = new Set<string>();
     for (const tpl of GENRE_TEMPLATES) {
+      expect(tpl.id).toBeTruthy();
+      expect(ids.has(tpl.id)).toBe(false);
+      ids.add(tpl.id);
       expect(tpl.content.trimStart().startsWith(tpl.marker)).toBe(true);
       expect(tpl.marker).toMatch(/^【创作约束·.+】$/);
+      expect(tpl.label).toBeTruthy();
+      expect(tpl.labelEn).toBeTruthy();
+      expect(tpl.group).toBeTruthy();
+    }
+    // P0-B 扩展：至少覆盖通用 4 套 + 多题材分组
+    expect(GENRE_TEMPLATES.length).toBeGreaterThanOrEqual(27);
+  });
+
+  it("every template's group exists in GENRE_GROUPS", () => {
+    const keys = new Set(GENRE_GROUPS.map((g) => g.key));
+    for (const tpl of GENRE_TEMPLATES) {
+      expect(keys.has(tpl.group)).toBe(true);
     }
   });
 
-  it("detects each template by first-line marker", () => {
+  it("detects each template by first-line marker (tolerant of leading whitespace)", () => {
     for (const tpl of GENRE_TEMPLATES) {
       expect(detectTemplateId(tpl.content)).toBe(tpl.id);
-      // 容忍前导空白
       expect(detectTemplateId("  \n" + tpl.content)).toBe(tpl.id);
     }
   });
