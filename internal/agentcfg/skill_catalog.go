@@ -75,7 +75,7 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 // BuildAlwaysSkillsContent 拼合所有 always 模式的 skill 正文，作为常驻系统消息注入。
 // 不包含 YAML frontmatter，只拼接 body 内容。
 // 除 frontmatter mode=always 的技能外，还会合并小说"勾选启用"的技能
-//（用户在聊天输入区 + 菜单里按书勾选，存于小说技能目录 .enabled.json）——
+// （用户在聊天输入区 + 菜单里按书勾选，存于小说技能目录 .enabled.json）——
 // 勾选即临时 always，取消勾选即恢复原 mode 行为。
 func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelID int64) string {
 	if store == nil {
