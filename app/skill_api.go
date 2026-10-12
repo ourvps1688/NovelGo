@@ -28,6 +28,30 @@ func (a *App) ListSkills(input ListSkillsInput) []skill.SkillMeta {
 	return a.skill.ListMeta(input.NovelID)
 }
 
+// GetEnabledSkills 返回小说勾选启用的技能名清单。
+// 勾选的技能在对话中常驻注入（等效临时 always），与技能文件本身解耦。
+func (a *App) GetEnabledSkills(novelID int64) ([]string, error) {
+	names, err := skill.LoadEnabled(novelID)
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// SetEnabledSkillsInput 是 SetEnabledSkills 的入参，PUT 语义全量覆盖。
+type SetEnabledSkillsInput struct {
+	NovelID int64    `json:"novel_id"`
+	Names   []string `json:"names"`
+}
+
+// SetEnabledSkills 全量覆盖小说勾选启用的技能名清单。
+func (a *App) SetEnabledSkills(input SetEnabledSkillsInput) error {
+	if input.NovelID <= 0 {
+		return fmt.Errorf("小说 ID 无效")
+	}
+	return skill.SaveEnabled(input.NovelID, input.Names)
+}
+
 // DeleteSkillInput 是 DeleteSkill 的入参。
 type DeleteSkillInput struct {
 	NovelID int64  `json:"novel_id"`

@@ -207,22 +207,34 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		// tool_args_invalid 首次提醒标志：同一 turn 内只加一次 reminder，
 		// 避免重试耗尽后 DB 残留多条孤立 user reminder 污染下轮 LLM 上下文
 		reminderAdded := false
-		// token 预算检查：每轮开始时，超限触发压缩
-		if opts.Model.ContextWindow > 0 && float64(sumRunningTokens(runningTokens))/float64(opts.Model.ContextWindow) >= 0.8 {
-			a.logger.Warn("token budget exceeded, triggering compression",
-				"estimated", sumRunningTokens(runningTokens),
-				"context_window", opts.Model.ContextWindow,
-				"ratio", fmt.Sprintf("%.1f%%", float64(sumRunningTokens(runningTokens))/float64(opts.Model.ContextWindow)*100),
-				"agent_type", opts.AgentType,
-			)
-			var compressErr error
-			if opts.AgentType == "main" {
-				compressErr = a.Compress(ctx, &opts, runningTokens)
-			} else {
-				compressErr = a.compressInMemory(ctx, &opts, runningTokens)
+		// token 预算检查：每轮开始时，若「已用历史 + 模型最大输出」逼近上下文窗口即触发压缩。
+		// 注意需把 MaxOutputTokens 也算进预算——仅按历史占比判断会在
+		// 历史 < 80% 但实际 + 最大输出已超窗口时漏判，导致 LLM 调用直接 400。
+		if opts.Model.ContextWindow > 0 {
+			used := sumRunningTokens(runningTokens)
+			modelMaxOut := opts.Model.MaxOutputTokens
+			if modelMaxOut <= 0 {
+				modelMaxOut = 64000
 			}
-			if compressErr != nil {
-				a.logger.Warn("compression failed, continuing with original context", "err", compressErr)
+			projected := used + modelMaxOut
+			if float64(projected)/float64(opts.Model.ContextWindow) >= 0.85 {
+				a.logger.Warn("token budget projected to exceed context, triggering compression",
+					"used", used,
+					"model_max_output", modelMaxOut,
+					"projected", projected,
+					"context_window", opts.Model.ContextWindow,
+					"ratio", fmt.Sprintf("%.1f%%", float64(projected)/float64(opts.Model.ContextWindow)*100),
+					"agent_type", opts.AgentType,
+				)
+				var compressErr error
+				if opts.AgentType == "main" {
+					compressErr = a.Compress(ctx, &opts, runningTokens)
+				} else {
+					compressErr = a.compressInMemory(ctx, &opts, runningTokens)
+				}
+				if compressErr != nil {
+					a.logger.Warn("compression failed, continuing with original context", "err", compressErr)
+				}
 			}
 		}
 

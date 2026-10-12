@@ -344,6 +344,16 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 		return &ToolResult{Success: true, Data: map[string]any{"path": physical, "message": "内容未变化，跳过"}}, nil
 	}
 
+	// 正文（非大纲）禁用破折号：LLM 惯性滥用「——」替代逗号/句号，提示词约束
+	// 无效，此处硬校验强制改写（U+2014 连用 / U+2015 均视为破折号）。
+	if !ref.IsOutline {
+		if n := countForbiddenDashes(proposed); n > 0 {
+			return &ToolResult{Success: false, Error: fmt.Sprintf(
+				"正文包含禁用标点破折号「——」共 %d 处。正文不允许出现破折号，"+
+					"请把破折号改写为逗号、句号、省略号或其他恰当表达后重新提交", n)}, nil
+		}
+	}
+
 	// 审批（new 通道展示虚拟路径，已有章节展示物理路径）
 	payloadPath := physical
 	if ref.IsNew {
@@ -506,6 +516,25 @@ func linePreview(content string, start, end int) string {
 }
 
 // ── 编辑操作 ──────────────────────────────────────────────
+
+// countForbiddenDashes 统计正文中破折号出现次数。
+// 「——」（U+2014 连用）与「――」（U+2015）均计入；单个 U+2014 不计，
+// 避免误伤数字区间等罕见合法用法。LLM 滥用形态几乎都是连用。
+func countForbiddenDashes(content string) int {
+	runes := []rune(content)
+	count := 0
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '―' { // U+2015 horizontal bar
+			count++
+			continue
+		}
+		if runes[i] == '—' && i+1 < len(runes) && runes[i+1] == '—' {
+			count++
+			i++ // 跳过成对中的第二个，三个连续「———」计 1 处
+		}
+	}
+	return count
+}
 
 func applyChange(a *EditArgs, current string) (string, error) {
 	switch a.ChangeType {

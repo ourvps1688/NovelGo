@@ -234,6 +234,14 @@ func (c *Client) buildPayload(
 	} else if um != nil && um.MaxOutputTokens > 0 {
 		maxTokens = um.MaxOutputTokens
 	}
+
+	// 上下文安全收缩：模型拥有上下文窗口时，确保 prompt + max_tokens 不超窗口，
+	// 直接避免触发「max context length」HTTP 400。用 o200k BPE 精确估计 prompt
+	// token，留 2K 安全余量，并兜底到最小可用输出预算。
+	if um != nil && um.ContextWindow > 0 {
+		promptTokens, _, _ := CountMessagesTokens(messages)
+		maxTokens = clampMaxTokens(maxTokens, um.ContextWindow, promptTokens)
+	}
 	payload["temperature"] = temperature
 	payload["max_tokens"] = maxTokens
 
@@ -617,4 +625,20 @@ func parseRetryAfter(value string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// clampMaxTokens 在保证 prompt + maxTokens 不超出 contextWindow 的前提下，
+// 收缩 maxTokens 避免触发服务端的 max context length 限制（HTTP 400）。
+// safetyMargin 预留少量余量；available 低于 minOutputBudget 时仍给模型最小输出预算。
+func clampMaxTokens(maxTokens, contextWindow, promptTokens int) int {
+	const safetyMargin = 2048
+	const minOutputBudget = 4096
+	available := contextWindow - promptTokens - safetyMargin
+	if available < minOutputBudget {
+		available = minOutputBudget
+	}
+	if maxTokens > available {
+		return available
+	}
+	return maxTokens
 }

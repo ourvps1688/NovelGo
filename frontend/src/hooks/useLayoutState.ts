@@ -4,7 +4,8 @@ const SIDEPANEL_KEY = "novelgo_sidepanel_width";
 const CHATPANEL_KEY = "novelgo_chatpanel_width";
 
 const SIDEPANEL_DEFAULT = 224;
-const CHATPANEL_DEFAULT = 360;
+// AI 对话面板：默认加宽保证 LLM 输出可读；max 提到 1200 便于宽屏拖拽
+const CHATPANEL_DEFAULT = 460;
 
 function loadNumber(
   key: string,
@@ -29,7 +30,7 @@ export function useLayoutState() {
     loadNumber(SIDEPANEL_KEY, SIDEPANEL_DEFAULT, 180, 480),
   );
   const [chatPanelWidth, setChatPanelWidthRaw] = useState(() =>
-    loadNumber(CHATPANEL_KEY, CHATPANEL_DEFAULT, 280, 800),
+    loadNumber(CHATPANEL_KEY, CHATPANEL_DEFAULT, 320, 1200),
   );
 
   // 防抖写入 localStorage，避免拖拽时频繁同步 I/O
@@ -61,7 +62,7 @@ export function useLayoutState() {
   }, []);
 
   const setChatPanelWidth = useCallback((w: number) => {
-    setChatPanelWidthRaw(Math.min(800, Math.max(280, Math.round(w))));
+    setChatPanelWidthRaw(Math.min(1200, Math.max(320, Math.round(w))));
   }, []);
 
   return {

@@ -164,6 +164,16 @@
     "retry": "Retry",
     "selectNovel": "Select a novel to start chatting",
     "inputPlaceholder": "Type a message, press / for skills...",
+    "skillPicker": {
+      "title": "Skills",
+      "search": "Search skills",
+      "hint": "Checked skills are injected into every turn for this novel; uncheck to disable. Saved per novel.",
+      "empty": "No matching skills",
+      "saveFailed": "Failed to save skill enablement",
+      "source_novel": "Novel",
+      "source_user": "User",
+      "source_builtin": "Built-in"
+    },
     "selectNovelFirst": "Please select a novel first",
     "configureModelFirst": "Please configure a model first",
     "chatInterrupted": "Chat interrupted",

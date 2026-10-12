@@ -101,6 +101,8 @@ export const skillKeys = {
   all: ["skills"] as const,
   // list: 与 ListSkillsInput.novel_id 对齐，避免跨 novel 串缓存（不同 novel 的 novel 层 skill 不同）。
   list: (novelId: number) => ["skills", novelId] as const,
+  // enabled: 按书勾选启用的技能名清单（SetEnabledSkills PUT 全量覆盖）。
+  enabled: (novelId: number) => ["skills", novelId, "enabled"] as const,
   detail: (name: string) => ["skill", name] as const,
   // remoteList: SkillMarketplace 远程技能市场列表（apperr 新 API）。
   // input 含 page/size/query，进 key 避免不同分页/搜索串缓存。

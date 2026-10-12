@@ -226,6 +226,10 @@ export function GetContent(arg1, arg2) {
   return window['go']['app']['App']['GetContent'](arg1, arg2);
 }
 
+export function GetEnabledSkills(arg1) {
+  return window['go']['app']['App']['GetEnabledSkills'](arg1);
+}
+
 export function GetFileDiff(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetFileDiff'](arg1, arg2, arg3);
 }
@@ -420,6 +424,10 @@ export function SetActiveNovel(arg1) {
 
 export function SetApprovalMode(arg1) {
   return window['go']['app']['App']['SetApprovalMode'](arg1);
+}
+
+export function SetEnabledSkills(arg1) {
+  return window['go']['app']['App']['SetEnabledSkills'](arg1);
 }
 
 export function SetLastSession(arg1) {

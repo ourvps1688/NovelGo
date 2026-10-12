@@ -1528,6 +1528,7 @@ export default function ChatPanel({
       </div>
 
       <ChatInput
+        novelId={novelId}
         disabled={!hasNovel || !selectedKey}
         isLoading={isLoading}
         isCancelling={cancelChatMutation.isPending}

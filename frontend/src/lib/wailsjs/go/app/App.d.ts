@@ -137,6 +137,8 @@ export function GetCommitLog(arg1:number,arg2:number,arg3:string):Promise<Array<
 
 export function GetContent(arg1:number,arg2:string):Promise<string>;
 
+export function GetEnabledSkills(arg1:number):Promise<Array<string>>;
+
 export function GetFileDiff(arg1:number,arg2:string,arg3:string):Promise<git.FileDiff>;
 
 export function GetLLMConfig():Promise<llm.LLMConfigView>;
@@ -234,6 +236,8 @@ export function SearchAll(arg1:number,arg2:string):Promise<Array<search.Result>>
 export function SetActiveNovel(arg1:app.SetActiveNovelInput):Promise<void>;
 
 export function SetApprovalMode(arg1:string):Promise<void>;
+
+export function SetEnabledSkills(arg1:app.SetEnabledSkillsInput):Promise<void>;
 
 export function SetLastSession(arg1:string):Promise<void>;
 

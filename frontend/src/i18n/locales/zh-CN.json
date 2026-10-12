@@ -156,6 +156,16 @@
     "retry": "重试",
     "selectNovel": "选择作品开始对话",
     "inputPlaceholder": "输入消息，按 / 调用技能...",
+    "skillPicker": {
+      "title": "技能",
+      "search": "搜索技能",
+      "hint": "勾选后该技能将在本作品的对话中常驻生效，取消勾选即停用；按作品独立保存。",
+      "empty": "无匹配技能",
+      "saveFailed": "保存技能启用状态失败",
+      "source_novel": "本书",
+      "source_user": "用户",
+      "source_builtin": "内置"
+    },
     "selectNovelFirst": "请先选择作品",
     "configureModelFirst": "请先配置模型",
     "chatInterrupted": "对话被中断",

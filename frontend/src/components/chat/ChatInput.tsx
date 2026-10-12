@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { ArrowUp, Square, Zap, Play, Star, Loader2 } from "lucide-react";
+import { ArrowUp, Square, Zap, Play, Star, Loader2, Plus } from "lucide-react";
 import type { app } from "@/lib/wailsjs/go/models";
+import Logo from "../Logo";
 import SlashMenu from "./SlashMenu";
+import SkillPicker from "./SkillPicker";
 
 // 草稿 localStorage key 前缀（per-session 持久化，沿用 novelgo_ 惯例）
 const DRAFT_PREFIX = "novelgo_chat_draft_";
@@ -27,6 +29,7 @@ const score = (c: app.SlashCommand, q: string): number => {
 };
 
 interface Props {
+  novelId: number;
   disabled: boolean;
   isLoading: boolean;
   isCancelling: boolean;
@@ -39,6 +42,7 @@ interface Props {
 }
 
 export default function ChatInput({
+  novelId,
   disabled,
   isLoading,
   isCancelling,
@@ -197,6 +201,23 @@ export default function ChatInput({
     };
   }, [slashOpen, updateSlashPos]);
 
+  // skill picker（"+"菜单）状态
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerPos, setPickerPos] = useState({ top: 0, left: 0, width: 0 });
+  const inputBoxRef = useRef<HTMLDivElement>(null);
+
+  const togglePicker = useCallback(() => {
+    if (pickerOpen) {
+      setPickerOpen(false);
+      return;
+    }
+    const rect = inputBoxRef.current?.getBoundingClientRect();
+    if (rect) {
+      setPickerPos({ top: rect.top, left: rect.left, width: rect.width });
+    }
+    setPickerOpen(true);
+  }, [pickerOpen]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (slashOpen && filteredItems.length > 0) {
@@ -323,7 +344,20 @@ export default function ChatInput({
           </span>
         </div>
       )}
-      <div className="flex items-end gap-2 bg-muted/40 rounded-2xl border border-border px-2 py-2 transition-colors focus-within:border-primary/40 focus-within:shadow-xs focus-within:bg-muted/50">
+      <div
+        ref={inputBoxRef}
+        className="flex items-end gap-2 bg-muted/40 rounded-2xl border border-border px-2 py-2 transition-colors focus-within:border-primary/40 focus-within:shadow-xs focus-within:bg-muted/50"
+      >
+        <button
+          onClick={togglePicker}
+          disabled={disabled}
+          aria-label="skills"
+          className={`flex h-9 w-9 min-w-[36px] items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 shrink-0 ${
+            pickerOpen ? "bg-muted text-foreground" : ""
+          }`}
+        >
+          <Plus className="w-4.5 h-4.5" />
+        </button>
         <textarea
           ref={textareaRef}
           placeholder={placeholder}
@@ -337,21 +371,41 @@ export default function ChatInput({
           <button
             onClick={handleStopClick}
             disabled={isCancelling}
-            className="w-[52px] h-[36px] min-w-[52px] flex items-center justify-center rounded-xl bg-destructive text-destructive-foreground shadow-md transition-all hover:bg-destructive/85 disabled:opacity-70 shrink-0"
+            aria-label="stop"
+            className="flex h-9 w-9 min-w-[36px] shrink-0 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow-md shadow-destructive/25 transition-all duration-200 hover:bg-destructive/85 hover:shadow-lg hover:shadow-destructive/30 active:scale-95 disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           >
             {isCancelling ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Square className="w-4 h-4" fill="currentColor" />
+              <Square className="h-3 w-3" fill="currentColor" />
             )}
           </button>
         ) : (
           <button
-            disabled={disabled || !hasContent}
             onClick={handleSendClick}
-            className="w-[52px] h-[36px] min-w-[52px] flex items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/20 transition-all hover:-translate-y-px hover:shadow-lg hover:shadow-primary/30 disabled:bg-muted disabled:text-muted-foreground/40 disabled:shadow-none disabled:hover:translate-y-0 shrink-0"
+            disabled={disabled || !hasContent}
+            aria-label="send"
+            className={`relative flex h-9 w-9 min-w-[36px] shrink-0 items-center justify-center rounded-full transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
+              disabled || !hasContent
+                ? "text-muted-foreground/50"
+                : "bg-primary text-primary-foreground shadow-md shadow-primary/25 hover:-translate-y-px hover:shadow-lg hover:shadow-primary/35 active:translate-y-0 active:scale-95"
+            }`}
           >
-            <ArrowUp className="w-5 h-5" />
+            {/* 空态：产品 Logo 徽标；就绪：发送箭头（交叉淡入） */}
+            <span
+              className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${
+                disabled || !hasContent ? "opacity-100" : "opacity-0"
+              }`}
+            >
+              <Logo className="h-[18px] w-[18px] opacity-45" />
+            </span>
+            <span
+              className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${
+                disabled || !hasContent ? "opacity-0" : "opacity-100"
+              }`}
+            >
+              <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.5} />
+            </span>
           </button>
         )}
       </div>
@@ -363,6 +417,14 @@ export default function ChatInput({
           position={slashPos}
           onSelect={applySlashSelection}
           onHover={setSlashIndex}
+        />
+      )}
+
+      {pickerOpen && novelId > 0 && (
+        <SkillPicker
+          novelId={novelId}
+          position={pickerPos}
+          onClose={() => setPickerOpen(false)}
         />
       )}
     </div>

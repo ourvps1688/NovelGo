@@ -305,3 +305,34 @@ func TestMergeSystemMessages_TwoEmptyOneNonEmpty(t *testing.T) {
 		t.Errorf("only one non-empty: got %v, want %v", got, in)
 	}
 }
+
+// --- clampMaxTokens ---
+
+func TestClampMaxTokens(t *testing.T) {
+	cases := []struct {
+		name          string
+		maxTokens     int
+		contextWindow int
+		promptTokens  int
+		want          int
+	}{
+		// 正常：prompt + maxTokens 不超窗口，原值返回
+		{"fits", 384000, 1048576, 100000, 384000},
+		// 触发 400 的真实场景：665042 + 384000 > 1048576，应收缩到可用余量
+		{"overflow", 384000, 1048576, 665042, 1048576 - 665042 - 2048},
+		// 即使模型无上限，也不得超过窗口
+		{"hugeMax", 1_000_000_000, 200000, 10000, 200000 - 10000 - 2048},
+		// 留白不足时兜底到最小输出预算
+		{"tinyAvail", 64000, 5000, 1000, 4096},
+		// 完全没prompt：按窗口收缩
+		{"noPrompt", 384000, 128000, 0, 128000 - 2048},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := clampMaxTokens(c.maxTokens, c.contextWindow, c.promptTokens); got != c.want {
+				t.Errorf("clampMaxTokens(%d,%d,%d) = %d, want %d",
+					c.maxTokens, c.contextWindow, c.promptTokens, got, c.want)
+			}
+		})
+	}
+}

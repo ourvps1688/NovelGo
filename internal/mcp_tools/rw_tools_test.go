@@ -180,6 +180,47 @@ func editArgsTitle(path, changeType, content, title string) map[string]any {
 	return args
 }
 
+// ── 正文破折号硬校验 ──────────────────────────────────────
+
+// 正文包含「——」直接拒绝（LLM 提示词约束无效，写入管线硬卡）；
+// 大纲不受限；单个「—」不误伤。
+func TestEditChapterBodyRejectsEmDash(t *testing.T) {
+	_, tc, ctx := setupRWEnv(t)
+
+	// 正文含「——」拒绝
+	res := execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "他停下来——看着远方。"))
+	if res.Success {
+		t.Fatal("expected rejection for em dash in chapter body")
+	}
+	if !strings.Contains(res.Error, "破折号") {
+		t.Errorf("error = %q, want dash hint", res.Error)
+	}
+
+	// 三连「———」同样拒绝
+	res = execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "他停下来———看着远方。"))
+	if res.Success {
+		t.Fatal("expected rejection for triple dash")
+	}
+
+	// U+2015 horizontal bar 同样拒绝
+	res = execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "他停下来――看着远方。"))
+	if res.Success {
+		t.Fatal("expected rejection for U+2015 dash")
+	}
+
+	// 正文单个「—」不误伤
+	res = execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "编号 3—5 的区间。"))
+	if !res.Success {
+		t.Fatalf("single dash should pass, got: %s", res.Error)
+	}
+
+	// 大纲不受限
+	res = execEdit(t, ctx, tc, editArgs("outlines/new.md", "full_replace", "转折——真相揭晓"))
+	if !res.Success {
+		t.Fatalf("outline should allow dashes, got: %s", res.Error)
+	}
+}
+
 // ── 新建通道（chapters/{vid}/new.md）──────────────────────
 
 // 新建章节：建记录拿 id → 写物理扁平文件 → 返回 chapter_id/volume_id。

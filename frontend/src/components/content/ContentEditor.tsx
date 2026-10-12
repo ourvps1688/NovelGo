@@ -59,6 +59,13 @@ export default function ContentEditor({
         editor.onDidScrollChange(save);
         editor.onDidChangeCursorPosition(save);
       }
+      // 已知 Monaco 问题：mouseWheelZoom 缩放字号后 wordWrap 不会重新计算，
+      // 长段落从此单行水平溢出。监听字体配置变化强制重排版恢复换行。
+      editor.onDidChangeConfiguration((e) => {
+        if (e.hasChanged(monaco.editor.EditorOption.fontInfo)) {
+          editor.layout();
+        }
+      });
       onMount(editor, monaco);
     },
     [positionKey, onMount],

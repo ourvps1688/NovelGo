@@ -676,6 +676,20 @@ export namespace app {
 	        this.novel_id = source["novel_id"];
 	    }
 	}
+	export class SetEnabledSkillsInput {
+	    novel_id: number;
+	    names: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SetEnabledSkillsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.names = source["names"];
+	    }
+	}
 	export class SettingResult {
 	    items: setting.SettingItem[];
 	    token_count: number;

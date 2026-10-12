@@ -39,8 +39,13 @@ func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillS
 
 	if skillStore != nil {
 		all := skillStore.ListMeta(novelID)
-		msg.Catalog = BuildSkillCatalog(skillStore.ListMetaForCatalog(all))
 		msg.Always = BuildAlwaysSkillsContent(all, skillStore, novelID)
+		catalogMeta := skillStore.ListMetaForCatalog(all)
+		// 已勾选启用的技能已常驻注入，从 auto 目录中排除，避免重复占 token。
+		if enabled := skillStore.EnabledNames(novelID); len(enabled) > 0 {
+			catalogMeta = excludeNames(catalogMeta, enabled)
+		}
+		msg.Catalog = BuildSkillCatalog(catalogMeta)
 	}
 
 	var errs []string
