@@ -537,3 +537,10 @@ export function UpdateTimelineEntry(arg1, arg2, arg3) {
 export function UpdateVolume(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateVolume'](arg1, arg2, arg3);
 }
+export function GetAuthorAliases() {
+  return window['go']['app']['App']['GetAuthorAliases']();
+}
+
+export function SaveAuthorAliases(arg1) {
+  return window['go']['app']['App']['SaveAuthorAliases'](arg1);
+}

@@ -8,6 +8,7 @@ import {
   Heart,
   Store,
   GitMerge,
+  Tag,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toastError } from "@/utils/toast";
@@ -21,6 +22,7 @@ import SkillMarketplace from "./SkillMarketplace";
 import { useSkills } from "./useSkills";
 import { useDeleteSkill } from "./useDeleteSkill";
 import ManualMergeDialog from "./ManualMergeDialog";
+import AuthorAliasDialog from "./AuthorAliasDialog";
 import { MergeMentalSkills } from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
@@ -66,6 +68,7 @@ export default function SkillList({
   const [showContribute, setShowContribute] = useState(false);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [aliasOpen, setAliasOpen] = useState(false);
 
   const handleMarketplaceInstalled = useCallback(() => {
     qc.invalidateQueries({ queryKey: skillKeys.list(novelId) });
@@ -180,6 +183,13 @@ export default function SkillList({
             title={t("skill.manualMerge")}
           >
             <GitMerge className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setAliasOpen(true)}
+            className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors"
+            title={t("skill.alias.manage")}
+          >
+            <Tag className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setCreating(true)}
@@ -316,6 +326,10 @@ export default function SkillList({
         onClose={() => setMergeOpen(false)}
         novelId={novelId}
         mentalSkills={mergeCandidateSkills}
+      />
+      <AuthorAliasDialog
+        open={aliasOpen}
+        onClose={() => setAliasOpen(false)}
       />
       <ConfirmDialog
         open={deleteTarget !== null}

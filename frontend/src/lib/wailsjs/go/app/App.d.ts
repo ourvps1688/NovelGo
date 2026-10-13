@@ -293,3 +293,5 @@ export function UpdateStyleSample(arg1:app.UpdateStyleSampleInput):Promise<style
 export function UpdateTimelineEntry(arg1:number,arg2:number,arg3:app.UpdateTimelineEntryInput):Promise<void>;
 
 export function UpdateVolume(arg1:number,arg2:number,arg3:string):Promise<void>;
+export function GetAuthorAliases():Promise<app.GetAuthorAliasesResult>;
+export function SaveAuthorAliases(arg1:app.SaveAuthorAliasesInput):Promise<void>;

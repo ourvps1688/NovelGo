@@ -1075,6 +1075,46 @@ export namespace app {
 	    }
 	}
 
+	export class AuthorAliasGroupDTO {
+	    canonical: string;
+	    aliases: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new AuthorAliasGroupDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.canonical = source["canonical"];
+	        this.aliases = source["aliases"];
+	    }
+	}
+	export class GetAuthorAliasesResult {
+	    version: number;
+	    groups: AuthorAliasGroupDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new GetAuthorAliasesResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.groups = source["groups"];
+	    }
+	}
+	export class SaveAuthorAliasesInput {
+	    groups: AuthorAliasGroupDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new SaveAuthorAliasesInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.groups = source["groups"];
+	    }
+	}
 }
 
 export namespace apperr {
