@@ -21,6 +21,7 @@ import {
 } from "./types";
 import ChatInput from "./ChatInput";
 import ChatControls from "./ChatControls";
+import type { PersonaSelection } from "./usePersonaSetting";
 import DeleteSessionDialog from "./DeleteSessionDialog";
 import MessageBubble from "./MessageBubble";
 import ThinkingBlock from "./ThinkingBlock";
@@ -1125,7 +1126,7 @@ export default function ChatPanel({
   }, [sessionId, selectedModel, compressMutation.mutateAsync, t]);
 
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, persona?: PersonaSelection | null) => {
       if (!selectedModel) return;
       const p = selectedModel.ProviderName;
       const m = selectedModel.ModelID;
@@ -1195,6 +1196,7 @@ export default function ChatPanel({
           provider_name: p,
           model_id: m,
           reasoning_effort: reasoningEffort,
+          persona: persona ?? undefined,
         });
         // 刷新会话列表（invalidate 触发 useSessions refetch）
         qc.invalidateQueries({ queryKey: sessionKeys.list(novelId, 1, 5, "") });

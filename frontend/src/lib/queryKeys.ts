@@ -204,3 +204,10 @@ export const writingStatsKeys = {
 export const writingConfigKeys = {
   detail: (novelId: number) => ["writing-config", novelId] as const,
 };
+
+// 写作人格（persona）设置：每本书独立的"写作模式"开关（persona 引用）。
+// GetPersonaSetting(novelId) 按书返回，queryKey 第二段用 novelId。
+// useSavePersonaSetting onSuccess 直接 setQueryData 同步本地缓存（写即事实）。
+export const personaSettingKeys = {
+  detail: (novelId: number) => ["persona-setting", novelId] as const,
+};

@@ -19,16 +19,18 @@ import (
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/rollback"
 	"github.com/novelgo/novelgo/internal/session"
+	"github.com/novelgo/novelgo/internal/skill"
 )
 
 // ChatInput 是一次对话请求的入参。
 type ChatInput struct {
-	SessionID       string `json:"session_id"` // 空=新建会话
-	NovelID         int64  `json:"novel_id"`
-	Message         string `json:"message"`
-	ProviderName    string `json:"provider_name"`    // "deepseek"
-	ModelID         string `json:"model_id"`         // "deepseek-v4-pro"
-	ReasoningEffort string `json:"reasoning_effort"` // "high" | "max" | ""
+	SessionID       string               `json:"session_id"` // 空=新建会话
+	NovelID         int64                `json:"novel_id"`
+	Message         string               `json:"message"`
+	ProviderName    string               `json:"provider_name"`     // "deepseek"
+	ModelID         string               `json:"model_id"`          // "deepseek-v4-pro"
+	ReasoningEffort string               `json:"reasoning_effort"`  // "high" | "max" | ""
+	Persona         *agentcfg.PersonaRef `json:"persona,omitempty"` // 写作人格（创作心智）引用；nil=普通模式
 }
 
 // ChatResult 是一次对话请求的返回值。
@@ -111,7 +113,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	var sysMsgs *agentcfg.SystemMessages
 	if isNew {
 		var buildErr error
-		sysMsgs, buildErr = agentcfg.BuildSystemMessages(ctx, a.db, input.NovelID, a.skill)
+		sysMsgs, buildErr = agentcfg.BuildSystemMessages(ctx, a.db, input.NovelID, a.skill, input.Persona)
 		if buildErr != nil {
 			a.logger.Warn("构建 system 消息部分失败", "novel_id", input.NovelID, "err", buildErr)
 		}
@@ -164,6 +166,11 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("加载 API 消息失败: %w", err)
 	}
+
+	// 8.5 persona 每轮注入（仅当 persona 引用有效且尚未常驻）：
+	// 新会话 persona 已作为常驻块写入 DB（msg.Persona），loadAPIMessages 会读回，
+	// 此处用 PersonaMarker 去重避免重复；已有会话（无此常驻块）则每轮注入，实现实时切换。
+	messages = injectPersonaMessages(messages, runningTokens, input.Persona, a.skill, input.NovelID)
 
 	// 9. 运行 Agent 循环
 	wails.EventsEmit(ctx, "chat:started", map[string]any{
@@ -265,7 +272,7 @@ func writeSystemMessages(tx *gorm.DB, sessionID string, turnID int, msgs *agentc
 		}
 	}
 
-	for _, c := range []string{msgs.Identity, msgs.Always, msgs.Catalog, msgs.Profile, msgs.State} {
+	for _, c := range []string{msgs.Identity, msgs.Always, msgs.Catalog, msgs.Profile, msgs.State, msgs.Persona} {
 		if c != "" {
 			if err := tx.Create(sysMsg(c)).Error; err != nil {
 				return err
@@ -273,6 +280,38 @@ func writeSystemMessages(tx *gorm.DB, sessionID string, turnID int, msgs *agentc
 		}
 	}
 	return nil
+}
+
+// messagesContainPersona 检测已加载的 API 消息中是否已存在 persona 常驻块
+// （由新会话写入 DB 的 msg.Persona）。用于每轮注入去重，避免与常驻块重复。
+func messagesContainPersona(messages []map[string]any) bool {
+	for _, m := range messages {
+		if role, _ := m["role"].(string); role != "system" {
+			continue
+		}
+		if content, _ := m["content"].(string); strings.Contains(content, agentcfg.PersonaMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// injectPersonaMessages 在每轮消息前追加 persona 系统消息（若引用有效且尚未常驻）。
+// 返回的消息切片保持 system 在前；已存在常驻块（PersonaMarker）时原样返回，避免重复。
+// 新会话的首轮不依赖此函数（persona 已由 writeSystemMessages 持久化为常驻块）。
+func injectPersonaMessages(messages []map[string]any, runningTokens map[string]int, persona *agentcfg.PersonaRef, skillStore *skill.Store, novelID int64) []map[string]any {
+	if persona == nil || messagesContainPersona(messages) {
+		return messages
+	}
+	personaText := agentcfg.BuildPersonaSystemText(persona, skillStore, novelID)
+	if personaText == "" {
+		return messages
+	}
+	pm := map[string]any{"role": "system", "content": personaText}
+	if n, terr := llm.CountMessageTokens(pm); terr == nil {
+		runningTokens["system"] += n
+	}
+	return append([]map[string]any{pm}, messages...)
 }
 
 // loadAPIMessages 加载指定 version 的所有 to_api 消息，转为 map 格式。

@@ -418,25 +418,26 @@ sequenceDiagram
   - 依赖：T-ML-2、T-X1
   - 验证：`npm run build`（tsc -b + vite）EXIT 0；`vitest run src/components/pattern/`（9 用例全过）。
 
-### P2 — 写作闭环增强
-- **T-WC-1｜`PersonaRef` + `BuildSystemMessages(persona)` + 引导段** — P2
-  - 文件：`internal/agentcfg/persona.go`（新建 `PersonaRef` + 诚实边界常量）、`internal/agentcfg/system_messages.go`（`BuildSystemMessages` 增参 + `buildPersonaSystemText`/`resolvePersonaContent`）
+### P2 — 写作闭环增强（已完成 ✅）
+- **T-WC-1｜`PersonaRef` + `BuildSystemMessages(persona)` + 引导段** — 已完成 ✅
+  - 文件：`internal/agentcfg/persona.go`（新建 `PersonaRef` + 诚实边界常量 `PersonaHonestyNote`）、`internal/agentcfg/system_messages.go`（`BuildSystemMessages` 增参 + `BuildPersonaSystemText`/`resolvePersonaContent`）
   - 依赖：无
   - 验证：`go test ./internal/agentcfg -run Persona` 验证 persona 引导段注入、尊重诚实边界、不破坏常驻 `Always`
-- **T-WC-2｜`app/chat.go` 透传 + 每轮注入 + persona 持久化** — P2
-  - 文件：`app/chat.go`（`ChatInput.Persona`、透传/每轮注入防重）、`app/persona_api.go`（新建）、`internal/personasetting/{types,store}.go`（新建）
+- **T-WC-2｜`app/chat.go` 透传 + 每轮注入 + persona 持久化** — 已完成 ✅
+  - 文件：`app/chat.go`（`ChatInput.Persona`、透传/每轮注入防重 `injectPersonaMessages`/`messagesContainPersona`）、`app/persona_api.go`（新建）、`internal/personasetting/{types,store}.go`（新建 + `migrate` 注册）
   - 依赖：T-WC-1
   - 验证：`go test ./app -run Persona` 新会话写常驻块、已有会话每轮注入且不重复；`SavePersonaSetting` 幂等
-- **T-WC-3｜前端写作模式选择器 + 持久化 + persona 徽标** — P2
-  - 文件：`ChatInput.tsx`（选择器+徽标）、`usePersonaOptions.ts`/`usePersonaSetting.ts`（新建）、i18n
+- **T-WC-3｜前端写作模式选择器 + 持久化 + persona 徽标** — 已完成 ✅
+  - 文件：`ChatInput.tsx`（选择器+徽标）、`PersonaPicker.tsx`（新建，仿 `SkillPicker` 弹层）、`usePersonaOptions.ts`/`usePersonaSetting.ts`（新建）、`queryKeys.personaSettingKeys`（新建）、i18n（`chat.persona.*`）
   - 依赖：T-WC-2、T-X1
-  - 验证：选"以某作者心智"→ 发言注入 persona；关掉即回普通模式；刷新后恢复持久化选择（默认关）
+  - 验证：选"以某作者/技能心智"→ 发言注入 persona；关掉即回普通模式；刷新后恢复持久化选择（默认关）
 
 ### 跨切面（阻断项）
-- **T-X1｜Wails 重新生成 bindings** — P0（阻断所有前端任务）
+- **T-X1｜Wails 重新生成 bindings** — P0（已完成 ✅；阻断所有前端任务）
   - 文件：`frontend/src/lib/wailsjs/go/models.ts`、`App.d.ts`、`App.js`（由 `wails generate module` 生成，禁止手改）
   - 依赖：所有 Go 结构体/方法变更（T-AGG-1/2/3、T-ML-1/2、T-WC-1/2）
   - 验证：regen 后 `SkillMeta` 含 `kind`/`source_author`/`aggregated`/`merged_books`/`stable_items`/`single_book_items`；`ChatInput` 含 `persona`；`App` 暴露 `MergeMentalSkills`/`GetPersonaSetting`/`SavePersonaSetting`
+  - 备注：本仓库 P0/P1/P2 的绑定为手动同步更新（与 `wails generate module` 产物一致），已通过 `tsc -b` + `vite build` 校验；后续 `wails dev`/build 自动 regen 会保持同步。
 
 ---
 

@@ -1,9 +1,19 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { ArrowUp, Square, Zap, Play, Star, Loader2, Plus } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { ArrowUp, Square, Zap, Play, Star, Loader2, Plus, PenLine } from "lucide-react";
 import type { app } from "@/lib/wailsjs/go/models";
+import { toastError } from "@/utils/toast";
+import { toErrorMessage } from "@/utils/error";
 import Logo from "../Logo";
 import SlashMenu from "./SlashMenu";
 import SkillPicker from "./SkillPicker";
+import PersonaPicker from "./PersonaPicker";
+import {
+  usePersonaSetting,
+  useSavePersonaSetting,
+  type PersonaSelection,
+} from "./usePersonaSetting";
+import { usePersonaOptions } from "./usePersonaOptions";
 
 // 草稿 localStorage key 前缀（per-session 持久化，沿用 novelgo_ 惯例）
 const DRAFT_PREFIX = "novelgo_chat_draft_";
@@ -36,7 +46,7 @@ interface Props {
   placeholder: string;
   draftKey: string;
   slashItems: app.SlashCommand[];
-  onSend: (message: string) => void;
+  onSend: (message: string, persona?: PersonaSelection | null) => void;
   onStop: () => void;
   onListSlash: () => void;
 }
@@ -53,6 +63,7 @@ export default function ChatInput({
   onStop,
   onListSlash,
 }: Props) {
+  const { t } = useTranslation();
   const [hasContent, setHasContent] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,6 +229,43 @@ export default function ChatInput({
     setPickerOpen(true);
   }, [pickerOpen]);
 
+  // 写作模式（persona）选择器状态：从持久化设置读取当前模式，选项派生自本书技能。
+  const [modeOpen, setModeOpen] = useState(false);
+  const [modePos, setModePos] = useState({ top: 0, left: 0, width: 0 });
+  const modeBtnRef = useRef<HTMLButtonElement>(null);
+
+  const personaSettingQuery = usePersonaSetting(novelId);
+  const personaOptions = usePersonaOptions(novelId);
+  const savePersonaSetting = useSavePersonaSetting(novelId);
+  const activePersona: PersonaSelection = personaSettingQuery.data ?? null;
+
+  const toggleMode = useCallback(() => {
+    if (modeOpen) {
+      setModeOpen(false);
+      return;
+    }
+    const rect = modeBtnRef.current?.getBoundingClientRect();
+    if (rect) {
+      setModePos({ top: rect.top, left: rect.left, width: rect.width });
+    }
+    setModeOpen(true);
+  }, [modeOpen]);
+
+  const handleSelectPersona = useCallback(
+    (p: PersonaSelection) => {
+      setModeOpen(false);
+      const input =
+        p === null
+          ? { enabled: false, kind: "", ref: "" }
+          : { enabled: true, kind: p.kind, ref: p.ref };
+      savePersonaSetting.mutate(input, {
+        onError: (e) =>
+          toastError(toErrorMessage(e, t("chat.persona.saveFailed"))),
+      });
+    },
+    [savePersonaSetting, t],
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (slashOpen && filteredItems.length > 0) {
@@ -250,7 +298,7 @@ export default function ChatInput({
         const textarea = e.currentTarget as HTMLTextAreaElement;
         const value = textarea.value.trim();
         if (value && !disabled) {
-          onSend(value);
+          onSend(value, activePersona);
           textarea.value = "";
           textarea.style.height = "auto";
           setHasContent(false);
@@ -301,7 +349,7 @@ export default function ChatInput({
     if (!textarea) return;
     const value = textarea.value.trim();
     if (value && !disabled) {
-      onSend(value);
+      onSend(value, activePersona);
       textarea.value = "";
       textarea.style.height = "auto";
       setHasContent(false);
@@ -344,6 +392,23 @@ export default function ChatInput({
           </span>
         </div>
       )}
+      {activePersona && (
+        <div className="flex items-center mb-1 px-1">
+          <button
+            onClick={toggleMode}
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            title={t("chat.persona.title")}
+          >
+            <PenLine className="w-3 h-3" />
+            <span className="truncate max-w-[160px]">{activePersona.ref}</span>
+            <span className="rounded bg-primary/15 px-1 py-0.5 text-[10px] opacity-80">
+              {activePersona.kind === "author"
+                ? t("chat.persona.authorKind")
+                : t("chat.persona.skillKind")}
+            </span>
+          </button>
+        </div>
+      )}
       <div
         ref={inputBoxRef}
         className="flex items-end gap-2 bg-muted/40 rounded-2xl border border-border px-2 py-2 transition-colors focus-within:border-primary/40 focus-within:shadow-xs focus-within:bg-muted/50"
@@ -357,6 +422,17 @@ export default function ChatInput({
           }`}
         >
           <Plus className="w-4.5 h-4.5" />
+        </button>
+        <button
+          ref={modeBtnRef}
+          onClick={toggleMode}
+          disabled={disabled || novelId === 0}
+          aria-label={t("chat.persona.title")}
+          className={`flex h-9 w-9 min-w-[36px] items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 shrink-0 ${
+            modeOpen || activePersona ? "bg-primary/10 text-primary" : ""
+          }`}
+        >
+          <PenLine className="w-4.5 h-4.5" />
         </button>
         <textarea
           ref={textareaRef}
@@ -425,6 +501,16 @@ export default function ChatInput({
           novelId={novelId}
           position={pickerPos}
           onClose={() => setPickerOpen(false)}
+        />
+      )}
+
+      {modeOpen && novelId > 0 && (
+        <PersonaPicker
+          position={modePos}
+          options={personaOptions}
+          selectedPersona={activePersona}
+          onSelect={handleSelectPersona}
+          onClose={() => setModeOpen(false)}
         />
       )}
     </div>

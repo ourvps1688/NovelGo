@@ -80,8 +80,9 @@ func (a *Agent) Compress(ctx context.Context, opts *RunOptions, runningTokens ma
 		return err
 	}
 
-	// 重建系统消息（与 chat 走同一条路径 BuildSystemMessages，事务外构建）
-	sysMsgs, buildErr := agentcfg.BuildSystemMessages(ctx, a.db, opts.NovelID, a.skillStore)
+	// 重建系统消息（与 chat 走同一条路径 BuildSystemMessages，事务外构建）。
+	// 压缩为摘要生成，不注入 persona（persona 仅作用于写作轮次，由 Chat 每轮处理）。
+	sysMsgs, buildErr := agentcfg.BuildSystemMessages(ctx, a.db, opts.NovelID, a.skillStore, nil)
 	if buildErr != nil {
 		a.logger.Warn("压缩时 system 消息构建部分失败", "novel_id", opts.NovelID, "err", buildErr)
 	}

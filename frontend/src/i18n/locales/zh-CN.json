@@ -273,7 +273,19 @@
     "diffStoryStatus": "故事状态",
     "diffChapterOutline": "第{{n}}章大纲",
     "diffNewChapter": "新建章节",
-    "diffNewOutline": "新建大纲"
+    "diffNewOutline": "新建大纲",
+    "persona": {
+      "title": "写作模式",
+      "normal": "普通",
+      "normalDesc": "不使用写作人格，按常规助手写作",
+      "select": "选择写作人格",
+      "search": "搜索人格 / 作者...",
+      "empty": "暂无可用写作人格（请先生成创作心智技能）",
+      "skillKind": "技能",
+      "authorKind": "作者",
+      "active": "当前：{{name}}",
+      "saveFailed": "保存写作模式失败"
+    }
   },
   "approval": {
     "approveFailed": "审批通过失败",
@@ -586,10 +598,28 @@
     "typePalace": "建筑",
     "typeWater": "水域",
     "typeKeywords": {
-      "nature": ["森林", "洞穴", "山脉", "沼泽"],
-      "settlement": ["城市", "城镇", "村庄", "市场"],
-      "palace": ["王宫", "城堡", "神殿"],
-      "water": ["海洋", "河流", "湖泊"]
+      "nature": [
+        "森林",
+        "洞穴",
+        "山脉",
+        "沼泽"
+      ],
+      "settlement": [
+        "城市",
+        "城镇",
+        "村庄",
+        "市场"
+      ],
+      "palace": [
+        "王宫",
+        "城堡",
+        "神殿"
+      ],
+      "water": [
+        "海洋",
+        "河流",
+        "湖泊"
+      ]
     }
   },
   "storyarc": {

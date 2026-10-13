@@ -270,6 +270,14 @@ export function GetNovels() {
   return window['go']['app']['App']['GetNovels']();
 }
 
+export function GetPersonaSetting(arg1) {
+  return window['go']['app']['App']['GetPersonaSetting'](arg1);
+}
+
+export function SavePersonaSetting(arg1, arg2) {
+  return window['go']['app']['App']['SavePersonaSetting'](arg1, arg2);
+}
+
 export function GetPlatform() {
   return window['go']['app']['App']['GetPlatform']();
 }

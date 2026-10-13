@@ -18,6 +18,7 @@ type SystemMessages struct {
 	Catalog  string // auto 模式技能目录
 	Profile  string // NovelProfile（设定+偏好，稳定）
 	State    string // NovelState（基础信息+novelgo.md，动态）
+	Persona  string // 写作人格（创作心智）引导段；为空表示普通模式
 }
 
 // BuildSystemMessages 统一构建 main agent 的 system 消息。
@@ -32,7 +33,10 @@ type SystemMessages struct {
 //
 // 注意：本函数固定使用 MainAgent 的 Identity，不适用于 subagent。
 // subagent 路径请直接调 AgentIdentity(at) + NovelProfile + NovelState。
-func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillStore *skill.Store) (*SystemMessages, error) {
+//
+// persona 为写作人格引用（可为 nil）：非 nil 时解析并构建引导段写入 msg.Persona，
+// 由调用方作为常驻块持久化（新会话）或每轮注入（已有会话）。
+func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillStore *skill.Store, persona *PersonaRef) (*SystemMessages, error) {
 	msg := &SystemMessages{
 		Identity: AgentIdentity(MainAgent),
 	}
@@ -46,6 +50,10 @@ func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillS
 			catalogMeta = excludeNames(catalogMeta, enabled)
 		}
 		msg.Catalog = BuildSkillCatalog(catalogMeta)
+	}
+
+	if persona != nil {
+		msg.Persona = BuildPersonaSystemText(persona, skillStore, novelID)
 	}
 
 	var errs []string

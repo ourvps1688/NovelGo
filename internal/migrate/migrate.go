@@ -17,6 +17,7 @@ import (
 	_ "github.com/novelgo/novelgo/internal/migrate/v160" // blank：触发 v160.init 注册，Run 无需感知具体迁移
 	_ "github.com/novelgo/novelgo/internal/migrate/v161" // blank：注册写作日志按日汇总迁移
 	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/reader"
 	"github.com/novelgo/novelgo/internal/review"
@@ -105,6 +106,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&activity.DailyLLMUsage{},
 		&volume.Volume{},
 		&writingconfig.WritingConfig{},
+		&personasetting.PersonaSetting{},
 		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}

@@ -30,28 +30,30 @@ export namespace app {
 	        this.remove_group_ids = source["remove_group_ids"];
 	    }
 	}
-	export class ChatInput {
-	    session_id: string;
-	    novel_id: number;
-	    message: string;
-	    provider_name: string;
-	    model_id: string;
-	    reasoning_effort: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ChatInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.session_id = source["session_id"];
-	        this.novel_id = source["novel_id"];
-	        this.message = source["message"];
-	        this.provider_name = source["provider_name"];
-	        this.model_id = source["model_id"];
-	        this.reasoning_effort = source["reasoning_effort"];
-	    }
-	}
+export class ChatInput {
+    session_id: string;
+    novel_id: number;
+    message: string;
+    provider_name: string;
+    model_id: string;
+    reasoning_effort: string;
+    persona?: agentcfg.PersonaRef;
+
+    static createFrom(source: any = {}) {
+        return new ChatInput(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.session_id = source["session_id"];
+        this.novel_id = source["novel_id"];
+        this.message = source["message"];
+        this.provider_name = source["provider_name"];
+        this.model_id = source["model_id"];
+        this.reasoning_effort = source["reasoning_effort"];
+        this.persona = source["persona"];
+    }
+}
 	export class ChatResult {
 	    session_id: string;
 	    turn_id: number;
@@ -118,14 +120,30 @@ export namespace app {
 	}
 	export class CompressResult {
 	    turn_id: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CompressResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.turn_id = source["turn_id"];
+	    }
+	}
+	export class SavePersonaSettingInput {
+	    enabled: boolean;
+	    kind: string;
+	    ref: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SavePersonaSettingInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.kind = source["kind"];
+	        this.ref = source["ref"];
 	    }
 	}
 	export class ComputeStyleStatsInput {
@@ -3418,5 +3436,71 @@ export namespace writingconfig {
 	    }
 	}
 
+}
+
+export namespace agentcfg {
+
+	export class PersonaRef {
+	    kind: string;
+	    ref: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PersonaRef(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.ref = source["ref"];
+	    }
+	}
+}
+
+export namespace personasetting {
+
+	export class PersonaSetting {
+	    id: number;
+	    novel_id: number;
+	    enabled: boolean;
+	    kind: string;
+	    ref: string;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+
+	    static createFrom(source: any = {}) {
+	        return new PersonaSetting(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.novel_id = source["novel_id"];
+	        this.enabled = source["enabled"];
+	        this.kind = source["kind"];
+	        this.ref = source["ref"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 }
 

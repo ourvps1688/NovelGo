@@ -282,7 +282,19 @@
     "diffStoryStatus": "Story Status",
     "diffChapterOutline": "Ch.{{n}} Outline",
     "diffNewChapter": "New chapter",
-    "diffNewOutline": "New outline"
+    "diffNewOutline": "New outline",
+    "persona": {
+      "title": "Writing mode",
+      "normal": "Normal",
+      "normalDesc": "No writing persona; write as a regular assistant",
+      "select": "Select writing persona",
+      "search": "Search persona / author...",
+      "empty": "No writing persona available (generate a mental skill first)",
+      "skillKind": "Skill",
+      "authorKind": "Author",
+      "active": "Active: {{name}}",
+      "saveFailed": "Failed to save writing mode"
+    }
   },
   "approval": {
     "approveFailed": "Approval failed",
@@ -605,10 +617,28 @@
     "typePalace": "Building",
     "typeWater": "Water",
     "typeKeywords": {
-      "nature": ["Forest", "Cave", "Mountain", "Swamp"],
-      "settlement": ["City", "Town", "Village", "Market"],
-      "palace": ["Palace", "Castle", "Temple"],
-      "water": ["Ocean", "River", "Lake"]
+      "nature": [
+        "Forest",
+        "Cave",
+        "Mountain",
+        "Swamp"
+      ],
+      "settlement": [
+        "City",
+        "Town",
+        "Village",
+        "Market"
+      ],
+      "palace": [
+        "Palace",
+        "Castle",
+        "Temple"
+      ],
+      "water": [
+        "Ocean",
+        "River",
+        "Lake"
+      ]
     }
   },
   "storyarc": {
