@@ -1,6 +1,15 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowUp, Square, Zap, Play, Star, Loader2, Plus, PenLine } from "lucide-react";
+import {
+  ArrowUp,
+  Square,
+  Zap,
+  Play,
+  Star,
+  Loader2,
+  Plus,
+  PenLine,
+} from "lucide-react";
 import type { app } from "@/lib/wailsjs/go/models";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";

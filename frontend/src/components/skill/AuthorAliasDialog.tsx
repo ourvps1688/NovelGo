@@ -43,8 +43,13 @@ export default function AuthorAliasDialog({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  const updateGroup = (idx: number, patch: Partial<app.AuthorAliasGroupDTO>) => {
-    setGroups((prev) => prev.map((g, i) => (i === idx ? { ...g, ...patch } : g)));
+  const updateGroup = (
+    idx: number,
+    patch: Partial<app.AuthorAliasGroupDTO>,
+  ) => {
+    setGroups((prev) =>
+      prev.map((g, i) => (i === idx ? { ...g, ...patch } : g)),
+    );
   };
 
   const addAlias = (idx: number) => {
@@ -63,9 +68,7 @@ export default function AuthorAliasDialog({ open, onClose }: Props) {
   const removeAlias = (idx: number, alias: string) => {
     setGroups((prev) =>
       prev.map((g, i) =>
-        i === idx
-          ? { ...g, aliases: g.aliases.filter((a) => a !== alias) }
-          : g,
+        i === idx ? { ...g, aliases: g.aliases.filter((a) => a !== alias) } : g,
       ),
     );
   };
@@ -98,7 +101,9 @@ export default function AuthorAliasDialog({ open, onClose }: Props) {
     for (const g of cleaned) {
       for (const al of g.aliases) {
         if (canonSet.has(al.trim()) && al.trim() !== g.canonical.trim()) {
-          toastError(t("skill.alias.aliasEqualsCanonical", { name: al.trim() }));
+          toastError(
+            t("skill.alias.aliasEqualsCanonical", { name: al.trim() }),
+          );
           return;
         }
       }

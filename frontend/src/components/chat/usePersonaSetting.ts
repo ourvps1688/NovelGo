@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GetPersonaSetting, SavePersonaSetting } from "@/lib/wailsjs/go/app/App";
+import {
+  GetPersonaSetting,
+  SavePersonaSetting,
+} from "@/lib/wailsjs/go/app/App";
 import type { agentcfg } from "@/lib/wailsjs/go/models";
 import { personaSettingKeys } from "@/lib/queryKeys";
 

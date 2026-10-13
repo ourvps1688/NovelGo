@@ -293,7 +293,9 @@
       "skillKind": "Skill",
       "authorKind": "Author",
       "active": "Active: {{name}}",
-      "saveFailed": "Failed to save writing mode"
+      "saveFailed": "Failed to save writing mode",
+      "authorAggregated": "Author creative mind (aggregated)",
+      "authorSingleBook": "Author creative mind (single book)"
     }
   },
   "approval": {

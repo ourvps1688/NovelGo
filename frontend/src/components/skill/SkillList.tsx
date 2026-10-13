@@ -327,10 +327,7 @@ export default function SkillList({
         novelId={novelId}
         mentalSkills={mergeCandidateSkills}
       />
-      <AuthorAliasDialog
-        open={aliasOpen}
-        onClose={() => setAliasOpen(false)}
-      />
+      <AuthorAliasDialog open={aliasOpen} onClose={() => setAliasOpen(false)} />
       <ConfirmDialog
         open={deleteTarget !== null}
         title={t("skill.confirmDeleteSkill")}

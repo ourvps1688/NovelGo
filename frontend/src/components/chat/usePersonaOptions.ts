@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useSkills } from "@/components/skill/useSkills";
 
 // PersonaOption 是写作人格选择器的可选项：来自本书已安装技能。
@@ -16,6 +17,7 @@ export interface PersonaOption {
 // 与后端 resolvePersonaContent（author 优先聚合档）保持一致。
 export function usePersonaOptions(novelId: number): PersonaOption[] {
   const skillsQuery = useSkills(novelId);
+  const { t } = useTranslation();
   return useMemo(() => {
     const list = skillsQuery.data ?? [];
     const mental = list.filter((s) => s.kind === "mental");
@@ -38,7 +40,7 @@ export function usePersonaOptions(novelId: number): PersonaOption[] {
             kind: "author",
             ref: s.source_author,
             label: s.source_author,
-            description: "作者创作心智（聚合）",
+            description: t("chat.persona.authorAggregated"),
           });
         }
       }
@@ -53,11 +55,11 @@ export function usePersonaOptions(novelId: number): PersonaOption[] {
             kind: "author",
             ref: s.source_author,
             label: s.source_author,
-            description: "作者创作心智（单书）",
+            description: t("chat.persona.authorSingleBook"),
           });
         }
       }
     }
     return options;
-  }, [skillsQuery.data]);
+  }, [skillsQuery.data, t]);
 }

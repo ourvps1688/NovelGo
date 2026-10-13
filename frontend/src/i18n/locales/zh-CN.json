@@ -284,7 +284,9 @@
       "skillKind": "技能",
       "authorKind": "作者",
       "active": "当前：{{name}}",
-      "saveFailed": "保存写作模式失败"
+      "saveFailed": "保存写作模式失败",
+      "authorAggregated": "作者创作心智（聚合）",
+      "authorSingleBook": "作者创作心智（单书）"
     }
   },
   "approval": {
