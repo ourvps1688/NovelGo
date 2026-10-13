@@ -330,12 +330,12 @@ export function GetWritingActivity(arg1) {
   return window['go']['app']['App']['GetWritingActivity'](arg1);
 }
 
-export function GetWritingStats() {
-  return window['go']['app']['App']['GetWritingStats']();
-}
-
 export function GetWritingConfig(arg1) {
   return window['go']['app']['App']['GetWritingConfig'](arg1);
+}
+
+export function GetWritingStats() {
+  return window['go']['app']['App']['GetWritingStats']();
 }
 
 export function ImportNovel(arg1) {

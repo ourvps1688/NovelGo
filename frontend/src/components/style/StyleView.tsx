@@ -10,10 +10,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-import {
-  ExtractStyle,
-  CancelExtract,
-} from "@/lib/wailsjs/go/app/App";
+import { ExtractStyle, CancelExtract } from "@/lib/wailsjs/go/app/App";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useCreateStyleProfile } from "@/components/preference/useCreateStyleProfile";

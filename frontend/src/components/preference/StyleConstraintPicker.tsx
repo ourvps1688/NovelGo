@@ -38,7 +38,10 @@ export default function StyleConstraintPicker({ novelId }: Props) {
     ],
     [preferencesQuery.data],
   );
-  const profiles = useMemo(() => profilesQuery.data ?? [], [profilesQuery.data]);
+  const profiles = useMemo(
+    () => profilesQuery.data ?? [],
+    [profilesQuery.data],
+  );
   const profileIds = useMemo(
     () => new Set(profiles.map((p) => p.id)),
     [profiles],
@@ -58,12 +61,17 @@ export default function StyleConstraintPicker({ novelId }: Props) {
     ? detectStyleProfileId(activeItem.content)
     : null;
   const activeProfile = useMemo(
-    () => (selectedId !== null ? profiles.find((p) => p.id === selectedId) ?? null : null),
+    () =>
+      selectedId !== null
+        ? (profiles.find((p) => p.id === selectedId) ?? null)
+        : null,
     [profiles, selectedId],
   );
 
   const pending =
-    createMutation.isPending || deleteMutation.isPending || deleteProfileMutation.isPending;
+    createMutation.isPending ||
+    deleteMutation.isPending ||
+    deleteProfileMutation.isPending;
   const [expanded, setExpanded] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
@@ -96,7 +104,9 @@ export default function StyleConstraintPicker({ novelId }: Props) {
     deleteProfileMutation
       .mutateAsync(deleteTarget)
       .catch((err) =>
-        toastError(t("preference.styleDeleteFailed") + ": " + toErrorMessage(err)),
+        toastError(
+          t("preference.styleDeleteFailed") + ": " + toErrorMessage(err),
+        ),
       )
       .finally(() => setDeleteTarget(null));
   }
@@ -120,7 +130,9 @@ export default function StyleConstraintPicker({ novelId }: Props) {
             <select
               value={selectedId !== null ? String(selectedId) : ""}
               disabled={pending || profilesQuery.isLoading}
-              onChange={(e) => apply(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) =>
+                apply(e.target.value ? Number(e.target.value) : null)
+              }
               className="h-8 max-w-full rounded border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             >
               <option value="">{t("preference.styleNone")}</option>
@@ -156,9 +168,7 @@ export default function StyleConstraintPicker({ novelId }: Props) {
               <div className="flex items-center justify-between gap-2 px-3 py-2">
                 <span className="min-w-0 truncate text-[11px] font-medium text-foreground">
                   {t("preference.styleActiveConstraint")}
-                  <span className="text-primary">
-                    ：{activeProfile.name}
-                  </span>
+                  <span className="text-primary">：{activeProfile.name}</span>
                   <span className="ml-1 text-muted-foreground">
                     （
                     {t("preference.styleWords", {
@@ -198,7 +208,9 @@ export default function StyleConstraintPicker({ novelId }: Props) {
         message={
           deleteTarget !== null
             ? t("preference.styleDeleteConfirm", {
-                name: profiles.find((p) => p.id === deleteTarget)?.name ?? String(deleteTarget),
+                name:
+                  profiles.find((p) => p.id === deleteTarget)?.name ??
+                  String(deleteTarget),
               })
             : ""
         }

@@ -2,10 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNovelStore } from "@/components/novel/useNovelStore";
-import {
-  useWritingConfig,
-  useSaveWritingConfig,
-} from "./useWritingConfig";
+import { useWritingConfig, useSaveWritingConfig } from "./useWritingConfig";
 import { toErrorMessage } from "@/utils/error";
 
 // WritingConfigTab: 本书"写作评分"配置面板。

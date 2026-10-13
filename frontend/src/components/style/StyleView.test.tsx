@@ -324,9 +324,7 @@ describe("StyleView", () => {
     renderWithProvider(<StyleView novelId={1} />);
     fireEvent.click(await screen.findByText("select"));
     fireEvent.click(screen.getByText("styleSample.startExtract"));
-    fireEvent.click(
-      await screen.findByText("styleSample.saveAsMyStyle"),
-    );
+    fireEvent.click(await screen.findByText("styleSample.saveAsMyStyle"));
 
     await vi.waitFor(() => {
       expect(mockCreateStyleProfile).toHaveBeenCalledWith({
@@ -380,14 +378,10 @@ describe("StyleView", () => {
     renderWithProvider(<StyleView novelId={1} />);
     fireEvent.click(await screen.findByText("select"));
     fireEvent.click(screen.getByText("styleSample.startExtract"));
-    fireEvent.click(
-      await screen.findByText("styleSample.saveAsMyStyle"),
-    );
+    fireEvent.click(await screen.findByText("styleSample.saveAsMyStyle"));
 
     expect(await screen.findByText("db error")).toBeInTheDocument();
     // 失败不清除结果，保存按钮仍在。
-    expect(
-      screen.getByText("styleSample.saveAsMyStyle"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("styleSample.saveAsMyStyle")).toBeInTheDocument();
   });
 });

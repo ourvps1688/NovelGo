@@ -190,9 +190,9 @@ export function GetVolumes(arg1:number):Promise<Array<volume.Volume>>;
 
 export function GetWritingActivity(arg1:number):Promise<Array<writing.DailyActivity>>;
 
-export function GetWritingStats():Promise<writing.WritingStats>;
-
 export function GetWritingConfig(arg1:number):Promise<writingconfig.WritingConfig>;
+
+export function GetWritingStats():Promise<writing.WritingStats>;
 
 export function ImportNovel(arg1:app.ImportNovelInput):Promise<imp.ImportResult>;
 

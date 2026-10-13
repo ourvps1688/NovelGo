@@ -1,8 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  GetWritingConfig,
-  SaveWritingConfig,
-} from "@/lib/wailsjs/go/app/App";
+import { GetWritingConfig, SaveWritingConfig } from "@/lib/wailsjs/go/app/App";
 import type { app as appModels, writingconfig } from "@/lib/wailsjs/go/models";
 import { writingConfigKeys } from "@/lib/queryKeys";
 

@@ -45,6 +45,11 @@ jobs:
         with:
           node-version: "24"
 
+      # 用仓库声明的 prettier 版本（devDependencies），避免 npx 拉最新版导致
+      # 规则漂移、整片报红。package-lock.json 必须与 package.json 同步。
+      - name: Install frontend deps
+        run: cd frontend && npm ci
+
       - name: Prettier
         run: cd frontend && npx prettier --check "src/**/*.{ts,tsx}"
 
