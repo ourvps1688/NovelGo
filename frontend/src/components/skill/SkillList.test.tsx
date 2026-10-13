@@ -46,6 +46,12 @@ vi.mock("./SkillMarketplace", () => ({
   default: () => null,
 }));
 
+// mock 跨书聚合入口（避免测试环境加载 wailsjs 运行期模块）。
+vi.mock("@/lib/wailsjs/go/app/App", () => ({
+  MergeMentalSkills: vi.fn(),
+  RebuildAggregated: vi.fn(),
+}));
+
 // 5.4 commit 1: skills 数据走 useSkills query（不再走 useApp.ListSkills）。
 // mockUseSkills 用 vi.hoisted 提升，让 vi.mock 工厂能引用（vi.mock 自身被提升到文件顶部）。
 // 5.4 commit 2: DeleteSkill 走 useDeleteSkill mutation（不再走 useApp）。

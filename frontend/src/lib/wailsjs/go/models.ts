@@ -594,6 +594,24 @@ export namespace app {
 	        this.search = source["search"];
 	    }
 	}
+	export class MergeMentalSkillsInput {
+	    novel_id: number;
+	    names: string[];
+	    canonical_author: string;
+	    alias_map: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new MergeMentalSkillsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.names = source["names"];
+	        this.canonical_author = source["canonical_author"];
+	        this.alias_map = source["alias_map"];
+	    }
+	}
 	export class PreferenceResult {
 	    global: preference.PreferenceItem[];
 	    novel: preference.PreferenceItem[];
@@ -629,6 +647,30 @@ export namespace app {
 		    }
 		    return a;
 		}
+	}
+	export class RebuildAggregatedInput {
+	    novel_id: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RebuildAggregatedInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	    }
+	}
+	export class RebuildAggregatedResult {
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RebuildAggregatedResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.count = source["count"];
+	    }
 	}
 	export class SaveContentInput {
 	    novel_id: number;
@@ -2108,11 +2150,11 @@ export namespace pattern {
 	    chapter_ids?: number[];
 	    flavor?: string;
 	    source_author?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ExtractPatternInput(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.task_id = source["task_id"];
@@ -2171,6 +2213,24 @@ export namespace pattern {
 		    return a;
 		}
 	}
+	export class FidelityScorecard {
+	    known_consistency: number;
+	    unknown_uncertainty: number;
+	    issues?: string[];
+	    passed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FidelityScorecard(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.known_consistency = source["known_consistency"];
+	        this.unknown_uncertainty = source["unknown_uncertainty"];
+	        this.issues = source["issues"];
+	        this.passed = source["passed"];
+	    }
+	}
 	export class ExtractPatternResult {
 	    task_id?: string;
 	    name: string;
@@ -2181,11 +2241,11 @@ export namespace pattern {
 	    fidelity?: FidelityScorecard;
 	    demoted_models?: string[];
 	    trace?: Trace;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ExtractPatternResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.task_id = source["task_id"];
@@ -2195,9 +2255,10 @@ export namespace pattern {
 	        this.file_path = source["file_path"];
 	        this.flavor = source["flavor"];
 	        this.fidelity = this.convertValues(source["fidelity"], FidelityScorecard);
-	        this.demoted_models = this.convertValues(source["demoted_models"], null);
+	        this.demoted_models = source["demoted_models"];
 	        this.trace = this.convertValues(source["trace"], Trace);
 	    }
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2216,6 +2277,7 @@ export namespace pattern {
 		    return a;
 		}
 	}
+	
 
 }
 
@@ -2503,14 +2565,63 @@ export namespace setting {
 
 export namespace skill {
 	
+	export class Skill {
+	    name: string;
+	    description: string;
+	    category: string;
+	    kind: string;
+	    mode: string;
+	    author: string;
+	    source_author: string;
+	    version: number;
+	    content: string;
+	    raw_content?: string;
+	    aggregated: boolean;
+	    aggregated_from: string[];
+	    merged_books: string[];
+	    stable_items: number;
+	    single_book_items: number;
+	    aggregated_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Skill(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.category = source["category"];
+	        this.kind = source["kind"];
+	        this.mode = source["mode"];
+	        this.author = source["author"];
+	        this.source_author = source["source_author"];
+	        this.version = source["version"];
+	        this.content = source["content"];
+	        this.raw_content = source["raw_content"];
+	        this.aggregated = source["aggregated"];
+	        this.aggregated_from = source["aggregated_from"];
+	        this.merged_books = source["merged_books"];
+	        this.stable_items = source["stable_items"];
+	        this.single_book_items = source["single_book_items"];
+	        this.aggregated_at = source["aggregated_at"];
+	    }
+	}
 	export class SkillMeta {
 	    name: string;
 	    description: string;
 	    category: string;
+	    kind: string;
 	    mode: string;
 	    author: string;
+	    source_author: string;
 	    version: number;
 	    source: string;
+	    aggregated: boolean;
+	    aggregated_from: string[];
+	    merged_books: string[];
+	    stable_items: number;
+	    single_book_items: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new SkillMeta(source);
@@ -2521,10 +2632,17 @@ export namespace skill {
 	        this.name = source["name"];
 	        this.description = source["description"];
 	        this.category = source["category"];
+	        this.kind = source["kind"];
 	        this.mode = source["mode"];
 	        this.author = source["author"];
+	        this.source_author = source["source_author"];
 	        this.version = source["version"];
 	        this.source = source["source"];
+	        this.aggregated = source["aggregated"];
+	        this.aggregated_from = source["aggregated_from"];
+	        this.merged_books = source["merged_books"];
+	        this.stable_items = source["stable_items"];
+	        this.single_book_items = source["single_book_items"];
 	    }
 	}
 
@@ -3260,21 +3378,3 @@ export namespace writingconfig {
 
 }
 
-export class FidelityScorecard {
-	    known_consistency: number;
-	    unknown_uncertainty: number;
-	    issues?: string[];
-	    passed: boolean;
-
-	    static createFrom(source: any = {}) {
-	        return new FidelityScorecard(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-        this.known_consistency = source["known_consistency"];
-        this.unknown_uncertainty = source["unknown_uncertainty"];
-        this.issues = source["issues"];
-        this.passed = source["passed"];
-	    }
-	}

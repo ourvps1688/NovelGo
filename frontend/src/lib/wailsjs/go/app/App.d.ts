@@ -214,11 +214,15 @@ export function ListStyleProfiles(arg1:app.ListStyleProfilesInput):Promise<Array
 
 export function ListStyleSamples(arg1:app.ListStyleSamplesInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_style_Sample_>;
 
+export function MergeMentalSkills(arg1:app.MergeMentalSkillsInput):Promise<skill.Skill>;
+
 export function PickAndImportNovel():Promise<imp.ImportResult>;
 
 export function PlaceChapter(arg1:chapter.PlaceInput):Promise<chapter.Chapter>;
 
 export function PlaceVolume(arg1:volume.PlaceInput):Promise<volume.Volume>;
+
+export function RebuildAggregated(arg1:app.RebuildAggregatedInput):Promise<app.RebuildAggregatedResult>;
 
 export function RebuildNovelIndex(arg1:number):Promise<void>;
 

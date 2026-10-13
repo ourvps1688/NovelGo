@@ -7,7 +7,7 @@ import {
   CancelExtractPattern,
   GetContent,
 } from "@/lib/wailsjs/go/app/App";
-import type { FidelityScorecard } from "@/lib/wailsjs/go/models";
+import type { pattern } from "@/lib/wailsjs/go/models";
 import { useSaveContent } from "@/components/content/useSaveContent";
 import { isContentConflict } from "@/components/content/editorSaveQueue";
 import { reportAIFileChange } from "@/components/content/aiFileChanges";
@@ -41,7 +41,7 @@ interface ExtractResult {
   description: string;
   filePath: string;
   rawContent: string;
-  fidelity?: FidelityScorecard; // V2 产出后保真度自测（仅 mental）
+  fidelity?: pattern.FidelityScorecard; // V2 产出后保真度自测（仅 mental）
   demotedModels?: string[]; // V2 确定性门禁降级的心智模型（仅 mental）
 }
 

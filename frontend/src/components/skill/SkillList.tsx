@@ -1,6 +1,14 @@
 import { useState, useCallback, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Search, Plus, Pencil, Trash2, Heart, Store } from "lucide-react";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
+import {
+  Search,
+  Plus,
+  Pencil,
+  Trash2,
+  Heart,
+  Store,
+  GitMerge,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
@@ -12,6 +20,9 @@ import SkillContributeDialog from "./SkillContributeDialog";
 import SkillMarketplace from "./SkillMarketplace";
 import { useSkills } from "./useSkills";
 import { useDeleteSkill } from "./useDeleteSkill";
+import ManualMergeDialog from "./ManualMergeDialog";
+import { MergeMentalSkills } from "@/lib/wailsjs/go/app/App";
+import type { app } from "@/lib/wailsjs/go/models";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 
 interface Props {
@@ -54,6 +65,7 @@ export default function SkillList({
   const [newName, setNewName] = useState("");
   const [showContribute, setShowContribute] = useState(false);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const handleMarketplaceInstalled = useCallback(() => {
     qc.invalidateQueries({ queryKey: skillKeys.list(novelId) });
@@ -72,6 +84,15 @@ export default function SkillList({
   const novelSkills = filtered.filter((s) => s.source === "novel");
   const userSkills = filtered.filter((s) => s.source === "user");
   const builtinSkills = filtered.filter((s) => s.source === "builtin");
+
+  // V3 跨书聚合：派生「作者档案」分组 + 手动合并候选（仅非聚合、非内置的 mental）。
+  const aggregatedSkills = filtered.filter(
+    (s) => s.aggregated === true && s.kind === "mental",
+  );
+  const mergeCandidateSkills = filtered.filter(
+    (s) =>
+      s.kind === "mental" && s.aggregated !== true && s.source !== "builtin",
+  );
 
   const [deleteTarget, setDeleteTarget] = useState<skill.SkillMeta | null>(
     null,
@@ -152,6 +173,13 @@ export default function SkillList({
             title={t("skill.contribute")}
           >
             <Heart className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setMergeOpen(true)}
+            className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors"
+            title={t("skill.manualMerge")}
+          >
+            <GitMerge className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setCreating(true)}
@@ -250,6 +278,16 @@ export default function SkillList({
                 onDelete={handleDelete}
               />
             )}
+            {aggregatedSkills.length > 0 && (
+              <SkillProfileGroup
+                title={t("skill.authorProfiles")}
+                skills={aggregatedSkills}
+                novelId={novelId}
+                activeSkillName={activeSkillName}
+                onSelect={onSelectSkill}
+                onEdit={onEditSkill}
+              />
+            )}
             {builtinSkills.length > 0 && (
               <SkillGroup
                 title={t("skill.builtin")}
@@ -272,6 +310,12 @@ export default function SkillList({
         onOpenChange={setMarketplaceOpen}
         novelId={novelId}
         onInstalled={handleMarketplaceInstalled}
+      />
+      <ManualMergeDialog
+        open={mergeOpen}
+        onClose={() => setMergeOpen(false)}
+        novelId={novelId}
+        mentalSkills={mergeCandidateSkills}
       />
       <ConfirmDialog
         open={deleteTarget !== null}
@@ -365,6 +409,143 @@ function SkillGroup({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// SkillProfileGroup 渲染「创作心智 · 作者档案」分组：每个聚合卡展示合并自 N 本、
+// stable/single-book 比例、来源书目，并提供「重建」按钮（按 source_author 重新聚合）。
+function SkillProfileGroup({
+  title,
+  skills,
+  novelId,
+  activeSkillName,
+  onSelect,
+  onEdit,
+}: {
+  title: string;
+  skills: skill.SkillMeta[];
+  novelId: number;
+  activeSkillName: string | null;
+  onSelect: (path: string, title: string, readOnly: boolean) => void;
+  onEdit: (path: string, title: string, readOnly: boolean) => void;
+}) {
+  return (
+    <div>
+      <div className="px-3 py-1.5">
+        <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+          {title}
+        </span>
+      </div>
+      {skills.map((s) => (
+        <SkillProfileCard
+          key={`${s.source}:${s.name}`}
+          skill={s}
+          novelId={novelId}
+          activeSkillName={activeSkillName}
+          onSelect={onSelect}
+          onEdit={onEdit}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SkillProfileCard({
+  skill: s,
+  novelId,
+  activeSkillName,
+  onSelect,
+  onEdit,
+}: {
+  skill: skill.SkillMeta;
+  novelId: number;
+  activeSkillName: string | null;
+  onSelect: (path: string, title: string, readOnly: boolean) => void;
+  onEdit: (path: string, title: string, readOnly: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const mergedBooks = s.merged_books ?? [];
+  const stable = s.stable_items ?? 0;
+  const single = s.single_book_items ?? 0;
+  const path = skillPath(s.name, s.source);
+  const display = `${t("skill.skillLabel")}${s.name}`;
+  const readOnly = s.source === "builtin";
+  const active = activeSkillName === display;
+
+  // 「重建」：按该档案的 source_author 重新枚举并聚合。
+  const rebuild = useMutation({
+    mutationFn: () =>
+      MergeMentalSkills({
+        novel_id: novelId,
+        names: [],
+        canonical_author: s.source_author,
+        alias_map: {},
+      } as app.MergeMentalSkillsInput),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: skillKeys.list(novelId) });
+    },
+    onError: (err) => {
+      toastError(t("skill.mergeFailed") + ": " + toErrorMessage(err));
+      console.error(err);
+    },
+  });
+
+  return (
+    <div className="group relative">
+      <button
+        onClick={() => onSelect(path, display, readOnly)}
+        className={`w-full flex flex-col px-3 py-1.5 text-left hover:bg-muted/50 transition-colors ${
+          active ? "bg-muted" : ""
+        }`}
+      >
+        {active && (
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+        )}
+        <span className="text-sm truncate">{s.name}</span>
+        {s.description && (
+          <span className="text-[11px] text-muted-foreground truncate">
+            {s.description}
+          </span>
+        )}
+        <span className="mt-0.5 flex flex-wrap items-center gap-1">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {t("skill.mergedFrom", { count: mergedBooks.length })}
+          </span>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            {t("skill.stableRatio", { stable, single })}
+          </span>
+        </span>
+        {mergedBooks.length > 0 && (
+          <span className="mt-0.5 text-[10px] text-muted-foreground/70 truncate">
+            {t("skill.mergedBooks")}：{mergedBooks.join("、")}
+          </span>
+        )}
+      </button>
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(path, display, readOnly);
+          }}
+          className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+          title={t("skill.editSkill")}
+        >
+          <Pencil className="w-3 h-3" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            rebuild.mutate();
+          }}
+          disabled={rebuild.isPending}
+          className="p-0.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+          title={t("skill.rebuild")}
+        >
+          <GitMerge className="w-3 h-3" />
+        </button>
+      </div>
     </div>
   );
 }

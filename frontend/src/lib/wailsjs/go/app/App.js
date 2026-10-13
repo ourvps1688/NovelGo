@@ -378,6 +378,10 @@ export function ListStyleSamples(arg1) {
   return window['go']['app']['App']['ListStyleSamples'](arg1);
 }
 
+export function MergeMentalSkills(arg1) {
+  return window['go']['app']['App']['MergeMentalSkills'](arg1);
+}
+
 export function PickAndImportNovel() {
   return window['go']['app']['App']['PickAndImportNovel']();
 }
@@ -388,6 +392,10 @@ export function PlaceChapter(arg1) {
 
 export function PlaceVolume(arg1) {
   return window['go']['app']['App']['PlaceVolume'](arg1);
+}
+
+export function RebuildAggregated(arg1) {
+  return window['go']['app']['App']['RebuildAggregated'](arg1);
 }
 
 export function RebuildNovelIndex(arg1) {
