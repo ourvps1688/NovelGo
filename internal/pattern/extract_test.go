@@ -951,9 +951,9 @@ func TestFinalSkill_LowConfidence(t *testing.T) {
 
 func TestGateMentalEvidence_DemotesUnderEvidenced(t *testing.T) {
 	evidence := []ModelEvidence{
-		{Model: "信息 withholding", ChapterIDs: []int64{3}},       // 仅 1 处 -> 降级
-		{Model: "命运不可控", ChapterIDs: []int64{5, 9}},          // 2 处 -> 保留
-		{Model: "POV 限知", ChapterIDs: []int64{1, 2, 8}},        // 3 处 -> 保留
+		{Model: "信息 withholding", ChapterIDs: []int64{3}}, // 仅 1 处 -> 降级
+		{Model: "命运不可控", ChapterIDs: []int64{5, 9}},       // 2 处 -> 保留
+		{Model: "POV 限知", ChapterIDs: []int64{1, 2, 8}},   // 3 处 -> 保留
 	}
 	demoted, note := gateMentalEvidence("content", evidence)
 	if len(demoted) != 1 || demoted[0] != "信息 withholding" {
@@ -1062,7 +1062,7 @@ func TestFinalMentalSkill_V2GateAndFidelity(t *testing.T) {
 		Content:     "# X 的创作心智\n## 叙事心智模型\n信息 withholding 与命运不可控。\n## 表达 DNA\n短句。",
 		Evidence: []ModelEvidence{
 			{Model: "信息 withholding", ChapterIDs: []int64{3}}, // 降级
-			{Model: "命运不可控", ChapterIDs: []int64{5, 9}},    // 保留
+			{Model: "命运不可控", ChapterIDs: []int64{5, 9}},       // 保留
 		},
 	}
 	skillJSON, _ := json.Marshal(skillOut)

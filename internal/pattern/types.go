@@ -27,7 +27,7 @@ type ExtractPatternResult struct {
 	Fidelity *FidelityScorecard `json:"fidelity,omitempty"`
 	// DemotedModels 是 V2 确定性跨弧复现门禁降级的心智模型名（独立章节证据<2），仅 mental flavor 非空。
 	DemotedModels []string `json:"demoted_models,omitempty"`
-	Trace         *Trace    `json:"trace,omitempty"`
+	Trace         *Trace   `json:"trace,omitempty"`
 }
 
 // Flavor 是提取产物的类型标识。

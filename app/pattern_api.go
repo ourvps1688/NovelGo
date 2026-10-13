@@ -38,10 +38,10 @@ func (a *App) ExtractPattern(input ExtractPatternInput) (*ExtractPatternResult, 
 	}()
 
 	extractor := &pattern.Extractor{
-		Chapters:         a.chapter,
-		LLMClient:        a.llmClient,
-		DB:               a.db,
-		Progress:         a.emitExtractPatternProgress,
+		Chapters:          a.chapter,
+		LLMClient:         a.llmClient,
+		DB:                a.db,
+		Progress:          a.emitExtractPatternProgress,
 		EvidenceRetriever: newMentalEvidenceRetriever(a), // V2-D：向量证据前置（无 ONNX 时自动为 nil）
 	}
 	result, err := extractor.Extract(ctx, input)
