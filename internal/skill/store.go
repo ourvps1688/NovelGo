@@ -1,8 +1,11 @@
 package skill
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/novelgo/novelgo/internal/config"
@@ -152,4 +155,31 @@ func findByName(skills []Skill, name string) *Skill {
 		}
 	}
 	return nil
+}
+
+// LoadDir 扫描指定目录下的所有 .md skill 文件并解析为 Skill 切片（无重命名副作用）。
+// 供 App 层枚举跨书来源（novel / user 级目录）使用；目录不存在时返回空切片。
+// 与 scanDir 不同，本函数不会因 YAML name 与文件名不一致而重命名文件。
+func LoadDir(dir string) ([]Skill, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("skill: 读取目录 %s 失败: %w", dir, err)
+	}
+
+	var skills []Skill
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		sk, err := ParseFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			// 跳过解析失败的文件，避免单点脏数据阻断整目录枚举
+			continue
+		}
+		skills = append(skills, *sk)
+	}
+	return skills, nil
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -202,4 +203,190 @@ func (a *App) InstallRemoteSkill(input InstallRemoteSkillInput) *apperr.Result[a
 		return apperr.Err[apperr.Empty](err)
 	}
 	return apperr.Ok(apperr.Empty{})
+}
+
+// ── V3 跨书聚合（cross-book mental-skill aggregation）──────────────────
+
+// MergeMentalSkillsInput 是 MergeMentalSkills 的入参。
+// Names 指定要合并的源 skill 名（跨 novel/user 级）；为空时按 CanonicalAuthor 自动枚举同作者源。
+type MergeMentalSkillsInput struct {
+	NovelID         int64             `json:"novel_id"`
+	Names           []string          `json:"names"`            // 手动合并时指定的源 skill 名
+	CanonicalAuthor string            `json:"canonical_author"` // 规范作者名；Names 为空时用于自动枚举同作者源
+	AliasMap        map[string]string `json:"alias_map"`        // 可选别名映射
+}
+
+// MergeMentalSkills 跨书聚合编排：
+// 枚举当前用户域所有小说的 mental skill → 调用 skill.MergeMentalSkills → 落盘 UserSkillsDir 派生文件 → 触发技能热重载。
+// 返回生成的派生 skill（含 frontmatter 聚合字段）。
+func (a *App) MergeMentalSkills(input MergeMentalSkillsInput) (*skill.Skill, error) {
+	if a.skill == nil {
+		return nil, fmt.Errorf("skill store 未初始化")
+	}
+
+	sources, bookTitles, err := a.collectMentalSources(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// 选定参与合并的源。
+	var selected []skill.MergeSource
+	switch {
+	case len(input.Names) > 0:
+		nameSet := make(map[string]bool, len(input.Names))
+		for _, n := range input.Names {
+			nameSet[n] = true
+		}
+		for _, s := range sources {
+			if s.Skill != nil && nameSet[s.Skill.Name] {
+				selected = append(selected, s)
+			}
+		}
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("未找到指定的源 skill：%v", input.Names)
+		}
+	case input.CanonicalAuthor != "":
+		target := skill.NormalizeAuthor(input.CanonicalAuthor, input.AliasMap)
+		for _, s := range sources {
+			if s.Skill != nil && skill.NormalizeAuthor(s.Skill.SourceAuthor, input.AliasMap) == target {
+				selected = append(selected, s)
+			}
+		}
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("未找到作者 %q 的 mental skill", input.CanonicalAuthor)
+		}
+	default:
+		return nil, fmt.Errorf("必须指定 names 或 canonical_author")
+	}
+
+	opts := skill.MergeOptions{
+		CanonicalAuthor: input.CanonicalAuthor,
+		AliasMap:        input.AliasMap,
+		OutputDir:       config.UserSkillsDir(),
+		AggregatedBy:    "aggregate",
+		BookTitles:      bookTitles,
+	}
+	derived, err := skill.MergeMentalSkills(a.ctx, selected, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := skill.WriteSkill(config.UserSkillsDir(), derived); err != nil {
+		return nil, fmt.Errorf("落盘派生 skill 失败: %w", err)
+	}
+	// 热重载用户级 skill，使新档案立即生效。
+	if err := a.skill.ReloadUser(config.UserSkillsDir()); err != nil {
+		a.logger.Warn("合并后重新加载用户级 skill 失败", "err", err)
+	}
+	return derived, nil
+}
+
+// RebuildAggregatedInput 是 RebuildAggregated 的入参。
+type RebuildAggregatedInput struct {
+	NovelID int64 `json:"novel_id"`
+}
+
+// RebuildAggregatedResult 是 RebuildAggregated 的返回。
+type RebuildAggregatedResult struct {
+	Count int `json:"count"` // 重建生成的作者档案数量
+}
+
+// RebuildAggregated 重建所有作者的跨书聚合档案（基础实现）。
+// 枚举全部 mental skill（排除派生聚合源），按归一作者分组，逐一重新生成并落盘派生文件。
+func (a *App) RebuildAggregated(input RebuildAggregatedInput) (*RebuildAggregatedResult, error) {
+	if a.skill == nil {
+		return nil, fmt.Errorf("skill store 未初始化")
+	}
+
+	sources, _, err := a.collectMentalSources(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	groups := make(map[string][]skill.MergeSource)
+	for _, s := range sources {
+		if s.Skill == nil || s.Skill.Aggregated {
+			continue
+		}
+		if s.Skill.Kind != "mental" {
+			continue
+		}
+		author := skill.NormalizeAuthor(s.Skill.SourceAuthor, nil)
+		if author == "" {
+			continue
+		}
+		groups[author] = append(groups[author], s)
+	}
+
+	count := 0
+	for author, grp := range groups {
+		opts := skill.MergeOptions{
+			CanonicalAuthor: author,
+			OutputDir:       config.UserSkillsDir(),
+			AggregatedBy:    "aggregate",
+		}
+		derived, err := skill.MergeMentalSkills(a.ctx, grp, opts)
+		if err != nil {
+			a.logger.Warn("重建聚合档案失败，已跳过", "author", author, "err", err)
+			continue
+		}
+		if _, err := skill.WriteSkill(config.UserSkillsDir(), derived); err != nil {
+			a.logger.Warn("落盘重建聚合档案失败，已跳过", "author", author, "err", err)
+			continue
+		}
+		count++
+	}
+
+	if err := a.skill.ReloadUser(config.UserSkillsDir()); err != nil {
+		a.logger.Warn("重建后重新加载用户级 skill 失败", "err", err)
+	}
+	return &RebuildAggregatedResult{Count: count}, nil
+}
+
+// collectMentalSources 枚举当前用户域所有小说级 + 用户级 mental skill，并附带书名溯源。
+func (a *App) collectMentalSources(ctx context.Context) ([]skill.MergeSource, map[string]string, error) {
+	if a.novel == nil {
+		return nil, nil, fmt.Errorf("novel store 未初始化")
+	}
+	if ctx == nil {
+		ctx = a.ctx
+	}
+
+	novels, err := a.GetNovels()
+	if err != nil {
+		return nil, nil, fmt.Errorf("枚举小说失败: %w", err)
+	}
+
+	bookTitles := make(map[string]string)
+	var sources []skill.MergeSource
+
+	for _, nv := range novels {
+		skills, err := skill.LoadDir(config.NovelSkillsDir(nv.ID))
+		if err != nil {
+			a.logger.Warn("加载小说 skill 失败，已跳过", "novel_id", nv.ID, "err", err)
+			continue
+		}
+		for i := range skills {
+			sk := skills[i]
+			if _, ok := bookTitles[sk.Name]; !ok {
+				bookTitles[sk.Name] = nv.Title
+			}
+			sources = append(sources, skill.MergeSource{Skill: &sk, BookTitle: nv.Title, BookID: nv.ID})
+		}
+	}
+
+	userSkills, err := skill.LoadDir(config.UserSkillsDir())
+	if err != nil {
+		a.logger.Warn("加载用户级 skill 失败", "err", err)
+	} else {
+		for i := range userSkills {
+			sk := userSkills[i]
+			if _, ok := bookTitles[sk.Name]; !ok {
+				bookTitles[sk.Name] = "用户"
+			}
+			sources = append(sources, skill.MergeSource{Skill: &sk, BookTitle: "用户"})
+		}
+	}
+
+	return sources, bookTitles, nil
 }

@@ -33,6 +33,15 @@ type Skill struct {
 	Version      int    `json:"version" yaml:"version"`
 	Content      string `json:"content" yaml:"-"`
 	RawContent   string `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
+
+	// —— 以下为 V3 跨书聚合（cross-book mental-skill aggregation）派生字段 ——
+	// 仅当 Aggregated=true 的派生 skill 使用；普通 skill 这些字段为零值，序列化时被 yaml 忽略。
+	Aggregated      bool     `json:"aggregated" yaml:"aggregated,omitempty"`               // 是否为跨书聚合派生 skill
+	AggregatedFrom  []string `json:"aggregated_from" yaml:"aggregated_from,omitempty"`     // 参与合并的源 skill 名清单
+	MergedBooks     []string `json:"merged_books" yaml:"merged_books,omitempty"`           // 去重后的来源书名清单
+	StableItems     int      `json:"stable_items" yaml:"stable_items,omitempty"`           // 跨书复现（stable）条目数
+	SingleBookItems int      `json:"single_book_items" yaml:"single_book_items,omitempty"` // 单书（single-book）条目数
+	AggregatedAt    string   `json:"aggregated_at" yaml:"aggregated_at,omitempty"`         // 聚合时间，RFC3339
 }
 
 // SkillMeta 是去除了正文的 skill 元数据，用于列表展示。
@@ -46,6 +55,13 @@ type SkillMeta struct {
 	SourceAuthor string `json:"source_author"`
 	Version      int    `json:"version"`
 	Source       string `json:"source"` // "builtin" | "user" | "novel"
+
+	// —— 以下为 V3 跨书聚合派生字段（仅 Aggregated=true 时有意义）——
+	Aggregated      bool     `json:"aggregated"`        // 是否为跨书聚合派生 skill
+	AggregatedFrom  []string `json:"aggregated_from"`   // 参与合并的源 skill 名清单
+	MergedBooks     []string `json:"merged_books"`      // 去重后的来源书名清单
+	StableItems     int      `json:"stable_items"`      // 跨书复现（stable）条目数
+	SingleBookItems int      `json:"single_book_items"` // 单书（single-book）条目数
 }
 
 // Meta 返回去除正文的元数据视图。
@@ -60,5 +76,11 @@ func (s *Skill) Meta(source string) SkillMeta {
 		SourceAuthor: s.SourceAuthor,
 		Version:      s.Version,
 		Source:       source,
+
+		Aggregated:      s.Aggregated,
+		AggregatedFrom:  s.AggregatedFrom,
+		MergedBooks:     s.MergedBooks,
+		StableItems:     s.StableItems,
+		SingleBookItems: s.SingleBookItems,
 	}
 }
