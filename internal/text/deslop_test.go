@@ -30,16 +30,15 @@ func TestBlockingIssues_EmDash(t *testing.T) {
 func TestBlockingIssues_SpecificPatterns(t *testing.T) {
 	blocking := []string{
 		"仿佛能穿透一切一般，他笑了。",
-		"她声音不大，却带着不容置疑的力量。",
+		"她声音不大，却带着平静的力量。",
 		"命运终于露出獠牙。",
 		"属于他的反击才刚刚开始。",
+		"反击才刚刚开始。",
 		"这一刻，他终于明白。",
 		"他不知道的是，更大的风暴即将来临。",
 		"取而代之的是冰冷的沉默。",
 		"他眼中闪过一丝悲伤。",
 		"她嘴角勾起一抹冷笑。",
-		"他深吸一口气，迈步上前。",
-		"这是不容置疑的事实。",
 	}
 	for _, s := range blocking {
 		if len(BlockingIssues(s)) == 0 {
@@ -64,15 +63,24 @@ func TestBlockingIssues_AllowsCleanProse(t *testing.T) {
 	}
 }
 
-// 验证常见自然用法不被误伤（避免对真实网文过度拒稿）
+// 验证常见自然用法不被误伤（避免对真实网文过度拒稿）。
+// 这些词在真人语料中常见，命中一次就拒整章会让 LLM 重写整章反复命中、
+// 连续失败 10 次中断对话（2026-10 实测），故全部降为 advisory。
 func TestBlockingIssues_NaturalUsageNotFlagged(t *testing.T) {
 	natural := []string{
-		"他不由得笑了起来。",    // 自然高频词，仅 advisory
-		"她不禁红了眼眶。",     // 同上
-		"他眉头微皱，看了她一眼。", //  milder body，仅 advisory
-		"目光锐利地扫过人群。",   // 同上
-		"事情并不是你想的那样。",  // "不是A" 无 "而是"，非翻转结构
-		"他不是医生。",       // 单纯否定，无翻转
+		"他不由得笑了起来。",        // 自然高频词，仅 advisory
+		"她不禁红了眼眶。",         // 同上
+		"他眉头微皱，看了她一眼。",     // milder body，仅 advisory
+		"目光锐利地扫过人群。",       // 同上
+		"事情并不是你想的那样。",      // "不是A" 无 "而是"，非翻转结构
+		"他不是医生。",           // 单纯否定，无翻转
+		"多年以后，她才明白那句话的分量。", // 合法叙事手法，仅 advisory
+		"从这一刻开始，他要为自己而活。",  // 立誓句式，仅 advisory
+		"他深吸一口气，迈步上前。",     // 自然动作，仅 advisory 密度提示
+		"这是毋庸置疑的事实。",       // 判断套词，仅 advisory
+		"毫无疑问，她是最强的。",      // 台词内合法
+		"他心中暗道不好。",         // 网文自然内心戏引导，仅 advisory 密度
+		"他的人生才刚刚开始。",       // 非「反击/故事/一切」主语，不再硬拒
 	}
 	for _, s := range natural {
 		if issues := BlockingIssues(s); len(issues) > 0 {
@@ -120,6 +128,17 @@ func TestAdvisoryIssues_FlagsDensity(t *testing.T) {
 	if !hasRule(AdvisoryIssues(tell), "tell-not-show") {
 		t.Errorf("expected tell-not-show for %q", tell)
 	}
+
+	// 从 blocking 降级的合法常用语：advisory 提示但不硬拒
+	if !hasRule(AdvisoryIssues("多年以后，她回到了故土。"), "future-flash") {
+		t.Error("expected future-flash advisory for 多年以后")
+	}
+	if !hasRule(AdvisoryIssues("从这一刻开始，他为自己而活。"), "vow-opening") {
+		t.Error("expected vow-opening advisory for 从这一刻开始")
+	}
+	if !hasRule(AdvisoryIssues("这是毋庸置疑的事实。"), "judgment-cliche") {
+		t.Error("expected judgment-cliche advisory for 判断套词")
+	}
 }
 
 func TestAdvisoryIssues_CleanNotFlagged(t *testing.T) {
@@ -139,12 +158,33 @@ func hasRule(issues []DeslopIssue, rule string) bool {
 }
 
 func TestBlockingErrorMessage_ContainsHint(t *testing.T) {
-	issues := BlockingIssues("他停下来——看着远方。")
+	issues := BlockingIssues("他心中涌起一股寒意。他停下来——看着远方。")
 	msg := BlockingErrorMessage(issues)
 	if !strings.Contains(msg, "破折号") {
 		t.Errorf("error message missing dash hint: %q", msg)
 	}
 	if !strings.Contains(msg, "AI 味硬伤") {
 		t.Errorf("error message missing header: %q", msg)
+	}
+	// 定向修补引导：只改命中句，不要重写整章
+	if !strings.Contains(msg, "不要重写整章") {
+		t.Errorf("error message missing targeted-patch guidance: %q", msg)
+	}
+	// 命中项附带所在句上下文，便于 LLM 定位
+	if !strings.Contains(msg, "所在句") {
+		t.Errorf("error message missing context locator: %q", msg)
+	}
+	if !strings.Contains(msg, "他停下来——看着远方") {
+		t.Errorf("error message missing sentence context: %q", msg)
+	}
+}
+
+func TestBlockingIssues_ContextLocatesSentence(t *testing.T) {
+	issues := BlockingIssues("夜色沉了下来。命运的齿轮开始转动。窗外有雨。")
+	if len(issues) != 1 {
+		t.Fatalf("expected 1 issue, got %d: %+v", len(issues), issues)
+	}
+	if issues[0].Context == "" || !strings.Contains(issues[0].Context, "命运的齿轮") {
+		t.Errorf("context should contain the hit sentence: %q", issues[0].Context)
 	}
 }

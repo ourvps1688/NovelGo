@@ -10,6 +10,7 @@ import (
 type DeslopIssue struct {
 	Rule    string // 规则标识（如 em-dash / fate-cliche）
 	Matched string // 命中的实际文本片段（可能截断）
+	Context string // 命中处所在句子的上下文片段（帮助 LLM 定位，只改命中句）
 	Message string // 人类可读的修正建议
 }
 
@@ -18,6 +19,10 @@ type DeslopIssue struct {
 // 选择标准（源自 zenstory-ai/oh-story-claudecode 的 banned-words.md 一级禁用词 / 禁用句式模板）：
 // 真人语料里几乎不出现、AI 高频套用，且命中即要求改写、不会误伤正常表达。
 // 作用域：仅章节正文（非大纲），在 edit 写入管线审批前硬校验。
+//
+// 校准原则（2026-10 实测复盘：过严会让 LLM 整章重写反复命中、10 次连续失败中断对话）：
+// 只硬拒「真人几乎不写」的指纹；真人也会自然使用的词（多年以后/从这一刻开始/
+// 深吸一口气/毫无疑问类判断套词）降为 advisory 密度提示，见下方 advisoryRegexRules。
 
 var blockingRules = []struct {
 	rule    string
@@ -35,23 +40,17 @@ var blockingRules = []struct {
 
 	// 命运 / 开端收束
 	{"fate-cliche", regexp.MustCompile(`命运的(齿轮|棋局|獠牙)|命运终于露出獠牙|早已布好的棋局`), "避免用「命运/齿轮/棋局/獠牙」作抽象收束，改回角色当下的动作、物件或后果"},
-	{"just-began", regexp.MustCompile(`(才刚刚开始|反击才刚刚开始|故事才刚刚开始|一切才刚刚开始)|属于[^，。\n]{0,8}(反击|复仇|故事)[^，。\n]{0,6}才刚刚开始`), "章末避免「才刚刚开始」式预告收束，用具体钩子或悬念收尾"},
-	{"epiphany", regexp.MustCompile(`这一刻(终于|，)?(他|她)?(终于)?明白|从这一刻开始`), "避免「这一刻终于明白/从这一刻开始」式升华收尾，用动作或场景收束"},
+	{"just-began", regexp.MustCompile(`(反击|复仇|故事|一切)才刚刚开始|属于[^，。\n]{0,8}(反击|复仇|故事)[^，。\n]{0,6}才刚刚开始`), "章末避免「才刚刚开始」式预告收束，用具体钩子或悬念收尾"},
+	{"epiphany", regexp.MustCompile(`这一刻(终于|，)?(他|她)?(终于)?明白`), "避免「这一刻终于明白」式升华收尾，用动作或场景收束"},
 
-	// 上帝视角 / 预告
-	{"god-view", regexp.MustCompile(`(他|她)不知道的是|殊不知|多年以后|仿佛预示着`), "避免上帝视角剧透/预告，只写角色此刻知道的；悬念留给读者"},
+	// 上帝视角 / 预告（「多年以后」是合法叙事手法，降为 advisory，不再硬拒）
+	{"god-view", regexp.MustCompile(`(他|她)不知道的是|殊不知|仿佛预示着`), "避免上帝视角剧透/预告，只写角色此刻知道的；悬念留给读者"},
 
 	// 过渡模板
 	{"transition-template", regexp.MustCompile(`取而代之的是`), "避免「取而代之的是」式 AI 过渡模板，直接写新状态"},
 
-	// 模板化身体 / 表情描写
-	{"stock-body", regexp.MustCompile(`眼中闪过(一丝|一抹)|嘴角勾起(一抹|一丝)|心中涌起一股|心头一震|心中暗道|心底泛起|瞳孔(微缩|收缩|一缩)|指节泛白`), "避免模板化身体/微表情描写（眼中闪过/嘴角勾起/瞳孔…），写角色当场的行为或台词"},
-
-	// 动作套路
-	{"stock-action", regexp.MustCompile(`深吸一口气`), "「深吸一口气」是 AI 高频动作套话，直接删或改具体动作"},
-
-	// 判断套词（书面化 AI 判断）
-	{"judgment-cliche", regexp.MustCompile(`不容置疑|不容置喙|毫无疑问|毋庸置疑|显而易见|不可否认|前所未有|不言而喻`), "避免「不容置疑/毫无疑问」等书面化判断套词，用具体事实或对话表达"},
+	// 模板化身体 / 表情描写（「心中暗道」是网文自然内心戏引导，降为 advisory 密度项）
+	{"stock-body", regexp.MustCompile(`眼中闪过(一丝|一抹)|嘴角勾起(一抹|一丝)|心中涌起一股|心头一震|心底泛起|瞳孔(微缩|收缩|一缩)|指节泛白`), "避免模板化身体/微表情描写（眼中闪过/嘴角勾起/瞳孔…），写角色当场的行为或台词"},
 }
 
 // BlockingIssues 扫描正文中确定性的 AI 味硬伤，返回所有命中的规则（每项含一个示例片段）。
@@ -59,20 +58,32 @@ var blockingRules = []struct {
 func BlockingIssues(s string) []DeslopIssue {
 	var issues []DeslopIssue
 	for _, r := range blockingRules {
-		if m := r.re.FindString(s); m != "" {
-			issues = append(issues, DeslopIssue{Rule: r.rule, Matched: truncate(m, 16), Message: r.message})
+		if loc := r.re.FindStringIndex(s); loc != nil {
+			issues = append(issues, DeslopIssue{
+				Rule:    r.rule,
+				Matched: truncate(s[loc[0]:loc[1]], 16),
+				Context: contextAround(s, loc[0], loc[1]),
+				Message: r.message,
+			})
 		}
 	}
 	return issues
 }
 
 // BlockingErrorMessage 把硬伤列表格式化为可回给 LLM 的拒绝原因。
+// 末尾附「定向修补」引导：只改命中句、不要重写整章——避免整章重写重掷骰子
+// 导致连环命中、连续失败耗尽触发对话中断。
 func BlockingErrorMessage(issues []DeslopIssue) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "正文命中 %d 处 AI 味硬伤，系统已拒绝写入。请改写后重提：\n", len(issues))
 	for _, it := range issues {
-		fmt.Fprintf(&b, "· %s：%s\n", it.Matched, it.Message)
+		if it.Context != "" && it.Context != it.Matched {
+			fmt.Fprintf(&b, "· %s（所在句：%s）：%s\n", it.Matched, it.Context, it.Message)
+		} else {
+			fmt.Fprintf(&b, "· %s：%s\n", it.Matched, it.Message)
+		}
 	}
+	b.WriteString("改写时只替换上述命中句，其余正文原样保留再次提交，不要重写整章。\n")
 	return b.String()
 }
 
@@ -105,6 +116,11 @@ var advisoryRegexRules = []struct {
 	re      *regexp.Regexp
 	message string
 }{
+	// 从 blocking 降级的合法常用语（真人写作也会用，只做密度/自检提示）
+	{"future-flash", regexp.MustCompile(`多年以后`), "「多年以后」是合法叙事手法，少量可保留；成片出现则成上帝视角预告，改写为角色当下的感知或具体后果"},
+	{"vow-opening", regexp.MustCompile(`从这一刻开始`), "「从这一刻开始」式立誓收束是 AI 常用套式，单处可留，复现时改为动作或台词承担转折"},
+	{"judgment-cliche", regexp.MustCompile(`不容置疑|不容置喙|毫无疑问|毋庸置疑|显而易见|不可否认|前所未有|不言而喻`), "「毫无疑问/不容置疑」等书面化判断套词：台词或确需强调时可留，叙述中复现时用具体事实或对话表达"},
+
 	{"negation-flip", regexp.MustCompile(`不是[^。！？\n]{1,10}(而)?是`), "「不是A而是B」是常见 AI 否定铺垫翻转句式，直接写肯定内容或用具象动作承担对比"},
 	{"negation-parade", regexp.MustCompile(`没有[^。！？\n]{0,8}没有`), "「没有X没有Y」否定铺排是 AI 句式，压成一次直述或只留一项"},
 	{"universal-adverb", regexp.MustCompile(`，带着|带着(一丝|一抹|几分)`), "「，带着…」万能状语是 AI 套路，删掉状语或换具体动作"},
@@ -120,7 +136,7 @@ var (
 	clicheWords = []string{
 		"仿佛", "犹如", "宛若", "如同", "一丝", "一抹", "些许", "几分",
 		"隐约", "微不可察", "毫无征兆", "几不可闻", "眼中闪过", "嘴角勾起",
-		"心中涌起", "心底泛起", "心头一震", "深吸一口气",
+		"心中涌起", "心底泛起", "心头一震", "深吸一口气", "心中暗道",
 	}
 	simileWords = []string{
 		"好像", "仿佛", "犹如", "如同", "宛若", "宛如",
@@ -177,4 +193,57 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// contextAround 返回命中处所在的句子片段：向两侧尽量扩到句界
+// （。！？换行/引号），最多向前 24 字、向后 30 字。用于拒绝消息中
+// 精确定位命中句，引导 LLM 只改写命中处而非重写整章。
+func contextAround(s string, start, end int) string {
+	runes := []rune(s)
+	lo, hi := runeIndexAt(s, start), runeIndexAt(s, end)
+	if lo > hi || lo >= len(runes) {
+		return ""
+	}
+
+	left := lo
+	if minLeft := lo - 24; minLeft > 0 {
+		left = minLeft
+		for left < lo && !isSentenceBoundary(runes[left]) {
+			left++
+		}
+	} else {
+		left = 0
+	}
+	if left < lo && isSentenceBoundary(runes[left]) && left+1 <= lo {
+		left++ // 句界标点不作为片段首字符
+	}
+
+	right := hi
+	maxRight := hi + 30
+	if maxRight > len(runes) {
+		maxRight = len(runes)
+	}
+	for right < maxRight && !isSentenceBoundary(runes[right]) {
+		right++
+	}
+	if right < len(runes) && isSentenceBoundary(runes[right]) {
+		right++ // 包含句末标点
+	}
+	return strings.TrimSpace(string(runes[left:right]))
+}
+
+// runeIndexAt 把字节偏移换算为 rune 下标。
+func runeIndexAt(s string, byteOff int) int {
+	if byteOff >= len(s) {
+		return len([]rune(s))
+	}
+	return len([]rune(s[:byteOff]))
+}
+
+func isSentenceBoundary(r rune) bool {
+	switch r {
+	case '。', '！', '？', '\n', '"', '\u201c', '\u201d', '…':
+		return true
+	}
+	return false
 }
