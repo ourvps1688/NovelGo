@@ -140,7 +140,8 @@
     "renameChapter": "重命名章节“{{title}}”",
     "addAtGroupEnd": "追加到所选分组末尾",
     "chapterCountShort": "{{count}}章",
-    "wordCount": "{{count}}字"
+    "wordCount": "{{count}}字",
+    "qualityScoreTitle": "章节评分：{{score}} 分"
   },
   "chat": {
     "aiChat": "AI 对话",
@@ -283,6 +284,17 @@
     "general": "基础设置",
     "modelConfig": "模型配置",
     "about": "关于",
+    "writingScore": "写作评分",
+    "selectNovelFirstHint": "请先在左侧选择一部作品，再配置其写作评分门禁。",
+    "writingScoreDesc": "开启后，AI 每次成章写作（新建章节 / 正文整体替换）会先由评分判官打分；未达及格线将自动退回重写，直到达标或达到最大重试次数。",
+    "autoScoreEnabled": "启用自动评分",
+    "autoScoreEnabledDesc": "关闭后 AI 成章写作不再评分与强制重写。",
+    "scoreThreshold": "及格阈值",
+    "scoreThresholdDesc": "0–100 分。评分低于此值的章节会被判为不达标并退回重写。",
+    "scoreThresholdUnit": "分",
+    "scoreMaxRetries": "最大重试次数",
+    "scoreMaxRetriesDesc": "未达标时最多自动重写的次数；超过后保留当前章节并标低分放行。",
+    "scoreMaxRetriesUnit": "次",
     "basicConfig": "基础配置",
     "dataDir": "数据目录",
     "gitConfig": "Git 配置",

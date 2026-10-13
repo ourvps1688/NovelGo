@@ -28,6 +28,8 @@ import (
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/novelgo/novelgo/internal/writing"
+	"github.com/novelgo/novelgo/internal/writingconfig"
+	"github.com/novelgo/novelgo/internal/review"
 )
 
 // Run 自动创建/更新全部数据表，幂等安全。作为外部入口，遍历 engine.Registry
@@ -102,6 +104,8 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&activity.DailyActivity{},
 		&activity.DailyLLMUsage{},
 		&volume.Volume{},
+		&writingconfig.WritingConfig{},
+		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}
 

@@ -339,6 +339,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						SearchService: a.searchService.Load(),
 						WebSearch:     a.buildWebSearch(),
 						Logger:        a.logger,
+						LLM:           a.llm,
+						ProviderName:  opts.ProviderName,
+						ModelID:       opts.Model.ID,
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])

@@ -63,6 +63,12 @@ type ToolContext struct {
 	SearchService *search.Service                                                       // 搜索服务，write 工具用于更新正文缓存
 	WebSearch     func(ctx context.Context, query string) (*llm.WebSearchResult, error) // 网络搜索，由 agent 注入 DeepSeek 闭包；nil 表示未配置
 	Logger        *slog.Logger                                                          // 项目 logger，由 agent 注入；nil 时走 slog.Default()
+
+	// 评分门禁依赖：LLM 客户端与本次调用使用的 provider/model。
+	// 由 agent 包注入（主 Agent 与子 Agent 共用构建点）；测试用例可手动注入桩实现。
+	LLM          *llm.Client // 评分判官所需；nil 表示不启用评分
+	ProviderName string       // 本次对话 provider（如 "openai"），传给 LLM 客户端选择端点
+	ModelID      string       // 本次对话模型 id
 }
 
 // LoggerOrDefault 返回 ToolContext 的 Logger，nil 时兜底到 slog.Default()。
@@ -89,6 +95,10 @@ const (
 	ErrKindBusiness ErrKind = ""
 	ErrKindSystem   ErrKind = "system"
 	ErrKindArgs     ErrKind = "args"
+	// ErrKindQuality 评分门禁退回：章节评分不达标，要求 Agent 重写。
+	// 这不是工具故障，不计入中断计数（见 agent/interrupt.go），避免有界重写循环
+	// 吃掉全局连续失败配额触发误中断。
+	ErrKindQuality ErrKind = "quality"
 )
 
 // ToolResult 是工具执行结果。

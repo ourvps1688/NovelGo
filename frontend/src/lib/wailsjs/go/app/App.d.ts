@@ -21,6 +21,7 @@ import {session} from '../models';
 import {config} from '../models';
 import {volume} from '../models';
 import {writing} from '../models';
+import {writingconfig} from '../models';
 import {imp} from '../models';
 import {skill} from '../models';
 import {search} from '../models';
@@ -191,6 +192,8 @@ export function GetWritingActivity(arg1:number):Promise<Array<writing.DailyActiv
 
 export function GetWritingStats():Promise<writing.WritingStats>;
 
+export function GetWritingConfig(arg1:number):Promise<writingconfig.WritingConfig>;
+
 export function ImportNovel(arg1:app.ImportNovelInput):Promise<imp.ImportResult>;
 
 export function ImportWithLLM(arg1:app.ImportWithLLMInput):Promise<imp.ImportResult>;
@@ -236,6 +239,8 @@ export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 export function SaveSettings(arg1:app.SaveSettingsInput):Promise<void>;
 
 export function SaveUserName(arg1:string):Promise<void>;
+
+export function SaveWritingConfig(arg1:number,arg2:app.SaveWritingConfigInput):Promise<void>;
 
 export function SearchAll(arg1:number,arg2:string):Promise<Array<search.Result>>;
 

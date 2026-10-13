@@ -197,3 +197,10 @@ export const writingActivityKeys = {
 export const writingStatsKeys = {
   all: ["writing-stats"] as const,
 };
+
+// 写作评分配置：每本书独立的评分门禁开关（auto_score_enabled / score_threshold /
+// score_max_retries）。GetWritingConfig(novelId) 按书返回，queryKey 第二段用 novelId。
+// useSaveWritingConfig onSuccess invalidate 此 key，让 WritingConfigTab 自动 refetch。
+export const writingConfigKeys = {
+  detail: (novelId: number) => ["writing-config", novelId] as const,
+};

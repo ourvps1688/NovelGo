@@ -1017,6 +1017,23 @@ export namespace app {
 	    }
 	}
 
+	export class SaveWritingConfigInput {
+	    auto_score_enabled: boolean;
+	    score_threshold: number;
+	    score_max_retries: number;
+
+	    static createFrom(source: any = {}) {
+	        return new SaveWritingConfigInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.auto_score_enabled = source["auto_score_enabled"];
+	        this.score_threshold = source["score_threshold"];
+	        this.score_max_retries = source["score_max_retries"];
+	    }
+	}
+
 }
 
 export namespace apperr {
@@ -1126,7 +1143,11 @@ export namespace chapter {
 	    file_path: string;
 	    outline_file_path: string;
 	    reading_number: number;
-	
+	    quality_score?: number;
+	    quality_report: string;
+	    // Go type: time
+	    quality_scored_at?: any;
+
 	    static createFrom(source: any = {}) {
 	        return new Chapter(source);
 	    }
@@ -1145,6 +1166,9 @@ export namespace chapter {
 	        this.file_path = source["file_path"];
 	        this.outline_file_path = source["outline_file_path"];
 	        this.reading_number = source["reading_number"];
+	        this.quality_score = source["quality_score"];
+	        this.quality_report = source["quality_report"];
+	        this.quality_scored_at = this.convertValues(source["quality_scored_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3199,7 +3223,30 @@ export namespace writing {
 	        this.current_streak = source["current_streak"];
 	        this.longest_streak = source["longest_streak"];
 	        this.total_novels = source["total_novels"];
-	        this.total_chapters = source["total_chapters"];
+	    this.total_chapters = source["total_chapters"];
+	    }
+	}
+
+}
+
+export namespace writingconfig {
+
+	export class WritingConfig {
+	    novel_id: number;
+	    auto_score_enabled: boolean;
+	    score_threshold: number;
+	    score_max_retries: number;
+
+	    static createFrom(source: any = {}) {
+	        return new WritingConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.auto_score_enabled = source["auto_score_enabled"];
+	        this.score_threshold = source["score_threshold"];
+	        this.score_max_retries = source["score_max_retries"];
 	    }
 	}
 

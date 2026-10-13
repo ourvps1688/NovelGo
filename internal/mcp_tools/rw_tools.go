@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -19,10 +20,12 @@ import (
 	"github.com/novelgo/novelgo/internal/config"
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/rag"
+	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/text"
 	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/novelgo/novelgo/internal/writing"
+	"github.com/novelgo/novelgo/internal/writingconfig"
 )
 
 // ── edit ──────────────────────────────────────────────────
@@ -412,11 +415,23 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	}
 
 	// 正文（非大纲）去 AI 味硬校验：命中确定性 AI 味硬伤（破折号、模板化身体/声音
-	// 描写、命运/开端套话、上帝视角预告、判断套词等）直接拒绝，提示词约束无效，
-	// 此处强制改写。规则集见 internal/text/deslop.go（源自 oh-story 一级禁用词）。
+	// 描写、命运/开端套话、「他不知道的是」式上帝视角预告等）直接拒绝，提示词约束无效，
+	// 此处强制改写。规则集见 internal/text/deslop.go（源自 oh-story 一级禁用词；
+	// 多年以后/从这一刻开始/深吸一口气/判断套词等真人常用语已降级为 advisory，不硬拒）。
+	// 拒绝消息带命中句上下文与「只改命中句、不要重写整章」引导，避免整章重写
+	// 反复命中导致连续失败 10 次中断对话。
+	var pendingScore *review.ScoreResult
 	if !ref.IsOutline {
 		if issues := text.BlockingIssues(proposed); len(issues) > 0 {
 			return &ToolResult{Success: false, Error: text.BlockingErrorMessage(issues)}, nil
+		}
+		// 评分门禁（仅成章写：new.md 新建或正文 full_replace）：低于阈值且有重试余量时
+		// 退回重写；通过或超重试上限则放行并落库分数。失败以 ErrKindQuality 标记，
+		// 不计入全局连续失败中断配额。
+		if scored, failRes := t.maybeScoreChapter(ctx, tc, ref, a, ch, proposed); failRes != nil {
+			return failRes, nil
+		} else {
+			pendingScore = scored
 		}
 	}
 
@@ -495,6 +510,10 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	// 正文（非大纲）落盘后的维护链路：向量/搜索缓存/字数/写作日志
 	if !ref.IsOutline {
 		maintainChapterAfterEdit(ctx, tc, ch, current, proposed)
+		// 落库评分结果（评分门禁判分后在此写入章节记录；nil 表示未评分或评分被跳过）
+		if pendingScore != nil {
+			persistChapterScore(ctx, tc, ch, pendingScore)
+		}
 	}
 	emitFileChanged(ctx, tc.NovelID, physical)
 
@@ -868,6 +887,100 @@ func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.C
 	tc.DB.WithContext(ctx).Model(&chapter.Chapter{}).
 		Where("id = ?", ch.ID).
 		Update("word_count", stats.WordCount)
+}
+
+// ── 评分门禁 ──────────────────────────────────────────
+
+// maybeScoreChapter 评分门禁：仅对"成章写"（new.md 新建或正文 full_replace）生效。
+// 返回 (scored, failResult)：
+//   - failResult 非 nil：评分低于阈值且有重试余量，调用方应直接返回它（Success:false、
+//     ErrKindQuality），让 Agent 在既有对话循环里自动重写，不进入审批/落盘。
+//   - 其余情况 proceed：scored 非 nil 时由调用方在章节记录可知后落库（通过或超重试放行）。
+//
+// 设计要点：复用 deslop 的「reject→重写」回路，但有独立的有界重试计数
+//（review.QualityAttempt，按章节/标题 key），不会吃掉全局连续失败中断配额
+//（ErrKindQuality 在 agent/interrupt.go 被排除）。
+func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref git.ChapterPathRef, a *EditArgs, ch *chapter.Chapter, proposed string) (*review.ScoreResult, *ToolResult) {
+	if tc.LLM == nil || tc.ProviderName == "" || tc.ModelID == "" {
+		return nil, nil // 未注入 LLM，跳过评分
+	}
+	cfg, err := writingconfig.NewStore(tc.DB, tc.LoggerOrDefault()).Get(ctx, tc.NovelID)
+	if err != nil {
+		tc.LoggerOrDefault().Warn("读取写作配置失败，跳过评分", "err", err)
+		return nil, nil
+	}
+	if !cfg.AutoScoreEnabled {
+		return nil, nil
+	}
+	// 仅成章写触发：新建正文通道，或已有正文 full_replace。增量编辑（search_replace/
+	// line_range_replace）与一切大纲编辑不评分。
+	if !(ref.IsNew || (ch != nil && a.ChangeType == "full_replace")) {
+		return nil, nil
+	}
+
+	// 重试计数 key：已有章节稳定用 id；新建章节无 id，用标题（重写通常保留标题）。
+	key := "new:" + strings.TrimSpace(a.Title)
+	if ch != nil {
+		key = fmt.Sprintf("chapter:%d", ch.ID)
+	}
+
+	// 读取本章大纲（仅已有章节可取），供判官对照字数预期与目标
+	outline := ""
+	if ch != nil {
+		if ol, rerr := git.ReadFile(tc.NovelID, git.OutlinePath(ch.ID)); rerr == nil {
+			outline = ol
+		}
+	}
+	stats := text.ComputeStats(proposed)
+	score, serr := review.ScoreChapter(ctx, tc.LLM, tc.ProviderName, tc.ModelID, proposed, outline, stats.WordCount)
+	if serr != nil {
+		tc.LoggerOrDefault().Warn("章节评分失败，放行不阻断", "err", serr)
+		return nil, nil
+	}
+
+	attempts := review.NewAttemptStore(tc.DB, tc.LoggerOrDefault())
+	if score.Overall >= cfg.ScoreThreshold {
+		// 通过：清理可能存在的脏重试计数
+		if cerr := attempts.Clear(ctx, tc.NovelID, key); cerr != nil {
+			tc.LoggerOrDefault().Warn("清理评分重试计数失败", "err", cerr)
+		}
+		return &score, nil
+	}
+
+	// 不达标：递增重试计数，决定是否退回重写或放行
+	retries, ierr := attempts.Increment(ctx, tc.NovelID, key, score.Overall, score.Critique)
+	if ierr != nil {
+		tc.LoggerOrDefault().Warn("评分重试计数失败", "err", ierr)
+	}
+	if retries <= cfg.MaxRetries {
+		msg := fmt.Sprintf(
+			"本章评分 %d 分（阈值 %d），未达标，系统已退回重写。请参考以下意见修改后重提——只改有问题的部分，不要整体推翻或重写无关段落：\n%s",
+			score.Overall, cfg.ScoreThreshold, score.Critique)
+		return &score, &ToolResult{Success: false, Error: msg, ErrKind: ErrKindQuality}
+	}
+	// 超出重试上限：放行并保留低分，让用户在审批时看到评分与警告
+	if cerr := attempts.Clear(ctx, tc.NovelID, key); cerr != nil {
+		tc.LoggerOrDefault().Warn("清理评分重试计数失败", "err", cerr)
+	}
+	tc.LoggerOrDefault().Warn("章节评分多次不达标，放行", "score", score.Overall, "retries", retries)
+	return &score, nil
+}
+
+// persistChapterScore 把评分结果写入章节记录（QualityScore / QualityReport / QualityScoredAt）。
+func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, scored *review.ScoreResult) {
+	if ch == nil || scored == nil {
+		return
+	}
+	now := time.Now()
+	if err := tc.DB.WithContext(ctx).Model(&chapter.Chapter{}).
+		Where("id = ?", ch.ID).
+		Updates(map[string]any{
+			"quality_score":     scored.Overall,
+			"quality_report":    scored.Critique,
+			"quality_scored_at": now,
+		}).Error; err != nil {
+		tc.LoggerOrDefault().Warn("落库章节评分失败", "chapter_id", ch.ID, "err", err)
+	}
 }
 
 // ── 工具描述 ──────────────────────────────────────────────

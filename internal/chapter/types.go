@@ -15,6 +15,9 @@ type Chapter struct {
 	Title           string    `gorm:"column:title"                       json:"title"`
 	Summary         string    `gorm:"column:summary"                     json:"summary"` // AI 生成的章节简介
 	WordCount       int       `gorm:"column:word_count;default:0"        json:"word_count"`
+	QualityScore    *int      `gorm:"column:quality_score"               json:"quality_score"`   // 评分门禁给出的总分（0-100），nil=未评分
+	QualityReport   string    `gorm:"column:quality_report"              json:"quality_report"` // 判官给出的具体修改意见
+	QualityScoredAt *time.Time `gorm:"column:quality_scored_at"          json:"quality_scored_at"`
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"   json:"created_at"`
 	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime"   json:"updated_at"`
 	FilePath        string    `gorm:"-"                                  json:"file_path"` // 不存 DB，由 git.ChapterPath 计算

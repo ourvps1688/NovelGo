@@ -199,6 +199,20 @@ export default function SidebarChapterGroup({
                             {t("sidebar.wordCount", { count: item.word_count })}
                           </span>
                         )}
+                        {typeof item.quality_score === "number" && (
+                          <span
+                            title={t("sidebar.qualityScoreTitle", {
+                              score: item.quality_score,
+                            })}
+                            className={`shrink-0 rounded px-1 text-[10px] font-medium tabular-nums ${
+                              item.quality_score >= 60
+                                ? "bg-tag-green-foreground/10 text-tag-green-foreground"
+                                : "bg-destructive/10 text-destructive"
+                            }`}
+                          >
+                            {item.quality_score}
+                          </span>
+                        )}
                       </button>
                     )}
                     {editingId !== item.id && (

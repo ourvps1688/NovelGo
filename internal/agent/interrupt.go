@@ -98,6 +98,10 @@ func (t *interruptTracker) recordFailure(name string, kind mcp_tools.ErrKind) (b
 	case mcp_tools.ErrKindArgs:
 		t.argsFailCnt[name]++
 		t.systemFailCnt[name] = 0
+	case mcp_tools.ErrKindQuality:
+		// 评分门禁退回：不是工具故障，完全不计入任何中断计数，避免有界重写
+		// 循环吃掉全局连续失败配额而误触发对话中断。
+		return false, nil
 	default:
 		// 业务错误：不计入 per-tool 计数，但计入全局连续失败
 	}

@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { Settings, Cpu, Info } from "lucide-react";
+import { Settings, Cpu, Info, ClipboardCheck } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import ModelConfigTab from "./ModelConfigTab";
 import GeneralConfigTab from "./GeneralConfigTab";
 import AboutTab from "./AboutTab";
+import WritingConfigTab from "./WritingConfigTab";
 
-type Tab = "general" | "model" | "about";
+type Tab = "general" | "model" | "about" | "writing";
 
 // 内容区按 activeTab 映射渲染，避免嵌套三元。
 const TAB_CONTENT: Record<Tab, React.ReactNode> = {
   general: <GeneralConfigTab />,
   model: <ModelConfigTab />,
   about: <AboutTab />,
+  writing: <WritingConfigTab />,
 };
 
 interface Props {
@@ -45,6 +47,11 @@ export default function SettingsDialog({
       id: "about",
       label: t("settings.about"),
       icon: <Info className="w-4 h-4" />,
+    },
+    {
+      id: "writing",
+      label: t("settings.writingScore"),
+      icon: <ClipboardCheck className="w-4 h-4" />,
     },
   ];
 

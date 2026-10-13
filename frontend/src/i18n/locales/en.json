@@ -148,7 +148,8 @@
     "chapterCountShort_one": "{{count}} chapter",
     "chapterCountShort_other": "{{count}} chapters",
     "wordCount_one": "{{count}} char",
-    "wordCount_other": "{{count}} chars"
+    "wordCount_other": "{{count}} chars",
+    "qualityScoreTitle": "Chapter score: {{score}}"
   },
   "chat": {
     "aiChat": "AI Chat",
@@ -292,6 +293,17 @@
     "general": "General",
     "modelConfig": "Model Config",
     "about": "About",
+    "writingScore": "Writing Score",
+    "selectNovelFirstHint": "Select a novel on the left first, then configure its writing-score gate.",
+    "writingScoreDesc": "When enabled, every AI chapter write (new chapter / full text replace) is scored by a judge. Below-threshold chapters are sent back for rewriting automatically, until they pass or hit the max retries.",
+    "autoScoreEnabled": "Enable auto scoring",
+    "autoScoreEnabledDesc": "When off, AI chapter writes are no longer scored or force-rewritten.",
+    "scoreThreshold": "Pass threshold",
+    "scoreThresholdDesc": "0–100. Chapters scoring below this are judged failed and sent back for rewriting.",
+    "scoreThresholdUnit": "pts",
+    "scoreMaxRetries": "Max retries",
+    "scoreMaxRetriesDesc": "Max automatic rewrites when below threshold; beyond that the current chapter is kept with a low-score warning.",
+    "scoreMaxRetriesUnit": "times",
     "basicConfig": "General Settings",
     "dataDir": "Data Directory",
     "gitConfig": "Git Config",

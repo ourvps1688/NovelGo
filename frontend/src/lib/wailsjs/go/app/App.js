@@ -334,6 +334,10 @@ export function GetWritingStats() {
   return window['go']['app']['App']['GetWritingStats']();
 }
 
+export function GetWritingConfig(arg1) {
+  return window['go']['app']['App']['GetWritingConfig'](arg1);
+}
+
 export function ImportNovel(arg1) {
   return window['go']['app']['App']['ImportNovel'](arg1);
 }
@@ -424,6 +428,10 @@ export function SaveSettings(arg1) {
 
 export function SaveUserName(arg1) {
   return window['go']['app']['App']['SaveUserName'](arg1);
+}
+
+export function SaveWritingConfig(arg1, arg2) {
+  return window['go']['app']['App']['SaveWritingConfig'](arg1, arg2);
 }
 
 export function SearchAll(arg1, arg2) {
