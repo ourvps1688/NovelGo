@@ -38,7 +38,7 @@ func TestReconcileAggregates_RebuildsStale(t *testing.T) {
 	}
 	writeDerived(t, dir, stale)
 
-	res := ReconcileAggregates(context.Background(), sources, []Skill{stale}, dir)
+	res := ReconcileAggregates(context.Background(), sources, []Skill{stale}, dir, nil)
 
 	assert.Contains(t, res.Rebuilt, "liu-mental")
 	assert.Equal(t, 1, res.Checked)
@@ -67,7 +67,7 @@ func TestReconcileAggregates_DeletesOrphan(t *testing.T) {
 	}
 	writeDerived(t, dir, orphan)
 
-	res := ReconcileAggregates(context.Background(), nil, []Skill{orphan}, dir)
+	res := ReconcileAggregates(context.Background(), nil, []Skill{orphan}, dir, nil)
 
 	assert.Contains(t, res.Deleted, "liu-mental")
 	assert.Equal(t, 0, len(res.Rebuilt))
@@ -90,7 +90,7 @@ func TestReconcileAggregates_UpToDateSkipped(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	res := ReconcileAggregates(context.Background(), sources, []Skill{*fresh}, dir)
+	res := ReconcileAggregates(context.Background(), sources, []Skill{*fresh}, dir, nil)
 
 	assert.Equal(t, 0, len(res.Rebuilt), "摘要未变不应重建")
 	assert.Equal(t, 0, len(res.Deleted))
@@ -101,8 +101,58 @@ func TestReconcileAggregates_IgnoresNonAggregated(t *testing.T) {
 	dir := t.TempDir()
 	// 普通（非聚合）skill 不应被处理。
 	plain := Skill{Name: "plain", Kind: "mental", SourceAuthor: "Liu", Content: "x"}
-	res := ReconcileAggregates(context.Background(), nil, []Skill{plain}, dir)
+	res := ReconcileAggregates(context.Background(), nil, []Skill{plain}, dir, nil)
 	assert.Equal(t, 0, res.Checked)
 	assert.Equal(t, 0, len(res.Rebuilt))
 	assert.Equal(t, 0, len(res.Deleted))
+}
+
+// TestReconcileAggregates_AliasGrouping 验证：同一作者的两种署名（英文 "Liu Cixin"
+// 与中文 "刘慈欣"）经别名映射归并为同一规范名后，被当作同一组处理。
+func TestReconcileAggregates_AliasGrouping(t *testing.T) {
+	dir := t.TempDir()
+
+	aliasMap := (&AliasConfig{Version: 1, Groups: []AuthorAliasGroup{
+		{Canonical: "刘慈欣", Aliases: []string{"Liu Cixin"}},
+	}}).ToMap()
+
+	// 源：一份署名 "Liu Cixin"，另一份署名 "刘慈欣"（实为同一人）。
+	s1 := &Skill{Name: "a", Kind: "mental", SourceAuthor: "Liu Cixin", Content: "x: 1"}
+	s2 := &Skill{Name: "b", Kind: "mental", SourceAuthor: "刘慈欣", Content: "y: 2"}
+	sources := []MergeSource{{Skill: s1}, {Skill: s2}}
+
+	// 已存在的派生档，其 SourceAuthor 按其中一种署名归一（"liu cixin"）。
+	existing := Skill{
+		Name:                 "liu-cixin-mental",
+		Kind:                 "mental",
+		Author:               "aggregate",
+		SourceAuthor:         "liu cixin",
+		Aggregated:           true,
+		AggregatedFrom:       []string{"a", "b"},
+		AggregatedSourceHash: "stale",
+		Content:              "old",
+	}
+	writeDerived(t, dir, existing)
+
+	res := ReconcileAggregates(context.Background(), sources, []Skill{existing}, dir, aliasMap)
+	assert.Contains(t, res.Rebuilt, "liu-cixin-mental")
+
+	// 别名归一改变了规范名，旧名文件应被清理，避免遗留孤儿档。
+	_, statErr := os.Stat(filepath.Join(dir, "liu-cixin-mental.md"))
+	assert.True(t, os.IsNotExist(statErr), "旧规范名文件应随别名归一被移除")
+
+	// 目录中仅剩唯一派生档，其 SourceAuthor 归并为规范名 "刘慈欣"，
+	// 证明两种署名被分到同一组、而非各自独立。
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var mdFiles []string
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".md" {
+			mdFiles = append(mdFiles, e.Name())
+		}
+	}
+	require.Len(t, mdFiles, 1, "应只剩唯一派生档")
+	reloaded, err := ParseFile(filepath.Join(dir, mdFiles[0]))
+	require.NoError(t, err)
+	assert.Equal(t, "刘慈欣", reloaded.SourceAuthor, "别名应把 Liu Cixin 与 刘慈欣 归并为同一规范名")
 }

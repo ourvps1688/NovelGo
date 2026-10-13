@@ -231,6 +231,13 @@ func (a *App) MergeMentalSkills(input MergeMentalSkillsInput) (*skill.Skill, err
 		return nil, err
 	}
 
+	// 别名映射：前端未显式传入时回退到持久化的 author_aliases.json，
+	// 使跨书聚合能把同一作者的不同署名归并到一起。
+	aliasMap := input.AliasMap
+	if len(aliasMap) == 0 {
+		aliasMap = a.aliasResolved()
+	}
+
 	// 选定参与合并的源。
 	var selected []skill.MergeSource
 	switch {
@@ -248,9 +255,9 @@ func (a *App) MergeMentalSkills(input MergeMentalSkillsInput) (*skill.Skill, err
 			return nil, fmt.Errorf("未找到指定的源 skill：%v", input.Names)
 		}
 	case input.CanonicalAuthor != "":
-		target := skill.NormalizeAuthor(input.CanonicalAuthor, input.AliasMap)
+		target := skill.NormalizeAuthor(input.CanonicalAuthor, aliasMap)
 		for _, s := range sources {
-			if s.Skill != nil && skill.NormalizeAuthor(s.Skill.SourceAuthor, input.AliasMap) == target {
+			if s.Skill != nil && skill.NormalizeAuthor(s.Skill.SourceAuthor, aliasMap) == target {
 				selected = append(selected, s)
 			}
 		}
@@ -263,7 +270,7 @@ func (a *App) MergeMentalSkills(input MergeMentalSkillsInput) (*skill.Skill, err
 
 	opts := skill.MergeOptions{
 		CanonicalAuthor: input.CanonicalAuthor,
-		AliasMap:        input.AliasMap,
+		AliasMap:        aliasMap,
 		OutputDir:       config.UserSkillsDir(),
 		AggregatedBy:    "aggregate",
 		BookTitles:      bookTitles,
@@ -305,6 +312,9 @@ func (a *App) RebuildAggregated(input RebuildAggregatedInput) (*RebuildAggregate
 		return nil, err
 	}
 
+	// 持久化别名映射：使不同署名的同一作者归并到同一组。
+	aliasMap := a.aliasResolved()
+
 	groups := make(map[string][]skill.MergeSource)
 	for _, s := range sources {
 		if s.Skill == nil || s.Skill.Aggregated {
@@ -313,7 +323,7 @@ func (a *App) RebuildAggregated(input RebuildAggregatedInput) (*RebuildAggregate
 		if s.Skill.Kind != "mental" {
 			continue
 		}
-		author := skill.NormalizeAuthor(s.Skill.SourceAuthor, nil)
+		author := skill.NormalizeAuthor(s.Skill.SourceAuthor, aliasMap)
 		if author == "" {
 			continue
 		}
@@ -324,6 +334,7 @@ func (a *App) RebuildAggregated(input RebuildAggregatedInput) (*RebuildAggregate
 	for author, grp := range groups {
 		opts := skill.MergeOptions{
 			CanonicalAuthor: author,
+			AliasMap:        aliasMap,
 			OutputDir:       config.UserSkillsDir(),
 			AggregatedBy:    "aggregate",
 		}
@@ -406,7 +417,7 @@ func (a *App) reconcileAggregated() {
 		a.logger.Warn("跨书聚合自动重建：加载现有聚合档失败", "err", err)
 		return
 	}
-	res := skill.ReconcileAggregates(a.ctx, sources, existing, config.UserSkillsDir())
+	res := skill.ReconcileAggregates(a.ctx, sources, existing, config.UserSkillsDir(), a.aliasResolved())
 	if len(res.Rebuilt) == 0 && len(res.Deleted) == 0 {
 		return
 	}
@@ -420,4 +431,16 @@ func (a *App) reconcileAggregated() {
 	if len(res.Deleted) > 0 {
 		a.logger.Info("跨书聚合孤儿清理完成", "deleted", res.Deleted)
 	}
+}
+
+// aliasResolved 从 UserSkillsDir 加载作者别名配置并编译为「归一键 → 规范名」映射。
+// 每次调用实时读取（文件很小），保证别名编辑后立即生效、无需重启应用。
+// 加载失败时降级为 nil（按无别名处理），仅记录告警。
+func (a *App) aliasResolved() map[string]string {
+	cfg, err := skill.LoadAliasConfig(config.UserSkillsDir())
+	if err != nil {
+		a.logger.Warn("加载作者别名配置失败，按无别名处理", "err", err)
+		return nil
+	}
+	return cfg.ToMap()
 }

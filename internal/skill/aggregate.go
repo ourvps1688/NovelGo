@@ -252,6 +252,10 @@ func ComputeSourceDigest(sources []MergeSource) string {
 
 // normalizeAuthor 对作者名做归一：trim + NFKC + Unicode 大小写折叠 + 别名映射。
 // 空名返回空串；别名映射命中后会对映射结果再归一（支持别名本身也含大小写差异）。
+//
+// 别名查找先按原始键、再按归一键（aliasKey），以兼容两种来源的 aliasMap：
+//   - 手写 map（如测试中的 {"Liu Cixin": "刘慈欣"}）使用原始键；
+//   - AliasConfig.ToMap() 编译出的 map 使用归一键（大小写/空白无关）。
 func normalizeAuthor(raw string, aliasMap map[string]string) string {
 	name := strings.TrimSpace(raw)
 	if name == "" {
@@ -259,6 +263,8 @@ func normalizeAuthor(raw string, aliasMap map[string]string) string {
 	}
 	if aliasMap != nil {
 		if mapped, ok := aliasMap[name]; ok && mapped != "" {
+			name = mapped
+		} else if mapped, ok := aliasMap[aliasKey(name)]; ok && mapped != "" {
 			name = mapped
 		}
 	}

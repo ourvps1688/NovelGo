@@ -467,7 +467,7 @@ sequenceDiagram
 | # | PRD 推荐项 | 本设计决策 | 风险 / 不同意点 |
 |---|---|---|---|
 | 1 | 跨书聚合存储 = 落盘派生文件 | **采纳** | 源 skill 更新后派生文件需手动重建（已确认不引入文件监听）；一致性靠 frontmatter 记录 + UI 提示 + "重建"按钮兜底 |
-| 2 | 作者名别名：先 trim+大小写折叠，别名可选配置，手动合并兜底必做 | **采纳** trim+大小写折叠为默认；别名走可选 `AliasMap` | **需确认别名映射存储位置**：本设计建议存用户级 JSON `config.UserSkillsDir()/aliases.json`（结构简单、随技能目录迁移）；亦可放全局 config。若团队倾向放 DB 需调整。手动合并兜底（AGG-5）已实现，不依赖别名 |
+| 2 | 作者名别名：先 trim+大小写折叠，别名可选配置，手动合并兜底必做 | **采纳** trim+大小写折叠为默认；别名走可选 `AliasMap` | **已落地（aliases.json）**：存储采用用户级 JSON `config.UserSkillsDir()/author_aliases.json`，由新建 `internal/skill/alias.go`（`AliasConfig`/`AuthorAliasGroup` + `LoadAliasConfig`/`SaveAliasConfig`/`ToMap`/`Resolve`）实现持久化与解析；App 在 `ReconcileAggregates`/`RebuildAggregated`/`MergeMentalSkills` 路径实时加载并注入 `aliasMap`（见 `app/skill_api.go` 的 `aliasResolved()`）。别名查找兼容原始键与归一键，大小写/空白无关。未做管理 UI（现阶段仅皮肤换肤、不动前端），用户可直接编辑该 JSON；别名归一改变规范名时派生文件名随之变化，`ReconcileAggregates` 会清理旧名孤儿档。手动合并兜底（AGG-5）已实现，不依赖别名 |
 | 3 | 深度多镜头默认关（opt-in） | **采纳** | 无 |
 | 4 | 多镜头仅 mental（struct 不开放） | **采纳** | 前端开关仅在 `flavor==mental` 渲染，后端 `finalMentalSkill` 分支天然不触及 struct 路径 |
 | 5 | persona 持久化 = novel 级、默认关 | **采纳** | **落库位置决策**：本设计新建 `internal/personasetting`（仿 `writingconfig` 的 DB 表 `novel_persona_settings`），**不写入 `.enabled.json`**（persona 是写作模式开关，与技能常驻启用正交）。若团队希望合并进 `.enabled.json` 需调整设计 |
