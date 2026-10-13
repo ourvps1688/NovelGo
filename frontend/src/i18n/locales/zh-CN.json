@@ -600,28 +600,10 @@
     "typePalace": "建筑",
     "typeWater": "水域",
     "typeKeywords": {
-      "nature": [
-        "森林",
-        "洞穴",
-        "山脉",
-        "沼泽"
-      ],
-      "settlement": [
-        "城市",
-        "城镇",
-        "村庄",
-        "市场"
-      ],
-      "palace": [
-        "王宫",
-        "城堡",
-        "神殿"
-      ],
-      "water": [
-        "海洋",
-        "河流",
-        "湖泊"
-      ]
+      "nature": ["森林", "洞穴", "山脉", "沼泽"],
+      "settlement": ["城市", "城镇", "村庄", "市场"],
+      "palace": ["王宫", "城堡", "神殿"],
+      "water": ["海洋", "河流", "湖泊"]
     }
   },
   "storyarc": {
@@ -1202,7 +1184,16 @@
     "deleteFailed": "删除失败",
     "searchPlaceholder": "搜索素材...",
     "noMatching": "没有匹配的素材",
-    "belongTo": "归属"
+    "belongTo": "归属",
+    "importFromChaptersTitle": "从小说章节导入",
+    "importChapters": "导入选中章节",
+    "importWholeBookHint": "未选范围时，将导入整本书内容",
+    "importSelectedHint": "将导入选中的 {{count}} 个章节",
+    "loadingChapters": "正在加载章节…",
+    "noChapters": "该小说暂无章节",
+    "importChaptersSuccess": "已导入 {{count}} 个章节内容",
+    "importChaptersEmpty": "所选章节内容为空",
+    "importChaptersFailed": "导入章节失败"
   },
   "extract": {
     "styleSamples": "风格素材",

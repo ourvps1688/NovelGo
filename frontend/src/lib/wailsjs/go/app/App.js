@@ -202,6 +202,10 @@ export function GetBuildHash() {
   return window['go']['app']['App']['GetBuildHash']();
 }
 
+export function GetChapterContents(arg1) {
+  return window['go']['app']['App']['GetChapterContents'](arg1);
+}
+
 export function GetChapterPlans(arg1) {
   return window['go']['app']['App']['GetChapterPlans'](arg1);
 }

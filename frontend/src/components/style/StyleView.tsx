@@ -10,7 +10,12 @@ import {
 import { useTranslation } from "react-i18next";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-import { ExtractStyle, CancelExtract } from "@/lib/wailsjs/go/app/App";
+import {
+  ExtractStyle,
+  CancelExtract,
+  GetChapterContents,
+} from "@/lib/wailsjs/go/app/App";
+import { app } from "@/lib/wailsjs/go/models";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useCreateStyleProfile } from "@/components/preference/useCreateStyleProfile";
@@ -35,6 +40,8 @@ import PopSelect from "@/components/shared/PopSelect";
 import ModelPicker from "@/components/model/ModelPicker";
 import TagInput from "@/components/shared/TagInput";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import ChapterRangeInput from "@/components/pattern/ChapterRangeInput";
+import { useChapters } from "@/components/chapter/useChapters";
 
 const PAGE_SIZE = 15;
 
@@ -83,6 +90,42 @@ export default function StyleView({
   const [newContent, setNewContent] = useState("");
   const [newNovelId, setNewNovelId] = useState(0);
   const [newTags, setNewTags] = useState<string[]>([]);
+  // 从小说章节导入：选中章节 ID 集合 + 导入中状态
+  const [chapterIds, setChapterIds] = useState<Set<number>>(new Set());
+  const [importingChapters, setImportingChapters] = useState(false);
+  const chaptersQuery = useChapters(newNovelId);
+  const chapters = useMemo(
+    () => chaptersQuery.data ?? [],
+    [chaptersQuery.data],
+  );
+  const handleImportChapters = useCallback(async () => {
+    if (newNovelId === 0) return;
+    setImportingChapters(true);
+    try {
+      const res = await GetChapterContents(
+        app.GetChapterContentsInput.createFrom({
+          novel_id: newNovelId,
+          chapter_ids: Array.from(chapterIds),
+        }),
+      );
+      if (res && res.content) {
+        setNewContent(res.content);
+        toastSuccess(
+          t("styleSample.importChaptersSuccess", {
+            count: res.chapter_count,
+          }),
+        );
+      } else {
+        toastError(t("styleSample.importChaptersEmpty"));
+      }
+    } catch (err) {
+      toastError(
+        t("styleSample.importChaptersFailed") + ": " + toErrorMessage(err),
+      );
+    } finally {
+      setImportingChapters(false);
+    }
+  }, [newNovelId, chapterIds, t]);
 
   // extract: models/settings 走 query（共享 5.1 chat 缓存），废弃手动 fetch + splitModelKey。
   const modelsQuery = useModels();
@@ -519,7 +562,10 @@ export default function StyleView({
             <PopSelect
               value={String(newNovelId)}
               options={novelOptions}
-              onChange={(v: string) => setNewNovelId(Number(v))}
+              onChange={(v: string) => {
+                setNewNovelId(Number(v));
+                setChapterIds(new Set());
+              }}
               minWidth="120px"
               dropUp={false}
             />
@@ -530,6 +576,7 @@ export default function StyleView({
                 setNewContent("");
                 setNewNovelId(0);
                 setNewTags([]);
+                setChapterIds(new Set());
               }}
               className="h-9 px-3 text-sm border rounded-md hover:bg-muted transition-colors"
             >
@@ -557,6 +604,53 @@ export default function StyleView({
               size="md"
             />
           </div>
+          {newNovelId > 0 && (
+            <div className="mt-3 rounded-lg border border-dashed border-border bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t("styleSample.importFromChaptersTitle")}
+                </span>
+                <button
+                  onClick={handleImportChapters}
+                  disabled={
+                    importingChapters ||
+                    (chapters.length > 0 && chapterIds.size === 0)
+                  }
+                  className="h-7 px-2.5 text-xs rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+                >
+                  {importingChapters ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    t("styleSample.importChapters")
+                  )}
+                </button>
+              </div>
+              {chaptersQuery.isLoading ? (
+                <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {t("styleSample.loadingChapters")}
+                </div>
+              ) : chapters.length === 0 ? (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {t("styleSample.noChapters")}
+                </div>
+              ) : (
+                <div className="mt-2">
+                  <ChapterRangeInput
+                    chapters={chapters}
+                    onSelect={setChapterIds}
+                  />
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    {chapterIds.size === 0
+                      ? t("styleSample.importWholeBookHint")
+                      : t("styleSample.importSelectedHint", {
+                          count: chapterIds.size,
+                        })}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           <textarea
             value={newContent}
             onChange={(e) => setNewContent(e.target.value)}

@@ -127,6 +127,8 @@ export function GetAuthorAliases():Promise<app.GetAuthorAliasesResult>;
 
 export function GetBuildHash():Promise<string>;
 
+export function GetChapterContents(arg1:app.GetChapterContentsInput):Promise<app.GetChapterContentsResult>;
+
 export function GetChapterPlans(arg1:number):Promise<Array<timeline.ChapterPlan>>;
 
 export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;

@@ -505,6 +505,34 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class GetChapterContentsInput {
+	    novel_id: number;
+	    chapter_ids: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GetChapterContentsInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.chapter_ids = source["chapter_ids"];
+	    }
+	}
+	export class GetChapterContentsResult {
+	    content: string;
+	    chapter_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new GetChapterContentsResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.chapter_count = source["chapter_count"];
+	    }
+	}
 	export class GetCharacterGroupMembersInput {
 	    novel_id: number;
 	    page: number;

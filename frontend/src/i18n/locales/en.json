@@ -619,28 +619,10 @@
     "typePalace": "Building",
     "typeWater": "Water",
     "typeKeywords": {
-      "nature": [
-        "Forest",
-        "Cave",
-        "Mountain",
-        "Swamp"
-      ],
-      "settlement": [
-        "City",
-        "Town",
-        "Village",
-        "Market"
-      ],
-      "palace": [
-        "Palace",
-        "Castle",
-        "Temple"
-      ],
-      "water": [
-        "Ocean",
-        "River",
-        "Lake"
-      ]
+      "nature": ["Forest", "Cave", "Mountain", "Swamp"],
+      "settlement": ["City", "Town", "Village", "Market"],
+      "palace": ["Palace", "Castle", "Temple"],
+      "water": ["Ocean", "River", "Lake"]
     }
   },
   "storyarc": {
@@ -1228,7 +1210,16 @@
     "deleteFailed": "Delete failed",
     "searchPlaceholder": "Search samples...",
     "noMatching": "No matching samples",
-    "belongTo": "Belongs to"
+    "belongTo": "Belongs to",
+    "importFromChaptersTitle": "Import from novel chapters",
+    "importChapters": "Import selected chapters",
+    "importWholeBookHint": "With no range selected, the whole book is imported",
+    "importSelectedHint": "Will import {{count}} selected chapters",
+    "loadingChapters": "Loading chapters…",
+    "noChapters": "This novel has no chapters yet",
+    "importChaptersSuccess": "Imported {{count}} chapters",
+    "importChaptersEmpty": "Selected chapters are empty",
+    "importChaptersFailed": "Failed to import chapters"
   },
   "extract": {
     "styleSamples": "Style Samples",
