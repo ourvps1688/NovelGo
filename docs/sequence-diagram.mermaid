@@ -1,0 +1,48 @@
+sequenceDiagram
+    autonumber
+    participant FE as 前端 ManualMergeDialog
+    participant App as app.App
+    participant Nov as internal/novel
+    participant Sk as internal/skill
+    participant FS as 磁盘(UserSkillsDir)
+
+    Note over FE,FS: ① 手动合并触发链（AGG-5）
+    FE->>App: MergeMentalSkills({Names, CanonicalAuthor?, AliasMap?})
+    App->>Nov: List(ctx) 枚举所有小说
+    loop 每本小说 + 用户目录
+        App->>Sk: LoadDir(NovelSkillsDir(id)) / LoadDir(UserSkillsDir)
+        Sk-->>App: []Skill（过滤 aggregated==true 源）
+    end
+    App->>Sk: MergeMentalSkills(sources, opts{BookTitles})
+    Note right of Sk: 作者名归一 → 按层+条目对齐 →<br/>跨书复现 stable:true / 单书 single-book<br/>→ 尾注 > 来源：《X》（第N章）<br/>→ 组装派生 frontmatter
+    Sk-->>App: *Skill(aggregated=true)
+    App->>Sk: WriteSkill(UserSkillsDir, derived)
+    Sk->>FS: 写 {author}-mental.md
+    App->>Sk: Store.ReloadUser(UserSkillsDir)
+    App-->>FE: *Skill（含 aggregated/merged_books 等字段）
+    FE->>FE: 刷新 Skill 列表 → 新分组"创作心智·作者档案"
+
+    Note over FE,FS: ② 多镜头提取链（ML）
+    FE->>App: ExtractPattern({flavor:"mental", deep_multi_lens:true})
+    App->>App: Extractor.Extract(ctx, input)
+    App->>App: preAnalyzeBoundaries → ensureSummaries → chunks（单遍，复用）
+    par 三路聚焦 final（合计 ≤7k）
+        App->>App: finalMentalLens(lens="mental", ≤3k) → 叙事心智模型+Evidence
+        App->>App: finalMentalLens(lens="expression", ≤2k) → 表达DNA
+        App->>App: finalMentalLens(lens="decision", ≤2k) → 决策/价值观/诚实边界
+    end
+    App->>App: mergeLensBodies() 拼五层正文
+    App->>App: gateMentalEvidence(body, Evidence)  // V2 门禁
+    App->>App: fidelityTest(body)  // V2 保真度
+    App->>FE: emit Progress{Stage:"finalizing", SubStep:"mental|expression|decision"}
+    App-->>FE: ExtractPatternResult{Raw, Fidelity, DemotedModels}
+
+    Note over FE,FS: ③ persona 注入链（WC）
+    FE->>App: Chat({message, Persona:{Kind,Ref}})  // 新会话
+    App->>App: BuildSystemMessages(..., persona)
+    App->>App: buildPersonaSystemText → 引导段 + 诚实边界声明
+    App-->>App: SystemMessages{Persona:"以X视角起草本章..."}
+    App->>FS: 事务写入 system 消息（含 Persona 块）
+    Note over App: 已有会话：!isNew && Persona!=nil 时每轮注入<br/>persona system 消息，与 .enabled.json 正交叠加，关掉即回普通
+    FE->>App: SavePersonaSetting(novelID,{Enabled,Kind,Ref})
+    App->>App: personasetting.Save()  // 幂等 upsert，默认关

@@ -1,0 +1,140 @@
+classDiagram
+    class Skill {
+        +string Name
+        +string Description
+        +string Category
+        +string Kind
+        +string Mode
+        +string Author
+        +string SourceAuthor
+        +int Version
+        +string Content
+        +bool Aggregated
+        +string[] AggregatedFrom
+        +string[] MergedBooks
+        +int StableItems
+        +int SingleBookItems
+        +string AggregatedAt
+        +Meta(source) SkillMeta
+    }
+    class SkillMeta {
+        +string Name
+        +string Description
+        +string Category
+        +string Kind
+        +string Mode
+        +string Author
+        +string SourceAuthor
+        +int Version
+        +string Source
+        +bool Aggregated
+        +string[] AggregatedFrom
+        +string[] MergedBooks
+        +int StableItems
+        +int SingleBookItems
+    }
+    class SkillStore {
+        +Get(novelID, name) *Skill
+        +ListMeta(novelID) []SkillMeta
+        +ReloadUser(dir) error
+        +ReloadNovel(novelID, dir) error
+        +LoadDir(dir) ([]Skill, error)
+        +GroupByAuthor(metas) map~string,[]SkillMeta~
+    }
+    class MergeOptions {
+        +string CanonicalAuthor
+        +map~string,string~ AliasMap
+        +string OutputDir
+        +string AggregatedBy
+        +map~string,string~ BookTitles
+    }
+    class MergeSource {
+        +*Skill Skill
+        +string BookTitle
+        +int64 BookID
+    }
+    class MergeMentalSkills {
+        +MergeMentalSkills(ctx, sources []MergeSource, opts MergeOptions) (*Skill, error)
+        -normalizeAuthor(raw, aliasMap) string
+        -alignItems(sources) map~layer+name, []entry~
+    }
+    class Extractor {
+        +finalSkill(ctx, input, chunks, n) finalSkillOutcome
+        +finalMentalSkill(ctx, input, chunks, n) finalSkillOutcome
+        +finalMentalMultiLens(ctx, input, chunks, n) finalSkillOutcome
+        +finalMentalLens(ctx, input, chunks, lens, maxTok) lensOutput
+        +mergeLensBodies(mental, expr, decision) string
+        +gateMentalEvidence(body, ev) ([]string, string)
+        +fidelityTest(ctx, input, chunks, body) *FidelityScorecard
+    }
+    class ExtractPatternInput {
+        +string Flavor
+        +string SourceAuthor
+        +bool DeepMultiLens
+    }
+    class Progress {
+        +string Stage
+        +string SubStep
+        +string Message
+    }
+    class PersonaRef {
+        +string Kind
+        +string Ref
+    }
+    class SystemMessages {
+        +string Identity
+        +string Always
+        +string Catalog
+        +string Profile
+        +string State
+        +string Persona
+    }
+    class BuildSystemMessages {
+        +BuildSystemMessages(ctx, db, novelID, store, persona *PersonaRef) *SystemMessages
+        +buildPersonaSystemText(persona, store, novelID) string
+        +resolvePersonaContent(persona, store, novelID) string
+    }
+    class PersonaSetting {
+        +int64 NovelID
+        +bool Enabled
+        +string Kind
+        +string Ref
+        +TableName() string
+    }
+    class PersonaStore {
+        +Get(ctx, novelID) *PersonaSetting
+        +Save(ctx, *PersonaSetting) error
+    }
+    class App {
+        +ExtractPattern(input) *ExtractPatternResult
+        +MergeMentalSkills(input) *Skill
+        +RebuildAggregated(input) *Skill
+        +GetPersonaSetting(novelID) *PersonaSetting
+        +SavePersonaSetting(novelID, input) error
+        +Chat(input) ChatResult
+    }
+    class ChatInput {
+        +string SessionID
+        +int64 NovelID
+        +string Message
+        +*PersonaRef Persona
+    }
+
+    Skill "1" --> "1" SkillMeta : Meta()
+    SkillStore ..> Skill : 管理
+    MergeMentalSkills ..> MergeOptions : 配置
+    MergeMentalSkills ..> MergeSource : 输入
+    MergeMentalSkills ..> Skill : 产出
+    Extractor ..> ExtractPatternInput : 读取
+    Extractor ..> Progress : emit
+    Extractor ..> Skill : 经 pattern 包产出
+    BuildSystemMessages ..> PersonaRef : 入参
+    BuildSystemMessages ..> SystemMessages : 产出
+    BuildSystemMessages ..> SkillStore : 读取常驻/聚合
+    PersonaStore ..> PersonaSetting : 读写
+    App ..> MergeMentalSkills : 编排
+    App ..> SkillStore : 枚举/热重载
+    App ..> PersonaStore : 读写
+    App ..> PersonaRef : Chat 透传
+    App ..> ChatInput : 入参
+    ChatInput --> PersonaRef : 持有
