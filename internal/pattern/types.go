@@ -9,6 +9,11 @@ type ExtractPatternInput struct {
 	ModelID         string  `json:"model_id"`
 	ReasoningEffort string  `json:"reasoning_effort"`
 	ChapterIDs      []int64 `json:"chapter_ids,omitempty"`
+	// Flavor 选择提取产物类型："struct"（默认，套路模板）或 "mental"（创作心智）。
+	Flavor string `json:"flavor,omitempty"`
+	// SourceAuthor 仅 mental 有意义：被蒸馏的心智所属的作者（用于 V3 跨书聚合）。
+	// 由前端「来源作者」输入框传入，写入 skill frontmatter 的 source_author。
+	SourceAuthor string `json:"source_author,omitempty"`
 }
 
 type ExtractPatternResult struct {
@@ -17,7 +22,29 @@ type ExtractPatternResult struct {
 	Description string `json:"description"`
 	RawContent  string `json:"raw_content"`
 	FilePath    string `json:"file_path"`
+	Flavor      string `json:"flavor,omitempty"`
 	Trace       *Trace `json:"trace,omitempty"`
+}
+
+// Flavor 是提取产物的类型标识。
+type Flavor string
+
+const (
+	// FlavorStruct 套路模板（默认）。
+	FlavorStruct Flavor = "struct"
+	// FlavorMental 创作心智（作者心智模型 / 决策启发式 / 表达 DNA）。
+	FlavorMental Flavor = "mental"
+)
+
+// MentalSkillOutput 是 mental flavor 下 LLM 返回的产出结构。
+// 与 SkillOutput 不同，content 必须包含五层结构（叙事心智模型 / 创作决策启发式 /
+// 价值观与反模式 / 表达DNA / 诚实边界），且心智模型与启发式须以章节锚点
+// （如「见第 N 章」）佐证——锚点内联在 content 文本中，不做独立结构化字段，
+// 以降低 LLM 输出不合规导致解析失败的风险。
+type MentalSkillOutput struct {
+	Name        string `json:"name" jsonschema:"required,description=技能名称（中文，体现该作者的创作心智，如「X 的创作心智」）"`
+	Description string `json:"description" jsonschema:"required,description=一句话描述何时使用此创作心智技能"`
+	Content     string `json:"content" jsonschema:"required,description=技能正文 markdown（不含 frontmatter），须含五章：叙事心智模型/创作决策启发式/价值观与反模式/表达DNA/诚实边界，且心智模型与启发式须附章节锚点"`
 }
 
 // Pipeline stage names

@@ -865,7 +865,7 @@ func TestFinalSkill_MockLLM(t *testing.T) {
 		{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "主角觉醒"},
 	}
 
-	raw, err := e.finalSkill(context.Background(), defaultInput(), chunks)
+	raw, err := e.finalSkill(context.Background(), defaultInput(), chunks, 0)
 	if err != nil {
 		t.Fatalf("finalSkill: %v", err)
 	}
@@ -877,6 +877,68 @@ func TestFinalSkill_MockLLM(t *testing.T) {
 	}
 	if !strings.Contains(raw, "套路模板") {
 		t.Errorf("final skill should contain 套路模板 category")
+	}
+}
+
+// TestFinalMentalSkill 验证 mental flavor 走独立分支：frontmatter 标注 kind: mental
+// 且写入 source_author，且正文不进入套路模板分支。
+func TestFinalMentalSkill(t *testing.T) {
+	out := MentalSkillOutput{
+		Name:        "X 的创作心智",
+		Description: "用 X 的叙事与表达习惯写新章节时",
+		Content:     "# X 的创作心智\n## 叙事心智模型\n冲突通过信息 withholding 生成。\n## 表达 DNA\n短句为主。",
+	}
+	argsJSON, _ := json.Marshal(out)
+
+	e := testExtractor(mockToolHandler("output_skill", string(argsJSON), ""))
+	chunks := []Chunk{
+		{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "主角觉醒"},
+	}
+	input := defaultInput()
+	input.Flavor = string(FlavorMental)
+	input.SourceAuthor = "刘慈欣"
+
+	raw, err := e.finalSkill(context.Background(), input, chunks, 30)
+	if err != nil {
+		t.Fatalf("finalMentalSkill: %v", err)
+	}
+	if !strings.Contains(raw, "kind: mental") {
+		t.Errorf("mental skill should contain kind: mental, got:\n%s", raw)
+	}
+	if !strings.Contains(raw, "source_author: 刘慈欣") {
+		t.Errorf("mental skill should contain source_author, got:\n%s", raw)
+	}
+	if strings.Contains(raw, "套路模板") {
+		t.Errorf("mental skill must not use 套路模板 category, got:\n%s", raw)
+	}
+	if !strings.Contains(raw, "创作心智") {
+		t.Errorf("mental skill should use 创作心智 category, got:\n%s", raw)
+	}
+}
+
+// TestFinalSkill_LowConfidence 验证章节数 < 20 时追加低置信度声明。
+func TestFinalSkill_LowConfidence(t *testing.T) {
+	out := MentalSkillOutput{
+		Name:        "X 的创作心智",
+		Description: "用 X 的叙事习惯写新章节",
+		Content:     "# X 的创作心智\n## 叙事心智模型\n冲突通过 withholding 生成。",
+	}
+	argsJSON, _ := json.Marshal(out)
+
+	e := testExtractor(mockToolHandler("output_skill", string(argsJSON), ""))
+	chunks := []Chunk{
+		{Name: "崛起", StartChapterID: 1, EndChapterID: 3, StartReadingNumber: 1, EndReadingNumber: 3, Content: "主角觉醒"},
+	}
+	input := defaultInput()
+	input.Flavor = string(FlavorMental)
+	input.SourceAuthor = "刘慈欣"
+
+	raw, err := e.finalSkill(context.Background(), input, chunks, 3)
+	if err != nil {
+		t.Fatalf("finalMentalSkill: %v", err)
+	}
+	if !strings.Contains(raw, "低置信度") {
+		t.Errorf("low chapter count should append low-confidence note, got:\n%s", raw)
 	}
 }
 

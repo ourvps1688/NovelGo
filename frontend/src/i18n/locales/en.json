@@ -1166,6 +1166,11 @@
   "extract": {
     "styleSamples": "Style Samples",
     "patternExtract": "Pattern Extract",
+    "mindsetExtract": "Mental Extract",
+    "sourceAuthor": "Source Author",
+    "sourceAuthorNote": "Used for cross-book merging (leave blank for single-book extraction)",
+    "sourceAuthorPlaceholder": "e.g. Liu Cixin",
+    "mindsetChapterNote": "Mental extraction works best with ≥20 chapters; fewer chapters lower confidence",
     "extractFailed": "Extract failed",
     "saveFailed": "Save failed",
     "generated": "Generated",
@@ -1195,6 +1200,7 @@
     "rangeAdd": "Add range",
     "progress": {
       "title": "Pattern Extraction Progress",
+      "mindsetTitle": "Creative Mindset Extraction Progress",
       "extractingWork": "Extracting {{title}}",
       "unknownWork": "Untitled work",
       "chapterCount": "{{count}} chapters",

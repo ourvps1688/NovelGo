@@ -14,6 +14,7 @@ import PatternSessionView from "./PatternSessionView";
 
 interface Props {
   currentNovelId: number;
+  flavor?: "struct" | "mental";
 }
 
 type View = "select" | "session";
@@ -28,9 +29,14 @@ interface SessionParams {
   reasoningEffort: string;
   title: string;
   chapterCount: number;
+  flavor: string;
+  sourceAuthor: string;
 }
 
-export default function PatternExtractView({ currentNovelId }: Props) {
+export default function PatternExtractView({
+  currentNovelId,
+  flavor = "struct",
+}: Props) {
   const { t } = useTranslation();
   const userSelectedNovelRef = useRef(false);
   const [view, setView] = useState<View>("select");
@@ -55,6 +61,8 @@ export default function PatternExtractView({ currentNovelId }: Props) {
   );
   // reasoningEffort：跟随选中模型。model 支持时默认第一档，不支持时空串。
   const [reasoningEffort, setReasoningEffort] = useState("");
+  // 来源作者：仅 mental 提取有意义（用于 V3 跨书聚合归并键），可选填。
+  const [sourceAuthor, setSourceAuthor] = useState("");
 
   useEffect(() => {
     if (!userSelectedNovelRef.current) {
@@ -141,6 +149,8 @@ export default function PatternExtractView({ currentNovelId }: Props) {
       reasoningEffort,
       title: targetNovelTitle || t("extract.progress.unknownWork"),
       chapterCount: activeChapterCount,
+      flavor,
+      sourceAuthor,
     });
     setView("session");
   }, [
@@ -152,6 +162,8 @@ export default function PatternExtractView({ currentNovelId }: Props) {
     t,
     targetNovelId,
     targetNovelTitle,
+    flavor,
+    sourceAuthor,
   ]);
 
   // 切 model：若支持 reasoning 默认第一档，不支持时清空（与 ChatControls 一致）。
@@ -184,6 +196,8 @@ export default function PatternExtractView({ currentNovelId }: Props) {
         reasoningEffort={sessionParams.reasoningEffort}
         title={sessionParams.title}
         chapterCount={sessionParams.chapterCount}
+        flavor={sessionParams.flavor}
+        sourceAuthor={sessionParams.sourceAuthor}
         onExit={() => {
           setView("select");
           setSessionParams(null);
@@ -263,6 +277,27 @@ export default function PatternExtractView({ currentNovelId }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
+            {flavor === "mental" && (
+              <div className="rounded-lg border bg-card px-4 py-3 space-y-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {t("extract.sourceAuthor")}
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {t("extract.sourceAuthorNote")}
+                  </p>
+                  <p className="text-xs text-warning-foreground mt-1">
+                    {t("extract.mindsetChapterNote")}
+                  </p>
+                </div>
+                <input
+                  value={sourceAuthor}
+                  onChange={(e) => setSourceAuthor(e.target.value)}
+                  placeholder={t("extract.sourceAuthorPlaceholder")}
+                  className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            )}
             <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-3">
               <div>
                 <h2 className="text-sm font-semibold text-foreground">

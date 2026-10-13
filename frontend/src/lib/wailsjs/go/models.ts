@@ -2106,11 +2106,13 @@ export namespace pattern {
 	    model_id: string;
 	    reasoning_effort: string;
 	    chapter_ids?: number[];
-	
+	    flavor?: string;
+	    source_author?: string;
+
 	    static createFrom(source: any = {}) {
 	        return new ExtractPatternInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.task_id = source["task_id"];
@@ -2119,6 +2121,8 @@ export namespace pattern {
 	        this.model_id = source["model_id"];
 	        this.reasoning_effort = source["reasoning_effort"];
 	        this.chapter_ids = source["chapter_ids"];
+	        this.flavor = source["flavor"];
+	        this.source_author = source["source_author"];
 	    }
 	}
 	export class Trace {
@@ -2173,12 +2177,13 @@ export namespace pattern {
 	    description: string;
 	    raw_content: string;
 	    file_path: string;
+	    flavor?: string;
 	    trace?: Trace;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ExtractPatternResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.task_id = source["task_id"];
@@ -2186,6 +2191,7 @@ export namespace pattern {
 	        this.description = source["description"];
 	        this.raw_content = source["raw_content"];
 	        this.file_path = source["file_path"];
+	        this.flavor = source["flavor"];
 	        this.trace = this.convertValues(source["trace"], Trace);
 	    }
 	

@@ -130,3 +130,52 @@ const finalSkillSystemPrompt = `你是一个专业的小说结构分析师。
   说明哪些地方必须改编，避免成品显得雷同。
 
 再次强调：content 中应抽象出可复用模板，不要仅仅描述原书内容；content 中不要包含 YAML frontmatter。`
+
+const mentalFinalSkillSystemPrompt = `你是一个小说创作心智分析师。
+
+你的任务不是总结剧情，而是从这本小说的已写章节中，蒸馏出**作者/叙事者的"创作心智"**——即指导 AI 未来写作新章节时可复用的思维与表达操作系统。这是给写作系统使用的"创作指南"，不是人物小传，也不是剧情摘要。
+
+只能通过调用 output_skill 工具返回结果，工具参数要求：
+- name：中文名称，体现该作者的创作心智（如"X 的创作心智"）。
+- description：一句话描述何时启用此创作心智技能（如"用 X 的叙事与表达习惯写新章节时"）。
+- content：技能正文 markdown，不含 frontmatter（frontmatter 由系统自动生成）。必须包含以下五章，顺序固定：
+
+  ## 叙事心智模型
+  3–7 个作者构造叙事的核心信念/框架（如冲突如何生成、信息何时收放、对节奏/命运/agent 的信念）。**每个模型必须附章节锚点**（如"见第 N 章"或"第 N–M 章"），证明它真实出现在书中而非你的猜测。
+  ## 创作决策启发式
+  5–10 条面临写作抉择时的快速规则，每条附书中案例章节锚点，且须说明"遇到什么新情境会触发该规则"。
+  ## 价值观与反模式
+  作者追求什么、明确拒绝什么、以及作者内部张力（价值观冲突）。
+  ## 表达 DNA
+  句式指纹（长短句偏好、疑问/陈述比例）、高频词与禁忌词、节奏（先结论还是先铺垫、转折方式）、幽默与确定性语气。可复用 internal/style 的六维画像思路，并补充小说专属维度：POV 与视角处理、时态、意象密度、对话-叙述比。
+  ## 诚实边界
+  明确声明：本技能是从**虚构文本**推断的创作人格，**非作者真人三观**；可能混有角色个体声音而非作者稳定技法；并附推断依据（章节数 / 提取时间）。
+
+**小说适配三重验证（防止臆造的关键）**：
+1. 跨章节/跨情节弧复现：一个观点要成为"心智模型"，必须在本书中**至少 2 条相互独立的情节线/章节段**都出现；只出现一次的，降级为"创作决策启发式"；0 处印证的，不收录。
+2. 有生成力：该模型必须能用于指导写出新章节（而非仅描述原书）；否则只是观察，不是心智模型。
+3. 有排他性：区别于"show don't tell"等通用写作建议——只收录真正体现**这位作者独特性**的特质。
+
+**质量自检（生成前逐项确认）**：每个心智模型是否都有≥2 章证据？模型数是否在 3–7？表达 DNA 是否有辨识度（不像通用 AI 腔）？诚实边界是否填了来源与时间？
+
+{{LOW_CONFIDENCE_NOTE}}
+
+再次强调：content 是给写作系统用的创作指南，要抽象出可复用规律；每个断言都要有章节锚点；content 中不要包含 YAML frontmatter。`
+
+// mentalFinalSkillMessages 组装 mental flavor 的最终提示词。
+// chapterCount 与 lowConfidence 用于注入样本量提示：章节少于 20 时要求缩减模型数量并声明样本不足。
+func mentalFinalSkillMessages(chunks []Chunk, chapterCount int, lowConfidence bool) []map[string]any {
+	var b strings.Builder
+	for _, chunk := range chunks {
+		fmt.Fprintf(&b, "第%d-%d章（chapter_id: %d-%d） %s：%s\n", chunk.StartReadingNumber, chunk.EndReadingNumber, chunk.StartChapterID, chunk.EndChapterID, chunk.Name, chunk.Content)
+	}
+	note := ""
+	if lowConfidence {
+		note = "**样本量提示**：本次提取仅基于 " + fmt.Sprintf("%d", chapterCount) + " 章，样本偏少。请将「叙事心智模型」缩减为 2–4 个最稳定的，并在「诚实边界」中明确声明样本不足、结论可能不稳定。"
+	}
+	prompt := strings.Replace(mentalFinalSkillSystemPrompt, "{{LOW_CONFIDENCE_NOTE}}", note, 1)
+	return []map[string]any{
+		{"role": "system", "content": prompt},
+		{"role": "user", "content": "根据以下叙事阶段块，蒸馏该作者的创作心智技能：\n\n" + b.String()},
+	}
+}

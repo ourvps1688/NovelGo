@@ -23,36 +23,42 @@ func normalizeMode(raw string) string {
 
 // Skill 是一个完整的 skill 定义，包含元数据和正文内容。
 type Skill struct {
-	Name        string `json:"name" yaml:"name"`
-	Description string `json:"description" yaml:"description"`
-	Category    string `json:"category" yaml:"category"` // 分类，未来可基于不同分类组合实现 skill 矩阵
-	Mode        string `json:"mode" yaml:"mode"`
-	Author      string `json:"author" yaml:"author"`
-	Version     int    `json:"version" yaml:"version"`
-	Content     string `json:"content" yaml:"-"`
-	RawContent  string `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
+	Name         string `json:"name" yaml:"name"`
+	Description  string `json:"description" yaml:"description"`
+	Category     string `json:"category" yaml:"category"` // 分类，未来可基于不同分类组合实现 skill 矩阵
+	Kind         string `json:"kind" yaml:"kind"`         // 提取类型：留空/struct=套路模板，mental=创作心智
+	Mode         string `json:"mode" yaml:"mode"`
+	Author       string `json:"author" yaml:"author"`
+	SourceAuthor string `json:"source_author" yaml:"source_author"` // 仅 mental 有意义：被蒸馏心智所属的作者（V3 跨书聚合归并键）
+	Version      int    `json:"version" yaml:"version"`
+	Content      string `json:"content" yaml:"-"`
+	RawContent   string `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
 }
 
 // SkillMeta 是去除了正文的 skill 元数据，用于列表展示。
 type SkillMeta struct {
-	Name        string `json:"name"`        //name和description给llm其余的保留作为元数据
-	Description string `json:"description"` //先写技能的简要介绍，再写何时invoke
-	Category    string `json:"category"`    // 分类，未来可基于不同分类组合实现 skill 矩阵
-	Mode        string `json:"mode"`
-	Author      string `json:"author"`
-	Version     int    `json:"version"`
-	Source      string `json:"source"` // "builtin" | "user" | "novel"
+	Name         string `json:"name"`        //name和description给llm其余的保留作为元数据
+	Description  string `json:"description"` //先写技能的简要介绍，再写何时invoke
+	Category     string `json:"category"`    // 分类，未来可基于不同分类组合实现 skill 矩阵
+	Kind         string `json:"kind"`
+	Mode         string `json:"mode"`
+	Author       string `json:"author"`
+	SourceAuthor string `json:"source_author"`
+	Version      int    `json:"version"`
+	Source       string `json:"source"` // "builtin" | "user" | "novel"
 }
 
 // Meta 返回去除正文的元数据视图。
 func (s *Skill) Meta(source string) SkillMeta {
 	return SkillMeta{
-		Name:        s.Name,
-		Description: s.Description,
-		Category:    s.Category,
-		Mode:        s.Mode,
-		Author:      s.Author,
-		Version:     s.Version,
-		Source:      source,
+		Name:         s.Name,
+		Description:  s.Description,
+		Category:     s.Category,
+		Kind:         s.Kind,
+		Mode:         s.Mode,
+		Author:       s.Author,
+		SourceAuthor: s.SourceAuthor,
+		Version:      s.Version,
+		Source:       source,
 	}
 }

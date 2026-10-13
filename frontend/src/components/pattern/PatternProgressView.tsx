@@ -12,6 +12,7 @@ interface Props {
   events: PatternProgressEvent[];
   novelTitle: string;
   chapterCount: number;
+  flavor?: string;
 }
 
 type PipelineStage = Exclude<PatternProgressStage, "done">;
@@ -87,8 +88,10 @@ export default function PatternProgressView({
   events,
   novelTitle,
   chapterCount,
+  flavor,
 }: Props) {
   const { t } = useTranslation();
+  const isMental = flavor === "mental";
   const isComplete = progress?.stage === "done";
 
   return (
@@ -99,7 +102,13 @@ export default function PatternProgressView({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
               <Sparkle className="h-4 w-4 text-action-extract" />
-              <span className="truncate">{t("extract.progress.title")}</span>
+              <span className="truncate">
+                {t(
+                  isMental
+                    ? "extract.progress.mindsetTitle"
+                    : "extract.progress.title",
+                )}
+              </span>
             </div>
             <p className="mt-1 truncate text-xs text-muted-foreground">
               {t("extract.progress.extractingWork", {

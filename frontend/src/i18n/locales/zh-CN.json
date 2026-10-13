@@ -1140,6 +1140,11 @@
   "extract": {
     "styleSamples": "风格素材",
     "patternExtract": "套路提取",
+    "mindsetExtract": "心智提取",
+    "sourceAuthor": "来源作者",
+    "sourceAuthorNote": "用于跨书合并（留空则仅单书提取）",
+    "sourceAuthorPlaceholder": "如：刘慈欣",
+    "mindsetChapterNote": "心智提取建议 ≥20 章，章节过少会降低置信度",
     "extractFailed": "提取失败",
     "saveFailed": "保存失败",
     "generated": "已生成",
@@ -1167,6 +1172,7 @@
     "rangeAdd": "添加范围",
     "progress": {
       "title": "套路提取进度",
+      "mindsetTitle": "创作心智提取进度",
       "extractingWork": "正在提取《{{title}}》",
       "unknownWork": "未命名作品",
       "chapterCount": "{{count}} 章",

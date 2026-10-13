@@ -218,7 +218,7 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		Tokens:  trace.FinalTokens,
 		Chunks:  chunks,
 	})
-	raw, err := e.finalSkill(ctx, input, chunks)
+	raw, err := e.finalSkill(ctx, input, chunks, len(chapters))
 	if err != nil {
 		return nil, err
 	}
@@ -473,8 +473,17 @@ func (e *Extractor) compressChunks(ctx context.Context, input ExtractPatternInpu
 	return all, trace, nil
 }
 
-// finalSkill Step 3：所有阶段块 → 通过 output_skill 工具调用生成最终套路技能
-func (e *Extractor) finalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk) (string, error) {
+// finalSkill Step 3：所有阶段块 → 通过 output_skill 工具调用生成最终技能。
+// 按 flavor 分流：struct 走套路模板（buildSkillMarkdown），mental 走创作心智（buildMentalSkillMarkdown）。
+func (e *Extractor) finalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (string, error) {
+	if Flavor(input.Flavor) == FlavorMental {
+		return e.finalMentalSkill(ctx, input, chunks, chapterCount)
+	}
+	return e.finalStructSkill(ctx, input, chunks)
+}
+
+// finalStructSkill 生成套路模板技能（原 finalSkill 逻辑）。
+func (e *Extractor) finalStructSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk) (string, error) {
 	onStatus := func(s LLMStatus) {
 		e.emit(input, Progress{Stage: StageFinalizing, LLMStatus: s})
 	}
@@ -492,6 +501,27 @@ func (e *Extractor) finalSkill(ctx context.Context, input ExtractPatternInput, c
 	return buildSkillMarkdown(out.Name, out.Description, out.Content), nil
 }
 
+// finalMentalSkill 生成创作心智技能：复用同一编排，仅替换 final 提示词与 frontmatter。
+// chapterCount < 20 时标记低置信度，提示词要求缩减心智模型数量并诚实声明样本不足。
+func (e *Extractor) finalMentalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (string, error) {
+	onStatus := func(s LLMStatus) {
+		e.emit(input, Progress{Stage: StageFinalizing, LLMStatus: s})
+	}
+	lowConfidence := chapterCount < 20
+	raw, err := e.callTool(ctx, input, "output_skill", MentalSkillOutput{}, mentalFinalSkillMessages(chunks, chapterCount, lowConfidence), 2, 64000, onStatus)
+	if err != nil {
+		return "", err
+	}
+	var out MentalSkillOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("解析生成的心智技能失败: %w", err)
+	}
+	if strings.TrimSpace(out.Name) == "" || strings.TrimSpace(out.Content) == "" {
+		return "", fmt.Errorf("LLM 返回的心智技能内容不完整")
+	}
+	return buildMentalSkillMarkdown(out.Name, out.Description, out.Content, input.SourceAuthor, lowConfidence), nil
+}
+
 // buildSkillMarkdown 组装完整的 skill markdown：固定 frontmatter + 正文。
 func buildSkillMarkdown(name, description, content string) string {
 	var b strings.Builder
@@ -504,6 +534,31 @@ func buildSkillMarkdown(name, description, content string) string {
 	b.WriteString("version: 1\n")
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimSpace(content))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// buildMentalSkillMarkdown 组装创作心智 skill markdown：frontmatter 标注 kind: mental，
+// 并写入 source_author（V3 跨书聚合归并键）与低置信度提示。
+func buildMentalSkillMarkdown(name, description, content, sourceAuthor string, lowConfidence bool) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "name: %s\n", name)
+	fmt.Fprintf(&b, "description: %s\n", description)
+	b.WriteString("category: 创作心智\n")
+	b.WriteString("kind: mental\n")
+	b.WriteString("mode: auto\n")
+	b.WriteString("author: ai\n")
+	if strings.TrimSpace(sourceAuthor) != "" {
+		fmt.Fprintf(&b, "source_author: %s\n", strings.TrimSpace(sourceAuthor))
+	}
+	b.WriteString("version: 1\n")
+	b.WriteString("---\n\n")
+	body := strings.TrimSpace(content)
+	if lowConfidence {
+		body += "\n\n> ⚠️ 低置信度提示：本次提取样本章节较少（少于 20 章），上述心智模型与启发式可能不稳定，建议积累更多章节后重新提取。\n"
+	}
+	b.WriteString(body)
 	b.WriteString("\n")
 	return b.String()
 }

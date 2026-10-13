@@ -15,6 +15,7 @@ import Markdown from "@/components/Markdown";
 import { splitFrontmatter } from "@/components/content/types";
 import PatternProgressView from "./PatternProgressView";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { GetEnabledSkills, SetEnabledSkills } from "@/lib/wailsjs/go/app/App";
 
 interface Props {
   taskId: string;
@@ -25,6 +26,8 @@ interface Props {
   reasoningEffort: string; // reasoning effort（model 不支持时为空串）
   title: string; // 小说标题（进度页展示用）
   chapterCount: number; // 本次提取的章节数
+  flavor?: string; // "struct" (default) | "mental"
+  sourceAuthor?: string; // 仅 mental：来源作者，写入 skill frontmatter
   onExit: () => void; // 返回选择页
 }
 
@@ -48,6 +51,8 @@ export default function PatternSessionView({
   reasoningEffort,
   title,
   chapterCount,
+  flavor,
+  sourceAuthor,
   onExit,
 }: Props) {
   const { t } = useTranslation();
@@ -84,6 +89,8 @@ export default function PatternSessionView({
         model_id: modelId,
         reasoning_effort: reasoningEffort,
         chapter_ids: chapterIds.length > 0 ? chapterIds : undefined,
+        flavor: flavor || undefined,
+        source_author: sourceAuthor || undefined,
       });
       setResult({
         taskId: res.task_id || taskId,
@@ -131,6 +138,21 @@ export default function PatternSessionView({
       });
       reportAIFileChange({ novelId: result.novelId, path: result.filePath });
       setOverwriteContent(null);
+      // mental 提取：保存成功后自动并入写作流（合并写入本书 .enabled.json，不全量覆盖）。
+      const { meta: savedMeta } = splitFrontmatter(result.rawContent);
+      if (savedMeta.kind === "mental") {
+        try {
+          const current = (await GetEnabledSkills(result.novelId)) ?? [];
+          if (!current.includes(result.name)) {
+            await SetEnabledSkills({
+              novel_id: result.novelId,
+              names: [...current, result.name],
+            });
+          }
+        } catch {
+          // 自动启用失败不阻塞已保存的 skill，静默忽略。
+        }
+      }
       onExit();
     } catch (e: unknown) {
       setOverwriteContent(null);
@@ -286,6 +308,7 @@ export default function PatternSessionView({
             events={events}
             novelTitle={title}
             chapterCount={chapterCount}
+            flavor={flavor}
           />
         </div>
       )}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { BookOpen, Palette } from "lucide-react";
+import { BookOpen, Brain, Palette } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import StyleView from "@/components/style/StyleView";
 import PatternExtractView from "@/components/pattern/PatternExtractView";
@@ -11,7 +11,7 @@ interface Props {
   onFocusSampleHandled?: () => void;
 }
 
-type Tab = "style" | "pattern";
+type Tab = "style" | "pattern" | "mindset";
 
 const tabs: { id: Tab; labelKey: string; icon: ReactNode }[] = [
   {
@@ -23,6 +23,11 @@ const tabs: { id: Tab; labelKey: string; icon: ReactNode }[] = [
     id: "pattern",
     labelKey: "extract.patternExtract",
     icon: <BookOpen className="w-4 h-4" />,
+  },
+  {
+    id: "mindset",
+    labelKey: "extract.mindsetExtract",
+    icon: <Brain className="w-4 h-4" />,
   },
 ];
 
@@ -79,6 +84,13 @@ export default function ExtractWorkspaceView({
         }
       >
         <PatternExtractView currentNovelId={novelId} />
+      </div>
+      <div
+        className={
+          activeTab === "mindset" ? "flex-1 flex flex-col min-h-0" : "hidden"
+        }
+      >
+        <PatternExtractView currentNovelId={novelId} flavor="mental" />
       </div>
     </div>
   );
