@@ -17,6 +17,7 @@
 
 ## 环境注意
 - **前端提交前的 CI 硬闸门（本地必跑）**：`npx prettier --check "src/**/*.{ts,tsx}"` 与 `npm run i18n:check`（后者会扫描源文件硬编码中文，中文文案必须进 i18n locales）。仅跑 tsc/vite/vitest 不够——Checks #41 曾因此报红。eslint CI 不限 warnings 数（0 error 即过）。
+- **wailsjs 绑定以 wails 自动生成产物为准（convertValues 约定）**：`wails dev`/build 每次重新生成绑定；v2.16 生成器给含嵌套结构体的类（如 ChatInput、SaveAuthorAliasesInput、GetAuthorAliasesResult）加 `convertValues` 方法，**对象字面量直接传参会 TS2345**。调用点必须用 `app.X.createFrom({...})` 构造实例，且 models 导入需为值导入（非 `import type`）才能用 createFrom。手写绑定仅为临时占位，dev 拉起后以重新生成结果为准入库。
 - **沙箱已装 MinGW/gcc**：winlibs GCC 16.2.0 (UCRT,x86_64) 在 `C:/tools/mingw64/bin`；`go` 在 `C:/Program Files/Go/bin`、`wails` 在 `C:/Users/Administrator/go/bin`（均已在 PATH）。wails dev 已跑通（见每日日志）。
 - **Windows 构建前置**：CGO 编译需 `sqlite3.h` → 设 `CGO_CFLAGS=-IC:/tools/sqlite3-headers`（该目录由 mattn/go-sqlite3@v1.14.44 的 `sqlite3-binding.h` 复制而来，详 cross-platform-build.md §7）。构建命令须显式 `export PATH="/c/tools/mingw64/bin:$PATH"`（新 shell 不继承 User PATH）。
 - 本地 ONNX 向量检索为可选能力，缺 `onnxruntime.dll`+`build/bin/models/vocab.txt` 时仅该功能不可用，不影响主程序。
