@@ -898,8 +898,8 @@ func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.C
 //   - 其余情况 proceed：scored 非 nil 时由调用方在章节记录可知后落库（通过或超重试放行）。
 //
 // 设计要点：复用 deslop 的「reject→重写」回路，但有独立的有界重试计数
-//（review.QualityAttempt，按章节/标题 key），不会吃掉全局连续失败中断配额
-//（ErrKindQuality 在 agent/interrupt.go 被排除）。
+// （review.QualityAttempt，按章节/标题 key），不会吃掉全局连续失败中断配额
+// （ErrKindQuality 在 agent/interrupt.go 被排除）。
 func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref git.ChapterPathRef, a *EditArgs, ch *chapter.Chapter, proposed string) (*review.ScoreResult, *ToolResult) {
 	if tc.LLM == nil || tc.ProviderName == "" || tc.ModelID == "" {
 		return nil, nil // 未注入 LLM，跳过评分
@@ -914,7 +914,7 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 	}
 	// 仅成章写触发：新建正文通道，或已有正文 full_replace。增量编辑（search_replace/
 	// line_range_replace）与一切大纲编辑不评分。
-	if !(ref.IsNew || (ch != nil && a.ChangeType == "full_replace")) {
+	if !ref.IsNew && (ch == nil || a.ChangeType != "full_replace") {
 		return nil, nil
 	}
 

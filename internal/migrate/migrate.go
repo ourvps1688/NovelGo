@@ -19,6 +19,7 @@ import (
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/rollback"
 	"github.com/novelgo/novelgo/internal/session"
 	"github.com/novelgo/novelgo/internal/setting"
@@ -29,7 +30,6 @@ import (
 	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/novelgo/novelgo/internal/writing"
 	"github.com/novelgo/novelgo/internal/writingconfig"
-	"github.com/novelgo/novelgo/internal/review"
 )
 
 // Run 自动创建/更新全部数据表，幂等安全。作为外部入口，遍历 engine.Registry

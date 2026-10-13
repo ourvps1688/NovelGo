@@ -59,14 +59,19 @@ const SKIP_DIR_PREFIXES = [
   join(SRC_DIR, 'components', 'ui'),  // shadcn/ui generated code
 ]
 
+function basename(p) {
+  // Handle both "/" (Linux CI) and "\\" (Windows local) separators
+  return p.split(/[\\/]/).pop() || ''
+}
+
 function shouldSkipDir(dirPath) {
-  const name = dirPath.split('/').pop() || dirPath.split('\\').pop() || ''
+  const name = basename(dirPath)
   if (SKIP_DIRS.has(name)) return true
   return SKIP_DIR_PREFIXES.some(p => dirPath.startsWith(p))
 }
 
 function shouldSkipFile(filePath) {
-  const name = filePath.split('/').pop() || filePath.split('\\').pop() || ''
+  const name = basename(filePath)
   if (SKIP_FILES.has(name)) return true
   // Markdown.tsx dark ternary is exempted
   if (name === 'Markdown.tsx') return true

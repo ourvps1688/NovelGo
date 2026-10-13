@@ -16,11 +16,11 @@ type LLMClient interface {
 
 // ScoreResult 是评分判官的输出。
 type ScoreResult struct {
-	Overall    int               `json:"overall"`              // 总分 0-100
-	Dimensions map[string]int    `json:"dimensions"`           // 分维度得分（0-100）
-	Verdict    string            `json:"verdict"`              // "pass" | "fail"（判官自评，调用方以总分+阈值准）
-	Critique   string            `json:"critique"`             // 具体、可执行的修改建议（中文）
-	Raw        string            `json:"-"`                    // 原始模型输出，便于排查
+	Overall    int            `json:"overall"`    // 总分 0-100
+	Dimensions map[string]int `json:"dimensions"` // 分维度得分（0-100）
+	Verdict    string         `json:"verdict"`    // "pass" | "fail"（判官自评，调用方以总分+阈值准）
+	Critique   string         `json:"critique"`   // 具体、可执行的修改建议（中文）
+	Raw        string         `json:"-"`          // 原始模型输出，便于排查
 }
 
 // scoringDimensions 定义评分维度与权重说明，注入给判官。
@@ -63,7 +63,7 @@ func buildSystemPrompt() string {
 // buildUserPrompt 构造用户消息：章节大纲（如有）+ 正文 + 字数信息。
 func buildUserPrompt(content, outline string, wordCount int) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("本章正文（中文字数约 %d）：\n\n", wordCount))
+	fmt.Fprintf(&b, "本章正文（中文字数约 %d）：\n\n", wordCount)
 	b.WriteString("===== 正文开始 =====\n")
 	b.WriteString(content)
 	b.WriteString("\n===== 正文结束 =====\n")

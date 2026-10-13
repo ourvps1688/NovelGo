@@ -67,8 +67,8 @@ type ToolContext struct {
 	// 评分门禁依赖：LLM 客户端与本次调用使用的 provider/model。
 	// 由 agent 包注入（主 Agent 与子 Agent 共用构建点）；测试用例可手动注入桩实现。
 	LLM          *llm.Client // 评分判官所需；nil 表示不启用评分
-	ProviderName string       // 本次对话 provider（如 "openai"），传给 LLM 客户端选择端点
-	ModelID      string       // 本次对话模型 id
+	ProviderName string      // 本次对话 provider（如 "openai"），传给 LLM 客户端选择端点
+	ModelID      string      // 本次对话模型 id
 }
 
 // LoggerOrDefault 返回 ToolContext 的 Logger，nil 时兜底到 slog.Default()。

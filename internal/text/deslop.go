@@ -205,7 +205,7 @@ func contextAround(s string, start, end int) string {
 		return ""
 	}
 
-	left := lo
+	var left int
 	if minLeft := lo - 24; minLeft > 0 {
 		left = minLeft
 		for left < lo && !isSentenceBoundary(runes[left]) {

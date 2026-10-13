@@ -5,7 +5,7 @@ import (
 )
 
 // GetWritingConfig 返回本书的写作评分配置；未配置时返回带缺省值的配置
-//（默认开启、阈值 60、最大重试 3）。
+// （默认开启、阈值 60、最大重试 3）。
 func (a *App) GetWritingConfig(novelID int64) (*writingconfig.WritingConfig, error) {
 	return writingconfig.NewStore(a.db, a.logger).Get(a.ctx, novelID)
 }
