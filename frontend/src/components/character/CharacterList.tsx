@@ -29,6 +29,7 @@ type Section = { id: number; name: string; characters: character.Character[] };
 type Row =
   | { kind: "all" }
   | { kind: "header"; section: Section; key: string; expanded: boolean }
+  | { kind: "empty"; key: string }
   | { kind: "item"; c: character.Character; groupId: number | null };
 
 export default function CharacterList({ novelId }: Props) {
@@ -150,8 +151,13 @@ export default function CharacterList({ novelId }: Props) {
           !!q || (expandedGroups[key] ?? section.id === groups[0]?.id);
         out.push({ kind: "header", section, key, expanded });
         if (expanded) {
-          for (const c of items)
-            out.push({ kind: "item", c, groupId: section.id });
+          if (items.length === 0) {
+            // 展开的空分组显示占位提示（F-5 虚拟化重构时丢失，此处恢复）
+            out.push({ kind: "empty", key: `${key}:empty` });
+          } else {
+            for (const c of items)
+              out.push({ kind: "item", c, groupId: section.id });
+          }
         }
       }
     } else {
@@ -206,7 +212,10 @@ export default function CharacterList({ novelId }: Props) {
     if (row.kind === "header") {
       const { section, key, expanded } = row;
       return (
-        <div className="border-b border-border/50">
+        <div
+          className="border-b border-border/50"
+          data-testid={`group-header-${section.name}`}
+        >
           <div className="flex items-center">
             <button
               type="button"
@@ -250,6 +259,13 @@ export default function CharacterList({ novelId }: Props) {
             )}
           </div>
         </div>
+      );
+    }
+    if (row.kind === "empty") {
+      return (
+        <p className="px-3 py-2 text-xs text-muted-foreground">
+          {t("characterGroup.empty")}
+        </p>
       );
     }
     return renderCharacter(row.c, row.groupId);
