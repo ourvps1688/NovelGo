@@ -46,3 +46,6 @@ python-master/
 
 # Local secrets / tokens (DO NOT COMMIT — contains GitHub PAT)
 github_pat.txt
+
+# Local scratch (extraction drafts, etc. — not source)
+.workbuddy/tmp/

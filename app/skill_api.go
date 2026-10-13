@@ -115,6 +115,9 @@ func (a *App) DeleteSkill(input DeleteSkillInput) error {
 		}
 	}
 
+	// T-AGG-5：源 skill 被删后，自动重建/清理受影响的跨书聚合档案（best-effort）。
+	a.reconcileAggregated()
+
 	return nil
 }
 
@@ -385,4 +388,36 @@ func (a *App) collectMentalSources() ([]skill.MergeSource, map[string]string, er
 	}
 
 	return sources, bookTitles, nil
+}
+
+// reconcileAggregated 是 T-AGG-5「自动重建」的触发入口：比对当前源与现有派生聚合档，
+// 重建过期档、清理孤儿档。在应用启动、删除 skill、保存 skill 文件后调用（best-effort，失败仅日志）。
+func (a *App) reconcileAggregated() {
+	if a.skill == nil || a.novel == nil {
+		return
+	}
+	sources, _, err := a.collectMentalSources()
+	if err != nil {
+		a.logger.Warn("跨书聚合自动重建：枚举源失败", "err", err)
+		return
+	}
+	existing, err := skill.LoadDir(config.UserSkillsDir())
+	if err != nil {
+		a.logger.Warn("跨书聚合自动重建：加载现有聚合档失败", "err", err)
+		return
+	}
+	res := skill.ReconcileAggregates(a.ctx, sources, existing, config.UserSkillsDir())
+	if len(res.Rebuilt) == 0 && len(res.Deleted) == 0 {
+		return
+	}
+	// 源/派生档已变化，重载用户级 skill 使最新档案立即生效。
+	if err := a.skill.ReloadUser(config.UserSkillsDir()); err != nil {
+		a.logger.Warn("跨书聚合自动重建后重载用户技能失败", "err", err)
+	}
+	if len(res.Rebuilt) > 0 {
+		a.logger.Info("跨书聚合自动重建完成", "rebuilt", res.Rebuilt)
+	}
+	if len(res.Deleted) > 0 {
+		a.logger.Info("跨书聚合孤儿清理完成", "deleted", res.Deleted)
+	}
 }

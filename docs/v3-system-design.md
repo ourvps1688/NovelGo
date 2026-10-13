@@ -395,10 +395,10 @@ sequenceDiagram
   - 文件：`frontend/src/components/skill/SkillList.tsx`、`ManualMergeDialog.tsx`（新建）、`useSkills.ts`（透出字段）
   - 依赖：T-AGG-3、T-X1（wails regen 后 `SkillMeta` 含 `aggregated`/`merged_books` 等）
   - 验证：手动勾选 2 个同作者 mental skill → 生成聚合卡显示"合并自 N 本"+stable 比例；点"重建"重算
-- **T-AGG-5｜保存软提示并入/重建 + 源删改过期提示** — P1（增强，属切片外）
-  - 文件：`PatternExtractView.tsx`（"合并已存在同作者心智"软提示）、`SkillList.tsx`（源 skill 被删 → 聚合卡显示"已过期，请重建"）
+- **T-AGG-5｜跨书聚合自动重建（源删改过期自动重算）** — 已完成
+  - 实现：重建算法下沉到 `internal/skill/reconcile.go`（`ReconcileAggregates` + `ComputeSourceDigest`）；`MergeMentalSkills` 落盘时写入 `AggregatedSourceHash`（源名称+内容 sha256 摘要）作为过期判据；`app.reconcileAggregated()` 在 **应用启动(initWithConfig 收尾)**、**删除 skill(`DeleteSkill`)**、**保存 skill 文件(`SaveContent`，`isSkillPath` 守卫)** 三处自动比对并重建过期档、清理孤儿档。仅维护「已存在」的派生档（不凭空新建；新建仍由手动合并/`RebuildAggregated` 负责）。
   - 依赖：T-AGG-3、T-AGG-4
-  - 验证：保存新 mental skill 时若已存在同作者聚合档，弹软提示；删除源 skill 后聚合卡标过期
+  - 验证：`go test ./internal/skill`（`ComputeSourceDigest` 顺序无关/内容变更/增删源/聚合源排除 + `ReconcileAggregates` 重建过期/删孤儿/未变跳过/忽略非聚合）、`go test ./app` 全过；golangci-lint + gofmt 全过。前端无需改动——"过期提示"由自动重建取代，手动「重建」按钮保留为冗余但无害的入口。
 
 ### P1 — 多镜头精提
 - **T-ML-1｜输入/进度类型扩展** — P1

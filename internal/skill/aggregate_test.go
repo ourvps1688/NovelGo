@@ -31,6 +31,41 @@ const (
 	layerHonesty = "## 诚实边界\n\n- 推断自虚构文本\n\n"
 )
 
+func TestComputeSourceDigest(t *testing.T) {
+	mk := func(name, content string) MergeSource {
+		return MergeSource{Skill: &Skill{Name: name, Content: content}}
+	}
+	a := mk("a", "x: 1")
+	b := mk("b", "y: 2")
+
+	// 顺序无关：相同集合不同顺序 → 同一摘要
+	d1 := ComputeSourceDigest([]MergeSource{a, b})
+	d2 := ComputeSourceDigest([]MergeSource{b, a})
+	assert.Equal(t, d1, d2)
+	assert.NotEmpty(t, d1)
+
+	// 内容变更 → 不同摘要
+	c := mk("a", "x: 999")
+	d3 := ComputeSourceDigest([]MergeSource{c, b})
+	assert.NotEqual(t, d1, d3)
+
+	// 增删源 → 不同摘要
+	d4 := ComputeSourceDigest([]MergeSource{a})
+	assert.NotEqual(t, d1, d4)
+
+	// 聚合源（Aggregated=true）不参与摘要计算：含/不含聚合源结果应一致。
+	agg := MergeSource{Skill: &Skill{Name: "agg", Content: "should-ignore", Aggregated: true}}
+	withAgg := ComputeSourceDigest([]MergeSource{a, b, agg})
+	assert.Equal(t, d1, withAgg, "聚合源不应影响摘要")
+
+	// 仅含聚合源 → 无有效源 → 空摘要
+	onlyAgg := ComputeSourceDigest([]MergeSource{agg})
+	assert.Equal(t, "", onlyAgg)
+
+	// 空切片 → 空串（稳定）
+	assert.Equal(t, "", ComputeSourceDigest(nil))
+}
+
 func TestNormalizeAuthor_Basic(t *testing.T) {
 	// trim + 大小写折叠
 	assert.Equal(t, "liu cixin", normalizeAuthor("Liu Cixin ", nil))

@@ -423,6 +423,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		}
 	}()
 
+	// T-AGG-5：应用启动后，自动重建/清理过期的跨书聚合派生档（best-effort，不影响启动）。
+	a.reconcileAggregated()
+
 	a.cfg = cfg
 	a.logger.Info("应用初始化完成",
 		"data_dir", config.DataDirPath(),

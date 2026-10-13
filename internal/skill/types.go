@@ -42,6 +42,9 @@ type Skill struct {
 	StableItems     int      `json:"stable_items" yaml:"stable_items,omitempty"`           // 跨书复现（stable）条目数
 	SingleBookItems int      `json:"single_book_items" yaml:"single_book_items,omitempty"` // 单书（single-book）条目数
 	AggregatedAt    string   `json:"aggregated_at" yaml:"aggregated_at,omitempty"`         // 聚合时间，RFC3339
+	// AggregatedSourceHash 是当前参与合并的源 skill（名称+内容）的 sha256 摘要，
+	// 供 T-AGG-5 过期检测：源 skill 增删改后摘要变化 → 触发自动重建。普通 skill 无此值。
+	AggregatedSourceHash string `json:"aggregated_source_hash" yaml:"aggregated_source_hash,omitempty"`
 }
 
 // SkillMeta 是去除了正文的 skill 元数据，用于列表展示。

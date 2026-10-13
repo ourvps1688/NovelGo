@@ -80,6 +80,11 @@ func (a *App) SaveContent(input SaveContentInput) error {
 		return err
 	}
 
+	// T-AGG-5：保存的是 skill 文件（新增/编辑源 mental skill）→ 自动重建受影响的跨书聚合档案。
+	if isSkillPath(input.Path) {
+		a.reconcileAggregated()
+	}
+
 	if ref, ok := git.ParseChapterLikePath(input.Path); ok && !ref.IsOutline && !ref.IsNew && ref.VolumeID == 0 {
 		chapterID := ref.ID
 		rag.SubmitRefresh(input.NovelID, chapterID, input.Content)

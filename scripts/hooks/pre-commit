@@ -1,0 +1,131 @@
+#!/bin/bash
+# Shared pre-commit hook (tracked at scripts/hooks/pre-commit): catch BOTH CI
+# reds before push:
+#   1. fmt-go  -> gofmt -l on staged content, LF-normalized (working tree is CRLF)
+#   2. lint-go -> golangci-lint (mirrors the CI gate)
+#
+# Activated via: git config core.hooksPath scripts/hooks
+# Emergency bypass: git commit --no-verify
+set -eo pipefail
+
+# --- collect staged Go files (Added/Copied/Modified; ignore deletions) ---
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+if [ "${#STAGED[@]}" -eq 0 ]; then
+  echo "pre-commit: no staged Go files; nothing to check."
+  exit 0
+fi
+
+# --- locate gofmt (bundled with the Go toolchain) ---
+GO_BIN="${GO_BIN:-$(command -v go 2>/dev/null || true)}"
+GOFMT_BIN=""
+if [ -n "$GO_BIN" ]; then
+  GOFMT_BIN="$(dirname "$GO_BIN")/gofmt"
+fi
+if [ -z "$GOFMT_BIN" ] || [ ! -x "$GOFMT_BIN" ]; then
+  GOFMT_BIN="$(command -v gofmt 2>/dev/null || true)"
+fi
+
+# --- locate golangci-lint: env override > PATH > default install ---
+GOLANGCI_BIN="${GOLANGCI_LINT_BIN:-}"
+if [ -z "$GOLANGCI_BIN" ]; then
+  GOLANGCI_BIN="$(command -v golangci-lint 2>/dev/null || true)"
+fi
+if [ -z "$GOLANGCI_BIN" ]; then
+  GOLANGCI_BIN="/c/Users/Administrator/go/bin/golangci-lint"
+fi
+
+# --- environment matching CI: CGO + sqlite3 headers + MinGW toolchain ---
+export PATH="/c/tools/mingw64/bin:$PATH"
+export CGO_ENABLED=1
+export CGO_CFLAGS="-IC:/tools/sqlite3-headers"
+
+# main package embeds frontend/dist via //go:embed all:frontend/dist.
+# Ensure it exists (gitignored, so the .gitkeep is harmless).
+if [ ! -d frontend/dist ]; then
+  mkdir -p frontend/dist
+  touch frontend/dist/.gitkeep
+fi
+
+# ---------------------------------------------------------------------------
+# GATE 1 — fmt-go: gofmt -l on the STAGED (to-be-committed) content.
+# We read from the index (LF) and strip any CR, so a CRLF working tree
+# does NOT produce false positives like a raw `gofmt -l <file>` would.
+# ---------------------------------------------------------------------------
+FMT_FAIL=0
+if [ -n "$GOFMT_BIN" ] && [ -x "$GOFMT_BIN" ]; then
+  echo "pre-commit(gofmt): checking ${#STAGED[@]} staged file(s) with LF normalization..."
+  TMPD="$(mktemp -d)"
+  i=0
+  for f in "${STAGED[@]}"; do
+    i=$((i + 1))
+    blob="$TMPD/$i.go"
+    # staged blob is LF; -s (simplify) mirrors the project's gofmt usage
+    git show ":$f" > "$blob" 2>/dev/null || continue
+    # defensive LF normalization: drop any stray CR
+    tr -d '\r' < "$blob" > "$TMPD/$i.norm.go"
+    set +e
+    OUT="$( "$GOFMT_BIN" -l "$TMPD/$i.norm.go" 2>/dev/null )"
+    RC=$?
+    set -e
+    if [ -n "$OUT" ] || [ "$RC" -ne 0 ]; then
+      echo "  NEEDS gofmt: $f" >&2
+      FMT_FAIL=1
+    fi
+  done
+  # cleanup is best-effort: sandbox/safe-delete may block the drive-prefixed
+  # temp path, which must NOT abort the hook before the verdict is printed.
+  rm -rf "$TMPD" 2>/dev/null || true
+  if [ "$FMT_FAIL" -ne 0 ]; then
+    echo "" >&2
+    echo "pre-commit(gofmt): FAILED. Run 'gofmt -w' on the files above, re-stage, then commit." >&2
+  else
+    echo "pre-commit(gofmt): OK."
+  fi
+else
+  echo "pre-commit(gofmt): gofmt not found; skipping fmt check." >&2
+fi
+
+# ---------------------------------------------------------------------------
+# GATE 2 — lint-go: golangci-lint on the packages touched by staged files.
+# ---------------------------------------------------------------------------
+LINT_FAIL=0
+if [ -x "$GOLANGCI_BIN" ]; then
+  # derive unique package dirs from staged files
+  declare -A seen=()
+  for f in "${STAGED[@]}"; do
+    d="$(dirname "$f")"
+    if [ "$d" = "." ]; then
+      seen["./"]=1
+    else
+      seen["./$d"]=1
+    fi
+  done
+  PKGS=("${!seen[@]}")
+
+  echo "pre-commit(golangci-lint): linting ${#PKGS[@]} package(s): ${PKGS[*]}"
+  set +e
+  "$GOLANGCI_BIN" run --build-tags webkit2_41 --timeout 10m "${PKGS[@]}"
+  RC=$?
+  set -e
+  if [ "$RC" -ne 0 ]; then
+    LINT_FAIL=1
+    echo "" >&2
+    echo "pre-commit(golangci-lint): FAILED (exit $RC). Fix the issues above, re-stage, then commit." >&2
+  else
+    echo "pre-commit(golangci-lint): OK."
+  fi
+else
+  echo "pre-commit(golangci-lint): binary not found at '$GOLANGCI_BIN'; skipping lint." >&2
+  echo "  Set GOLANGCI_LINT_BIN to point at your golangci-lint, or install it." >&2
+fi
+
+# --- final verdict: block if EITHER gate failed ---
+if [ "$FMT_FAIL" -ne 0 ] || [ "$LINT_FAIL" -ne 0 ]; then
+  echo "" >&2
+  echo "pre-commit: BLOCKED. Resolve the gofmt/lint issue(s) above, re-stage, and commit." >&2
+  echo "Emergency bypass: git commit --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-commit: all checks passed."
+exit 0

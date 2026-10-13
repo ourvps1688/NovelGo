@@ -2,8 +2,11 @@ package skill
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -215,8 +218,36 @@ func MergeMentalSkills(ctx context.Context, sources []MergeSource, opts MergeOpt
 		StableItems:     stableCount,
 		SingleBookItems: singleCount,
 		AggregatedAt:    time.Now().UTC().Format(time.RFC3339),
+		// T-AGG-5：记录当前参与合并源的摘要，供后续过期检测（源增删改→摘要变→触发重建）。
+		AggregatedSourceHash: ComputeSourceDigest(valid),
 	}
 	return derived, nil
+}
+
+// ComputeSourceDigest 计算一组（同一作者的）源 mental skill 的稳定摘要：
+// 对源按名称排序后，拼接「名称+内容」做 sha256。源增删或任一内容变更都会改变摘要，
+// 供 T-AGG-5 检测派生聚合档是否过期。聚合源（Aggregated=true）不参与计算。
+func ComputeSourceDigest(sources []MergeSource) string {
+	type kv struct{ name, content string }
+	items := make([]kv, 0, len(sources))
+	for _, s := range sources {
+		if s.Skill == nil || s.Skill.Aggregated {
+			continue
+		}
+		items = append(items, kv{name: s.Skill.Name, content: s.Skill.Content})
+	}
+	if len(items) == 0 {
+		return "" // 无有效源 → 空摘要（孤儿档检测用）
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].name < items[j].name })
+	h := sha256.New()
+	for _, it := range items {
+		h.Write([]byte(it.name))
+		h.Write([]byte{0})
+		h.Write([]byte(it.content))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // normalizeAuthor 对作者名做归一：trim + NFKC + Unicode 大小写折叠 + 别名映射。
