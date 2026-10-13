@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -224,7 +223,7 @@ func (a *App) MergeMentalSkills(input MergeMentalSkillsInput) (*skill.Skill, err
 		return nil, fmt.Errorf("skill store 未初始化")
 	}
 
-	sources, bookTitles, err := a.collectMentalSources(a.ctx)
+	sources, bookTitles, err := a.collectMentalSources()
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +297,7 @@ func (a *App) RebuildAggregated(input RebuildAggregatedInput) (*RebuildAggregate
 		return nil, fmt.Errorf("skill store 未初始化")
 	}
 
-	sources, _, err := a.collectMentalSources(a.ctx)
+	sources, _, err := a.collectMentalSources()
 	if err != nil {
 		return nil, err
 	}
@@ -344,12 +343,9 @@ func (a *App) RebuildAggregated(input RebuildAggregatedInput) (*RebuildAggregate
 }
 
 // collectMentalSources 枚举当前用户域所有小说级 + 用户级 mental skill，并附带书名溯源。
-func (a *App) collectMentalSources(ctx context.Context) ([]skill.MergeSource, map[string]string, error) {
+func (a *App) collectMentalSources() ([]skill.MergeSource, map[string]string, error) {
 	if a.novel == nil {
 		return nil, nil, fmt.Errorf("novel store 未初始化")
-	}
-	if ctx == nil {
-		ctx = a.ctx
 	}
 
 	novels, err := a.GetNovels()

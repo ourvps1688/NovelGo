@@ -147,7 +147,7 @@ func MergeMentalSkills(ctx context.Context, sources []MergeSource, opts MergeOpt
 
 	// 5. 组装派生正文：按五层 canonical 顺序，stable 优先。
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# %s 的创作心智\n\n", canonicalAuthor))
+	fmt.Fprintf(&sb, "# %s 的创作心智\n\n", canonicalAuthor)
 
 	stableCount := 0
 	singleCount := 0
@@ -168,7 +168,7 @@ func MergeMentalSkills(ctx context.Context, sources []MergeSource, opts MergeOpt
 		if len(stableItems) == 0 && len(singleItems) == 0 {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("## %s\n\n", layerName))
+		fmt.Fprintf(&sb, "## %s\n\n", layerName)
 		for _, mi := range stableItems {
 			stableCount++
 			sb.WriteString("- " + mi.rawText + "\n")
@@ -332,9 +332,9 @@ func buildFootnotes(books []string, rawText string) string {
 			continue
 		}
 		if chapter != "" {
-			sb.WriteString(fmt.Sprintf("> 来源：《%s》（%s）\n", b, chapter))
+			fmt.Fprintf(&sb, "> 来源：《%s》（%s）\n", b, chapter)
 		} else {
-			sb.WriteString(fmt.Sprintf("> 来源：《%s》\n", b))
+			fmt.Fprintf(&sb, "> 来源：《%s》\n", b)
 		}
 	}
 	return sb.String()
