@@ -1212,6 +1212,7 @@
     "noMatching": "No matching samples",
     "belongTo": "Belongs to",
     "importFromChaptersTitle": "Import from novel chapters",
+    "importNeedsNovel": "This sample is global. Pick a specific novel above to import its chapter content directly — no manual pasting needed.",
     "importChapters": "Import selected chapters",
     "importWholeBookHint": "With no range selected, the whole book is imported",
     "importSelectedHint": "Will import {{count}} selected chapters",

@@ -604,6 +604,11 @@ export default function StyleView({
               size="md"
             />
           </div>
+          {newNovelId === 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {t("styleSample.importNeedsNovel")}
+            </p>
+          )}
           {newNovelId > 0 && (
             <div className="mt-3 rounded-lg border border-dashed border-border bg-muted/30 p-3">
               <div className="flex items-center justify-between gap-2">

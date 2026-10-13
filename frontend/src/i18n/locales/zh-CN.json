@@ -1186,6 +1186,7 @@
     "noMatching": "没有匹配的素材",
     "belongTo": "归属",
     "importFromChaptersTitle": "从小说章节导入",
+    "importNeedsNovel": "素材当前为全局。在上方选择一本具体小说后，可直接从该书章节导入素材内容，无需手动粘贴。",
     "importChapters": "导入选中章节",
     "importWholeBookHint": "未选范围时，将导入整本书内容",
     "importSelectedHint": "将导入选中的 {{count}} 个章节",
