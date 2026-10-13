@@ -1,6 +1,6 @@
 # 心智 Skill 提取 — 开发计划
 
-> 状态：设计已定，待实现（V1）
+> 状态：**V1 + V2 已实现并推送 `origin/master`**（V1=commit `a7821c6`，V2=commit `7ee8b4d`，2026-10-13）；V3 待规划
 > 关联决策：① 心智 Skill 独立成文件（不并入套路 Skill）；② 前端「提取」页新增并列 tab「心智提取」；③ 复用 `internal/pattern` 编排 + `flavor` 参数；④ 混合法——合成用 LLM，V2 证据收集走 ONNX 向量检索、跨弧验证走确定性计数；⑤ 生成后写入本书 `.enabled.json` 自动并入写作流（心智模型常驻、启发式按需）。
 > **已知约束（2026-10-13 补充）**：用户导入的参考素材以 **TXT/MD 为主、不是 EPUB**。TXT 无内嵌作者元数据（`parseTxt` 只做章节切分），故"同一作者"**无法自动识别**。但心智 Skill 落盘本就是一份 `skills/{name}.md`，其 frontmatter 已支持 `author` 字段，因此**作者在"保存心智 Skill"时手填即可**——身份归属落在技能文件层而非小说模型层，**无需改动 `Novel` 模型 / 导入管线 / txt 解析**（详见 §二·续）。跨书聚合（V3）的前置即"保存时填好来源作者"，随 V1 保存框即可交付，不做成独立模型迁移。
 
@@ -112,7 +112,14 @@
 > **与早期 V1/V2/V3 方案的对照说明**：最早评估时把"注入写作上下文（用 X 的创作心智写新章）"列为 V3。后续确认 `internal/skill` 的 `.enabled.json` + `BuildSystemMessages` 注入机制已原生支持该能力——因此该能力已在 **V1 的"生成后自动写 `.enabled.json`"** 中交付，不再作为独立阶段。原 V2 中的"多镜头精提 / 同一作者多本跨书聚合 / 置信度标注"部分被吸收进 V1（置信度→成熟度门禁），部分遗漏，现将"跨书聚合 + 多镜头 + 写作闭环增强"明确列为 **V3**，使 roadmap 与前期讨论一致。
 
 - **V1（本计划）**：flavor 分流 + `MentalSkillOutput` + mental final prompt（含**小说适配三重验证** + **质量自检清单**）+ 前端 tab + 自动写 `.enabled.json`（即"注入写作上下文"的原始 V3 能力在此交付）。合成全 LLM（复用现有递归压缩的 token 预算）。置信度标注已含于成熟度门禁（`low_confidence`）。
-- **V2（优化）**：ONNX 向量检索做证据收集前置（减少 LLM 重读全本）；跨弧复现验证改为确定性计数门禁（统计独立弧数 ≥2）；token 上限护栏（心智模型层 ~1.5–2.5k）；**产出后保真度测试**：用本书作者已明确处理过的冲突测方向一致性，用作者从未涉及的题材测"适度不确定而非斩钉截铁"（nuwa 产出后测试的fiction 适配版）。
+- **V2（已完成 2026-10-13，commit `7ee8b4d`）**：ONNX 向量检索做证据收集前置（减少 LLM 重读全本）；跨弧复现验证改为确定性计数门禁（统计独立弧数 ≥2）；token 上限护栏（心智模型层 ~1.5–2.5k）；**产出后保真度测试**：用本书作者已明确处理过的冲突测方向一致性，用作者从未涉及的题材测"适度不确定而非斩钉截铁"（nuwa 产出后测试的 fiction 适配版）。
+  - **实际落地**（对照原设想的偏差与细化）：
+    - **V2-A 护栏**：`mentalFinalMaxTokens = 8000`（整个 final content 上限）；prompt 显式要求「叙事心智模型」一节控制在 ~1.5–2.5k token。
+    - **V2-B 确定性门禁**：新增结构化 `MentalSkillOutput.Evidence []ModelEvidence{Model, ChapterIDs}`，`gateMentalEvidence(content, evidence)` 对每个心智模型统计**去重后的独立章节数**，<2 即判定为"未跨弧复现"，从心智模型降级为启发式候选，并在文末追加 `## 验证与降级说明` 段解释；**不再依赖 LLM 自评**，比 prompt 指令更稳健。空 `Evidence` 时该门禁为 no-op（向后兼容 V1 行为）。
+    - **V2-C 保真度测试**：新增 `output_fidelity` 工具调用（maxTokens 2000），prompt 要求对"已知立场一致性（known_consistency 1–5）"与"未知题材适度不确定（unknown_uncertainty 1–5）"打分；失败**不阻断**生成（emit 提示后继续）。产出 `## 保真度自测` 段 + 结构化 `FidelityScorecard{known_consistency, unknown_uncertainty, issues[], passed}`。
+    - **V2-D 证据前置（条件式）**：`app/pattern_api.go` 注入 `EvidenceRetriever`（基于 `internal/rag` 的 `VectorStore.Search`，topK=4，4 条种子 query）。**当 `App.vectorStore.Load() == nil`（无 ONNX 运行时/未建索引）时 retriever 返回 nil → 证据前置整段跳过、不报错**，实现优雅降级。
+    - **数据流**：`ExtractPatternResult` 新增 `Fidelity *FidelityScorecard` + `DemotedModels []string`；经 `lib/wailsjs/go/models.ts` 同步到前端 `PatternSessionView` 新增"保真度"卡片（通过/未通过徽章 + 两项打分 tile + issues + 降级模型说明）。
+    - **测试**：`extract_test.go` 新增/更新 9 个用例，覆盖 `gateMentalEvidence` 降级、空证据 no-op、`appendFidelitySection`、`fidelityTest` 集成、`mentalFinalSkillMessages` 证据注入、`retrieveEvidence` 的 nil/retriever 分支。
 - **V3（增强，应对多书多作者场景）**：
   - **前置（来源作者，见 §二·续）**：V3 启动前无需任何模型/管线改动——V1 的"保存心智 Skill"对话框已提供必填「来源作者」输入，写入 `source_author` frontmatter 字段。保存时填好来源作者，V3 即可按该字段聚合。
   - **跨书聚合**：按 `skill.SourceAuthor` 分组，`kind:mental` 且同来源作者的多个心智 Skill 合并/加权为"作者心智总 Skill"——**跨书复现才算稳定习惯（高权重），仅单书出现的习惯降级标记**。作者名在技能层做轻量归一（trim + 大小写折叠 + 可选别名映射）；并提供"手动勾选多个心智 Skill 合并"作为备选（避开作者名拼写问题）。
