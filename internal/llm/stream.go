@@ -554,10 +554,16 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 			diag.retryAfter = resp.Header.Get("Retry-After")
 			diag.rateLimitRemain = resp.Header.Get("X-RateLimit-Remaining")
 			c.logger.Warn("empty sse response", "diag", diag)
+			// Kind="empty_stream"：CallTool 层据此触发非流式回退（部分服务商不支持流式+tools）。
+			msg := "流式响应为空，服务商可能不支持流式请求或返回了非标准格式"
+			if diag.hasReason {
+				msg = "流式响应只有推理内容，未生成最终结果（可能 max_tokens 不足或推理失控）"
+			}
 			ch <- StreamEvent{Type: EventError, Error: &APIError{
 				StatusCode: 0,
-				Message:    "流式响应为空，服务商可能不支持流式请求或返回了非标准格式",
+				Message:    msg,
 				Retryable:  true,
+				Kind:       "empty_stream",
 			}}
 		}
 	}

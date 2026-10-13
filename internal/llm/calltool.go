@@ -97,6 +97,20 @@ func (c *Client) CallTool(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+
+		// 流式零产出回退：部分服务商不支持「流式 + tools」，SSE 零产出即结束。
+		// 识别 Kind="empty_stream" 后改走非流式请求，一次成功即返回。
+		var apiErr *APIError
+		if errors.As(lastErr, &apiErr) && apiErr.Kind == "empty_stream" {
+			c.logger.Warn("stream tool call empty, falling back to non-stream",
+				"provider", providerName, "model", modelID, "tool", toolName)
+			raw, fbErr := c.callToolNonStream(ctx, providerName, modelID, messages, tools, callOpts)
+			if fbErr == nil {
+				return raw, nil
+			}
+			lastErr = fbErr
+		}
+
 		if lastErr == nil {
 			lastErr = fmt.Errorf("LLM 未调用工具 %s", toolName)
 		}
