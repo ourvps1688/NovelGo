@@ -31,6 +31,11 @@ const (
 	// mentalFinalMaxTokens 是 V2-A 心智技能最终生成的 token 护栏：限制整体产出体量，
 	// 并要求「叙事心智模型」一节控制在约 1.5k–2.5k token（见 mentalFinalSkillSystemPrompt）。
 	mentalFinalMaxTokens = 8_000
+	// 多镜头精提（V3 P1）三路聚焦生成的 token 预算：
+	//   expr 2k + mental 3k + decision 2k = 7k < mentalFinalMaxTokens(8k) 单轮护栏。
+	lensExprMaxTokens     = 2_000 // 表达镜头
+	lensMentalMaxTokens   = 3_000 // 心智镜头（主镜头，含 name/description/evidence）
+	lensDecisionMaxTokens = 2_000 // 决策镜头
 )
 
 // EvidenceRetriever 是 V2-D 的可选证据检索器。当 Extractor 持有非 nil 实例时，
@@ -541,6 +546,12 @@ func (e *Extractor) finalStructSkill(ctx context.Context, input ExtractPatternIn
 // 流水线：①（V2-D 可选）向量检索证据前置；② 生成；③（V2-B）确定性跨弧复现门禁；
 // ④（V1）低置信度提示；⑤（V2-C）产出后保真度自测。
 func (e *Extractor) finalMentalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (finalSkillOutcome, error) {
+	// V3 P1：深度多镜头精提（opt-in）。开启后 final 阶段改用三路聚焦镜头分别生成再合并，
+	// 合计 token ≤7k，低于单轮 8k 护栏，提升五层结构的独立保真度。
+	if input.DeepMultiLens {
+		return e.finalMentalMultiLens(ctx, input, chunks, chapterCount)
+	}
+
 	onStatus := func(s LLMStatus) {
 		e.emit(input, Progress{Stage: StageFinalizing, LLMStatus: s})
 	}
@@ -585,6 +596,135 @@ func (e *Extractor) finalMentalSkill(ctx context.Context, input ExtractPatternIn
 		Fidelity:      fidelity,
 		DemotedModels: demoted,
 	}, nil
+}
+
+// finalMentalMultiLens 多镜头精提（V3 P1）：boundary→summary→chunk 已单遍完成，复用 chunks。
+// 三路聚焦 final（心智/表达/决策）分别生成，最后拼装五层并照常运行 V2 门禁与保真度。
+func (e *Extractor) finalMentalMultiLens(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (finalSkillOutcome, error) {
+	lowConfidence := chapterCount < 20
+	evidencePassages := e.retrieveEvidence(ctx, input.NovelID)
+
+	emitStep := func(lens, msg string) {
+		e.emit(input, Progress{Stage: StageFinalizing, SubStep: lens, Message: msg})
+	}
+	onStatus := func(lens string) func(LLMStatus) {
+		return func(s LLMStatus) {
+			e.emit(input, Progress{Stage: StageFinalizing, SubStep: lens, LLMStatus: s})
+		}
+	}
+
+	emitStep("mental", "多镜头精提·叙事心智模型（≤3k）...")
+	mental, err := e.finalMentalLens(ctx, input, chunks, "mental", lensMentalMaxTokens, lowConfidence, evidencePassages, onStatus("mental"))
+	if err != nil {
+		return finalSkillOutcome{}, err
+	}
+	if strings.TrimSpace(mental.Content) == "" {
+		return finalSkillOutcome{}, fmt.Errorf("多镜头：心智镜头未返回正文")
+	}
+
+	emitStep("expression", "多镜头精提·表达DNA（≤2k）...")
+	expr, err := e.finalMentalLens(ctx, input, chunks, "expression", lensExprMaxTokens, lowConfidence, evidencePassages, onStatus("expression"))
+	if err != nil {
+		return finalSkillOutcome{}, err
+	}
+	if strings.TrimSpace(expr.Content) == "" {
+		return finalSkillOutcome{}, fmt.Errorf("多镜头：表达镜头未返回正文")
+	}
+
+	emitStep("decision", "多镜头精提·创作决策启发式/价值观/诚实边界（≤2k）...")
+	decision, err := e.finalMentalLens(ctx, input, chunks, "decision", lensDecisionMaxTokens, lowConfidence, evidencePassages, onStatus("decision"))
+	if err != nil {
+		return finalSkillOutcome{}, err
+	}
+	if strings.TrimSpace(decision.Content) == "" {
+		return finalSkillOutcome{}, fmt.Errorf("多镜头：决策镜头未返回正文")
+	}
+
+	// 按五层 canonical 顺序拼装正文：叙事心智模型(mental) → 创作决策启发式/价值观(decision 前段)
+	// → 表达DNA(expr) → 诚实边界(decision 后段)。
+	body := mergeLensBodies(mental, expr, decision)
+
+	// ③（V2-B）确定性跨弧复现门禁：使用心智镜头的证据，独立章节<2 的模型降级为启发式。
+	demoted, gateNote := gateMentalEvidence(body, mental.Evidence)
+
+	body = strings.TrimSpace(body) + gateNote
+	if lowConfidence {
+		body += "\n\n> ⚠️ 低置信度提示：本次提取样本章节较少（少于 20 章），上述心智模型与启发式可能不稳定，建议积累更多章节后重新提取。\n"
+	}
+
+	name := strings.TrimSpace(mental.Name)
+	if name == "" {
+		name = "创作心智"
+		if a := strings.TrimSpace(input.SourceAuthor); a != "" {
+			name = a + " 的创作心智"
+		}
+	}
+	description := strings.TrimSpace(mental.Description)
+	if description == "" {
+		description = "以该作者的创作心智与表达习惯写新章节时"
+	}
+	md := buildMentalSkillMarkdown(name, description, body, input.SourceAuthor)
+
+	// ⑤（V2-C）产出后保真度自测（失败不阻断主流程，仅记录）。
+	fidelity, ferr := e.fidelityTest(ctx, input, chunks, body)
+	if ferr != nil {
+		e.emit(input, Progress{Stage: StageFinalizing, Message: "保真度自测跳过：" + ferr.Error()})
+	} else if fidelity != nil {
+		md = appendFidelitySection(md, fidelity)
+	}
+
+	return finalSkillOutcome{Raw: md, Fidelity: fidelity, DemotedModels: demoted}, nil
+}
+
+// finalMentalLens 多镜头精提的单个聚焦镜头：调用 output_skill 生成仅含本镜头指定章节的
+// 正文，返回 LensOutput（Content + Evidence）。主镜头（mental）额外产出 name/description。
+func (e *Extractor) finalMentalLens(ctx context.Context, input ExtractPatternInput, chunks []Chunk, lens string, maxTokens int, lowConfidence bool, evidence []string, onStatus func(LLMStatus)) (LensOutput, error) {
+	raw, err := e.callTool(ctx, input, "output_skill", LensOutput{}, lensMentalSkillMessages(chunks, lowConfidence, evidence, lens), 2, maxTokens, onStatus)
+	if err != nil {
+		return LensOutput{}, err
+	}
+	var out LensOutput
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return LensOutput{}, fmt.Errorf("解析多镜头产出失败: %w", err)
+	}
+	return out, nil
+}
+
+// mergeLensBodies 按五层 canonical 顺序拼装三路镜头正文：
+// 叙事心智模型(mental) → 创作决策启发式/价值观(decision 前段) → 表达DNA(expr) → 诚实边界(decision 后段)。
+// decision 镜头一次产出三章（启发式/价值观/诚实边界），此处把「诚实边界」拆出放到表达DNA之后，
+// 以满足 canonical 顺序（表达DNA 在诚实边界之前）。不做二次 LLM 调用。
+func mergeLensBodies(mental, expr, decision LensOutput) string {
+	decisionHead, honesty := splitHonestySection(decision.Content)
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(mental.Content))
+	if strings.TrimSpace(decisionHead) != "" {
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(decisionHead))
+	}
+	if strings.TrimSpace(expr.Content) != "" {
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(expr.Content))
+	}
+	if strings.TrimSpace(honesty) != "" {
+		b.WriteString("\n\n")
+		b.WriteString(strings.TrimSpace(honesty))
+	}
+	return b.String()
+}
+
+// splitHonestySection 将决策镜头正文按「## 诚实边界」（兼容「##诚实边界」）拆分为前段
+// （启发式+价值观）与诚实边界段。若不含诚实边界标记，则整体作为前段返回，honesty 为空。
+func splitHonestySection(content string) (head, honesty string) {
+	idx := strings.Index(content, "## 诚实边界")
+	if idx < 0 {
+		// 兼容 LLM 偶发的「##诚实边界」（无空格）。
+		if alt := strings.Index(content, "##诚实边界"); alt >= 0 {
+			return content[:alt], content[alt:]
+		}
+		return content, ""
+	}
+	return content[:idx], content[idx:]
 }
 
 // buildSkillMarkdown 组装完整的 skill markdown：固定 frontmatter + 正文。

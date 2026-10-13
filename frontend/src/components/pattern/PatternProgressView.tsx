@@ -13,6 +13,7 @@ interface Props {
   novelTitle: string;
   chapterCount: number;
   flavor?: string;
+  deepMultiLens?: boolean;
 }
 
 type PipelineStage = Exclude<PatternProgressStage, "done">;
@@ -89,10 +90,23 @@ export default function PatternProgressView({
   novelTitle,
   chapterCount,
   flavor,
+  deepMultiLens,
 }: Props) {
   const { t } = useTranslation();
   const isMental = flavor === "mental";
   const isComplete = progress?.stage === "done";
+  // 多镜头三步步进器仅在「心智提取 + 开启深度多镜头 + 处于 finalizing」时展示。
+  const showLensSteps =
+    !!deepMultiLens && isMental && progress?.stage === "finalizing";
+
+  // 三镜头顺序与中文名，用于进度步进器。
+  const lensSteps: { key: string; labelKey: string }[] = [
+    { key: "mental", labelKey: "extract.lens.mental" },
+    { key: "expression", labelKey: "extract.lens.expression" },
+    { key: "decision", labelKey: "extract.lens.decision" },
+  ];
+  const lensOrder = lensSteps.map((s) => s.key);
+  const activeLensIdx = lensOrder.indexOf(progress?.subStep ?? "");
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
@@ -207,6 +221,50 @@ export default function PatternProgressView({
           })}
         </div>
       </section>
+
+      {/* Multi-lens 3-step stepper (V3 P1)：仅在深度多镜头心智提取的 finalizing 阶段展示 */}
+      {showLensSteps && (
+        <section className="rounded-lg border bg-card p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Sparkle className="h-4 w-4 text-action-extract" />
+            {t("extract.lens.title")}
+          </div>
+          <div className="grid gap-2 md:grid-cols-3">
+            {lensSteps.map((step, i) => {
+              const done = activeLensIdx > i;
+              const active = activeLensIdx === i;
+              return (
+                <div
+                  key={step.key}
+                  className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/20 px-3 py-2"
+                >
+                  {done ? (
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-action-save" />
+                  ) : active ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-action-extract" />
+                  ) : (
+                    <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <div className="min-w-0">
+                    <div
+                      className={`truncate text-xs font-medium ${active || done ? "text-foreground" : "text-muted-foreground"}`}
+                    >
+                      {t(step.labelKey)}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {done
+                        ? t("extract.progress.done")
+                        : active
+                          ? t("extract.progress.running")
+                          : t("extract.progress.waiting")}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Recent events */}
       <section className="rounded-lg border bg-card p-4">

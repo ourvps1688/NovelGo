@@ -1206,6 +1206,15 @@
     "sourceAuthorNote": "Used for cross-book merging (leave blank for single-book extraction)",
     "sourceAuthorPlaceholder": "e.g. Liu Cixin",
     "mindsetChapterNote": "Mental extraction works best with ≥20 chapters; fewer chapters lower confidence",
+    "deepMultiLens": "Deep multi-lens extraction",
+    "deepMultiLensNote": "When enabled, the final stage splits into three focused lenses (narrative mental model / expression DNA / creative decisions·values·honesty boundary) generated separately then merged, improving fidelity of the five-layer structure; per-run tokens stay ≤7k.",
+    "mergeHint": "After extraction, merge the same author's cross-book mental skills in the \"Skills\" sidebar.",
+    "lens": {
+      "title": "Multi-lens extraction progress",
+      "mental": "Narrative mental model",
+      "expression": "Expression DNA",
+      "decision": "Creative decisions·values·honesty boundary"
+    },
     "extractFailed": "Extract failed",
     "saveFailed": "Save failed",
     "generated": "Generated",

@@ -1180,6 +1180,15 @@
     "sourceAuthorNote": "用于跨书合并（留空则仅单书提取）",
     "sourceAuthorPlaceholder": "如：刘慈欣",
     "mindsetChapterNote": "心智提取建议 ≥20 章，章节过少会降低置信度",
+    "deepMultiLens": "深度多镜头精提",
+    "deepMultiLensNote": "开启后 final 阶段改用三路聚焦（叙事心智模型 / 表达DNA / 创作决策·价值观·诚实边界）分别生成再合并，提升五层结构保真度；单轮 token 仍 ≤7k。",
+    "mergeHint": "提取后可在「技能」侧栏手动合并同一作者的跨书心智。",
+    "lens": {
+      "title": "多镜头精提进度",
+      "mental": "叙事心智模型",
+      "expression": "表达DNA",
+      "decision": "创作决策·价值观·诚实边界"
+    },
     "extractFailed": "提取失败",
     "saveFailed": "保存失败",
     "generated": "已生成",

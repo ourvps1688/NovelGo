@@ -1241,3 +1241,221 @@ func TestPreAnalyzeBoundaries_ProgressCallback(t *testing.T) {
 		t.Error("progress callback should receive LLMGenerating status")
 	}
 }
+
+// ===========================================================================
+// V3 P1：多镜头精提（DeepMultiLens）
+// ===========================================================================
+
+// TestLensBudgetLimit 验证三路镜头 token 预算合计 = 7k，低于单轮 8k 护栏。
+func TestLensBudgetLimit(t *testing.T) {
+	total := lensExprMaxTokens + lensMentalMaxTokens + lensDecisionMaxTokens
+	if total != 7000 {
+		t.Errorf("lens budget sum = %d, want exactly 7000", total)
+	}
+}
+
+// TestSplitHonestySection 验证决策镜头正文按「## 诚实边界」拆分前段与诚实边界段。
+func TestSplitHonestySection(t *testing.T) {
+	head, honesty := splitHonestySection("## 创作决策启发式\n规则1。\n## 价值观与反模式\n追求克制。\n## 诚实边界\n虚构推断。")
+	if !strings.Contains(head, "创作决策启发式") || !strings.Contains(head, "价值观与反模式") {
+		t.Errorf("head should contain decision/values layers:\n%s", head)
+	}
+	if strings.Contains(head, "诚实边界") {
+		t.Errorf("head must not contain honesty marker:\n%s", head)
+	}
+	if !strings.Contains(honesty, "诚实边界") {
+		t.Errorf("honesty should contain marker:\n%s", honesty)
+	}
+	// 兼容「##诚实边界」（无空格）。
+	_, hon2 := splitHonestySection("## 创作决策启发式\nx\n##诚实边界\nz")
+	if !strings.Contains(hon2, "诚实边界") {
+		t.Errorf("should handle no-space marker, got hon2=%q", hon2)
+	}
+	// 无诚实边界：整体作为前段，honesty 为空。
+	h3, hon3 := splitHonestySection("## 创作决策启发式\nx")
+	if hon3 != "" {
+		t.Errorf("expected empty honesty, got %q", hon3)
+	}
+	if !strings.Contains(h3, "创作决策启发式") {
+		t.Errorf("head should contain content")
+	}
+}
+
+// TestMergeLensBodies_CanonicalOrder 验证三路镜头正文按五层 canonical 顺序拼装
+// （叙事心智模型 → 创作决策启发式 → 价值观与反模式 → 表达DNA → 诚实边界）。
+func TestMergeLensBodies_CanonicalOrder(t *testing.T) {
+	mental := LensOutput{Content: "## 叙事心智模型\n模型A。"}
+	expr := LensOutput{Content: "## 表达 DNA\n短句为主。"}
+	decision := LensOutput{Content: "## 创作决策启发式\n规则1。\n## 价值观与反模式\n追求克制。\n## 诚实边界\n虚构推断。"}
+	body := mergeLensBodies(mental, expr, decision)
+
+	order := []string{"叙事心智模型", "创作决策启发式", "价值观与反模式", "表达 DNA", "诚实边界"}
+	prev := -1
+	for _, layer := range order {
+		idx := strings.Index(body, layer)
+		if idx < 0 {
+			t.Fatalf("missing layer %q in body:\n%s", layer, body)
+		}
+		if idx <= prev {
+			t.Errorf("layer %q out of canonical order: idx=%d prev=%d\nbody:\n%s", layer, idx, prev, body)
+		}
+		prev = idx
+	}
+}
+
+// sequenceToolHandler 按调用顺序为 output_skill 返回不同的 LensOutput JSON；
+// 之后若收到 output_fidelity 则返回保真度评分卡。用于多镜头端到端测试。
+func sequenceToolHandler(lensJSON [3]string, fidelityJSON string) http.HandlerFunc {
+	calls := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		_ = json.Unmarshal(body, &req)
+		toolName := ""
+		if len(req.Tools) > 0 {
+			toolName = req.Tools[0].Function.Name
+		}
+		var argsJSON string
+		if toolName == "output_fidelity" {
+			argsJSON = fidelityJSON
+		} else {
+			if calls >= len(lensJSON) {
+				argsJSON = lensJSON[len(lensJSON)-1]
+			} else {
+				argsJSON = lensJSON[calls]
+			}
+			calls++
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flusher", 500)
+			return
+		}
+		if argsJSON != "" {
+			start := map[string]any{
+				"choices": []map[string]any{{
+					"delta": map[string]any{
+						"tool_calls": []map[string]any{{
+							"index":    0,
+							"id":       "call_mock",
+							"function": map[string]any{"name": toolName},
+						}},
+					},
+				}},
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(start))
+			flusher.Flush()
+			args := map[string]any{
+				"choices": []map[string]any{{
+					"delta": map[string]any{
+						"tool_calls": []map[string]any{{
+							"index":    0,
+							"function": map[string]any{"arguments": argsJSON},
+						}},
+					},
+				}},
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(args))
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}
+}
+
+// TestFinalMentalSkill_MultiLens 验证深度多镜头走独立分支：三路镜头分别生成再合并，
+// 产出含五层 canonical 顺序的正文，且 V2 确定性门禁与保真度在合并正文上运行。
+func TestFinalMentalSkill_MultiLens(t *testing.T) {
+	mentalJSON := `{"name":"X 的创作心智","description":"用 X 的叙事习惯写新章节","content":"## 叙事心智模型\n信息 withholding 与命运不可控。","evidence":[{"model":"信息 withholding","chapter_ids":[3]},{"model":"命运不可控","chapter_ids":[5,9]}]}`
+	exprJSON := `{"content":"## 表达 DNA\n短句为主，疑问少。"}`
+	decisionJSON := `{"content":"## 创作决策启发式\n遇到抉择时优先揭示信息。\n## 价值观与反模式\n作者追求克制，拒绝煽情。\n## 诚实边界\n本技能从虚构文本推断，非作者真人三观；基于 30 章提取。"}`
+	fidelityJSON, _ := json.Marshal(FidelityScorecard{KnownConsistency: 5, UnknownUncertainty: 4, Passed: true})
+
+	handler := sequenceToolHandler([3]string{mentalJSON, exprJSON, decisionJSON}, string(fidelityJSON))
+	e := testExtractor(handler)
+	chunks := []Chunk{
+		{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "主角觉醒"},
+	}
+	input := defaultInput()
+	input.Flavor = string(FlavorMental)
+	input.DeepMultiLens = true
+	input.SourceAuthor = "刘慈欣"
+
+	outcome, err := e.finalMentalSkill(context.Background(), input, chunks, 30)
+	if err != nil {
+		t.Fatalf("finalMentalMultiLens: %v", err)
+	}
+	raw := outcome.Raw
+
+	// 五层齐全。
+	for _, layer := range []string{"叙事心智模型", "表达 DNA", "创作决策启发式", "价值观与反模式", "诚实边界"} {
+		if !strings.Contains(raw, layer) {
+			t.Errorf("merged body missing layer %q:\n%s", layer, raw)
+		}
+	}
+	// canonical 顺序。
+	order := []string{"叙事心智模型", "创作决策启发式", "价值观与反模式", "表达 DNA", "诚实边界"}
+	prev := -1
+	for _, layer := range order {
+		idx := strings.Index(raw, layer)
+		if idx < 0 {
+			t.Fatalf("missing layer %q", layer)
+		}
+		if idx <= prev {
+			t.Errorf("layer %q out of canonical order: idx=%d prev=%d\nbody:\n%s", layer, idx, prev, raw)
+		}
+		prev = idx
+	}
+	// V2 确定性门禁：信息 withholding 仅 1 章证据 → 降级说明出现在合并正文上。
+	if !strings.Contains(raw, "验证与降级说明") {
+		t.Errorf("expected gate note on merged body:\n%s", raw)
+	}
+	// 保真度自测在合并正文上运行。
+	if !strings.Contains(raw, "保真度自测") {
+		t.Errorf("expected fidelity section:\n%s", raw)
+	}
+	if outcome.Fidelity == nil || outcome.Fidelity.KnownConsistency != 5 {
+		t.Errorf("expected fidelity scorecard, got %+v", outcome.Fidelity)
+	}
+	if len(outcome.DemotedModels) != 1 || outcome.DemotedModels[0] != "信息 withholding" {
+		t.Errorf("expected 1 demoted model, got %v", outcome.DemotedModels)
+	}
+}
+
+// TestFinalMentalSkill_SingleRoundRegression 验证未开启深度多镜头时仍走原单轮路径（零回归）。
+func TestFinalMentalSkill_SingleRoundRegression(t *testing.T) {
+	out := MentalSkillOutput{
+		Name:        "X 的创作心智",
+		Description: "用 X 的叙事习惯写新章节",
+		Content:     "# X 的创作心智\n## 叙事心智模型\n冲突通过 withholding 生成。\n## 表达 DNA\n短句。",
+	}
+	argsJSON, _ := json.Marshal(out)
+	e := testExtractor(mockToolHandler("output_skill", string(argsJSON), ""))
+	chunks := []Chunk{
+		{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "主角觉醒"},
+	}
+	input := defaultInput()
+	input.Flavor = string(FlavorMental)
+	// DeepMultiLens 留零值（false）→ 单轮路径。
+	outcome, err := e.finalSkill(context.Background(), input, chunks, 30)
+	if err != nil {
+		t.Fatalf("finalMentalSkill (single-round): %v", err)
+	}
+	raw := outcome.Raw
+	if !strings.Contains(raw, "叙事心智模型") {
+		t.Errorf("single-round mental should contain 叙事心智模型:\n%s", raw)
+	}
+	if !strings.Contains(raw, "表达 DNA") {
+		t.Errorf("single-round mental should contain 表达 DNA:\n%s", raw)
+	}
+	// 单轮路径不产出 sub_step（保持后端默认空）。
+}

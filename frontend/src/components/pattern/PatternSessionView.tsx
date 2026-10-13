@@ -29,6 +29,7 @@ interface Props {
   chapterCount: number; // 本次提取的章节数
   flavor?: string; // "struct" (default) | "mental"
   sourceAuthor?: string; // 仅 mental：来源作者，写入 skill frontmatter
+  deepMultiLens?: boolean; // 仅 mental：深度多镜头精提（V3 P1，opt-in）
   onExit: () => void; // 返回选择页
 }
 
@@ -56,6 +57,7 @@ export default function PatternSessionView({
   chapterCount,
   flavor,
   sourceAuthor,
+  deepMultiLens,
   onExit,
 }: Props) {
   const { t } = useTranslation();
@@ -94,6 +96,8 @@ export default function PatternSessionView({
         chapter_ids: chapterIds.length > 0 ? chapterIds : undefined,
         flavor: flavor || undefined,
         source_author: sourceAuthor || undefined,
+        deep_multi_lens:
+          deepMultiLens && flavor === "mental" ? deepMultiLens : undefined,
       });
       setResult({
         taskId: res.task_id || taskId,
@@ -374,6 +378,7 @@ export default function PatternSessionView({
             novelTitle={title}
             chapterCount={chapterCount}
             flavor={flavor}
+            deepMultiLens={deepMultiLens}
           />
         </div>
       )}

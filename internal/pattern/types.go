@@ -14,6 +14,10 @@ type ExtractPatternInput struct {
 	// SourceAuthor 仅 mental 有意义：被蒸馏的心智所属的作者（用于 V3 跨书聚合）。
 	// 由前端「来源作者」输入框传入，写入 skill frontmatter 的 source_author。
 	SourceAuthor string `json:"source_author,omitempty"`
+	// DeepMultiLens 仅 mental 有意义（opt-in）：开启后 final 阶段改用三路聚焦镜头
+	// （叙事心智模型 / 表达DNA / 创作决策启发式+价值观+诚实边界）分别生成再合并，
+	// 合计 token ≤7k，低于单轮 8k 护栏，提升五层结构的独立保真度（V3 P1）。
+	DeepMultiLens bool `json:"deep_multi_lens,omitempty"`
 }
 
 type ExtractPatternResult struct {
@@ -62,6 +66,17 @@ type ModelEvidence struct {
 	ChapterIDs []int64 `json:"chapter_ids" jsonschema:"required,description=佐证该模型的章节 chapter_id 列表；确定性门禁要求≥2 个相互独立的章节"`
 }
 
+// LensOutput 是 V3 P1 多镜头精提中单个镜头（mental/expression/decision）的产出。
+// 三路镜头各自聚焦五层结构的子集，最终由 mergeLensBodies 拼装为完整五层正文。
+// Name/Description 仅主镜头（mental）填写，其余镜头留空；Evidence 仅 mental 镜头产出
+// （用于确定性跨弧复现门禁），其余镜头留空。
+type LensOutput struct {
+	Name        string          `json:"name,omitempty" jsonschema:"description=技能名称（仅 mental 主镜头填写，其余镜头留空）"`
+	Description string          `json:"description,omitempty" jsonschema:"description=一句话描述（仅 mental 主镜头填写，其余镜头留空）"`
+	Content     string          `json:"content" jsonschema:"required,description=本镜头聚焦产出的技能正文 markdown（不含 frontmatter），仅含指定章节"`
+	Evidence    []ModelEvidence `json:"evidence,omitempty" jsonschema:"description=（仅 mental 镜头）每个心智模型的章节证据锚点；其余镜头留空"`
+}
+
 // FidelityScorecard 是 V2 产出后保真度测试的结果（nuwa 保真度评分卡的 fiction 适配版）。
 // 两项评分均 1–5：
 //   - KnownConsistency：已知立场一致性——作者已明确处理过的冲突，技能指导方向是否一致；
@@ -96,6 +111,7 @@ type Progress struct {
 	TaskID     string               `json:"task_id,omitempty"`
 	NovelID    int64                `json:"novel_id"`
 	Stage      string               `json:"stage"`
+	SubStep    string               `json:"sub_step,omitempty"`
 	Message    string               `json:"message"`
 	LLMStatus  LLMStatus            `json:"llm_status,omitempty"`
 	Round      int                  `json:"round,omitempty"`

@@ -2190,6 +2190,7 @@ export namespace pattern {
 	    chapter_ids?: number[];
 	    flavor?: string;
 	    source_author?: string;
+	    deep_multi_lens?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ExtractPatternInput(source);
@@ -2205,6 +2206,7 @@ export namespace pattern {
 	        this.chapter_ids = source["chapter_ids"];
 	        this.flavor = source["flavor"];
 	        this.source_author = source["source_author"];
+	        this.deep_multi_lens = source["deep_multi_lens"];
 	    }
 	}
 	export class Trace {

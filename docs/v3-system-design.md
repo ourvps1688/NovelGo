@@ -378,20 +378,20 @@ sequenceDiagram
 > 最小可用切片 = AGG-1/2/3/4/5/7。
 > **Wails 重生成（T-X1）是跨所有 Go 字段/方法变更的阻断项，必须在任何前端任务与 `App.*` 变更之后执行。**
 
-### P0 — 跨书聚合
-- **T-AGG-1｜派生 skill 数据模型 + 序列化落盘** — P0
+### P0 — 跨书聚合（已完成 ✅）
+- **T-AGG-1｜派生 skill 数据模型 + 序列化落盘** — 已完成
   - 文件：`internal/skill/types.go`（Skill/SkillMeta 增字段）、`internal/skill/save.go`（新建 `Serialize`/`WriteSkill`）
   - 依赖：无
   - 验证：`go build ./...`；`WriteSkill` 落盘文件可被 `ParseFile` 反解析且 frontmatter 字段齐全
-- **T-AGG-2｜聚合算法 `MergeMentalSkills`** — P0
+- **T-AGG-2｜聚合算法 `MergeMentalSkills`** — 已完成
   - 文件：`internal/skill/aggregate.go`（新建）、`internal/config`（仅复用 `UserSkillsDir`/`NovelSkillsDir`）
   - 依赖：T-AGG-1
   - 验证：`go test ./internal/skill -run Merge` 覆盖 ①作者名归一（trim+大小写折叠+别名）②跨书复现→`stable:true`+`appears_in` ③单书→`single-book` ④尾注格式 ⑤`merged_books` 去重
-- **T-AGG-3｜App 合并编排 + 跨书枚举 + 热重载** — P0
+- **T-AGG-3｜App 合并编排 + 跨书枚举 + 热重载** — 已完成
   - 文件：`app/skill_api.go`（增 `MergeMentalSkills`/`RebuildAggregated`）、`internal/skill/store.go`（增 `LoadDir`、`GroupByAuthor`）、`internal/novel`（仅调用 `List`）
   - 依赖：T-AGG-1、T-AGG-2
   - 验证：`go test ./app` Mock store 验证枚举+合并+落盘+ReloadUser 调用
-- **T-AGG-4｜前端作者档案分组 + 聚合卡 + 手动合并弹窗** — P0
+- **T-AGG-4｜前端作者档案分组 + 聚合卡 + 手动合并弹窗** — 已完成
   - 文件：`frontend/src/components/skill/SkillList.tsx`、`ManualMergeDialog.tsx`（新建）、`useSkills.ts`（透出字段）
   - 依赖：T-AGG-3、T-X1（wails regen 后 `SkillMeta` 含 `aggregated`/`merged_books` 等）
   - 验证：手动勾选 2 个同作者 mental skill → 生成聚合卡显示"合并自 N 本"+stable 比例；点"重建"重算
@@ -400,19 +400,23 @@ sequenceDiagram
   - 依赖：T-AGG-3、T-AGG-4
   - 验证：`go test ./internal/skill`（`ComputeSourceDigest` 顺序无关/内容变更/增删源/聚合源排除 + `ReconcileAggregates` 重建过期/删孤儿/未变跳过/忽略非聚合）、`go test ./app` 全过；golangci-lint + gofmt 全过。前端无需改动——"过期提示"由自动重建取代，手动「重建」按钮保留为冗余但无害的入口。
 
-### P1 — 多镜头精提
-- **T-ML-1｜输入/进度类型扩展** — P1
-  - 文件：`internal/pattern/types.go`（`ExtractPatternInput.DeepMultiLens`、`Progress.SubStep`、`lensOutput`）
+### P1 — 多镜头精提（已完成 ✅）
+- **T-ML-1｜输入/进度类型扩展** — 已完成
+  - 文件：`internal/pattern/types.go`（`ExtractPatternInput.DeepMultiLens`、`Progress.SubStep`、`LensOutput{Name,Description,Content,Evidence}`）
   - 依赖：无
-  - 验证：`go build ./...`
-- **T-ML-2｜`finalMentalSkill` 多镜头分支 + 三路 lens + 合并 + 进度** — P1
-  - 文件：`internal/pattern/extract.go`
+  - 验证：`go build ./...`、`gofmt -l` 全过（LF 归一后）
+- **T-ML-2｜`finalMentalSkill` 多镜头分支 + 三路 lens + 合并 + 进度** — 已完成
+  - 文件：`internal/pattern/extract.go`（`finalMentalMultiLens`/`finalMentalLens`/`mergeLensBodies`/`splitHonestySection` + 三路 token 预算常量 `lensExprMaxTokens=2k`/`lensMentalMaxTokens=3k`/`lensDecisionMaxTokens=2k`）、`internal/pattern/prompts.go`（`lensTitles`/`lensMentalSystemPrompt`/`lensMentalSkillMessages`）
+  - 复用既有 boundary→summary→chunk 单遍管线，仅改造 final 阶段内部；三路合计 7k < 单轮护栏 `mentalFinalMaxTokens`(8k)。
+  - 合并顺序（canonical）：叙事心智模型(mental) → 创作决策启发式/价值观(decision 前段) → 表达 DNA(expr) → 诚实边界(decision 后段，由 `splitHonestySection` 拆出后置）；`mergeLensBodies` 仅文本拼接，**不**二次调 LLM。
+  - V2 确定性门禁 `gateMentalEvidence` 与保真度自测 `fidelityTest` 在合并正文上运行；低置信度提示；mental.Name/Description 缺失回退用 `SourceAuthor` 拼名。
+  - 进度：`Progress.Stage="finalizing"` + `SubStep ∈ {"mental","expression","decision"}`。
   - 依赖：T-ML-1
-  - 验证：`go test ./internal/pattern -run MultiLens` 验证三路调用合计 ≤7k、合并产出五层、V2 门禁/保真度在合并正文上运行、单轮路径（DeepMultiLens=false）零回归
-- **T-ML-3｜前端深度多镜头开关 + 三步进度** — P1
-  - 文件：`PatternExtractView.tsx`（仅 mental 显示开关）、`PatternSessionView.tsx`（透传）、`PatternProgressView.tsx`（三步步进器）
+  - 验证：`go test ./internal/pattern`（全过，含 `TestLensBudgetLimit` 断言 7k、`TestSplitHonestySection`、`TestMergeLensBodies_CanonicalOrder`、`TestFinalMentalSkill_MultiLens` 端到端五层齐全+canonical 顺序+门禁降级+保真度+`DemotedModels`、`TestFinalMentalSkill_SingleRoundRegression` 单轮零回归）；golangci-lint + `go vet` 全过。
+- **T-ML-3｜前端深度多镜头开关 + 三步进度** — 已完成
+  - 文件：`PatternExtractView.tsx`（仅 mental 显示开关 `deepMultiLens` + 子说明 + mergeHint）、`PatternSessionView.tsx`（透传 + `ExtractPattern` 仅 mental 时带 `deep_multi_lens`）、`PatternProgressView.tsx`（三步步进器 mental→expression→decision）、`usePatternProgress.ts`（本地 `subStep` 类型化）、`frontend/src/lib/wailsjs/go/models.ts`（`ExtractPatternInput.deep_multi_lens`）、i18n `zh-CN.json`/`en.json`（`extract.deepMultiLens`/`deepMultiLensNote`/`mergeHint`/`lens.{title,mental,expression,decision}`）
   - 依赖：T-ML-2、T-X1
-  - 验证：开启后进度 finalizing 显示 mental→expression→decision 三步
+  - 验证：`npm run build`（tsc -b + vite）EXIT 0；`vitest run src/components/pattern/`（9 用例全过）。
 
 ### P2 — 写作闭环增强
 - **T-WC-1｜`PersonaRef` + `BuildSystemMessages(persona)` + 引导段** — P2

@@ -193,6 +193,101 @@ func mentalFinalSkillMessages(chunks []Chunk, chapterCount int, lowConfidence bo
 	}
 }
 
+// lensTitles 是三个镜头的中文名，用于 user 消息说明本次聚焦的章节。
+var lensTitles = map[string]string{
+	"mental":     "叙事心智模型",
+	"expression": "表达DNA",
+	"decision":   "创作决策启发式/价值观/诚实边界",
+}
+
+// lensMentalSystemPrompt 返回多镜头精提中某个镜头的聚焦系统提示词。
+// 复用 mentalFinalSkillSystemPrompt 的"蒸馏创作心智、非剧情摘要"核心 framing，但仅要求本镜头
+// 指定的章节，并给出 token 护栏，使三路合计 ≤7k（低于单轮 8k 护栏）。
+func lensMentalSystemPrompt(lens string, lowConfidence bool) string {
+	var b strings.Builder
+	b.WriteString(`你是一个小说创作心智分析师。
+
+你的任务不是总结剧情，而是从这本小说的已写章节中，蒸馏出**作者/叙事者的"创作心智"**——指导 AI 未来写作新章节时可复用的思维与表达操作系统。这是给写作系统使用的"创作指南"，不是人物小传，也不是剧情摘要。
+
+只能通过调用 output_skill 工具返回结果。本镜头只聚焦下面指定的章节（其余章节不要产出），content 中不要包含 YAML frontmatter。`)
+
+	switch lens {
+	case "mental":
+		b.WriteString(`
+
+工具参数要求：
+- name：中文名称，体现该作者的创作心智（如"X 的创作心智"）。
+- description：一句话描述何时启用此创作心智技能。
+- content：技能正文 markdown。**本镜头只产出一章**：
+  ## 叙事心智模型
+  3–7 个作者构造叙事的核心信念/框架（如冲突如何生成、信息何时收放、对节奏/命运/agent 的信念）。**每个模型必须附章节锚点**（"见第 N 章"或"第 N–M 章"），证明它真实出现在书中而非猜测。
+- evidence：每个心智模型的章节证据锚点（chapter_id 列表），用于确定性门禁（独立章节<2 的模型将降级为启发式）。
+
+**小说适配三重验证**：①跨章节/弧复现≥2 章才作"心智模型"，仅一次降级为启发式，0 处不收录；②有生成力（能指导写新章）；③有排他性（只收真正体现该作者独特性者）。
+**token 护栏**：本镜头「叙事心智模型」≤3k token（约 1200 字），过细则合并相邻模型，过简则补证据。`)
+		if lowConfidence {
+			b.WriteString("\n\n**样本量提示**：本次提取样本偏少，请将「叙事心智模型」缩减为 2–4 个最稳定的，并在「诚实边界」相关说明中声明样本不足（诚实边界由决策镜头产出，请在其章节中明确标注样本不足、结论可能不稳定）。")
+		}
+	case "expression":
+		b.WriteString(`
+
+工具参数要求：
+- content：技能正文 markdown。**本镜头只产出一章**，其余参数（name/description/evidence）留空：
+  ## 表达 DNA
+  句式指纹（长短句偏好、疑问/陈述比例）、高频词与禁忌词、节奏（先结论还是先铺垫、转折方式）、幽默与确定性语气。复用 style 六维画像思路并补小说专属维度：POV 与视角处理、时态、意象密度、对话-叙述比。
+
+**token 护栏**：本镜头「表达DNA」≤2k token（约 800 字），要有辨识度，不像通用 AI 腔。`)
+	case "decision":
+		b.WriteString(`
+
+工具参数要求：
+- content：技能正文 markdown。**本镜头产出三章（用 ## 分隔）**，其余参数（name/description/evidence）留空：
+  ## 创作决策启发式
+  5–10 条面临写作抉择时的快速规则，每条附书中案例章节锚点，并说明"遇到什么新情境会触发该规则"。
+  ## 价值观与反模式
+  作者追求什么、明确拒绝什么、以及作者内部张力（价值观冲突）。
+  ## 诚实边界
+  明确声明：本技能是从**虚构文本**推断的创作人格，**非作者真人三观**；可能混有角色个体声音而非作者稳定技法；并附推断依据（章节数 / 提取时间）。
+
+**token 护栏**：本镜头三章合计 ≤2k token（约 800 字）。`)
+		if lowConfidence {
+			b.WriteString("\n\n**样本量提示**：本次提取样本偏少，请在「诚实边界」中明确声明样本不足、结论可能不稳定。")
+		}
+	default:
+		// 未知镜头退回单轮完整提示词（不应发生，仅作兜底）。
+		return mentalFinalSkillSystemPrompt
+	}
+	return b.String()
+}
+
+// lensMentalSkillMessages 组装多镜头精提中单个镜头的提示词。
+// lowConfidence 透传给镜头系统提示词；evidence 是 V2-D 可选证据片段。
+func lensMentalSkillMessages(chunks []Chunk, lowConfidence bool, evidence []string, lens string) []map[string]any {
+	var b strings.Builder
+	for _, chunk := range chunks {
+		fmt.Fprintf(&b, "第%d-%d章（chapter_id: %d-%d） %s：%s\n", chunk.StartReadingNumber, chunk.EndReadingNumber, chunk.StartChapterID, chunk.EndChapterID, chunk.Name, chunk.Content)
+	}
+	prompt := lensMentalSystemPrompt(lens, lowConfidence)
+
+	title := lensTitles[lens]
+	if title == "" {
+		title = lens
+	}
+	userContent := "根据以下叙事阶段块，蒸馏该作者创作心智的「" + title + "」章节（仅产出于该镜头指定的章节）：\n\n" + b.String()
+	if len(evidence) > 0 {
+		var eb strings.Builder
+		eb.WriteString("\n\n## 全书证据片段（来自向量检索，供佐证，非必须全部采纳）\n")
+		for i, p := range evidence {
+			fmt.Fprintf(&eb, "\n证据%d：%s\n", i+1, strings.TrimSpace(p))
+		}
+		userContent += eb.String()
+	}
+	return []map[string]any{
+		{"role": "system", "content": prompt},
+		{"role": "user", "content": userContent},
+	}
+}
+
 const fidelityTestSystemPrompt = `你是一个严格的保真度审计员，负责核验一份"创作心智"写作技能是否忠实于它来源的小说，而非凭空臆造。
 
 你不会修改技能，只做评判。请根据提供的"全书叙事阶段块"与"已生成的创作心智技能"，完成两项测试，并通过 output_fidelity 工具返回评分卡：

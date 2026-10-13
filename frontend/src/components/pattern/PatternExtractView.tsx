@@ -31,6 +31,7 @@ interface SessionParams {
   chapterCount: number;
   flavor: string;
   sourceAuthor: string;
+  deepMultiLens: boolean;
 }
 
 export default function PatternExtractView({
@@ -63,6 +64,8 @@ export default function PatternExtractView({
   const [reasoningEffort, setReasoningEffort] = useState("");
   // 来源作者：仅 mental 提取有意义（用于 V3 跨书聚合归并键），可选填。
   const [sourceAuthor, setSourceAuthor] = useState("");
+  // 深度多镜头精提（V3 P1，opt-in）：仅 mental 有意义，开启后 final 阶段三路聚焦生成再合并。
+  const [deepMultiLens, setDeepMultiLens] = useState(false);
 
   useEffect(() => {
     if (!userSelectedNovelRef.current) {
@@ -151,6 +154,7 @@ export default function PatternExtractView({
       chapterCount: activeChapterCount,
       flavor,
       sourceAuthor,
+      deepMultiLens,
     });
     setView("session");
   }, [
@@ -164,6 +168,7 @@ export default function PatternExtractView({
     targetNovelTitle,
     flavor,
     sourceAuthor,
+    deepMultiLens,
   ]);
 
   // 切 model：若支持 reasoning 默认第一档，不支持时清空（与 ChatControls 一致）。
@@ -198,6 +203,7 @@ export default function PatternExtractView({
         chapterCount={sessionParams.chapterCount}
         flavor={sessionParams.flavor}
         sourceAuthor={sessionParams.sourceAuthor}
+        deepMultiLens={sessionParams.deepMultiLens}
         onExit={() => {
           setView("select");
           setSessionParams(null);
@@ -296,6 +302,23 @@ export default function PatternExtractView({
                   placeholder={t("extract.sourceAuthorPlaceholder")}
                   className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />
+                <label className="mt-3 flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={deepMultiLens}
+                    onChange={(e) => setDeepMultiLens(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+                  />
+                  <span className="text-xs text-foreground">
+                    {t("extract.deepMultiLens")}
+                    <span className="block text-[11px] text-muted-foreground mt-0.5">
+                      {t("extract.deepMultiLensNote")}
+                    </span>
+                  </span>
+                </label>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {t("extract.mergeHint")}
+                </p>
               </div>
             )}
             <div className="flex items-center justify-between rounded-lg border bg-card px-4 py-3">

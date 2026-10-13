@@ -16,6 +16,7 @@ interface PatternProgressPayload {
   task_id?: string;
   novel_id: number;
   stage: PatternProgressStage;
+  sub_step?: string;
   message: string;
   llm_status?: PatternLLMStatus;
   round?: number;
@@ -31,6 +32,7 @@ export interface PatternProgressState {
   taskId: string;
   novelId: number;
   stage: PatternProgressStage;
+  subStep: string;
   message: string;
   llmStatus: PatternLLMStatus;
   round: number;
@@ -45,6 +47,7 @@ export interface PatternProgressState {
 export interface PatternProgressEvent {
   id: string;
   stage: PatternProgressStage;
+  subStep: string;
   message: string;
   llmStatus: PatternLLMStatus;
   round: number;
@@ -68,6 +71,7 @@ function toState(data: PatternProgressPayload): PatternProgressState {
     taskId: data.task_id ?? "",
     novelId: data.novel_id,
     stage: data.stage,
+    subStep: data.sub_step ?? "",
     message: data.message,
     llmStatus: data.llm_status ?? "",
     round: data.round ?? 0,
@@ -87,6 +91,7 @@ function toEvent(
   return {
     id: `${state.taskId}-${index}`,
     stage: state.stage,
+    subStep: state.subStep,
     message: state.message,
     llmStatus: state.llmStatus,
     round: state.round,
