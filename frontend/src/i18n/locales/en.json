@@ -1177,6 +1177,16 @@
     "reExtract": "Re-extract",
     "saving": "Saving...",
     "saveToUserSkill": "Save to User Skills",
+    "fidelity": {
+      "title": "Fidelity Self-Test",
+      "passed": "Passed",
+      "failed": "Failed",
+      "knownConsistency": "Known-position consistency",
+      "unknownUncertainty": "Unknown-topic appropriate uncertainty",
+      "issues": "Issues found",
+      "demoted": "Demoted mental models (insufficient evidence): ",
+      "note": "The fidelity self-test is produced by the V2 post-generation check and is for quality reference only."
+    },
     "totalChapters_one": "{{count}} chapter",
     "totalChapters_other": "{{count}} chapters",
     "currentRange_one": "Current range: {{count}} chapter",

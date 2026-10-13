@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Save, Sparkle } from "lucide-react";
+import { Loader2, Save, ShieldCheck, Sparkle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toErrorMessage } from "@/utils/error";
 import {
@@ -7,6 +7,7 @@ import {
   CancelExtractPattern,
   GetContent,
 } from "@/lib/wailsjs/go/app/App";
+import type { FidelityScorecard } from "@/lib/wailsjs/go/models";
 import { useSaveContent } from "@/components/content/useSaveContent";
 import { isContentConflict } from "@/components/content/editorSaveQueue";
 import { reportAIFileChange } from "@/components/content/aiFileChanges";
@@ -40,6 +41,8 @@ interface ExtractResult {
   description: string;
   filePath: string;
   rawContent: string;
+  fidelity?: FidelityScorecard; // V2 产出后保真度自测（仅 mental）
+  demotedModels?: string[]; // V2 确定性门禁降级的心智模型（仅 mental）
 }
 
 export default function PatternSessionView({
@@ -99,6 +102,8 @@ export default function PatternSessionView({
         description: res.description,
         filePath: res.file_path,
         rawContent: res.raw_content,
+        fidelity: res.fidelity,
+        demotedModels: res.demoted_models,
       });
       setStatus("done");
     } catch (e: unknown) {
@@ -296,6 +301,66 @@ export default function PatternSessionView({
                 )}
               </tbody>
             </table>
+          )}
+          {flavor === "mental" && result.fidelity && (
+            <div className="rounded-lg border bg-muted/10 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-action-save" />
+                  {t("extract.fidelity.title")}
+                </span>
+                <span
+                  className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                    result.fidelity.passed
+                      ? "bg-success/15 text-success-foreground"
+                      : "bg-warning/15 text-warning-foreground"
+                  }`}
+                >
+                  {result.fidelity.passed
+                    ? t("extract.fidelity.passed")
+                    : t("extract.fidelity.failed")}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+                  <span className="text-muted-foreground">
+                    {t("extract.fidelity.knownConsistency")}
+                  </span>
+                  <span className="font-semibold text-foreground">
+                    {result.fidelity.known_consistency}/5
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+                  <span className="text-muted-foreground">
+                    {t("extract.fidelity.unknownUncertainty")}
+                  </span>
+                  <span className="font-semibold text-foreground">
+                    {result.fidelity.unknown_uncertainty}/5
+                  </span>
+                </div>
+              </div>
+              {result.fidelity.issues && result.fidelity.issues.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {t("extract.fidelity.issues")}
+                  </p>
+                  <ul className="list-disc pl-5 space-y-0.5 text-xs text-foreground">
+                    {result.fidelity.issues.map((iss, i) => (
+                      <li key={i}>{iss}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {result.demotedModels && result.demotedModels.length > 0 && (
+                <div className="text-xs text-warning-foreground">
+                  {t("extract.fidelity.demoted")}
+                  {result.demotedModels.join("、")}
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                {t("extract.fidelity.note")}
+              </p>
+            </div>
           )}
           <div className="rounded-lg border bg-muted/10 p-4">
             <Markdown content={body} />

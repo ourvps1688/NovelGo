@@ -865,10 +865,11 @@ func TestFinalSkill_MockLLM(t *testing.T) {
 		{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "主角觉醒"},
 	}
 
-	raw, err := e.finalSkill(context.Background(), defaultInput(), chunks, 0)
+	outcome, err := e.finalSkill(context.Background(), defaultInput(), chunks, 0)
 	if err != nil {
 		t.Fatalf("finalSkill: %v", err)
 	}
+	raw := outcome.Raw
 	if !strings.Contains(raw, "name: 逆袭模式") {
 		t.Errorf("final skill should contain frontmatter name, got:\n%s", raw)
 	}
@@ -898,10 +899,11 @@ func TestFinalMentalSkill(t *testing.T) {
 	input.Flavor = string(FlavorMental)
 	input.SourceAuthor = "刘慈欣"
 
-	raw, err := e.finalSkill(context.Background(), input, chunks, 30)
+	outcome, err := e.finalSkill(context.Background(), input, chunks, 30)
 	if err != nil {
 		t.Fatalf("finalMentalSkill: %v", err)
 	}
+	raw := outcome.Raw
 	if !strings.Contains(raw, "kind: mental") {
 		t.Errorf("mental skill should contain kind: mental, got:\n%s", raw)
 	}
@@ -933,12 +935,206 @@ func TestFinalSkill_LowConfidence(t *testing.T) {
 	input.Flavor = string(FlavorMental)
 	input.SourceAuthor = "刘慈欣"
 
-	raw, err := e.finalSkill(context.Background(), input, chunks, 3)
+	outcome, err := e.finalSkill(context.Background(), input, chunks, 3)
 	if err != nil {
 		t.Fatalf("finalMentalSkill: %v", err)
 	}
+	raw := outcome.Raw
 	if !strings.Contains(raw, "低置信度") {
 		t.Errorf("low chapter count should append low-confidence note, got:\n%s", raw)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// V2: 确定性跨弧复现门禁 / 保真度自测 / 向量证据前置
+// ---------------------------------------------------------------------------
+
+func TestGateMentalEvidence_DemotesUnderEvidenced(t *testing.T) {
+	evidence := []ModelEvidence{
+		{Model: "信息 withholding", ChapterIDs: []int64{3}},       // 仅 1 处 -> 降级
+		{Model: "命运不可控", ChapterIDs: []int64{5, 9}},          // 2 处 -> 保留
+		{Model: "POV 限知", ChapterIDs: []int64{1, 2, 8}},        // 3 处 -> 保留
+	}
+	demoted, note := gateMentalEvidence("content", evidence)
+	if len(demoted) != 1 || demoted[0] != "信息 withholding" {
+		t.Errorf("expected 1 demoted model '信息 withholding', got %v", demoted)
+	}
+	if !strings.Contains(note, "验证与降级说明") {
+		t.Errorf("note should contain 验证与降级说明, got:\n%s", note)
+	}
+	if !strings.Contains(note, "信息 withholding") {
+		t.Errorf("note should mention demoted model, got:\n%s", note)
+	}
+}
+
+func TestGateMentalEvidence_EmptyEvidenceNoOp(t *testing.T) {
+	demoted, note := gateMentalEvidence("content", nil)
+	if len(demoted) != 0 || note != "" {
+		t.Errorf("empty evidence should be a no-op, got demoted=%v note=%q", demoted, note)
+	}
+}
+
+func TestAppendFidelitySection(t *testing.T) {
+	md := "---\nname: x\n---\nbody"
+	f := &FidelityScorecard{KnownConsistency: 5, UnknownUncertainty: 4, Issues: []string{"a"}, Passed: true}
+	out := appendFidelitySection(md, f)
+	if !strings.Contains(out, "保真度自测") {
+		t.Errorf("missing 保真度自测 section:\n%s", out)
+	}
+	if !strings.Contains(out, "5/5") || !strings.Contains(out, "4/5") {
+		t.Errorf("missing scores:\n%s", out)
+	}
+	if !strings.Contains(out, "通过") {
+		t.Errorf("should be 通过:\n%s", out)
+	}
+}
+
+// mockToolRouter 按请求中的工具名返回对应的 JSON 参数，用于需要连续多次 tool call 的测试
+// （如 mental 提取后还要跑保真度自测）。
+func mockToolRouter(responses map[string]string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		_ = json.Unmarshal(body, &req)
+		toolName := ""
+		if len(req.Tools) > 0 {
+			toolName = req.Tools[0].Function.Name
+		}
+		argsJSON := responses[toolName]
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flusher", 500)
+			return
+		}
+		if argsJSON != "" {
+			startChunk := map[string]any{
+				"choices": []map[string]any{{
+					"delta": map[string]any{
+						"tool_calls": []map[string]any{{
+							"index":    0,
+							"id":       "call_mock",
+							"function": map[string]any{"name": toolName},
+						}},
+					},
+				}},
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(startChunk))
+			flusher.Flush()
+			argsChunk := map[string]any{
+				"choices": []map[string]any{{
+					"delta": map[string]any{
+						"tool_calls": []map[string]any{{
+							"index":    0,
+							"function": map[string]any{"arguments": argsJSON},
+						}},
+					},
+				}},
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(argsChunk))
+			flusher.Flush()
+		} else {
+			contentChunk := map[string]any{
+				"choices": []map[string]any{{
+					"delta": map[string]any{"content": "fallback"},
+				}},
+			}
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(contentChunk))
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}
+}
+
+func TestFinalMentalSkill_V2GateAndFidelity(t *testing.T) {
+	skillOut := MentalSkillOutput{
+		Name:        "X 的创作心智",
+		Description: "用 X 的叙事习惯写新章节",
+		Content:     "# X 的创作心智\n## 叙事心智模型\n信息 withholding 与命运不可控。\n## 表达 DNA\n短句。",
+		Evidence: []ModelEvidence{
+			{Model: "信息 withholding", ChapterIDs: []int64{3}}, // 降级
+			{Model: "命运不可控", ChapterIDs: []int64{5, 9}},    // 保留
+		},
+	}
+	skillJSON, _ := json.Marshal(skillOut)
+	fidelityJSON, _ := json.Marshal(FidelityScorecard{KnownConsistency: 5, UnknownUncertainty: 4, Passed: true})
+
+	router := mockToolRouter(map[string]string{
+		"output_skill":    string(skillJSON),
+		"output_fidelity": string(fidelityJSON),
+	})
+	e := testExtractor(router)
+	chunks := []Chunk{
+		{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "主角觉醒"},
+	}
+	input := defaultInput()
+	input.Flavor = string(FlavorMental)
+
+	outcome, err := e.finalSkill(context.Background(), input, chunks, 30)
+	if err != nil {
+		t.Fatalf("finalMentalSkill: %v", err)
+	}
+	raw := outcome.Raw
+	if !strings.Contains(raw, "验证与降级说明") {
+		t.Errorf("expected gate note, got:\n%s", raw)
+	}
+	if !strings.Contains(raw, "信息 withholding") {
+		t.Errorf("expected demoted model in note, got:\n%s", raw)
+	}
+	if !strings.Contains(raw, "保真度自测") {
+		t.Errorf("expected fidelity section, got:\n%s", raw)
+	}
+	if outcome.Fidelity == nil || outcome.Fidelity.KnownConsistency != 5 {
+		t.Errorf("expected fidelity scorecard, got %+v", outcome.Fidelity)
+	}
+	if len(outcome.DemotedModels) != 1 || outcome.DemotedModels[0] != "信息 withholding" {
+		t.Errorf("expected 1 demoted model, got %v", outcome.DemotedModels)
+	}
+}
+
+func TestMentalFinalSkillMessages_EvidenceInjection(t *testing.T) {
+	chunks := []Chunk{{Name: "崛起", StartChapterID: 1, EndChapterID: 5, StartReadingNumber: 1, EndReadingNumber: 5, Content: "x"}}
+	msgs := mentalFinalSkillMessages(chunks, 30, false, []string{"证据片段A", "证据片段B"})
+	if len(msgs) < 2 {
+		t.Fatalf("expected >=2 messages, got %d", len(msgs))
+	}
+	userContent, _ := msgs[1]["content"].(string)
+	if !strings.Contains(userContent, "全书证据片段") {
+		t.Errorf("evidence block missing, got:\n%s", userContent)
+	}
+	if !strings.Contains(userContent, "证据片段A") || !strings.Contains(userContent, "证据片段B") {
+		t.Errorf("evidence passages missing, got:\n%s", userContent)
+	}
+}
+
+type fakeRetriever struct{ passages []string }
+
+func (f *fakeRetriever) RetrieveEvidence(ctx context.Context, novelID int64, queries []string, topK int) ([]string, error) {
+	return f.passages, nil
+}
+
+func TestRetrieveEvidence_NilRetriever(t *testing.T) {
+	e := &Extractor{}
+	got := e.retrieveEvidence(context.Background(), 1)
+	if got != nil {
+		t.Errorf("expected nil passages when retriever absent, got %v", got)
+	}
+}
+
+func TestRetrieveEvidence_UsesRetriever(t *testing.T) {
+	e := &Extractor{EvidenceRetriever: &fakeRetriever{passages: []string{"p1", "p2"}}}
+	got := e.retrieveEvidence(context.Background(), 1)
+	if len(got) != 2 {
+		t.Errorf("expected 2 passages, got %v", got)
 	}
 }
 

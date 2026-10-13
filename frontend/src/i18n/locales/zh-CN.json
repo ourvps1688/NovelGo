@@ -1151,6 +1151,16 @@
     "reExtract": "重新提取",
     "saving": "保存中...",
     "saveToUserSkill": "保存到用户技能",
+    "fidelity": {
+      "title": "保真度自测",
+      "passed": "通过",
+      "failed": "未通过",
+      "knownConsistency": "已知立场一致性",
+      "unknownUncertainty": "未知题材适度不确定",
+      "issues": "发现的问题",
+      "demoted": "已降级的心智模型（证据不足）：",
+      "note": "保真度自测由 V2 产出后测试生成，仅作质量参考。"
+    },
     "totalChapters": "共 {{count}} 章",
     "currentRange": "当前范围 {{count}} 章",
     "noAvailableWork": "无可用作品",

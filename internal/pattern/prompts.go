@@ -158,13 +158,16 @@ const mentalFinalSkillSystemPrompt = `你是一个小说创作心智分析师。
 
 **质量自检（生成前逐项确认）**：每个心智模型是否都有≥2 章证据？模型数是否在 3–7？表达 DNA 是否有辨识度（不像通用 AI 腔）？诚实边界是否填了来源与时间？
 
+**token 护栏（V2-A）**：「叙事心智模型」一节控制在约 1.5k–2.5k token（约 600–1000 字）内；整体 content 不超过 ~8k token。过细则合并相邻模型，过简则补证据。
+
 {{LOW_CONFIDENCE_NOTE}}
 
 再次强调：content 是给写作系统用的创作指南，要抽象出可复用规律；每个断言都要有章节锚点；content 中不要包含 YAML frontmatter。`
 
 // mentalFinalSkillMessages 组装 mental flavor 的最终提示词。
 // chapterCount 与 lowConfidence 用于注入样本量提示：章节少于 20 时要求缩减模型数量并声明样本不足。
-func mentalFinalSkillMessages(chunks []Chunk, chapterCount int, lowConfidence bool) []map[string]any {
+// evidence 是 V2-D 可选的全书向量检索证据片段；非空时前置到 user 消息，减少 LLM 重读全本。
+func mentalFinalSkillMessages(chunks []Chunk, chapterCount int, lowConfidence bool, evidence []string) []map[string]any {
 	var b strings.Builder
 	for _, chunk := range chunks {
 		fmt.Fprintf(&b, "第%d-%d章（chapter_id: %d-%d） %s：%s\n", chunk.StartReadingNumber, chunk.EndReadingNumber, chunk.StartChapterID, chunk.EndChapterID, chunk.Name, chunk.Content)
@@ -174,8 +177,40 @@ func mentalFinalSkillMessages(chunks []Chunk, chapterCount int, lowConfidence bo
 		note = "**样本量提示**：本次提取仅基于 " + fmt.Sprintf("%d", chapterCount) + " 章，样本偏少。请将「叙事心智模型」缩减为 2–4 个最稳定的，并在「诚实边界」中明确声明样本不足、结论可能不稳定。"
 	}
 	prompt := strings.Replace(mentalFinalSkillSystemPrompt, "{{LOW_CONFIDENCE_NOTE}}", note, 1)
+
+	userContent := "根据以下叙事阶段块，蒸馏该作者的创作心智技能：\n\n" + b.String()
+	if len(evidence) > 0 {
+		var eb strings.Builder
+		eb.WriteString("\n\n## 全书证据片段（来自向量检索，供佐证，非必须全部采纳）\n")
+		for i, p := range evidence {
+			fmt.Fprintf(&eb, "\n证据%d：%s\n", i+1, strings.TrimSpace(p))
+		}
+		userContent += eb.String()
+	}
 	return []map[string]any{
 		{"role": "system", "content": prompt},
-		{"role": "user", "content": "根据以下叙事阶段块，蒸馏该作者的创作心智技能：\n\n" + b.String()},
+		{"role": "user", "content": userContent},
+	}
+}
+
+const fidelityTestSystemPrompt = `你是一个严格的保真度审计员，负责核验一份"创作心智"写作技能是否忠实于它来源的小说，而非凭空臆造。
+
+你不会修改技能，只做评判。请根据提供的"全书叙事阶段块"与"已生成的创作心智技能"，完成两项测试，并通过 output_fidelity 工具返回评分卡：
+
+1. **已知立场一致性（known_consistency，1–5）**：从书中作者**已明确处理过**的冲突/抉择中挑选 1–2 个，判断：若严格按技能的指导去写新章节，是否会导向与该书实际处理**方向一致**的结局？一致给 4–5，部分一致给 3，矛盾或扭曲给 1–2。
+
+2. **未知题材适度不确定（unknown_uncertainty，1–5）**：设想一个本书作者**从未涉及**的题材/类型（如慢热爱情副线、法庭戏、星际政治），判断：技能是否会**过度断言**它在这种题材下也成立（斩钉截铁、以偏概全）？还是会**诚实表达适度不确定**（"这位作者在该题材下如何表现尚不可知，需以真实文本核验"）？能避免过度断言给 4–5，照搬到未知领域给 1–2。
+
+将发现的具体问题写入 issues 列表（若无则留空）。passed 在两项均 ≥3 时为 true。只通过 output_fidelity 工具返回，不要输出多余文字。`
+
+// fidelityTestMessages 组装产出后保真度自测的提示词：把全书阶段块与已生成技能一并交给审计员。
+func fidelityTestMessages(chunks []Chunk, skillContent string) []map[string]any {
+	var b strings.Builder
+	for _, chunk := range chunks {
+		fmt.Fprintf(&b, "第%d-%d章（chapter_id: %d-%d） %s：%s\n", chunk.StartReadingNumber, chunk.EndReadingNumber, chunk.StartChapterID, chunk.EndChapterID, chunk.Name, chunk.Content)
+	}
+	return []map[string]any{
+		{"role": "system", "content": fidelityTestSystemPrompt},
+		{"role": "user", "content": fmt.Sprintf("以下是全书叙事阶段块：\n\n%s\n\n以下是已生成的创作心智技能正文：\n\n%s\n\n请按系统指令完成两项保真度测试并返回评分卡。", b.String(), skillContent)},
 	}
 }

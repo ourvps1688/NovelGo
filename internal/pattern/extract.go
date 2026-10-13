@@ -25,15 +25,37 @@ const (
 	outputBoundariesTool       = "output_boundary_hints"
 	outputChapterSummariesTool = "output_chapter_summaries"
 	outputChunksTool           = "output_chunks"
+	outputFidelityTool         = "output_fidelity"
 	finalChunkBudget           = 80_000
 	defaultContextWindow       = 128_000
+	// mentalFinalMaxTokens 是 V2-A 心智技能最终生成的 token 护栏：限制整体产出体量，
+	// 并要求「叙事心智模型」一节控制在约 1.5k–2.5k token（见 mentalFinalSkillSystemPrompt）。
+	mentalFinalMaxTokens = 8_000
 )
+
+// EvidenceRetriever 是 V2-D 的可选证据检索器。当 Extractor 持有非 nil 实例时，
+// mental flavor 的最终提示词会前置来自全书向量检索的证据片段，减少 LLM 重读全本。
+// 缺失（如本机无 ONNX 嵌入）时自动跳过，不影响主流程。
+type EvidenceRetriever interface {
+	// RetrieveEvidence 返回与 queries 相关的证据文本片段（已截断）。topK<=0 时使用实现默认值。
+	RetrieveEvidence(ctx context.Context, novelID int64, queries []string, topK int) ([]string, error)
+}
+
+// mentalEvidenceQueries 是 V2-D 注入向量检索的种子查询，覆盖心智提取的四个关注面。
+var mentalEvidenceQueries = []string{
+	"叙事冲突如何生成与解决",
+	"作者做出关键创作决策的场景",
+	"独特的句式与表达习惯",
+	"作者刻意回避或拒绝的写法",
+}
 
 type Extractor struct {
 	Chapters  *chapter.Store
 	LLMClient *llm.Client
 	DB        *gorm.DB
 	Progress  func(Progress)
+	// EvidenceRetriever 可选；非 nil 时启用 V2-D 向量证据前置。
+	EvidenceRetriever EvidenceRetriever
 }
 
 // Extract 执行完整的模式提取 Pipeline：Pre-step 边界分析 → Step 1 章节摘要 → Step 2 递归压缩 → Step 3 生成技能
@@ -218,11 +240,11 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		Tokens:  trace.FinalTokens,
 		Chunks:  chunks,
 	})
-	raw, err := e.finalSkill(ctx, input, chunks, len(chapters))
+	outcome, err := e.finalSkill(ctx, input, chunks, len(chapters))
 	if err != nil {
 		return nil, err
 	}
-	sk, err := skill.ParseBytes([]byte(raw), "ai")
+	sk, err := skill.ParseBytes([]byte(outcome.Raw), "ai")
 	if err != nil {
 		return nil, fmt.Errorf("解析生成的技能失败: %w", err)
 	}
@@ -234,12 +256,15 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		Tokens:  trace.FinalTokens,
 	})
 	return &ExtractPatternResult{
-		TaskID:      input.TaskID,
-		Name:        sk.Name,
-		Description: sk.Description,
-		RawContent:  sk.RawContent,
-		FilePath:    fmt.Sprintf("~/.novelgo/skills/%s.md", safeName),
-		Trace:       trace,
+		TaskID:        input.TaskID,
+		Name:          sk.Name,
+		Description:   sk.Description,
+		RawContent:    sk.RawContent,
+		FilePath:      fmt.Sprintf("~/.novelgo/skills/%s.md", safeName),
+		Flavor:        input.Flavor,
+		Fidelity:      outcome.Fidelity,
+		DemotedModels: outcome.DemotedModels,
+		Trace:         trace,
 	}, nil
 }
 
@@ -473,13 +498,24 @@ func (e *Extractor) compressChunks(ctx context.Context, input ExtractPatternInpu
 	return all, trace, nil
 }
 
+// finalSkillOutcome 是 Step 3 的最终产出；mental flavor 会额外携带保真度自测与降级信息。
+type finalSkillOutcome struct {
+	Raw           string
+	Fidelity      *FidelityScorecard
+	DemotedModels []string
+}
+
 // finalSkill Step 3：所有阶段块 → 通过 output_skill 工具调用生成最终技能。
 // 按 flavor 分流：struct 走套路模板（buildSkillMarkdown），mental 走创作心智（buildMentalSkillMarkdown）。
-func (e *Extractor) finalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (string, error) {
+func (e *Extractor) finalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (finalSkillOutcome, error) {
 	if Flavor(input.Flavor) == FlavorMental {
 		return e.finalMentalSkill(ctx, input, chunks, chapterCount)
 	}
-	return e.finalStructSkill(ctx, input, chunks)
+	out, err := e.finalStructSkill(ctx, input, chunks)
+	if err != nil {
+		return finalSkillOutcome{}, err
+	}
+	return finalSkillOutcome{Raw: out}, nil
 }
 
 // finalStructSkill 生成套路模板技能（原 finalSkill 逻辑）。
@@ -502,24 +538,53 @@ func (e *Extractor) finalStructSkill(ctx context.Context, input ExtractPatternIn
 }
 
 // finalMentalSkill 生成创作心智技能：复用同一编排，仅替换 final 提示词与 frontmatter。
-// chapterCount < 20 时标记低置信度，提示词要求缩减心智模型数量并诚实声明样本不足。
-func (e *Extractor) finalMentalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (string, error) {
+// 流水线：①（V2-D 可选）向量检索证据前置；② 生成；③（V2-B）确定性跨弧复现门禁；
+// ④（V1）低置信度提示；⑤（V2-C）产出后保真度自测。
+func (e *Extractor) finalMentalSkill(ctx context.Context, input ExtractPatternInput, chunks []Chunk, chapterCount int) (finalSkillOutcome, error) {
 	onStatus := func(s LLMStatus) {
 		e.emit(input, Progress{Stage: StageFinalizing, LLMStatus: s})
 	}
 	lowConfidence := chapterCount < 20
-	raw, err := e.callTool(ctx, input, "output_skill", MentalSkillOutput{}, mentalFinalSkillMessages(chunks, chapterCount, lowConfidence), 2, 64000, onStatus)
+
+	// ①（V2-D）向量检索证据前置（可选，缺失则跳过）
+	evidencePassages := e.retrieveEvidence(ctx, input.NovelID)
+
+	raw, err := e.callTool(ctx, input, "output_skill", MentalSkillOutput{},
+		mentalFinalSkillMessages(chunks, chapterCount, lowConfidence, evidencePassages), 2, mentalFinalMaxTokens, onStatus)
 	if err != nil {
-		return "", err
+		return finalSkillOutcome{}, err
 	}
 	var out MentalSkillOutput
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("解析生成的心智技能失败: %w", err)
+		return finalSkillOutcome{}, fmt.Errorf("解析生成的心智技能失败: %w", err)
 	}
 	if strings.TrimSpace(out.Name) == "" || strings.TrimSpace(out.Content) == "" {
-		return "", fmt.Errorf("LLM 返回的心智技能内容不完整")
+		return finalSkillOutcome{}, fmt.Errorf("LLM 返回的心智技能内容不完整")
 	}
-	return buildMentalSkillMarkdown(out.Name, out.Description, out.Content, input.SourceAuthor, lowConfidence), nil
+
+	// ③（V2-B）确定性跨弧复现门禁：独立章节证据 <2 的心智模型降级为启发式
+	demoted, gateNote := gateMentalEvidence(out.Content, out.Evidence)
+
+	// 组装正文：原始内容 + 门禁降级说明 + 低置信度提示
+	body := strings.TrimSpace(out.Content) + gateNote
+	if lowConfidence {
+		body += "\n\n> ⚠️ 低置信度提示：本次提取样本章节较少（少于 20 章），上述心智模型与启发式可能不稳定，建议积累更多章节后重新提取。\n"
+	}
+	md := buildMentalSkillMarkdown(out.Name, out.Description, body, input.SourceAuthor)
+
+	// ⑤（V2-C）产出后保真度自测（失败不阻断主流程，仅记录）
+	fidelity, ferr := e.fidelityTest(ctx, input, chunks, out.Content)
+	if ferr != nil {
+		e.emit(input, Progress{Stage: StageFinalizing, Message: "保真度自测跳过：" + ferr.Error()})
+	} else if fidelity != nil {
+		md = appendFidelitySection(md, fidelity)
+	}
+
+	return finalSkillOutcome{
+		Raw:           md,
+		Fidelity:      fidelity,
+		DemotedModels: demoted,
+	}, nil
 }
 
 // buildSkillMarkdown 组装完整的 skill markdown：固定 frontmatter + 正文。
@@ -539,8 +604,8 @@ func buildSkillMarkdown(name, description, content string) string {
 }
 
 // buildMentalSkillMarkdown 组装创作心智 skill markdown：frontmatter 标注 kind: mental，
-// 并写入 source_author（V3 跨书聚合归并键）与低置信度提示。
-func buildMentalSkillMarkdown(name, description, content, sourceAuthor string, lowConfidence bool) string {
+// 并写入 source_author（V3 跨书聚合归并键）。低置信度提示与门禁降级说明由调用方追加到 content。
+func buildMentalSkillMarkdown(name, description, content, sourceAuthor string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", name)
@@ -554,13 +619,91 @@ func buildMentalSkillMarkdown(name, description, content, sourceAuthor string, l
 	}
 	b.WriteString("version: 1\n")
 	b.WriteString("---\n\n")
-	body := strings.TrimSpace(content)
-	if lowConfidence {
-		body += "\n\n> ⚠️ 低置信度提示：本次提取样本章节较少（少于 20 章），上述心智模型与启发式可能不稳定，建议积累更多章节后重新提取。\n"
-	}
-	b.WriteString(body)
+	b.WriteString(strings.TrimSpace(content))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// gateMentalEvidence 执行 V2-B 确定性跨弧复现门禁：统计每个心智模型的独立章节证据数，
+// 独立章节 < 2 的模型标记为"证据不足，降级为启发式"。返回被降级的模型名与待追加的说明段。
+// 若 LLM 未返回 Evidence（向前兼容 V1 行为），返回空，交由提示词中的 LLM 自评兜底。
+func gateMentalEvidence(content string, evidence []ModelEvidence) (demoted []string, note string) {
+	if len(evidence) == 0 {
+		return nil, ""
+	}
+	var lines []string
+	for _, ev := range evidence {
+		name := strings.TrimSpace(ev.Model)
+		if name == "" {
+			continue
+		}
+		seen := make(map[int64]bool, len(ev.ChapterIDs))
+		for _, id := range ev.ChapterIDs {
+			seen[id] = true
+		}
+		if len(seen) < 2 {
+			demoted = append(demoted, name)
+			lines = append(lines, fmt.Sprintf("- 「%s」：独立章节证据仅 %d 处（门禁要求 ≥2），已降级为创作决策启发式。", name, len(seen)))
+		}
+	}
+	if len(lines) == 0 {
+		return nil, ""
+	}
+	note = "\n\n## 验证与降级说明\n\n" +
+		"> 确定性跨弧复现门禁（V2）：以下心智模型因独立章节证据不足，已降级为启发式，建议作为「创作决策启发式」而非稳定的「叙事心智模型」使用：\n\n" +
+		strings.Join(lines, "\n")
+	return demoted, note
+}
+
+// retrieveEvidence 调用可选的向量检索器（V2-D）获取全书证据片段；缺失或出错时返回 nil（无操作）。
+func (e *Extractor) retrieveEvidence(ctx context.Context, novelID int64) []string {
+	if e.EvidenceRetriever == nil {
+		return nil
+	}
+	passages, err := e.EvidenceRetriever.RetrieveEvidence(ctx, novelID, mentalEvidenceQueries, 4)
+	if err != nil {
+		e.emit(ExtractPatternInput{NovelID: novelID}, Progress{Stage: StageFinalizing, Message: "向量证据检索不可用，跳过：" + err.Error()})
+		return nil
+	}
+	return passages
+}
+
+// fidelityTest 执行 V2-C 产出后保真度自测：用本书作者已明确处理过的冲突测方向一致性，
+// 用作者从未涉及的题材测"适度不确定而非斩钉截铁"。返回评分卡；失败返回 error（由调用方决定是否阻断）。
+func (e *Extractor) fidelityTest(ctx context.Context, input ExtractPatternInput, chunks []Chunk, skillContent string) (*FidelityScorecard, error) {
+	onStatus := func(s LLMStatus) {
+		e.emit(input, Progress{Stage: StageFinalizing, Message: "正在执行产出后保真度自测...", LLMStatus: s})
+	}
+	raw, err := e.callTool(ctx, input, outputFidelityTool, FidelityScorecard{}, fidelityTestMessages(chunks, skillContent), 2, 2000, onStatus)
+	if err != nil {
+		return nil, err
+	}
+	var sc FidelityScorecard
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		return nil, fmt.Errorf("解析保真度自测结果失败: %w", err)
+	}
+	sc.Passed = sc.KnownConsistency >= 3 && sc.UnknownUncertainty >= 3
+	return &sc, nil
+}
+
+// appendFidelitySection 将保真度自测结果追加到 skill markdown 末尾，供审阅者直接可见。
+func appendFidelitySection(md string, f *FidelityScorecard) string {
+	status := "通过"
+	if !f.Passed {
+		status = "未通过"
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## 保真度自测\n\n")
+	fmt.Fprintf(&b, "> 已知立场一致性：%d/5 ｜ 未知题材适度不确定：%d/5 ｜ 结论：**%s**\n\n", f.KnownConsistency, f.UnknownUncertainty, status)
+	if len(f.Issues) > 0 {
+		b.WriteString("发现的问题：\n")
+		for _, iss := range f.Issues {
+			fmt.Fprintf(&b, "- %s\n", strings.TrimSpace(iss))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("> 保真度自测由 V2 产出后测试生成，仅作质量参考，不构成绝对评判。\n")
+	return md + b.String()
 }
 
 // callTool 请求 LLM 调用指定工具，返回结构化 JSON。

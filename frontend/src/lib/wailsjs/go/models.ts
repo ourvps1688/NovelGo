@@ -2178,6 +2178,8 @@ export namespace pattern {
 	    raw_content: string;
 	    file_path: string;
 	    flavor?: string;
+	    fidelity?: FidelityScorecard;
+	    demoted_models?: string[];
 	    trace?: Trace;
 
 	    static createFrom(source: any = {}) {
@@ -2192,9 +2194,10 @@ export namespace pattern {
 	        this.raw_content = source["raw_content"];
 	        this.file_path = source["file_path"];
 	        this.flavor = source["flavor"];
+	        this.fidelity = this.convertValues(source["fidelity"], FidelityScorecard);
+	        this.demoted_models = this.convertValues(source["demoted_models"], null);
 	        this.trace = this.convertValues(source["trace"], Trace);
 	    }
-	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -3257,3 +3260,21 @@ export namespace writingconfig {
 
 }
 
+export class FidelityScorecard {
+	    known_consistency: number;
+	    unknown_uncertainty: number;
+	    issues?: string[];
+	    passed: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new FidelityScorecard(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+        this.known_consistency = source["known_consistency"];
+        this.unknown_uncertainty = source["unknown_uncertainty"];
+        this.issues = source["issues"];
+        this.passed = source["passed"];
+	    }
+	}
