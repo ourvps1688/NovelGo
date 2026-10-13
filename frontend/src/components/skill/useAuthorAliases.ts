@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { GetAuthorAliases, SaveAuthorAliases } from "@/lib/wailsjs/go/app/App";
-import type { app } from "@/lib/wailsjs/go/models";
+import { app } from "@/lib/wailsjs/go/models";
 import { skillKeys } from "@/lib/queryKeys";
 
 // useAuthorAliases: 读取用户级「作者别名映射」配置。
@@ -10,7 +10,11 @@ export function useAuthorAliases() {
     queryKey: ["authorAliases"],
     queryFn: async () => {
       const res = await GetAuthorAliases();
-      if (!res) return { version: 1, groups: [] } as app.GetAuthorAliasesResult;
+      if (!res)
+        return app.GetAuthorAliasesResult.createFrom({
+          version: 1,
+          groups: [],
+        });
       return res;
     },
   });

@@ -1,5 +1,38 @@
+export namespace agentcfg {
+	
+	export class PersonaRef {
+	    kind: string;
+	    ref: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PersonaRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.ref = source["ref"];
+	    }
+	}
+
+}
+
 export namespace app {
 	
+	export class AuthorAliasGroupDTO {
+	    canonical: string;
+	    aliases: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AuthorAliasGroupDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.canonical = source["canonical"];
+	        this.aliases = source["aliases"];
+	    }
+	}
 	export class CharacterGroupInput {
 	    name: string;
 	    description: string;
@@ -30,30 +63,48 @@ export namespace app {
 	        this.remove_group_ids = source["remove_group_ids"];
 	    }
 	}
-export class ChatInput {
-    session_id: string;
-    novel_id: number;
-    message: string;
-    provider_name: string;
-    model_id: string;
-    reasoning_effort: string;
-    persona?: agentcfg.PersonaRef;
-
-    static createFrom(source: any = {}) {
-        return new ChatInput(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.session_id = source["session_id"];
-        this.novel_id = source["novel_id"];
-        this.message = source["message"];
-        this.provider_name = source["provider_name"];
-        this.model_id = source["model_id"];
-        this.reasoning_effort = source["reasoning_effort"];
-        this.persona = source["persona"];
-    }
-}
+	export class ChatInput {
+	    session_id: string;
+	    novel_id: number;
+	    message: string;
+	    provider_name: string;
+	    model_id: string;
+	    reasoning_effort: string;
+	    persona?: agentcfg.PersonaRef;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.session_id = source["session_id"];
+	        this.novel_id = source["novel_id"];
+	        this.message = source["message"];
+	        this.provider_name = source["provider_name"];
+	        this.model_id = source["model_id"];
+	        this.reasoning_effort = source["reasoning_effort"];
+	        this.persona = this.convertValues(source["persona"], agentcfg.PersonaRef);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ChatResult {
 	    session_id: string;
 	    turn_id: number;
@@ -120,30 +171,14 @@ export class ChatInput {
 	}
 	export class CompressResult {
 	    turn_id: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new CompressResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.turn_id = source["turn_id"];
-	    }
-	}
-	export class SavePersonaSettingInput {
-	    enabled: boolean;
-	    kind: string;
-	    ref: string;
-
-	    static createFrom(source: any = {}) {
-	        return new SavePersonaSettingInput(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.enabled = source["enabled"];
-	        this.kind = source["kind"];
-	        this.ref = source["ref"];
 	    }
 	}
 	export class ComputeStyleStatsInput {
@@ -438,6 +473,38 @@ export class ChatInput {
 	        this.reasoning_effort = source["reasoning_effort"];
 	    }
 	}
+	export class GetAuthorAliasesResult {
+	    version: number;
+	    groups: AuthorAliasGroupDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GetAuthorAliasesResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.version = source["version"];
+	        this.groups = this.convertValues(source["groups"], AuthorAliasGroupDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class GetCharacterGroupMembersInput {
 	    novel_id: number;
 	    page: number;
@@ -690,6 +757,36 @@ export class ChatInput {
 	        this.count = source["count"];
 	    }
 	}
+	export class SaveAuthorAliasesInput {
+	    groups: AuthorAliasGroupDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveAuthorAliasesInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.groups = this.convertValues(source["groups"], AuthorAliasGroupDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class SaveContentInput {
 	    novel_id: number;
 	    path: string;
@@ -706,6 +803,22 @@ export class ChatInput {
 	        this.path = source["path"];
 	        this.content = source["content"];
 	        this.expected_content = source["expected_content"];
+	    }
+	}
+	export class SavePersonaSettingInput {
+	    enabled: boolean;
+	    kind: string;
+	    ref: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavePersonaSettingInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.kind = source["kind"];
+	        this.ref = source["ref"];
 	    }
 	}
 	export class SaveSettingsInput {
@@ -1093,46 +1206,6 @@ export class ChatInput {
 	    }
 	}
 
-	export class AuthorAliasGroupDTO {
-	    canonical: string;
-	    aliases: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new AuthorAliasGroupDTO(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.canonical = source["canonical"];
-	        this.aliases = source["aliases"];
-	    }
-	}
-	export class GetAuthorAliasesResult {
-	    version: number;
-	    groups: AuthorAliasGroupDTO[];
-
-	    static createFrom(source: any = {}) {
-	        return new GetAuthorAliasesResult(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.version = source["version"];
-	        this.groups = source["groups"];
-	    }
-	}
-	export class SaveAuthorAliasesInput {
-	    groups: AuthorAliasGroupDTO[];
-
-	    static createFrom(source: any = {}) {
-	        return new SaveAuthorAliasesInput(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.groups = source["groups"];
-	    }
-	}
 }
 
 export namespace apperr {
@@ -2341,6 +2414,55 @@ export namespace pattern {
 
 }
 
+export namespace personasetting {
+	
+	export class PersonaSetting {
+	    id: number;
+	    novel_id: number;
+	    enabled: boolean;
+	    kind: string;
+	    ref: string;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new PersonaSetting(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.novel_id = source["novel_id"];
+	        this.enabled = source["enabled"];
+	        this.kind = source["kind"];
+	        this.ref = source["ref"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace preference {
 	
 	export class PreferenceItem {
@@ -2642,6 +2764,7 @@ export namespace skill {
 	    stable_items: number;
 	    single_book_items: number;
 	    aggregated_at: string;
+	    aggregated_source_hash: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Skill(source);
@@ -2665,6 +2788,7 @@ export namespace skill {
 	        this.stable_items = source["stable_items"];
 	        this.single_book_items = source["single_book_items"];
 	        this.aggregated_at = source["aggregated_at"];
+	        this.aggregated_source_hash = source["aggregated_source_hash"];
 	    }
 	}
 	export class SkillMeta {
@@ -3436,71 +3560,5 @@ export namespace writingconfig {
 	    }
 	}
 
-}
-
-export namespace agentcfg {
-
-	export class PersonaRef {
-	    kind: string;
-	    ref: string;
-
-	    static createFrom(source: any = {}) {
-	        return new PersonaRef(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.kind = source["kind"];
-	        this.ref = source["ref"];
-	    }
-	}
-}
-
-export namespace personasetting {
-
-	export class PersonaSetting {
-	    id: number;
-	    novel_id: number;
-	    enabled: boolean;
-	    kind: string;
-	    ref: string;
-	    // Go type: time
-	    created_at: any;
-	    // Go type: time
-	    updated_at: any;
-
-	    static createFrom(source: any = {}) {
-	        return new PersonaSetting(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.novel_id = source["novel_id"];
-	        this.enabled = source["enabled"];
-	        this.kind = source["kind"];
-	        this.ref = source["ref"];
-	        this.created_at = this.convertValues(source["created_at"], null);
-	        this.updated_at = this.convertValues(source["updated_at"], null);
-	    }
-
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
 }
 

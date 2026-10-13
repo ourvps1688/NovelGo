@@ -194,6 +194,10 @@ export function GetArcNodes(arg1) {
   return window['go']['app']['App']['GetArcNodes'](arg1);
 }
 
+export function GetAuthorAliases() {
+  return window['go']['app']['App']['GetAuthorAliases']();
+}
+
 export function GetBuildHash() {
   return window['go']['app']['App']['GetBuildHash']();
 }
@@ -272,10 +276,6 @@ export function GetNovels() {
 
 export function GetPersonaSetting(arg1) {
   return window['go']['app']['App']['GetPersonaSetting'](arg1);
-}
-
-export function SavePersonaSetting(arg1, arg2) {
-  return window['go']['app']['App']['SavePersonaSetting'](arg1, arg2);
 }
 
 export function GetPlatform() {
@@ -418,6 +418,10 @@ export function RetryStartup() {
   return window['go']['app']['App']['RetryStartup']();
 }
 
+export function SaveAuthorAliases(arg1) {
+  return window['go']['app']['App']['SaveAuthorAliases'](arg1);
+}
+
 export function SaveAvatar(arg1) {
   return window['go']['app']['App']['SaveAvatar'](arg1);
 }
@@ -436,6 +440,10 @@ export function SaveGitConfig(arg1, arg2) {
 
 export function SaveLLMConfig(arg1) {
   return window['go']['app']['App']['SaveLLMConfig'](arg1);
+}
+
+export function SavePersonaSetting(arg1, arg2) {
+  return window['go']['app']['App']['SavePersonaSetting'](arg1, arg2);
 }
 
 export function SaveSettings(arg1) {
@@ -544,11 +552,4 @@ export function UpdateTimelineEntry(arg1, arg2, arg3) {
 
 export function UpdateVolume(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateVolume'](arg1, arg2, arg3);
-}
-export function GetAuthorAliases() {
-  return window['go']['app']['App']['GetAuthorAliases']();
-}
-
-export function SaveAuthorAliases(arg1) {
-  return window['go']['app']['App']['SaveAuthorAliases'](arg1);
 }

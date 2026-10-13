@@ -3,7 +3,7 @@ import { X, Tag, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-import type { app } from "@/lib/wailsjs/go/models";
+import { app } from "@/lib/wailsjs/go/models";
 import { useAuthorAliases, useSaveAuthorAliases } from "./useAuthorAliases";
 
 interface Props {
@@ -109,7 +109,9 @@ export default function AuthorAliasDialog({ open, onClose }: Props) {
       }
     }
     try {
-      await saveMutation.mutateAsync({ groups: cleaned });
+      await saveMutation.mutateAsync(
+        app.SaveAuthorAliasesInput.createFrom({ groups: cleaned }),
+      );
       toastSuccess(t("skill.alias.saveSuccess"));
       onClose();
     } catch (err) {

@@ -4,6 +4,7 @@ import { MessageSquare, Loader2, History, Plus } from "lucide-react";
 import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { GetSession, Chat } from "@/lib/wailsjs/go/app/App";
+import { app } from "@/lib/wailsjs/go/models";
 import { cachedFileDescription } from "@/components/content/fileDescription";
 import { modelKeys, sessionKeys, slashCommandKeys } from "@/lib/queryKeys";
 import { useModels } from "@/components/settings/useModels";
@@ -1189,15 +1190,17 @@ export default function ChatPanel({
       startedUnsubRef.current = startedCleanup;
 
       try {
-        await Chat({
-          session_id: sessionId,
-          novel_id: novelId,
-          message: content,
-          provider_name: p,
-          model_id: m,
-          reasoning_effort: reasoningEffort,
-          persona: persona ?? undefined,
-        });
+        await Chat(
+          app.ChatInput.createFrom({
+            session_id: sessionId,
+            novel_id: novelId,
+            message: content,
+            provider_name: p,
+            model_id: m,
+            reasoning_effort: reasoningEffort,
+            persona: persona ?? undefined,
+          }),
+        );
         // 刷新会话列表（invalidate 触发 useSessions refetch）
         qc.invalidateQueries({ queryKey: sessionKeys.list(novelId, 1, 5, "") });
       } catch (err) {
