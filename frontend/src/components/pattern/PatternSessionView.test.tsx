@@ -128,3 +128,49 @@ describe("PatternSessionView generated skill save", () => {
     expect(onExit).not.toHaveBeenCalled();
   });
 });
+
+describe("PatternSessionView running header title", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // 让 ExtractPattern 永远 pending：保持 running 态以渲染运行页头，不被 done 态替换。
+    mockExtractPattern.mockReturnValue(new Promise<unknown>(() => {}));
+  });
+
+  function renderWithFlavor(flavor?: string) {
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PatternSessionView
+          taskId="task-1"
+          novelId={3}
+          chapterIds={[]}
+          providerName="test"
+          modelId="model"
+          reasoningEffort=""
+          title="Novel"
+          chapterCount={2}
+          flavor={flavor}
+          onExit={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("shows 创作心智提取进度 title when flavor is mental", () => {
+    renderWithFlavor("mental");
+    expect(
+      screen.getByText("extract.progress.mindsetTitle"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("extract.progress.title"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows 套路提取进度 title when flavor is struct", () => {
+    renderWithFlavor("struct");
+    expect(screen.getByText("extract.progress.title")).toBeInTheDocument();
+    expect(
+      screen.queryByText("extract.progress.mindsetTitle"),
+    ).not.toBeInTheDocument();
+  });
+});
