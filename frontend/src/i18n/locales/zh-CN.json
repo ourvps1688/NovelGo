@@ -186,6 +186,8 @@
     "maxReasoning": "最大推理",
     "configureModel": "配置模型...",
     "auto": "自动",
+    "autoApproval": "自动审批",
+    "manualApproval": "人工审批",
     "noModelAvailable": "无可用模型",
     "thinking": "正在思考",
     "thinkingProcess": "思考过程",

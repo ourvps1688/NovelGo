@@ -194,6 +194,8 @@
     "maxReasoning": "Max",
     "configureModel": "Configure Model...",
     "auto": "Auto",
+    "autoApproval": "Auto approval",
+    "manualApproval": "Human approval",
     "noModelAvailable": "No models available",
     "thinking": "Thinking",
     "thinkingProcess": "Thinking Process",

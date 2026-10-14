@@ -66,7 +66,9 @@ export default function ChatControls({
             : "text-muted-foreground"
         }`}
       >
-        {t("chat.auto")}
+        {t(
+          approvalMode === "auto" ? "chat.autoApproval" : "chat.manualApproval",
+        )}
       </button>
 
       <ContextRing
