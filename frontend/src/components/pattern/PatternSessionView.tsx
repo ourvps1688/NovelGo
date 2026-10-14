@@ -199,7 +199,11 @@ export default function PatternSessionView({
           <>
             <span className="text-sm text-muted-foreground flex items-center gap-2">
               <Sparkle className="w-4 h-4 text-primary" />
-              {t("extract.progress.title")}
+              {t(
+                flavor === "mental"
+                  ? "extract.progress.mindsetTitle"
+                  : "extract.progress.title",
+              )}
             </span>
             <div className="flex items-center gap-2">
               <button

@@ -117,14 +117,18 @@ type ToolCallDelta struct {
 // empty sse 时填充 HTTP 快照后传入日志，便于区分限流软拒绝 / 推理失控 / 非标准格式等场景。
 type sseDiagnostics struct {
 	// 循环追踪值（parseSSE 内累积）
-	hasContent    bool           // 收到过 content 文本
-	hasToolCalls  bool           // tool call 收尾成功（发过 EventToolCallEnd）
-	hasReason     bool           // 收到过 reasoning_content
-	dataLineCount int            // data: 行总数
-	gotDone       bool           // 是否收到 [DONE]
-	lastUsage     map[string]any // 最后一个 usage chunk（发 EventUsage 用）
-	headLines     []string       // 前 10 行原始行
-	tailLines     []string       // 后 10 行原始行（环形切片）
+	hasContent    bool // 收到过 content 文本
+	hasToolCalls  bool // tool call 收尾成功（发过 EventToolCallEnd）
+	hasReason     bool // 收到过 reasoning_content
+	dataLineCount int  // data: 行总数
+	gotDone       bool // 是否收到 [DONE]
+	// truncatedByLength 标记 finish_reason=="length"：输出被 max_tokens 预算截断。
+	// 思考模型的 reasoning token 也计入 max_tokens 预算，因此即便正文预算看似足够仍可能截断。
+	// 用于把 tool arguments JSON 校验失败的错误升级为明确的「输出被截断」提示。
+	truncatedByLength bool
+	lastUsage         map[string]any // 最后一个 usage chunk（发 EventUsage 用）
+	headLines         []string       // 前 10 行原始行
+	tailLines         []string       // 后 10 行原始行（环形切片）
 
 	// HTTP 快照（empty 分支从 resp 填入）
 	statusCode      int
@@ -159,6 +163,7 @@ func (d sseDiagnostics) LogValue() slog.Value {
 		slog.Bool("has_content", d.hasContent),
 		slog.Bool("has_tool_calls", d.hasToolCalls),
 		slog.Bool("has_reason", d.hasReason),
+		slog.Bool("truncated_by_length", d.truncatedByLength),
 		slog.Int("data_lines", d.dataLineCount),
 		slog.Bool("got_done", d.gotDone),
 		slog.Bool("has_usage", d.lastUsage != nil),

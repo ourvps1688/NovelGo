@@ -32,10 +32,14 @@ const (
 	// 并要求「叙事心智模型」一节控制在约 1.5k–2.5k token（见 mentalFinalSkillSystemPrompt）。
 	mentalFinalMaxTokens = 8_000
 	// 多镜头精提（V3 P1）三路聚焦生成的 token 预算：
-	//   expr 2k + mental 3k + decision 2k = 7k < mentalFinalMaxTokens(8k) 单轮护栏。
-	lensExprMaxTokens     = 2_000 // 表达镜头
-	lensMentalMaxTokens   = 3_000 // 心智镜头（主镜头，含 name/description/evidence）
-	lensDecisionMaxTokens = 2_000 // 决策镜头
+	//   expr 6k + mental 8k + decision 6k。心智镜头含 ≤3k 正文 + name/description/evidence，
+	//   JSON 转义后更长；思考模型（SupportsThinking 默认开启）的 reasoning token 也计入 max_tokens，
+	//   原 3k/2k 预算会被 max_tokens 截断导致 tool arguments JSON 不完整，现已上调。
+	//   三路为相互独立的 callTool 调用，故每段预算只需 ≤ 单轮护栏 mentalFinalMaxTokens(8k)，
+	//   不要求三者之和 ≤ 8k（旧 7k 之和约束已不适用）。
+	lensExprMaxTokens     = 6_000 // 表达镜头
+	lensMentalMaxTokens   = 8_000 // 心智镜头（主镜头，含 name/description/evidence）
+	lensDecisionMaxTokens = 6_000 // 决策镜头
 )
 
 // EvidenceRetriever 是 V2-D 的可选证据检索器。当 Extractor 持有非 nil 实例时，

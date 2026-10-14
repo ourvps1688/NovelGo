@@ -1246,11 +1246,22 @@ func TestPreAnalyzeBoundaries_ProgressCallback(t *testing.T) {
 // V3 P1：多镜头精提（DeepMultiLens）
 // ===========================================================================
 
-// TestLensBudgetLimit 验证三路镜头 token 预算合计 = 7k，低于单轮 8k 护栏。
+// TestLensBudgetLimit 验证三路镜头各自 token 预算为独立 callTool 调用，
+// 故只要求「每个镜头」不超过单轮护栏 mentalFinalMaxTokens(8k)，不再要求三者之和 ≤ 8k。
 func TestLensBudgetLimit(t *testing.T) {
-	total := lensExprMaxTokens + lensMentalMaxTokens + lensDecisionMaxTokens
-	if total != 7000 {
-		t.Errorf("lens budget sum = %d, want exactly 7000", total)
+	lenses := map[string]int{
+		"expr":     lensExprMaxTokens,
+		"mental":   lensMentalMaxTokens,
+		"decision": lensDecisionMaxTokens,
+	}
+	for name, budget := range lenses {
+		if budget <= 0 {
+			t.Errorf("%s lens budget must be positive, got %d", name, budget)
+		}
+		if budget > mentalFinalMaxTokens {
+			t.Errorf("%s lens budget %d exceeds single-round guard mentalFinalMaxTokens=%d",
+				name, budget, mentalFinalMaxTokens)
+		}
 	}
 }
 

@@ -1,8 +1,12 @@
 package llm
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -334,5 +338,145 @@ func TestClampMaxTokens(t *testing.T) {
 					c.maxTokens, c.contextWindow, c.promptTokens, got, c.want)
 			}
 		})
+	}
+}
+
+// --- parseSSE / finish_reason=length 截断提示 ---
+
+// runParseSSE 用给定 HTTP 响应体驱动 parseSSE，收集全部 StreamEvent（parseSSE 自身不关闭 channel）。
+func runParseSSE(t *testing.T, body string) []StreamEvent {
+	t.Helper()
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	c := NewClient(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ch := make(chan StreamEvent, 64)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.parseSSE(ch, resp)
+		close(ch)
+	}()
+
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	wg.Wait()
+	return events
+}
+
+// TestParseSSE_FinishReasonLength_TruncatedJSON_ReportsTruncation
+// 流式返回 finish_reason=length，且工具参数 JSON 不完整 → 错误信息应明确包含「截断」字样，
+// 而非笼统的 "unexpected end of JSON input"。
+func TestParseSSE_FinishReasonLength_TruncatedJSON_ReportsTruncation(t *testing.T) {
+	// tool call arguments 为不完整的 JSON（缺闭合大括号），末尾 chunk 标记 finish_reason=length。
+	body := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"output_skill","arguments":"{\"name\":\"x\""}}]}}]}`,
+		``,
+		`data: {"choices":[{"delta":{},"finish_reason":"length"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	events := runParseSSE(t, body)
+
+	var errEvent *StreamEvent
+	for i := range events {
+		if events[i].Type == EventError {
+			errEvent = &events[i]
+			break
+		}
+	}
+	if errEvent == nil {
+		t.Fatalf("expected a tool_args_invalid EventError, got events: %+v", events)
+	}
+	apiErr, ok := errEvent.Error.(*APIError)
+	if !ok {
+		t.Fatalf("EventError.Error should be *APIError, got %T", errEvent.Error)
+	}
+	if apiErr.Kind != "tool_args_invalid" {
+		t.Errorf("Kind: got %q, want %q", apiErr.Kind, "tool_args_invalid")
+	}
+	if !strings.Contains(apiErr.Message, "截断") {
+		t.Errorf("truncation hint missing from message: %q", apiErr.Message)
+	}
+	if !strings.Contains(apiErr.Message, "max_tokens") {
+		t.Errorf("message should mention max_tokens: %q", apiErr.Message)
+	}
+}
+
+// TestParseSSE_FinishReasonLength_NoToolArgs_NotTruncationError
+// 正常 length 截断但零产出（无任何 tool call 参数）场景：走 empty_stream 分支，
+// 不应被误升级为「截断」提示（该提示仅针对「参数存在但 JSON 无效」）。
+func TestParseSSE_FinishReasonLength_NoToolArgs_NotTruncationError(t *testing.T) {
+	// 只有 reasoning_content，无 tool call，末尾 finish_reason=length（思考被预算截断）。
+	body := strings.Join([]string{
+		`data: {"choices":[{"delta":{"reasoning_content":"让我想想..."}}]}`,
+		``,
+		`data: {"choices":[{"delta":{},"finish_reason":"length"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	events := runParseSSE(t, body)
+
+	var errEvent *StreamEvent
+	for i := range events {
+		if events[i].Type == EventError {
+			errEvent = &events[i]
+			break
+		}
+	}
+	if errEvent == nil {
+		t.Fatalf("expected empty_stream EventError, got events: %+v", events)
+	}
+	apiErr, ok := errEvent.Error.(*APIError)
+	if !ok {
+		t.Fatalf("EventError.Error should be *APIError, got %T", errEvent.Error)
+	}
+	if apiErr.Kind != "empty_stream" {
+		t.Errorf("Kind: got %q, want %q", apiErr.Kind, "empty_stream")
+	}
+	// 此处不应出现「截断」字样（那是 tool_args_invalid 分支的专属提示）。
+	if strings.Contains(apiErr.Message, "截断") {
+		t.Errorf("zero-output empty_stream should not contain 截断: %q", apiErr.Message)
+	}
+}
+
+// TestParseSSE_NormalStop_CompleteJSON_NoTruncation
+// 正常结束（finish_reason=stop）且工具参数 JSON 完整：成功收尾，不应有错误，消息不含「截断」。
+func TestParseSSE_NormalStop_CompleteJSON_NoTruncation(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"output_skill","arguments":"{\"name\":\"x\"}"}}]}}]}`,
+		``,
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	events := runParseSSE(t, body)
+
+	for i := range events {
+		if events[i].Type == EventError {
+			t.Fatalf("unexpected EventError: %+v", events[i].Error)
+		}
+	}
+	var gotEnd bool
+	for i := range events {
+		if events[i].Type == EventToolCallEnd {
+			gotEnd = true
+			break
+		}
+	}
+	if !gotEnd {
+		t.Errorf("expected EventToolCallEnd for complete JSON, got events: %+v", events)
 	}
 }

@@ -377,6 +377,13 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 		if !ok {
 			continue
 		}
+		// 追踪 finish_reason：标准 provider 在最后一个 chunk 的 choice 上置 finish_reason。
+		// 思考模型（SupportsThinking）的推理 token 也计入 max_tokens 预算，
+		// finish_reason=="length" 表示输出被预算截断（可能致 tool arguments JSON 不完整）。
+		// 放在 delta 提取之前，确保无 delta 的收尾 chunk 也能被追踪到。
+		if fr, ok := choice["finish_reason"].(string); ok && fr == "length" {
+			diag.truncatedByLength = true
+		}
 		delta, ok := choice["delta"].(map[string]any)
 		if !ok {
 			continue
@@ -523,6 +530,13 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 	// tool arguments 解析失败：全丢弃（不发送成功的 tool call），发 EventError（tool_args_invalid）
 	if len(invalidToolErrors) > 0 {
 		errMsg := buildToolArgsInvalidMsg(invalidToolErrors)
+		// 若工具参数存在但 JSON 校验失败，且流被 max_tokens 截断
+		// （finish_reason=="length"，思考模型的推理 token 也计入预算），升级为明确提示，
+		// 替代笼统的 "unexpected end of JSON input"，便于定位为预算不足而非协议错误。
+		if diag.truncatedByLength {
+			errMsg = "输出因 max_tokens 预算被截断（思考模型的推理 token 也计入预算），" +
+				"建议提高输出预算或换模型。原错误：" + errMsg
+		}
 		ch <- StreamEvent{Type: EventError, Error: &APIError{
 			StatusCode: 0,
 			Message:    errMsg,
