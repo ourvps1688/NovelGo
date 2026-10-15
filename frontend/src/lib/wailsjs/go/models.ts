@@ -987,7 +987,7 @@ export namespace app {
 	    name: string;
 	    description: string;
 	    type: string;
-	    use_when_hint?: string;
+	    use_when_hint: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SlashCommand(source);
@@ -2777,12 +2777,27 @@ export namespace setting {
 
 export namespace skill {
 	
+	export class UseWhenEntry {
+	    intent: string;
+	    cues: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new UseWhenEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.intent = source["intent"];
+	        this.cues = source["cues"];
+	    }
+	}
 	export class Skill {
 	    name: string;
 	    description: string;
 	    category: string;
 	    kind: string;
 	    mode: string;
+	    use_when?: UseWhenEntry[];
 	    author: string;
 	    source_author: string;
 	    version: number;
@@ -2807,6 +2822,7 @@ export namespace skill {
 	        this.category = source["category"];
 	        this.kind = source["kind"];
 	        this.mode = source["mode"];
+	        this.use_when = this.convertValues(source["use_when"], UseWhenEntry);
 	        this.author = source["author"];
 	        this.source_author = source["source_author"];
 	        this.version = source["version"];
@@ -2820,6 +2836,24 @@ export namespace skill {
 	        this.aggregated_at = source["aggregated_at"];
 	        this.aggregated_source_hash = source["aggregated_source_hash"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class SkillMeta {
 	    name: string;
@@ -2837,11 +2871,11 @@ export namespace skill {
 	    merged_books: string[];
 	    stable_items: number;
 	    single_book_items: number;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SkillMeta(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -2849,7 +2883,7 @@ export namespace skill {
 	        this.category = source["category"];
 	        this.kind = source["kind"];
 	        this.mode = source["mode"];
-	        this.use_when = source["use_when"];
+	        this.use_when = this.convertValues(source["use_when"], UseWhenEntry);
 	        this.author = source["author"];
 	        this.source_author = source["source_author"];
 	        this.version = source["version"];
@@ -2860,21 +2894,24 @@ export namespace skill {
 	        this.stable_items = source["stable_items"];
 	        this.single_book_items = source["single_book_items"];
 	    }
-	}
-
-	export class UseWhenEntry {
-	    intent: string;
-	    cues: string[];
-
-	    static createFrom(source: any = {}) {
-	        return new UseWhenEntry(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.intent = source["intent"];
-	        this.cues = source["cues"];
-	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }
