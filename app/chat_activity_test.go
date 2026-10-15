@@ -49,7 +49,7 @@ func TestChatActivityCountsAcceptedRequestsDespiteLaterFailure(t *testing.T) {
 		requireConversationTurns(t, a, i)
 	}
 	var messages int64
-	require.NoError(t, a.db.Raw("SELECT COUNT(*) FROM messages WHERE role = 'user'").Scan(&messages).Error)
+	require.NoError(t, a.db.Raw("SELECT COUNT(*) FROM messages WHERE role = 'user' AND to_frontend = 1").Scan(&messages).Error)
 	require.Equal(t, int64(2), messages)
 }
 
@@ -75,7 +75,7 @@ func TestChatActivityFailureDoesNotBlockAcceptedMessage(t *testing.T) {
 	_, err := a.Chat(input)
 	require.ErrorContains(t, err, "API messages unavailable")
 	var messages int64
-	require.NoError(t, a.db.Raw("SELECT COUNT(*) FROM messages WHERE role = 'user'").Scan(&messages).Error)
+	require.NoError(t, a.db.Raw("SELECT COUNT(*) FROM messages WHERE role = 'user' AND to_frontend = 1").Scan(&messages).Error)
 	require.Equal(t, int64(1), messages)
 	requireConversationTurns(t, a, 0)
 }
