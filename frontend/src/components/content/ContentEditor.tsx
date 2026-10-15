@@ -82,6 +82,8 @@ export default function ContentEditor({
       options={{
         minimap: { enabled: false },
         lineNumbers: "off",
+        overviewRulerLanes: 0,
+        renderValidationDecorations: "off",
         padding: { top: 24, bottom: 24 },
         scrollBeyondLastLine: false,
         fontSize: 18,
