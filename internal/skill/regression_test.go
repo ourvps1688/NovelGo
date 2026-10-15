@@ -70,6 +70,10 @@ func TestCuePrecisionRegression(t *testing.T) {
 		{"帮我改一下文", "revision-pass"},
 		{"我想起个书名", "book-pitch"},
 		{"按之前的走向继续写下一章", "next"},
+		// 三个「签约智能」技能：确保它们的 cue 也纳入确定性回归闸门
+		{"帮我评估签约潜力", "signability-audit"},
+		{"写个全书卷纲", "story-blueprint"},
+		{"设定一下修炼体系", "worldbuilding-design"},
 	}
 	for _, p := range positives {
 		res := RouteUserMessage(all, p.msg, 1, 1, nil)
