@@ -1,10 +1,16 @@
 package agentcfg
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/skill"
 )
+
+// MaxAlwaysSkillsResident 是常驻（always + 勾选启用）技能注入 system 消息的数量硬上限。
+// 超过此数的技能被截断为按需（auto）触发，避免长驻正文稀释主 Agent 上下文注意力、
+// 造成"规则越多执行越差"的退化。显式 mode=always 的技能优先保留，其次才轮到勾选启用的。
+const MaxAlwaysSkillsResident = 3
 
 // BuildSkillCatalog 将 auto 模式的 skill 元数据格式化为 LLM 可用的技能目录。
 // manual 和 always 模式的 skill 不出现在目录中。
@@ -109,9 +115,46 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 	}
 	always := filterByMode(meta, skill.ModeAlways)
 	enabled := filterByNames(meta, store.EnabledNames(novelID), always)
-	resident := make([]skill.SkillMeta, 0, len(always)+len(enabled))
-	resident = append(resident, always...)
-	resident = append(resident, enabled...)
+	full := make([]skill.SkillMeta, 0, len(always)+len(enabled))
+	full = append(full, always...)
+	full = append(full, enabled...)
+
+	// 常驻上限保护：最多 MaxAlwaysSkillsResident 个，优先保留显式 always，再补勾选启用的；
+	// 超出部分截断为按需（auto）触发，并生成警告提示被丢弃的技能名（不阻塞流程）。
+	var warning string
+	resident := full
+	if len(full) > MaxAlwaysSkillsResident {
+		kept := make([]skill.SkillMeta, 0, MaxAlwaysSkillsResident)
+		// 显式 always 优先，但连 always 本身也超上限时同样截断（保前 N 个）。
+		alwaysKeep := len(always)
+		if alwaysKeep > MaxAlwaysSkillsResident {
+			alwaysKeep = MaxAlwaysSkillsResident
+		}
+		kept = append(kept, always[:alwaysKeep]...)
+		if room := MaxAlwaysSkillsResident - len(kept); room > 0 && len(enabled) > 0 {
+			end := room
+			if end > len(enabled) {
+				end = len(enabled)
+			}
+			kept = append(kept, enabled[:end]...)
+		}
+		dropped := make([]string, 0, len(full)-len(kept))
+		keptNames := make(map[string]bool, len(kept))
+		for _, m := range kept {
+			keptNames[m.Name] = true
+		}
+		for _, m := range full {
+			if !keptNames[m.Name] {
+				dropped = append(dropped, m.Name)
+			}
+		}
+		resident = kept
+		warning = "⚠️ 常驻技能超过 " + strconv.Itoa(MaxAlwaysSkillsResident) +
+			" 个上限，已仅常驻最核心的 " + strconv.Itoa(MaxAlwaysSkillsResident) +
+			" 个；其余（" + strings.Join(dropped, "、") +
+			"）改为按需（auto）触发，避免长驻正文稀释上下文注意力。如需常驻请优先保留最核心的技能。\n"
+	}
+
 	if len(resident) == 0 {
 		return ""
 	}
@@ -130,6 +173,10 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 		b.WriteString(" ---\n")
 		b.WriteString(sk.Content)
 		b.WriteString("\n\n")
+	}
+
+	if warning != "" {
+		b.WriteString(warning)
 	}
 
 	return strings.TrimSpace(b.String())

@@ -124,3 +124,80 @@ func TestBuildSkillCatalog_GroupsByCategory(t *testing.T) {
 		t.Errorf("目录应包含路由消歧指引\ngot: %s", catalog)
 	}
 }
+
+func TestBuildAlwaysSkillsContent_CapsResidentCount(t *testing.T) {
+	userDir := t.TempDir()
+	// 4 个显式 always 技能：超过 MaxAlwaysSkillsResident(3)，应截断为 3 并告警。
+	alwaysNames := []string{"always-1", "always-2", "always-3", "always-4"}
+	for _, n := range alwaysNames {
+		writeTestSkill(t, userDir, n, "always", n+"_BODY")
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store, err := skill.NewStore(logger, userDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	meta := make([]skill.SkillMeta, 0, len(alwaysNames))
+	for _, n := range alwaysNames {
+		meta = append(meta, skill.SkillMeta{Name: n, Mode: skill.ModeAlways, Source: "user"})
+	}
+
+	content := BuildAlwaysSkillsContent(meta, store, int64(7))
+
+	// 仅前 3 个常驻，第 4 个被截断。
+	for _, kept := range []string{"always-1_BODY", "always-2_BODY", "always-3_BODY"} {
+		if !strings.Contains(content, kept) {
+			t.Errorf("应常驻 %s\ngot: %s", kept, content)
+		}
+	}
+	if strings.Contains(content, "always-4_BODY") {
+		t.Errorf("always-4 应被上限截断\ngot: %s", content)
+	}
+	if !strings.Contains(content, "常驻技能超过 3 个上限") {
+		t.Errorf("应注入上限警告\ngot: %s", content)
+	}
+	if !strings.Contains(content, "always-4") {
+		t.Errorf("警告应列出被丢弃的 always-4\ngot: %s", content)
+	}
+}
+
+func TestBuildAlwaysSkillsContent_CapPrefersAlwaysOverEnabled(t *testing.T) {
+	userDir := t.TempDir()
+	// 1 个 always + 3 个勾选启用（共 4，超过上限 3）：应保留 always + 前 2 个 enabled。
+	writeTestSkill(t, userDir, "a-always", "always", "A_ALWAYS_BODY")
+	for _, n := range []string{"e-1", "e-2", "e-3"} {
+		writeTestSkill(t, userDir, n, "auto", n+"_BODY")
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store, err := skill.NewStore(logger, userDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	novelID := int64(9)
+	if err := skill.SaveEnabled(novelID, []string{"e-1", "e-2", "e-3"}); err != nil {
+		t.Fatalf("SaveEnabled: %v", err)
+	}
+
+	meta := []skill.SkillMeta{
+		{Name: "a-always", Mode: skill.ModeAlways, Source: "user"},
+		{Name: "e-1", Mode: skill.ModeAuto, Source: "user"},
+		{Name: "e-2", Mode: skill.ModeAuto, Source: "user"},
+		{Name: "e-3", Mode: skill.ModeAuto, Source: "user"},
+	}
+	content := BuildAlwaysSkillsContent(meta, store, novelID)
+
+	for _, kept := range []string{"A_ALWAYS_BODY", "e-1_BODY", "e-2_BODY"} {
+		if !strings.Contains(content, kept) {
+			t.Errorf("应常驻 %s\ngot: %s", kept, content)
+		}
+	}
+	if strings.Contains(content, "e-3_BODY") {
+		t.Errorf("e-3 应被上限截断（always 优先）\ngot: %s", content)
+	}
+	if !strings.Contains(content, "e-3") {
+		t.Errorf("警告应列出被丢弃的 e-3\ngot: %s", content)
+	}
+}
