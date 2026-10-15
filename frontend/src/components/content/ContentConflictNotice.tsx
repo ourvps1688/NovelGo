@@ -4,6 +4,7 @@ import { DiffEditor } from "@monaco-editor/react";
 import { Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useThemeStore } from "@/stores/useThemeStore";
+import { INK_LIGHT, INK_DARK } from "@/monaco/monacoTheme";
 import { toErrorMessage } from "@/utils/error";
 import type {
   ConflictChoiceResult,
@@ -180,7 +181,7 @@ export default function ContentConflictNotice({
                   <DiffEditor
                     height="100%"
                     language="markdown"
-                    theme={theme === "dark" ? "vs-dark" : "light"}
+                    theme={theme === "dark" ? INK_DARK : INK_LIGHT}
                     original={snapshot.diskContent}
                     modified={snapshot.localContent}
                     options={{

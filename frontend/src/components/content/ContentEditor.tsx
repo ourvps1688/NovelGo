@@ -81,14 +81,16 @@ export default function ContentEditor({
       onMount={handleMount}
       options={{
         minimap: { enabled: false },
-        lineNumbers: "on",
+        lineNumbers: "off",
+        padding: { top: 24, bottom: 24 },
         scrollBeyondLastLine: false,
-        fontSize: 17,
-        lineHeight: 30,
-        fontFamily: "'Noto Serif SC', 'Source Han Serif SC', serif",
+        fontSize: 18,
+        lineHeight: 34,
+        fontFamily:
+          "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif",
         wordWrap: "on",
         automaticLayout: true,
-        renderLineHighlight: "line",
+        renderLineHighlight: "none",
         cursorSmoothCaretAnimation: "on",
         smoothScrolling: true,
         mouseWheelZoom: true,

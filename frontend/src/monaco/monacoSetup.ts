@@ -5,6 +5,7 @@
 // 同时注册各语言 worker，避免编辑 .json/.css/.html/.ts 文件时回退到主线程（卡顿）。
 import { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
+import { registerInkThemes } from "./monacoTheme";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
 import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
@@ -36,3 +37,7 @@ import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker"
 };
 
 loader.config({ monaco });
+
+// 注册墨色（ink）Monaco 主题，与 src/index.css 的浅/深 token 对齐，
+// 消除编辑器与外壳皮肤的视觉割裂。defineTheme 幂等，重复调用安全。
+registerInkThemes();

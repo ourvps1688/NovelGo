@@ -17,6 +17,7 @@ import { useEditorTabsStore } from "./useEditorTabsStore";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { useThemeStore, type Theme } from "@/stores/useThemeStore";
+import { INK_LIGHT, INK_DARK } from "@/monaco/monacoTheme";
 import { aiFileVersion } from "./aiFileChanges";
 import {
   cachedFileDescription,
@@ -44,7 +45,10 @@ import {
 import type { EditorTab } from "./types";
 import "./ContentPanel.css";
 
-const MONACO_THEME: Record<Theme, string> = { light: "light", dark: "vs-dark" };
+const MONACO_THEME: Record<Theme, string> = {
+  light: INK_LIGHT,
+  dark: INK_DARK,
+};
 
 export interface ContentPanelHandle {
   openFile: (
@@ -982,9 +986,10 @@ const ContentPanel = forwardRef<ContentPanelHandle>(
                 options={{
                   minimap: { enabled: false },
                   scrollBeyondLastLine: false,
-                  fontSize: 15,
-                  lineHeight: 26,
-                  fontFamily: "'Noto Serif SC', 'Source Han Serif SC', serif",
+                  fontSize: 16,
+                  lineHeight: 28,
+                  fontFamily:
+                    "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif",
                   lineNumbers: "on",
                   wordWrap: "on",
                   automaticLayout: true,
