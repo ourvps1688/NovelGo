@@ -5,6 +5,15 @@ category: 修订
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "写后打磨 / 质检修改"
+    cues:
+      - "打磨"
+      - "修改"
+      - "润色稿"
+      - "改稿"
+      - "质检"
+      - "修稿"
 ---
 # 三遍修改法
 

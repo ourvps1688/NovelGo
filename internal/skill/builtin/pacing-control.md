@@ -5,6 +5,16 @@ category: 结构
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "调节章节节奏快慢 / 爽点密度"
+    cues:
+      - "节奏"
+      - "爽点"
+      - "快慢"
+      - "拖沓"
+      - "节奏太慢"
+      - "节奏太快"
+      - "爽点密度"
 ---
 # 节奏控制
 

@@ -7,6 +7,14 @@ const (
 	ModeAlways = "always" // 不出现在 catalog，会话开头注入 system 消息，常驻生效
 )
 
+// UseWhenEntry 是「何时使用」意图线索的一条。
+// Intent 是人类可读的意图描述（用于 catalog 路由表、用户侧提示）；
+// Cues 是命中关键词/短语（小写，对用户消息做子串匹配，确定性、零开销）。
+type UseWhenEntry struct {
+	Intent string   `json:"intent" yaml:"intent"`
+	Cues   []string `json:"cues" yaml:"cues"`
+}
+
 // normalizeMode 兼容旧值并校验，非法值返回 "auto"。
 func normalizeMode(raw string) string {
 	switch raw {
@@ -23,16 +31,17 @@ func normalizeMode(raw string) string {
 
 // Skill 是一个完整的 skill 定义，包含元数据和正文内容。
 type Skill struct {
-	Name         string `json:"name" yaml:"name"`
-	Description  string `json:"description" yaml:"description"`
-	Category     string `json:"category" yaml:"category"` // 分类，未来可基于不同分类组合实现 skill 矩阵
-	Kind         string `json:"kind" yaml:"kind"`         // 提取类型：留空/struct=套路模板，mental=创作心智
-	Mode         string `json:"mode" yaml:"mode"`
-	Author       string `json:"author" yaml:"author"`
-	SourceAuthor string `json:"source_author" yaml:"source_author"` // 仅 mental 有意义：被蒸馏心智所属的作者（V3 跨书聚合归并键）
-	Version      int    `json:"version" yaml:"version"`
-	Content      string `json:"content" yaml:"-"`
-	RawContent   string `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
+	Name         string         `json:"name" yaml:"name"`
+	Description  string         `json:"description" yaml:"description"`
+	Category     string         `json:"category" yaml:"category"` // 分类，未来可基于不同分类组合实现 skill 矩阵
+	Kind         string         `json:"kind" yaml:"kind"`         // 提取类型：留空/struct=套路模板，mental=创作心智
+	Mode         string         `json:"mode" yaml:"mode"`
+	UseWhen      []UseWhenEntry `json:"use_when,omitempty" yaml:"useWhen,omitempty"` // 结构化「何时使用」意图线索，供 LLM 预路由与用户侧提示
+	Author       string         `json:"author" yaml:"author"`
+	SourceAuthor string         `json:"source_author" yaml:"source_author"` // 仅 mental 有意义：被蒸馏心智所属的作者（V3 跨书聚合归并键）
+	Version      int            `json:"version" yaml:"version"`
+	Content      string         `json:"content" yaml:"-"`
+	RawContent   string         `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
 
 	// —— 以下为 V3 跨书聚合（cross-book mental-skill aggregation）派生字段 ——
 	// 仅当 Aggregated=true 的派生 skill 使用；普通 skill 这些字段为零值，序列化时被 yaml 忽略。
@@ -49,15 +58,16 @@ type Skill struct {
 
 // SkillMeta 是去除了正文的 skill 元数据，用于列表展示。
 type SkillMeta struct {
-	Name         string `json:"name"`        //name和description给llm其余的保留作为元数据
-	Description  string `json:"description"` //先写技能的简要介绍，再写何时invoke
-	Category     string `json:"category"`    // 分类，未来可基于不同分类组合实现 skill 矩阵
-	Kind         string `json:"kind"`
-	Mode         string `json:"mode"`
-	Author       string `json:"author"`
-	SourceAuthor string `json:"source_author"`
-	Version      int    `json:"version"`
-	Source       string `json:"source"` // "builtin" | "user" | "novel"
+	Name         string         `json:"name"`        //name和description给llm其余的保留作为元数据
+	Description  string         `json:"description"` //先写技能的简要介绍，再写何时invoke
+	Category     string         `json:"category"`    // 分类，未来可基于不同分类组合实现 skill 矩阵
+	Kind         string         `json:"kind"`
+	Mode         string         `json:"mode"`
+	UseWhen      []UseWhenEntry `json:"use_when,omitempty"` // 结构化「何时使用」意图线索（来自技能 frontmatter）
+	Author       string         `json:"author"`
+	SourceAuthor string         `json:"source_author"`
+	Version      int            `json:"version"`
+	Source       string         `json:"source"` // "builtin" | "user" | "novel"
 
 	// —— 以下为 V3 跨书聚合派生字段（仅 Aggregated=true 时有意义）——
 	Aggregated      bool     `json:"aggregated"`        // 是否为跨书聚合派生 skill
@@ -75,6 +85,7 @@ func (s *Skill) Meta(source string) SkillMeta {
 		Category:     s.Category,
 		Kind:         s.Kind,
 		Mode:         s.Mode,
+		UseWhen:      s.UseWhen,
 		Author:       s.Author,
 		SourceAuthor: s.SourceAuthor,
 		Version:      s.Version,

@@ -5,6 +5,16 @@ category: 角色
 mode: auto
 author: builtin
 version: 3
+useWhen:
+  - intent: "设计人物 / 人设 / 角色弧光"
+    cues:
+      - "人设"
+      - "角色"
+      - "人物"
+      - "人物弧"
+      - "配角"
+      - "主角设定"
+      - "角色成长"
 ---
 
 # 角色设计

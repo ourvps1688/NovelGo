@@ -5,6 +5,16 @@ category: 结构
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "写具体场景 / 场景张力与节拍"
+    cues:
+      - "场景"
+      - "这场戏"
+      - "场景张力"
+      - "节拍"
+      - "太拖了"
+      - "场景没力"
+      - "单场戏"
 ---
 # 场景节拍设计
 

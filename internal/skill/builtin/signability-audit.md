@@ -5,6 +5,17 @@ category: 评估
 mode: manual
 author: builtin
 version: 1
+useWhen:
+  - intent: "评估签约潜力 / 编辑审稿视角"
+    cues:
+      - "签约"
+      - "编辑"
+      - "体检"
+      - "过签"
+      - "对标"
+      - "市场视角"
+      - "收不收"
+      - "签约潜力"
 ---
 
 # 签约级体检（Signability Audit）

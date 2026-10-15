@@ -5,6 +5,15 @@ category: 创作
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "发散构思 / 头脑风暴"
+    cues:
+      - "构思"
+      - "头脑风暴"
+      - "灵感"
+      - "发散"
+      - "想点子"
+      - "点子"
 ---
 # 共创构思工作流
 

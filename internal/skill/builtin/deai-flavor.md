@@ -5,6 +5,16 @@ category: 技法
 mode: auto
 author: builtin
 version: 2
+useWhen:
+  - intent: "去除 AI 味 / 润色声线"
+    cues:
+      - "ai味"
+      - "去味"
+      - "润色"
+      - "声线"
+      - "像人写"
+      - "机械感"
+      - "ai 味"
 ---
 # 去 AI 味写作
 

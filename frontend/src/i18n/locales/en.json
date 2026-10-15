@@ -271,6 +271,7 @@
     "command": "Command",
     "permanent": "Permanent",
     "noMatchingCommand": "No matching commands",
+    "useWhenHint": "When",
     "historySessions": "History",
     "totalSessions": "{{count}} total",
     "searchSessions": "Search sessions...",
@@ -1608,6 +1609,8 @@
     "noResults": "No skills match the filters",
     "loading": "Loading…",
     "loadFailed": "Failed to load skills",
-    "emptyDesc": "(no description)"
+    "emptyDesc": "(no description)",
+    "useWhen": "When to use",
+    "command": "Command"
   }
 }

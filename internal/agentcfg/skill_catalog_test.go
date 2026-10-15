@@ -119,9 +119,41 @@ func TestBuildSkillCatalog_GroupsByCategory(t *testing.T) {
 		t.Errorf("「其他」组应包含无分类技能 orphan-skill\ngot: %s", catalog[otherIdx:])
 	}
 
-	// 5. 路由消歧指引存在
-	if !strings.Contains(catalog, "路由指引（消歧）") {
-		t.Errorf("目录应包含路由消歧指引\ngot: %s", catalog)
+	// 5. 路由指引存在（无 useWhen 时给出兜底提示）
+	if !strings.Contains(catalog, "路由指引（意图 → 技能") {
+		t.Errorf("目录应包含意图→技能路由指引\ngot: %s", catalog)
+	}
+	if !strings.Contains(catalog, "暂无技能声明 useWhen") {
+		t.Errorf("无 useWhen 时应给出兜底提示\ngot: %s", catalog)
+	}
+}
+
+func TestBuildSkillCatalog_RoutingTableFromUseWhen(t *testing.T) {
+	meta := []skill.SkillMeta{
+		{
+			Name:    "worldbuilding-design",
+			Mode:    skill.ModeAuto,
+			Source:  "builtin",
+			UseWhen: []skill.UseWhenEntry{{Intent: "设计世界观 / 力量体系", Cues: []string{"力量体系"}}},
+		},
+		{
+			Name:    "signability-audit",
+			Mode:    skill.ModeManual,
+			Source:  "builtin",
+			UseWhen: []skill.UseWhenEntry{{Intent: "评估签约潜力", Cues: []string{"签约"}}},
+		},
+	}
+	catalog := BuildSkillCatalog(meta)
+
+	// auto 与 manual 技能的意图都应进入路由表
+	if !strings.Contains(catalog, "设计世界观 / 力量体系") {
+		t.Errorf("路由表应包含 worldbuilding-design 的意图\ngot: %s", catalog)
+	}
+	if !strings.Contains(catalog, "评估签约潜力") {
+		t.Errorf("路由表应包含 signability-audit 的意图\ngot: %s", catalog)
+	}
+	if !strings.Contains(catalog, "worldbuilding-design") || !strings.Contains(catalog, "signability-audit") {
+		t.Errorf("路由表应列出技能名\ngot: %s", catalog)
 	}
 }
 

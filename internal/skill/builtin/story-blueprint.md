@@ -5,6 +5,17 @@ category: 结构
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "规划宏观故事蓝图 / 卷纲 / 主线结构"
+    cues:
+      - "蓝图"
+      - "卷纲"
+      - "大纲"
+      - "主线"
+      - "故事结构"
+      - "整体规划"
+      - "世界观架构"
+      - "长线"
 ---
 
 # 故事蓝图（宏观结构）

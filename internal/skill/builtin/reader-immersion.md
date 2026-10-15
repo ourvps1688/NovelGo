@@ -5,6 +5,15 @@ category: 读者
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "提升代入感 / 感官与视角描写"
+    cues:
+      - "代入感"
+      - "感官"
+      - "沉浸"
+      - "视角"
+      - "临场"
+      - "画面感"
 ---
 
 # 读者代入感工程（Reader Immersion）

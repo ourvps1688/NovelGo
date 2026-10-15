@@ -5,6 +5,16 @@ category: 开篇
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "打磨前两章 / 黄金三章 / 开篇钩子"
+    cues:
+      - "前三章"
+      - "黄金三章"
+      - "开篇"
+      - "开头"
+      - "第一章"
+      - "钩子"
+      - "开篇怎么写"
 ---
 
 # 黄金前三章（Opening Chapters）

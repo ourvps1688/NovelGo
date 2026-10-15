@@ -1,6 +1,7 @@
 package agentcfg
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -33,10 +34,26 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	writeSourceGroup(&b, "内置技能（只读）", builtin)
 
 	b.WriteString("---\n")
-	b.WriteString("路由指引（消歧）：\n")
+	b.WriteString("路由指引（意图 → 技能，依据各技能 frontmatter 的 useWhen 自动生成）：\n")
+	wroteRoute := false
+	for _, s := range meta {
+		if len(s.UseWhen) == 0 {
+			continue
+		}
+		intent := s.UseWhen[0].Intent
+		if intent == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "- 当用户想做【%s】→ 用 read 工具加载技能 `%s`\n", intent, s.Name)
+		wroteRoute = true
+	}
+	if !wroteRoute {
+		b.WriteString("- （暂无技能声明 useWhen 意图线索，按技能名与描述自行判断）\n")
+	}
+	b.WriteString("\n通用原则：\n")
 	b.WriteString("- 宏观层（story-blueprint 蓝图 / opening-chapters 前三章 / worldbuilding-design 设定体系 / character-design 人设 / signability-audit 签约体检）先于微观层（scene-beats 场景 / pacing-control 节奏 / plot-hook 钩子 / dialogue-subtext 对白 / revision-pass 打磨 / reader-immersion 代入 / deai-flavor 去味 / brainstorm-composer 发散）。\n")
-	b.WriteString("- 场景内部张力/节拍用 scene-beats；节奏快慢用 pacing-control；二者不混。\n")
 	b.WriteString("- 只改某类具体技法时点名加载对应技能；综合请求先对齐宏观层再下沉，勿一次堆砌多个微观技法。\n")
+	b.WriteString("- 检测到用户意图可由某技能覆盖时，主动建议用户启用对应技能（例如：「你在设计力量体系，要我加载 worldbuilding-design 吗？」），提升可发现性。\n")
 	b.WriteString("\n使用 read 工具加载技能完整内容：\n")
 	b.WriteString("- skills/<name>.md（小说技能）\n")
 	b.WriteString("- ~/.novelgo/skills/<name>.md（用户技能）\n")

@@ -277,6 +277,15 @@ export default function SkillMatrixView({ novelId, onOpenSkill }: Props) {
                           {s.description || t("skillMatrix.emptyDesc")}
                         </p>
 
+                        {s.use_when && s.use_when.length > 0 && (
+                          <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">
+                            <span className="text-primary/70">
+                              {t("skillMatrix.useWhen")}：
+                            </span>
+                            {s.use_when.map((e) => e.intent).join("；")}
+                          </p>
+                        )}
+
                         <div className="mt-2 flex flex-wrap items-center gap-1">
                           <span
                             className={`rounded px-1.5 py-0.5 text-[10px] ${modeBadgeClass(s.mode)}`}
@@ -291,6 +300,9 @@ export default function SkillMatrixView({ novelId, onOpenSkill }: Props) {
                               {t("skill.authorProfiles")}
                             </span>
                           )}
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
+                            /{s.name}
+                          </span>
                         </div>
 
                         <button

@@ -128,6 +128,14 @@ export default function SlashMenu({
                   {c.description}
                 </div>
               )}
+              {c.use_when_hint && (
+                <div className="text-[10px] text-primary/70 mt-0.5 flex items-baseline gap-1 min-w-0">
+                  <span className="shrink-0 opacity-80">
+                    {t("chat.useWhenHint")}：
+                  </span>
+                  <span className="truncate">{c.use_when_hint}</span>
+                </div>
+              )}
             </button>
           );
         })}

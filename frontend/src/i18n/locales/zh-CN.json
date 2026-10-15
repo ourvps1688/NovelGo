@@ -262,6 +262,7 @@
     "command": "指令",
     "permanent": "常驻",
     "noMatchingCommand": "无匹配命令",
+    "useWhenHint": "何时用",
     "historySessions": "历史会话",
     "totalSessions": "共 {{count}} 个",
     "searchSessions": "搜索会话...",
@@ -1569,6 +1570,8 @@
     "noResults": "没有符合筛选条件的技能",
     "loading": "加载中…",
     "loadFailed": "技能加载失败",
-    "emptyDesc": "（无描述）"
+    "emptyDesc": "（无描述）",
+    "useWhen": "何时使用",
+    "command": "命令"
   }
 }

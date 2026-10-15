@@ -5,6 +5,14 @@ category: 角色
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "写对话潜台词 / 台词"
+    cues:
+      - "对话"
+      - "台词"
+      - "潜台词"
+      - "对白"
+      - "说话方式"
 ---
 # 对白与潜台词设计
 

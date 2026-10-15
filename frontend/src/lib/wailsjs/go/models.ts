@@ -987,6 +987,7 @@ export namespace app {
 	    name: string;
 	    description: string;
 	    type: string;
+	    use_when_hint?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SlashCommand(source);
@@ -997,6 +998,7 @@ export namespace app {
 	        this.name = source["name"];
 	        this.description = source["description"];
 	        this.type = source["type"];
+	        this.use_when_hint = source["use_when_hint"];
 	    }
 	}
 	export class StartupState {
@@ -2825,6 +2827,7 @@ export namespace skill {
 	    category: string;
 	    kind: string;
 	    mode: string;
+	    use_when?: UseWhenEntry[];
 	    author: string;
 	    source_author: string;
 	    version: number;
@@ -2834,11 +2837,11 @@ export namespace skill {
 	    merged_books: string[];
 	    stable_items: number;
 	    single_book_items: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SkillMeta(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
@@ -2846,6 +2849,7 @@ export namespace skill {
 	        this.category = source["category"];
 	        this.kind = source["kind"];
 	        this.mode = source["mode"];
+	        this.use_when = source["use_when"];
 	        this.author = source["author"];
 	        this.source_author = source["source_author"];
 	        this.version = source["version"];
@@ -2855,6 +2859,21 @@ export namespace skill {
 	        this.merged_books = source["merged_books"];
 	        this.stable_items = source["stable_items"];
 	        this.single_book_items = source["single_book_items"];
+	    }
+	}
+
+	export class UseWhenEntry {
+	    intent: string;
+	    cues: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new UseWhenEntry(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.intent = source["intent"];
+	        this.cues = source["cues"];
 	    }
 	}
 

@@ -5,6 +5,15 @@ category: 情节
 mode: auto
 author: builtin
 version: 1
+useWhen:
+  - intent: "设计章尾钩子 / 悬念"
+    cues:
+      - "钩子"
+      - "悬念"
+      - "章尾"
+      - "结尾钩子"
+      - "留悬念"
+      - "断章"
 ---
 # 悬念与章尾钩子
 

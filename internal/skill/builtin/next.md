@@ -1,11 +1,27 @@
-\---  
-name: next  
-description: 每章创作的"总调度"——编排写前对齐→写中代入→写后质检→周期体检四阶段，串联 story-blueprint / character-design / worldbuilding-design / opening-chapters / reader-immersion / scene-beats / dialogue-subtext / pacing-control / plot-hook / deai-flavor / review / signability-audit 等专项技能，确保每章走完签约级全链路。当用户说"写下一章""继续""next""开始创作下一章""动笔"时手动触发。  
-category: 系统  
-mode: manual  
-author: builtin  
+---  
+name: next
+  
+description: 每章创作的"总调度"——编排写前对齐→写中代入→写后质检→周期体检四阶段，串联 story-blueprint / character-design / worldbuilding-design / opening-chapters / reader-immersion / scene-beats / dialogue-subtext / pacing-control / plot-hook / deai-flavor / review / signability-audit 等专项技能，确保每章走完签约级全链路。当用户说"写下一章""继续""next""开始创作下一章""动笔"时手动触发。
+  
+category: 系统
+  
+mode: manual
+  
+author: builtin
+  
 version: 2  
-\---
+useWhen:
+  - intent: "写下一章 / 继续创作 / 开始动笔"
+    cues:
+      - "写下一章"
+      - "继续"
+      - "next"
+      - "动笔"
+      - "开始创作"
+      - "开始写"
+      - "写新章"
+      - "下一章"
+---
 
 # 下一章创作总调度（Chapter Orchestrator）
 
