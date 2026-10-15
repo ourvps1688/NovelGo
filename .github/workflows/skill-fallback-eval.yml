@@ -1,0 +1,43 @@
+name: Skill Fallback Eval (nightly)
+
+# 测量 LLM 兜底分类的真实命中率，作为回归闸门。
+# - 定时（北京时间每日 02:17）与手动触发；
+# - 命中率 <90% 或负面样本被误触发时，本工作流标红（测试内 t.Errorf）；
+# - 需要仓库 secret DEEPSEEK_API_KEY 提供评估用 key（无 key 时测试自动 Skip，工作流标黄而非标红）。
+on:
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: 1
+      NOVELGO_EVAL_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Install sqlite3 headers (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sqlite-amalgamation.zip" "https://www.sqlite.org/2023/sqlite-amalgamation-3440000.zip"
+          unzip -qjo "$RUNNER_TEMP/sqlite-amalgamation.zip" -d "$RUNNER_TEMP/sqlite"
+          echo "CGO_CFLAGS=${CGO_CFLAGS} -I${RUNNER_TEMP}/sqlite" >> $GITHUB_ENV
+
+      - name: Run fallback hit-rate eval
+        run: go test ./app/ -run '^TestSkillFallbackHitRate$' -v -timeout 600s
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-llm-fallback-report
+          path: skill-llm-fallback-report.md
+          if-no-files-found: ignore
+          retention-days: 30

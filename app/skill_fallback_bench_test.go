@@ -87,13 +87,15 @@ type fallbackRow struct {
 	negative bool
 }
 
-// TestSkillFallbackHitRate 用 dev 端真实配置的 LLM（deepseek）测量兜底分类命中率。
-// 依赖 ~/.novelgo/llm_config.enc 中存在已配置 key；CI 无此文件时自动跳过。
+// TestSkillFallbackHitRate 用真实 LLM（deepseek）测量兜底分类命中率。
+// key 读取优先级：环境变量 NOVELGO_EVAL_KEY / DEEPSEEK_API_KEY → dev 端加密配置
+// (~/.novelgo/llm_config.enc)。二者皆无时 t.Skip（CI 默认跳过，不污染流水线）。
+//
+// 命中率门槛：整体 <90% 或负面样本被误触发时，本测试以 t.Errorf 失败，
+// 使「命中率回归」能在夜跑工作流中阻断，形成回归闸门的一部分。
 func TestSkillFallbackHitRate(t *testing.T) {
-	cfg, err := llm.LoadUserConfig(config.LLMConfigPath())
-	if err != nil {
-		t.Skipf("无法读取 dev LLM 配置（%v），跳过真实兜底命中率测试", err)
-	}
+	cfg := loadEvalLLMConfig(t)
+
 	var hasKey bool
 	for _, p := range cfg.Providers {
 		if p.APIKey != "" {
@@ -102,7 +104,7 @@ func TestSkillFallbackHitRate(t *testing.T) {
 		}
 	}
 	if !hasKey {
-		t.Skip("dev LLM 配置中无可用 key，跳过真实兜底命中率测试")
+		t.Skip("LLM 配置中无可用 key，跳过真实兜底命中率测试（设置 NOVELGO_EVAL_KEY 或配置 dev key 可运行）")
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -223,6 +225,32 @@ func TestSkillFallbackHitRate(t *testing.T) {
 
 	// 写报告文件（未跟踪，便于复跑对比）
 	writeFallbackReport(t, rows, total, correct, cueTotal, cueCorrect, llmTotal, llmCorrect, negTotal, negCorrect, pn, mid)
+
+	// ---- 回归闸门：命中率门槛 ----
+	// 负面样本一旦被误触发，属于「cue 过宽 / 置信门槛失效」，必须硬性失败。
+	if negTotal-negCorrect > 0 {
+		t.Errorf("负面样本被误触发 %d/%d（期望 0），兜底分类存在误注入风险", negTotal-negCorrect, negTotal)
+	}
+	// 整体命中率低于 90% 视为回归（历史基线 ~96%），夜跑工作流将因此变红。
+	if total > 0 && pct(correct, total) < 90 {
+		t.Errorf("整体命中率 %.1f%% 低于阈值 90%%（correct=%d total=%d），疑似路由/分类回归", pct(correct, total), correct, total)
+	}
+}
+
+// loadEvalLLMConfig 解析用于兜底命中率测量的 LLM 配置。
+// 优先读取环境变量（CI 注入 secret），其次读取 dev 端加密配置；都无则 Skip。
+func loadEvalLLMConfig(t *testing.T) *llm.UserLLMConfig {
+	if key := os.Getenv("NOVELGO_EVAL_KEY"); key != "" {
+		return &llm.UserLLMConfig{Providers: []llm.Provider{{Name: "deepseek", APIKey: key}}}
+	}
+	if key := os.Getenv("DEEPSEEK_API_KEY"); key != "" {
+		return &llm.UserLLMConfig{Providers: []llm.Provider{{Name: "deepseek", APIKey: key}}}
+	}
+	cfg, err := llm.LoadUserConfig(config.LLMConfigPath())
+	if err != nil {
+		t.Skipf("无法读取 dev LLM 配置（%v），跳过真实兜底命中率测试", err)
+	}
+	return cfg
 }
 
 func pct(a, b int) float64 {
