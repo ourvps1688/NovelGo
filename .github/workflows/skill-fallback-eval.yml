@@ -33,11 +33,13 @@ jobs:
       - name: Run fallback hit-rate eval
         run: go test ./app/ -run '^TestSkillFallbackHitRate$' -v -timeout 600s
 
+      # 报告由 go test ./app/ 在包目录 app/ 下生成，用 glob 匹配实际落点，
+      # 避免相对路径（仓库根）与实际 CWD（app/）不一致导致静默跳过。
       - name: Upload eval report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: skill-llm-fallback-report
-          path: skill-llm-fallback-report.md
-          if-no-files-found: ignore
+          path: "**/skill-llm-fallback-report.md"
+          if-no-files-found: warn
           retention-days: 30

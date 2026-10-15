@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -293,10 +295,31 @@ func writeFallbackReport(t *testing.T, rows []fallbackRow, total, correct, cueTo
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n", rw.msg, exp, rw.routed, rw.source, res)
 	}
-	path := "skill-llm-fallback-report.md"
+	// 写到仓库根目录（与 go.mod 同级），避免 go test 的工作目录（包目录 app/）
+	// 与 CI upload-artifact 的相对路径（仓库根）不一致导致报告找不到。
+	path := fallbackReportPath()
 	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
 		t.Logf("写报告失败: %v", err)
 	} else {
 		t.Logf("报告已写入 %s", path)
 	}
+}
+
+// fallbackReportPath 从本测试文件位置向上查找 go.mod，返回仓库根目录下的报告路径。
+// 这样无论 go test 的工作目录是包目录还是仓库根，报告都落到可预期的位置。
+func fallbackReportPath() string {
+	if _, file, _, ok := runtime.Caller(0); ok {
+		dir := filepath.Dir(file)
+		for {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return filepath.Join(dir, "skill-llm-fallback-report.md")
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return "skill-llm-fallback-report.md"
 }
