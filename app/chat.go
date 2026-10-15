@@ -108,11 +108,11 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		}
 	}
 
-	// 6.5 确定性意图预路由：非斜杠消息按 useWhen 线索自动注入命中的 auto 技能
+	// 6.5 确定性意图预路由 + LLM 兜底：非斜杠消息按 useWhen 线索自动注入命中的 auto 技能
 	// （复用 slash 同款 <system-reminder> 注入，逐轮写入；always 已常驻、manual 走建议）
 	var autoInject string
 	if !strings.HasPrefix(input.Message, "/") {
-		autoInject = a.buildAutoSkillInject(input.NovelID, input.Message)
+		autoInject = a.buildAutoSkillInject(ctx, input.NovelID, input.Message, input.ProviderName, input.ModelID)
 	}
 
 	// 7. 持久化本轮消息（事务：System 消息 + slash inject + 用户消息原子写入）
