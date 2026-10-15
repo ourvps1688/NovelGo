@@ -23,6 +23,11 @@ type DeslopIssue struct {
 // 校准原则（2026-10 实测复盘：过严会让 LLM 整章重写反复命中、10 次连续失败中断对话）：
 // 只硬拒「真人几乎不写」的指纹；真人也会自然使用的词（多年以后/从这一刻开始/
 // 深吸一口气/毫无疑问类判断套词）降为 advisory 密度提示，见下方 advisoryRegexRules。
+// 后续又降一级：「殊不知」「仿佛预示着」（古风/历史题材真人常用连词）与
+// 「这一刻（终于）明白」（可能落在角色真实情绪顿悟点）亦从 blocking 降为 advisory，
+// 避免对特定题材与真实情绪点过度拒稿；信号仍在写后自检浮现，不丢失。
+// 再进一步：对「命运的齿轮」「指节泛白」这类在网文语境为真人常用的 idiom，改为按题材
+// 感知豁免（见下方 exemptInWebNovel）——用户已选网文题材即放行，未选则保守硬拒。
 
 var blockingRules = []struct {
 	rule    string
@@ -41,24 +46,53 @@ var blockingRules = []struct {
 	// 命运 / 开端收束
 	{"fate-cliche", regexp.MustCompile(`命运的(齿轮|棋局|獠牙)|命运终于露出獠牙|早已布好的棋局`), "避免用「命运/齿轮/棋局/獠牙」作抽象收束，改回角色当下的动作、物件或后果"},
 	{"just-began", regexp.MustCompile(`(反击|复仇|故事|一切)才刚刚开始|属于[^，。\n]{0,8}(反击|复仇|故事)[^，。\n]{0,6}才刚刚开始`), "章末避免「才刚刚开始」式预告收束，用具体钩子或悬念收尾"},
-	{"epiphany", regexp.MustCompile(`这一刻(终于|，)?(他|她)?(终于)?明白`), "避免「这一刻终于明白」式升华收尾，用动作或场景收束"},
 
-	// 上帝视角 / 预告（「多年以后」是合法叙事手法，降为 advisory，不再硬拒）
-	{"god-view", regexp.MustCompile(`(他|她)不知道的是|殊不知|仿佛预示着`), "避免上帝视角剧透/预告，只写角色此刻知道的；悬念留给读者"},
+	// 上帝视角 / 预告（「多年以后」是合法叙事手法、「殊不知/仿佛预示着」在古风/历史为真人常用连词，均已降 advisory；此处只硬拒最明确的「他不知道的是」剧透）
+	{"god-view", regexp.MustCompile(`(他|她)不知道的是`), "避免上帝视角剧透/预告，只写角色此刻知道的；悬念留给读者"},
 
 	// 过渡模板
 	{"transition-template", regexp.MustCompile(`取而代之的是`), "避免「取而代之的是」式 AI 过渡模板，直接写新状态"},
 
 	// 模板化身体 / 表情描写（「心中暗道」是网文自然内心戏引导，降为 advisory 密度项）
-	{"stock-body", regexp.MustCompile(`眼中闪过(一丝|一抹)|嘴角勾起(一抹|一丝)|心中涌起一股|心头一震|心底泛起|瞳孔(微缩|收缩|一缩)|指节泛白`), "避免模板化身体/微表情描写（眼中闪过/嘴角勾起/瞳孔…），写角色当场的行为或台词"},
+	{"stock-body", regexp.MustCompile(`眼中闪过(一丝|一抹)|嘴角勾起(一抹|一丝)|心中涌起一股|心头一震|心底泛起|瞳孔(微缩|收缩|一缩)`), "避免模板化身体/微表情描写（眼中闪过/嘴角勾起/瞳孔…），写角色当场的行为或台词"},
+	// 指节泛白：动作/言情/悬疑题材真人常用的紧张身体描写，单列为可题材豁免项（见 exemptInWebNovel）
+	{"stock-body-fingertip", regexp.MustCompile(`指节泛白`), "「指节泛白」是动作/言情题材真人常用的紧张描写，可在该题材保留；作为模板身体 tic 在其他语境仍建议改为具体动作"},
 }
 
-// BlockingIssues 扫描正文中确定性的 AI 味硬伤，返回所有命中的规则（每项含一个示例片段）。
-// 空切片表示无硬伤。调用方应据其拒绝写入。
+// exemptInWebNovel 列出「在网文语境下为真人常用、不应被硬拒」的 blocking 规则。
+// 仅当用户已选定网文题材（genre 非空）时豁免；genre 为空（未知/未选）时保守硬拒，
+// 保留安全网。这解决了此前全题材统一硬拒对玄幻/历史/古风/言情等题材真人 idiom 的误伤。
+// 注意：这些规则在 advisory 层（见下方 advisoryRegexRules 的 fate-*/god-view-soft 等）仍可
+// 浮现，写后自检仍能提示，信号不丢失；此处只决定「写时是否直接拒稿」。
+var exemptInWebNovel = map[string]bool{
+	"fate-cliche":          true, // 命运的齿轮/棋局/獠牙：网文（玄幻/仙侠/轻小说/系统文等）高频真人 idiom
+	"stock-body-fingertip": true, // 指节泛白：动作/言情/悬疑题材真人常用的紧张身体描写
+}
+
+// BlockingIssues 扫描正文中确定性的 AI 味硬伤（无题材上下文，等同 genre 为空：不做题材豁免）。
+// 用于测试与拿不到题材时的保底校验。空切片表示无硬伤，调用方应据其拒绝写入。
 func BlockingIssues(s string) []DeslopIssue {
+	return blockingIssuesForGenre(s, "")
+}
+
+// BlockingIssuesForGenre 同 BlockingIssues，但按活动题材豁免「在网文语境为真人常用」的
+// blocking 规则（见 exemptInWebNovel）。genre 为空时不做任何豁免（保守硬拒的保底行为）。
+func BlockingIssuesForGenre(s, genre string) []DeslopIssue {
+	return blockingIssuesForGenre(s, genre)
+}
+
+// blockingIssuesForGenre 是 BlockingIssues 的核心实现：遍历全部规则、返回同一规则在该章
+// 内的全部命中；若该命中规则的 rule 在 exemptInWebNovel 且 genre 已指定（非空），则跳过，
+// 实现「网文题材放行真人 idiom、未选题材保守硬拒」。一次性返回整章所有硬伤，避免
+// 「改一处→下一轮又报另一处」的循环重试。
+func blockingIssuesForGenre(s, genre string) []DeslopIssue {
 	var issues []DeslopIssue
+	g := strings.TrimSpace(genre)
 	for _, r := range blockingRules {
-		if loc := r.re.FindStringIndex(s); loc != nil {
+		for _, loc := range r.re.FindAllStringIndex(s, -1) {
+			if exemptInWebNovel[r.rule] && g != "" {
+				continue
+			}
 			issues = append(issues, DeslopIssue{
 				Rule:    r.rule,
 				Matched: truncate(s[loc[0]:loc[1]], 16),
@@ -125,6 +159,11 @@ var advisoryRegexRules = []struct {
 	{"negation-parade", regexp.MustCompile(`没有[^。！？\n]{0,8}没有`), "「没有X没有Y」否定铺排是 AI 句式，压成一次直述或只留一项"},
 	{"universal-adverb", regexp.MustCompile(`，带着|带着(一丝|一抹|几分)`), "「，带着…」万能状语是 AI 套路，删掉状语或换具体动作"},
 	{"tell-not-show", regexp.MustCompile(`(他|她)(知道|感到|意识到|明白)`), "「他知道/感到/意识到」是 tell-not-show，用行为展示认知而非告知"},
+
+	// 从 blocking 降级（避免过度拒稿）：古风/历史题材真人常用连词，统一硬拒会误伤该类题材
+	{"god-view-soft", regexp.MustCompile(`殊不知|仿佛预示着`), "「殊不知/仿佛预示着」在古风/历史题材为真人自然连词，叙述中偶用可留；成片复现时改用具体动作或对话承担转折"},
+	// 从 blocking 降级：可能落在角色真实情绪顿悟点，不再硬拒，改为写后自检提示
+	{"epiphany-soft", regexp.MustCompile(`这一刻(终于|，)?(他|她)?(终于)?明白`), "「这一刻（终于）明白」可能落在真实情绪点；写后自检时确认是否可用动作/场景收束，避免升华式套话"},
 }
 
 var (

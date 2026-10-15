@@ -34,7 +34,6 @@ func TestBlockingIssues_SpecificPatterns(t *testing.T) {
 		"命运终于露出獠牙。",
 		"属于他的反击才刚刚开始。",
 		"反击才刚刚开始。",
-		"这一刻，他终于明白。",
 		"他不知道的是，更大的风暴即将来临。",
 		"取而代之的是冰冷的沉默。",
 		"他眼中闪过一丝悲伤。",
@@ -81,6 +80,8 @@ func TestBlockingIssues_NaturalUsageNotFlagged(t *testing.T) {
 		"毫无疑问，她是最强的。",      // 台词内合法
 		"他心中暗道不好。",         // 网文自然内心戏引导，仅 advisory 密度
 		"他的人生才刚刚开始。",       // 非「反击/故事/一切」主语，不再硬拒
+		"殊不知，这背后另有隐情。",     // 古风/历史真人常用连词，降 advisory，不再硬拒
+		"乌云压顶，仿佛预示着一场风暴。",  // 同上，自然用法不误伤
 	}
 	for _, s := range natural {
 		if issues := BlockingIssues(s); len(issues) > 0 {
@@ -139,6 +140,17 @@ func TestAdvisoryIssues_FlagsDensity(t *testing.T) {
 	if !hasRule(AdvisoryIssues("这是毋庸置疑的事实。"), "judgment-cliche") {
 		t.Error("expected judgment-cliche advisory for 判断套词")
 	}
+
+	// 从 blocking 降级的软规则：advisory 提示但不硬拒
+	if !hasRule(AdvisoryIssues("殊不知，这背后另有隐情。"), "god-view-soft") {
+		t.Error("expected god-view-soft advisory for 殊不知")
+	}
+	if !hasRule(AdvisoryIssues("乌云压顶，仿佛预示着一场风暴。"), "god-view-soft") {
+		t.Error("expected god-view-soft advisory for 仿佛预示着")
+	}
+	if !hasRule(AdvisoryIssues("这一刻，他终于明白。"), "epiphany-soft") {
+		t.Error("expected epiphany-soft advisory for 这一刻明白")
+	}
 }
 
 func TestAdvisoryIssues_CleanNotFlagged(t *testing.T) {
@@ -186,5 +198,32 @@ func TestBlockingIssues_ContextLocatesSentence(t *testing.T) {
 	}
 	if issues[0].Context == "" || !strings.Contains(issues[0].Context, "命运的齿轮") {
 		t.Errorf("context should contain the hit sentence: %q", issues[0].Context)
+	}
+}
+
+// TestBlockingIssues_ForGenreExemptsWebNovel 验证题材感知豁免：
+// 在网文题材（genre 非空）下，fate-cliche 与 指节泛白 这两个真人常用 idiom 不再硬拒；
+// 但未选题材（genre 空）时仍保守硬拒；且其他规则（破折号/模板身体）不受影响始终拦截。
+func TestBlockingIssues_ForGenreExemptsWebNovel(t *testing.T) {
+	// 豁免：网文题材下命中即放行
+	if got := len(BlockingIssuesForGenre("命运的齿轮开始转动。", "玄幻")); got != 0 {
+		t.Errorf("fate-cliche should be exempt in web-novel genre, got %d issues", got)
+	}
+	if got := len(BlockingIssuesForGenre("他指节泛白，攥紧了衣角。", "言情")); got != 0 {
+		t.Errorf("指节泛白 should be exempt in web-novel genre, got %d issues", got)
+	}
+	// 保底：未选题材仍硬拒
+	if got := len(BlockingIssuesForGenre("命运的齿轮开始转动。", "")); got != 1 {
+		t.Errorf("fate-cliche should block when genre empty, got %d issues", got)
+	}
+	if got := len(BlockingIssuesForGenre("他指节泛白。", "")); got != 1 {
+		t.Errorf("指节泛白 should block when genre empty, got %d issues", got)
+	}
+	// 其他规则不受豁免影响，始终拦截
+	if got := len(BlockingIssuesForGenre("他停下来——看着远方。", "玄幻")); got != 1 {
+		t.Errorf("em-dash should always block, got %d issues", got)
+	}
+	if got := len(BlockingIssuesForGenre("他眼中闪过一丝悲伤。", "玄幻")); got != 1 {
+		t.Errorf("stock-body(眼中闪过) should always block, got %d issues", got)
 	}
 }

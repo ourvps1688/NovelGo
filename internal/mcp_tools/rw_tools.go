@@ -423,7 +423,7 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	// 反复命中导致连续失败 10 次中断对话。
 	var pendingScore *review.ScoreResult
 	if !ref.IsOutline {
-		if issues := text.BlockingIssues(proposed); len(issues) > 0 {
+		if issues := text.BlockingIssuesForGenre(proposed, novelGenre(ctx, tc)); len(issues) > 0 {
 			return &ToolResult{Success: false, Error: text.BlockingErrorMessage(issues)}, nil
 		}
 		// 评分门禁（仅成章写：new.md 新建或正文 full_replace）：低于阈值且有重试余量时
@@ -859,6 +859,20 @@ func isSkillPath(p string) bool {
 }
 
 // ── 章节记录 ──────────────────────────────────────────────
+
+// novelGenre 取当前小说的题材，用于去 AI 味门禁的题材感知豁免（fate-cliche / 指节泛白
+// 在网文题材下为真人常用，放行；未选题材则保守硬拒）。取不到（DB 空或查询失败）时返回
+// 空串，门禁退化为无题材上下文的保底行为。表名用 gorm 默认的 novels，避免引入 novel 包依赖。
+func novelGenre(ctx context.Context, tc ToolContext) string {
+	if tc.DB == nil {
+		return ""
+	}
+	var g string
+	if err := tc.DB.WithContext(ctx).Table("novels").Where("id = ?", tc.NovelID).Limit(1).Pluck("genre", &g).Error; err != nil {
+		return ""
+	}
+	return g
+}
 
 // getChapterRecord 按章节 id 取当前小说的章节记录，不存在返回 (nil, nil)。
 func getChapterRecord(ctx context.Context, db *gorm.DB, novelID, id int64) (*chapter.Chapter, error) {
