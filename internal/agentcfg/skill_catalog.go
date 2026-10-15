@@ -8,7 +8,8 @@ import (
 
 // BuildSkillCatalog 将 auto 模式的 skill 元数据格式化为 LLM 可用的技能目录。
 // manual 和 always 模式的 skill 不出现在目录中。
-// 按 novel > user > builtin 分组输出，每组只列出 name 和 description。
+// 按 novel > user > builtin 分组；每个来源块内再按 category 子分组（category 字段
+// 此前仅被解析却未使用，现真正参与目录结构，便于 LLM 区分语义相邻的技法）。
 func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	if len(meta) == 0 {
 		return ""
@@ -21,48 +22,16 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	var b strings.Builder
 	b.WriteString("<available_skills>\n")
 
-	if len(novel) > 0 {
-		b.WriteString("## 小说专属技能\n")
-		for _, s := range novel {
-			b.WriteString("- ")
-			b.WriteString(s.Name)
-			if s.Description != "" {
-				b.WriteString(": ")
-				b.WriteString(s.Description)
-			}
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	if len(user) > 0 {
-		b.WriteString("## 用户技能\n")
-		for _, s := range user {
-			b.WriteString("- ")
-			b.WriteString(s.Name)
-			if s.Description != "" {
-				b.WriteString(": ")
-				b.WriteString(s.Description)
-			}
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	if len(builtin) > 0 {
-		b.WriteString("## 内置技能（只读）\n")
-		for _, s := range builtin {
-			b.WriteString("- ")
-			b.WriteString(s.Name)
-			if s.Description != "" {
-				b.WriteString(": ")
-				b.WriteString(s.Description)
-			}
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
+	writeSourceGroup(&b, "小说专属技能", novel)
+	writeSourceGroup(&b, "用户技能", user)
+	writeSourceGroup(&b, "内置技能（只读）", builtin)
 
 	b.WriteString("---\n")
-	b.WriteString("使用 read 工具加载技能完整内容：\n")
+	b.WriteString("路由指引（消歧）：\n")
+	b.WriteString("- 宏观层（story-blueprint 蓝图 / opening-chapters 前三章 / worldbuilding-design 设定体系 / character-design 人设 / signability-audit 签约体检）先于微观层（scene-beats 场景 / pacing-control 节奏 / plot-hook 钩子 / dialogue-subtext 对白 / revision-pass 打磨 / reader-immersion 代入 / deai-flavor 去味 / brainstorm-composer 发散）。\n")
+	b.WriteString("- 场景内部张力/节拍用 scene-beats；节奏快慢用 pacing-control；二者不混。\n")
+	b.WriteString("- 只改某类具体技法时点名加载对应技能；综合请求先对齐宏观层再下沉，勿一次堆砌多个微观技法。\n")
+	b.WriteString("\n使用 read 工具加载技能完整内容：\n")
 	b.WriteString("- skills/<name>.md（小说技能）\n")
 	b.WriteString("- ~/.novelgo/skills/<name>.md（用户技能）\n")
 	b.WriteString("- /builtin/skills/<name>.md（内置技能，只读）\n")
@@ -70,6 +39,63 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	b.WriteString("</available_skills>")
 
 	return b.String()
+}
+
+// writeSourceGroup 将一个来源的技能按 category 子分组写入 builder。
+// category 按首次出现顺序稳定输出；无 category 的技能归入「其他」组并置于末尾。
+func writeSourceGroup(b *strings.Builder, title string, skills []skill.SkillMeta) {
+	if len(skills) == 0 {
+		return
+	}
+	b.WriteString("## ")
+	b.WriteString(title)
+	b.WriteString("\n")
+
+	groups := groupByCategoryOrdered(skills)
+	for _, g := range groups {
+		label := g.name
+		if label == "" {
+			label = "其他"
+		}
+		b.WriteString("### ")
+		b.WriteString(label)
+		b.WriteString("\n")
+		for _, s := range g.items {
+			b.WriteString("- ")
+			b.WriteString(s.Name)
+			if s.Description != "" {
+				b.WriteString(": ")
+				b.WriteString(s.Description)
+			}
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
+}
+
+// categoryGroup 是同一 category 下的技能集合。
+type categoryGroup struct {
+	name  string
+	items []skill.SkillMeta
+}
+
+// groupByCategoryOrdered 按 category 分组并保持稳定顺序（首次出现优先），
+// 无 category 的技能统一归入 name=="" 的组，调用方将其渲染为「其他」并置于末尾。
+func groupByCategoryOrdered(skills []skill.SkillMeta) []categoryGroup {
+	order := make([]string, 0)
+	byCat := make(map[string][]skill.SkillMeta)
+	for _, s := range skills {
+		cat := s.Category
+		if _, ok := byCat[cat]; !ok {
+			order = append(order, cat)
+		}
+		byCat[cat] = append(byCat[cat], s)
+	}
+	result := make([]categoryGroup, 0, len(order))
+	for _, cat := range order {
+		result = append(result, categoryGroup{name: cat, items: byCat[cat]})
+	}
+	return result
 }
 
 // BuildAlwaysSkillsContent 拼合所有 always 模式的 skill 正文，作为常驻系统消息注入。

@@ -78,3 +78,49 @@ func TestBuildAlwaysSkillsContent_MergesEnabled(t *testing.T) {
 		t.Errorf("清空勾选后应仅注入 always，got: %s", content)
 	}
 }
+
+func TestBuildSkillCatalog_GroupsByCategory(t *testing.T) {
+	meta := []skill.SkillMeta{
+		{Name: "scene-beats", Description: "场景节拍", Category: "结构", Mode: skill.ModeAuto, Source: "builtin"},
+		{Name: "character-design", Description: "角色设计", Category: "角色", Mode: skill.ModeAuto, Source: "builtin"},
+		{Name: "pacing-control", Description: "节奏控制", Category: "结构", Mode: skill.ModeAuto, Source: "builtin"},
+		{Name: "dialogue-subtext", Description: "对白潜台词", Category: "角色", Mode: skill.ModeAuto, Source: "builtin"},
+		{Name: "orphan-skill", Description: "无分类", Category: "", Mode: skill.ModeAuto, Source: "builtin"},
+	}
+	catalog := BuildSkillCatalog(meta)
+
+	// 1. 每个分类以 ### 子标题呈现
+	for _, cat := range []string{"### 结构", "### 角色", "### 其他"} {
+		if !strings.Contains(catalog, cat) {
+			t.Errorf("目录缺少分类子标题 %q\ngot: %s", cat, catalog)
+		}
+	}
+
+	// 2. 分类区块出现在来源标题「内置技能（只读）」之下
+	srcIdx := strings.Index(catalog, "## 内置技能（只读）")
+	catIdx := strings.Index(catalog, "### 结构")
+	if srcIdx < 0 || catIdx < 0 || catIdx < srcIdx {
+		t.Errorf("分类子标题应位于来源标题之下，srcIdx=%d catIdx=%d", srcIdx, catIdx)
+	}
+
+	// 3. 同分类技能在该子标题下相邻出现（顺序稳定：首次出现优先）
+	structBlock := catalog[strings.Index(catalog, "### 结构"):strings.Index(catalog, "### 角色")]
+	if strings.Index(structBlock, "scene-beats") > strings.Index(structBlock, "pacing-control") {
+		t.Errorf("同分类内应按首次出现顺序：scene-beats 应在 pacing-control 之前\ngot: %s", structBlock)
+	}
+
+	// 4. 无分类技能归入「其他」且置于末尾（在「角色」之后）
+	otherIdx := strings.Index(catalog, "### 其他")
+	roleIdx := strings.Index(catalog, "### 角色")
+	if otherIdx < roleIdx {
+		t.Errorf("「其他」应置于有名分类之后，otherIdx=%d roleIdx=%d", otherIdx, roleIdx)
+	}
+	if !strings.Contains(catalog[otherIdx:], "orphan-skill") {
+		t.Errorf("「其他」组应包含无分类技能 orphan-skill\ngot: %s", catalog[otherIdx:])
+	}
+
+	// 5. 路由消歧指引存在
+	if !strings.Contains(catalog, "路由指引（消歧）") {
+		t.Errorf("目录应包含路由消歧指引\ngot: %s", catalog)
+	}
+}

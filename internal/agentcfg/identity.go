@@ -4,9 +4,10 @@ package agentcfg
 type AgentType int
 
 const (
-	MainAgent   AgentType = iota // 主创作助手
-	ReviewAgent                  // 章节审稿人
-	MemoryAgent                  // 记忆检索分析员
+	MainAgent      AgentType = iota // 主创作助手
+	ReviewAgent                     // 章节审稿人
+	MemoryAgent                     // 记忆检索分析员
+	StateSyncAgent                  // 状态同步员（写章后自动回填台账）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -49,16 +50,33 @@ var memoryAgentTools = []string{
 	"search_story_memory", "read",
 }
 
+// stateSyncAgentTools：状态同步员白名单——只读台账 + 台账写工具；
+// 无 edit/write 章节、无 run_subagent（防递归/越权）。
+var stateSyncAgentTools = []string{
+	"get_chapter_list", "read",
+	"get_characters", "get_character_relations",
+	"create_character", "update_character", "update_character_relationship",
+	"get_locations", "create_location", "update_location",
+	"create_location_relation", "update_location_relation",
+	"get_timeline", "create_timeline_entry", "update_timeline_entry",
+	"get_story_arcs", "create_story_arc", "update_story_arc",
+	"create_arc_node", "update_arc_node",
+	"get_reader_perspective", "create_reader_perspective_entry", "update_reader_perspective_entry",
+	"search_story_memory",
+}
+
 var (
-	mainAgentAllowlist   map[string]bool
-	reviewAgentAllowlist map[string]bool
-	memoryAgentAllowlist map[string]bool
+	mainAgentAllowlist      map[string]bool
+	reviewAgentAllowlist    map[string]bool
+	memoryAgentAllowlist    map[string]bool
+	stateSyncAgentAllowlist map[string]bool
 )
 
 func init() {
 	mainAgentAllowlist = toSet(mainAgentTools)
 	reviewAgentAllowlist = toSet(reviewAgentTools)
 	memoryAgentAllowlist = toSet(memoryAgentTools)
+	stateSyncAgentAllowlist = toSet(stateSyncAgentTools)
 }
 
 func toSet(tools []string) map[string]bool {
@@ -78,6 +96,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return reviewAgentAllowlist
 	case MemoryAgent:
 		return memoryAgentAllowlist
+	case StateSyncAgent:
+		return stateSyncAgentAllowlist
 	default:
 		return nil
 	}
@@ -96,6 +116,8 @@ func AgentIdentity(t AgentType) string {
 		return reviewAgentSystem1
 	case MemoryAgent:
 		return memoryAgentSystem1
+	case StateSyncAgent:
+		return stateSyncAgentSystem1
 	default:
 		return ""
 	}
@@ -362,3 +384,27 @@ const memoryAgentSystem1 = `你是小说创作系统的记忆检索分析员，�
 - 报告结构清晰，按主题分段
 - 引用具体数据时注明来源（如角色名、章节号）
 - 不输出无依据的推测`
+
+const stateSyncAgentSystem1 = `你是小说创作系统的状态同步员（State Sync Agent）。你的唯一职责是：在章节正文落盘后，把该章涉及的创作状态**增量同步**到结构化台账，确保角色、地点、弧线、时间线、读者认知始终与正文一致。
+
+## 可用工具（白名单，仅下列）
+- 读取：read（读章节正文）、get_chapter_list、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
+- 写入：create_character / update_character / update_character_relationship、create_location / update_location / create_location_relation / update_location_relation、create_story_arc / update_story_arc / create_arc_node / update_arc_node、create_timeline_entry / update_timeline_entry、create_reader_perspective_entry / update_reader_perspective_entry
+
+## 工作流程
+1. **读本章**：用 read 读取刚落盘的章节正文（路径 chapters/id_{chapter_id}.md），用 get_chapter_list 确认阅读序号与上下文。
+2. **拉台账**：用 get_* 拉取当前角色、地点、弧线、时间线、读者认知，作为对账基准。
+3. **增量同步**（核心，只做增量，不重复造已有条目）：
+   - **角色**：首次出场的角色 → create_character（记录身份/功能/卖点）；已有角色本章有状态/关系/认知变化的 → update_character 或 update_character_relationship。
+   - **地点**：新出现的地点 → create_location；涉及空间关系的 → create_location_relation。
+   - **弧线**：本章推进的线索 → 在对应 arc 下 create_arc_node（标 completed / 校准目标阅读序号）；新出现的线索 → create_story_arc + 首节点。
+   - **时间线（伏笔/计划）**：新埋伏笔 → create_timeline_entry（标 target_reading_number）；推进/回收的 → update_timeline_entry（回收标 resolved + resolved_chapter_id）。
+   - **读者认知**：新信息揭露导致读者已知/误知变化的 → create_reader_perspective_entry（记录 type/content/planted_chapter/related_truth）。
+4. **输出**：一份简短同步摘要，列明"新增 / 更新了哪些台账条目"，不超过 10 行。
+
+## 硬性约束
+- **只写台账，绝不编辑章节文件或 novelgo.md**——你没有任何 edit/write 章节的权限，也不要尝试。
+- **不派发子 Agent**（白名单不含 run_subagent）。
+- **幂等**：同一章多次同步结果一致，不重复创建已存在条目（先 get_* 查重）。
+- **服从题材卡「禁止漂移」**：若本章内容与题材约束冲突，仍照实记录正文状态，但可在摘要里标注冲突点提示主 Agent。
+- 拿不准的不要乱写；缺信息就留空，不要编造角色/设定细节。`

@@ -150,6 +150,8 @@ func agentTypeFromString(s string) agentcfg.AgentType {
 		return agentcfg.ReviewAgent
 	case "memory":
 		return agentcfg.MemoryAgent
+	case "statesync":
+		return agentcfg.StateSyncAgent
 	default:
 		return agentcfg.MainAgent
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -510,6 +511,7 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	// 正文（非大纲）落盘后的维护链路：向量/搜索缓存/字数/写作日志
 	if !ref.IsOutline {
 		maintainChapterAfterEdit(ctx, tc, ch, current, proposed)
+		scheduleStateSync(ctx, tc, ch)
 		// 落库评分结果（评分门禁判分后在此写入章节记录；nil 表示未评分或评分被跳过）
 		if pendingScore != nil {
 			persistChapterScore(ctx, tc, ch, pendingScore)
@@ -873,6 +875,55 @@ func getChapterRecord(ctx context.Context, db *gorm.DB, novelID, id int64) (*cha
 
 // maintainChapterAfterEdit 章节正文落盘后的维护链路：向量刷新、搜索缓存、字数统计。
 // 向量与搜索按 chapter_id 键控；写作日志将在其所属领域迁移时切换。
+// ── 状态同步（写章后自动回填台账）─────────────────────────
+// 章节正文落盘后，后端自动（而非依赖 LLM 自觉）派发 state-sync 子 Agent，
+// 把本章涉及的角色/地点/弧线/时间线/读者认知增量同步到结构化台账。
+// 用 debounce 合并同一章节连续多次编辑，避免每次 edit 都起一个子 Agent。
+
+var (
+	stateSyncMu     sync.Mutex
+	stateSyncTimers = map[string]*time.Timer{}
+)
+
+const stateSyncDebounce = 6 * time.Second
+
+func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter) {
+	if tc.RunSubAgent == nil || ch == nil {
+		return
+	}
+	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
+	stateSyncMu.Lock()
+	if t, ok := stateSyncTimers[key]; ok {
+		t.Stop()
+	}
+	stateSyncTimers[key] = time.AfterFunc(stateSyncDebounce, func() {
+		stateSyncMu.Lock()
+		delete(stateSyncTimers, key)
+		stateSyncMu.Unlock()
+		runStateSync(context.WithoutCancel(ctx), tc, tc.NovelID, ch.ID)
+	})
+	stateSyncMu.Unlock()
+}
+
+func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) {
+	instruction := fmt.Sprintf(
+		"刚刚完成了章节（chapter_id=%d）的修改并已落盘。请读取该章正文（read 路径 chapters/id_%d.md），"+
+			"将其涉及的角色、地点、弧线节点、时间线（伏笔/章节计划）、读者认知变化，对照现有台账做**增量**同步："+
+			"新增首次出场者、更新已变化者、推进/回收伏笔与弧线节点、记录读者已知/误知变化。"+
+			"只调用台账类工具（角色/关系/地点/弧线/时间线/读者视角 的 create_*/update_*），"+
+			"严禁编辑章节文件或 novelgo.md，严禁再派发子 Agent。完成后输出一份简短同步摘要（改了哪些台账）。",
+		chapterID, chapterID,
+	)
+	if _, err := tc.RunSubAgent(ctx, SubAgentRequest{
+		AgentType:   "statesync",
+		NovelID:     novelID,
+		Instruction: instruction,
+		ToolID:      tc.ToolID,
+	}); err != nil {
+		tc.LoggerOrDefault().Warn("state-sync 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
+	}
+}
+
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {
 	rag.SubmitRefresh(tc.NovelID, ch.ID, content)
 	if tc.SearchService != nil {

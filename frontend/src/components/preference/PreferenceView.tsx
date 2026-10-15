@@ -12,6 +12,7 @@ import { useDeletePreference } from "./useDeletePreference";
 import { useCreatePreference } from "./useCreatePreference";
 import { useUpdatePreference } from "./useUpdatePreference";
 import GenreConstraintPicker from "./GenreConstraintPicker";
+import PlatformConstraintPicker from "./PlatformConstraintPicker";
 import StyleConstraintPicker from "./StyleConstraintPicker";
 
 interface Props {
@@ -383,6 +384,8 @@ export default function PreferenceView({ novelId }: Props) {
           </div>
 
           <GenreConstraintPicker novelId={novelId} />
+
+          <PlatformConstraintPicker novelId={novelId} />
 
           <StyleConstraintPicker novelId={novelId} />
 

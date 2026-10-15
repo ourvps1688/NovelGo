@@ -10,6 +10,21 @@
 - skills 仓库 `ourvps1688/NovelGo-skills`、主仓库 `ourvps1688/NovelGo`（已创建并推送，master/main 分支）。
 - git 历史已 unshallow；`origin`=ourvps1688/NovelGo，`upstream`=sigpanic/goink。
 
+## 签约级能力缺口（评估内置 skill 后的核心结论）
+- 现有系统保证了"写得不差"（大纲先行+写后质检+状态维护+review agent+题材模板+AI味硬卡+LLM 6维评分门禁），但**完全没有任何一层保证"能签"**——全仓无 签约/编辑审稿口径/完本/追读/网文数据 概念（grep 证实 internal/ 与 frontend/src/ 均无）。
+- review agent 仅查内部一致性（角色/情节/伏笔/读者认知/弧线），无平台编辑视角；review.ScoreChapter 6 维（字数/情节推进/情绪流爽点/人设一致/去AI味/禁忌）亦无签约维度。
+- 12 内置 skill 仅承载"创作技法方法论"；题材/偏好层覆盖题材/开场抓手/商业化节奏。真正缺的三类"签约智能"：
+  1. **签约/平台审稿口径**（编辑看什么、黄金三章过审、题材契合、人设记忆点、完本潜力、数据预期）——最高优先。
+  2. **宏观故事蓝图/卷纲方法论**（立意→卷纲节奏地图→主支线编织→全局悬念→爽点地图→人物弧总览），现有仅 per-chapter 大纲，无蓝图方法论。
+  3. **世界观/金手指/力量体系设计方法论**（自洽升级体系/金手指规则/卖点化），设定仅存储无设计法。
+- 补充路径：手写"知识/方法论型"skill（pattern 蒸馏系统只能从本书正文归纳 struct/mental，**产不出外部平台知识**，故签约向 skill 必须手写）；可再用 pattern 提取器从用户提供的签约级范本蒸馏风格/套路 skill 互补。新 skill 建议 story-blueprint/worldbuilding-design 设 auto、signability-audit 设 manual，并充实空壳 `next` 让其引用蓝图+签约自检（纯内容改动）。
+
+## 题材/偏好层（评估内置 skill 时易被漏看）
+- 题材预设不在 12 个内置 skill 里，而在前端偏好层：`frontend/src/components/preference/genreTemplates.ts`（30+ 经语料校准的题材文风卡，覆盖 通用/男频/女频言情/悬疑/历史脑洞/幻想科幻/种田日常 7 组；每张含 开场抓手/冲突发动机/章尾钩子/禁止漂移 + 爽点密度/情绪曲线/字数门槛）。
+- `GenreConstraintPicker.tsx` 把所选题材写为本书偏好（category=创作约束），经既有偏好注入管线每轮常驻生效，无需后端改动。
+- `internal/agentcfg/identity.go` 已内置题材感知规则（爽文≥3500字/章、悬疑≥3000、爽点密度、爽文禁虐主/有仇不过夜、情绪流）。小说 `Genre` 字段由 `novel_state.go` 注入上下文。
+- 结论：评估"签约向"覆盖度时，题材/赛道/平台调性 + 开场抓手 + 商业化节奏已由该层覆盖；12 内置 skill 仅承载"创作技法方法论"，缺的是 worldbuilding/金手指/力量体系设计 与 宏观大纲/卷纲 两套方法论 skill。
+
 ## UI 方向
 - 用户认为当前前端"丑"，但**现阶段只做纯皮肤换肤**：仅改 `frontend/src/index.css` 颜色 token，不动组件/布局/功能入口。
 - 审美参考 AI-NWA（ExplosiveCoderflome/AI-Novel-Writing-Assistant）。**已按用户提供的 AI-NWA 真实截图对版**：极简黑白灰"墨色"风（Notion/Vercel 挂）——亮色 primary 近黑 `oklch(0.24 0.005 260)`、暗色反转近白；白卡片 + 浅灰页底 + 中性细边框；**不是**彩色强调。语义色（tag/tool/danger/success）保留原样。
