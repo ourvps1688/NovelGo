@@ -14,6 +14,7 @@ import {
   GitGraph,
   Glasses,
   Puzzle,
+  LayoutGrid,
   Sparkles,
   ChevronsLeft,
   ChevronsRight,
@@ -47,6 +48,7 @@ const activities: Activity[] = [
   { id: "git", icon: GitGraph, labelKey: "shell.gitHistory" },
   { id: "reader", icon: Glasses, labelKey: "shell.readerView" },
   { id: "skills", icon: Puzzle, labelKey: "shell.skills" },
+  { id: "skill-matrix", icon: LayoutGrid, labelKey: "shell.skillMatrix" },
   { id: "style-samples", icon: Sparkles, labelKey: "shell.extract" },
 ];
 

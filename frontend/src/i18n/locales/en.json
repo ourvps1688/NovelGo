@@ -117,7 +117,8 @@
     "unsaved": "Unsaved",
     "saved": "Saved",
     "githubIssue": "Have questions? File an Issue",
-    "githubStar": "If this helps you, please Star"
+    "githubStar": "If this helps you, please Star",
+    "skillMatrix": "Skill Matrix"
   },
   "sidebar": {
     "comingSoon": "Coming Soon",
@@ -1590,5 +1591,23 @@
     "checking": "Checking...",
     "upToDate": "Already up to date",
     "checkFailed": "Check failed"
+  },
+  "skillMatrix": {
+    "title": "Skill Matrix",
+    "subtitle": "Browse all skills grouped by category and manage which are enabled for this novel.",
+    "total": "Total skills",
+    "enabledLabel": "Enabled",
+    "disabledLabel": "Disabled",
+    "searchPlaceholder": "Search skill name or description…",
+    "sourceFilter": "Source",
+    "modeFilter": "Mode",
+    "filterAll": "All",
+    "open": "Open",
+    "enabledAria": "Toggle enabled state of {name}",
+    "noSkills": "No skills yet",
+    "noResults": "No skills match the filters",
+    "loading": "Loading…",
+    "loadFailed": "Failed to load skills",
+    "emptyDesc": "(no description)"
   }
 }

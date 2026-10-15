@@ -6,6 +6,7 @@ import {
   useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { flushSync } from "react-dom";
 import type { imp, novel } from "@/lib/wailsjs/go/models";
 import ActivityBar from "@/components/shell/ActivityBar";
 import StatusBar from "@/components/shell/StatusBar";
@@ -30,6 +31,7 @@ import GitHubLink from "@/components/shell/GitHubLink";
 import SettingsDialog from "@/components/settings/SettingsDialog";
 import HelpDialog from "@/components/help/HelpDialog";
 import ProfileView from "@/components/profile/ProfileView";
+import SkillMatrixView from "@/components/skill/SkillMatrixView";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
 import UpdateDialog from "@/components/update/UpdateDialog";
@@ -73,6 +75,12 @@ const CONTENT_PANEL_IDS = new Set<PanelId>(["chapters", "skills"]);
 interface Props {
   initialNovelId: number;
   initialShowHelp?: boolean;
+}
+
+function skillPathForMatrix(name: string, source: string): string {
+  if (source === "novel") return `skills/${name}.md`;
+  if (source === "user") return `~/.novelgo/skills/${name}.md`;
+  return `/builtin/skills/${name}.md`;
 }
 
 export default function WorkspaceView({
@@ -309,6 +317,20 @@ export default function WorkspaceView({
     }
   }
 
+  // 技能矩阵卡片点击：先同步切到 skills 面板（挂载 ContentPanel），再打开技能。
+  const handleMatrixOpenSkill = useCallback(
+    (name: string, source: string) => {
+      flushSync(() => setActivePanel("skills"));
+      const path = skillPathForMatrix(name, source);
+      handleSelectSkill(
+        path,
+        `${t("skill.skillLabel")}${name}`,
+        source === "builtin",
+      );
+    },
+    [setActivePanel, handleSelectSkill, t],
+  );
+
   // 3.8 后续：selectedGitFile 迁 useGitStore，GitHistoryList 自己写 store，不再透传 onSelectGitFile。
   // 4b: 接 type 透传给 focusEntity（storyarc 全局搜索区分 arc/node 跳转，其他领域 undefined）。
   function handleSearchNavigateEntity(
@@ -525,6 +547,13 @@ export default function WorkspaceView({
           ) : activePanel === "profile" ? (
             <ErrorBoundary>
               <ProfileView />
+            </ErrorBoundary>
+          ) : activePanel === "skill-matrix" ? (
+            <ErrorBoundary>
+              <SkillMatrixView
+                novelId={activeNovelId}
+                onOpenSkill={handleMatrixOpenSkill}
+              />
             </ErrorBoundary>
           ) : null}
 

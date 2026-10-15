@@ -16,6 +16,7 @@ export type PanelId =
   | "profile"
   | "git"
   | "skills"
+  | "skill-matrix"
   | "style-samples";
 
 // 侧栏可额外为 "search"（搜索面板覆盖在 SidePanel 内）。

@@ -113,7 +113,8 @@
     "unsaved": "未保存",
     "saved": "已保存",
     "githubIssue": "有任何问题？去提 Issue",
-    "githubStar": "如果对你有帮助，欢迎 Star"
+    "githubStar": "如果对你有帮助，欢迎 Star",
+    "skillMatrix": "技能矩阵"
   },
   "sidebar": {
     "comingSoon": "即将推出",
@@ -1551,5 +1552,23 @@
     "checking": "检查中...",
     "upToDate": "已是最新版本",
     "checkFailed": "检查失败"
+  },
+  "skillMatrix": {
+    "title": "技能矩阵",
+    "subtitle": "按分类浏览全部技能，并管理各技能在本小说的启用状态。",
+    "total": "技能总数",
+    "enabledLabel": "已启用",
+    "disabledLabel": "未启用",
+    "searchPlaceholder": "搜索技能名或描述…",
+    "sourceFilter": "来源",
+    "modeFilter": "模式",
+    "filterAll": "全部",
+    "open": "打开",
+    "enabledAria": "切换 {name} 的启用状态",
+    "noSkills": "暂无技能",
+    "noResults": "没有符合筛选条件的技能",
+    "loading": "加载中…",
+    "loadFailed": "技能加载失败",
+    "emptyDesc": "（无描述）"
   }
 }
