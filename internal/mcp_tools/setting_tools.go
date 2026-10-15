@@ -76,6 +76,13 @@ func (t *UpsertSettingTool) Execute(ctx context.Context, args any, tc ToolContex
 		}, nil
 	}
 
+	// 事务成功后再增量索引设定到向量库（向量库为可选能力，失败仅告警不阻断）。
+	for _, id := range ids {
+		if err := setting.IndexSettingByID(ctx, tc.DB, tc.NovelID, id); err != nil {
+			tc.LoggerOrDefault().Warn("索引设定到向量库失败(已忽略)", "setting_id", id, "err", err)
+		}
+	}
+
 	return &ToolResult{
 		Success: true,
 		Data:    map[string]any{"setting_ids": ids, "count": len(ids)},
@@ -127,4 +134,5 @@ func upsertOneSetting(tx *gorm.DB, novelID int64, item UpsertSettingItem) (int64
 // RegisterSettingTools 注册设定工具。
 func RegisterSettingTools(r *Registry) {
 	r.Register(&UpsertSettingTool{})
+	r.Register(&SearchSettingsTool{})
 }

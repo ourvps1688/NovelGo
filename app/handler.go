@@ -416,6 +416,11 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		rag.InitRefreshQueue(vectorStore, a.chapter, a.novel, a.logger)
 		rag.GetRefreshQueue().Start()
 
+		// 注入设定补索引钩子：冷启动/ONNX 后加载时，RebuildAll 会重索引各本小说的设定向量。
+		rag.RegisterSettingIndexer(func(ctx context.Context, novelID int64) error {
+			return setting.ReindexNovelSettings(ctx, a.db, novelID)
+		})
+
 		// 首次启动全量索引（已有向量则跳过）
 		rebuildCtx := context.Background()
 		if err := rag.GetRefreshQueue().RebuildAll(rebuildCtx); err != nil {

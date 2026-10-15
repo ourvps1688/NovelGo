@@ -468,6 +468,11 @@ func (t *DeleteRecordTool) deleteSetting(ctx context.Context, a *DeleteRecordArg
 		return nil, fmt.Errorf("delete setting: %w", err)
 	}
 
+	// 清理设定对应的向量块（向量库为可选能力，失败仅告警不阻断）。
+	if err := setting.DeleteSettingVector(ctx, tc.NovelID, rec.ID); err != nil {
+		tc.LoggerOrDefault().Warn("清理设定向量失败(已忽略)", "setting_id", rec.ID, "err", err)
+	}
+
 	return &ToolResult{Success: true, Data: map[string]any{"deleted": meta}, Inject: injects}, nil
 }
 

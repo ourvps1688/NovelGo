@@ -25,7 +25,7 @@ version: 2
 
 1. **蓝图对齐** — 调 `story-blueprint`：确认本章在卷纲/蓝图中的功能位置（推进/转折/收束），不偏离宏观结构。
 2. **人设加载** — 调 `character-design`：本章出场角色的教义档案（升级驱动/经营/情感/解谜/心理）+ 卖点化节点；用 `get_characters` 取已建档案，确保言行一致、不漂移。
-3. **设定校验** — 调 `worldbuilding-design`：本章涉及的设定/力量体系/金手指，用 `search_story_memory` / `get_locations` / 设定库检索核对一致性，防吃书。
+3. **设定校验** — 调 `worldbuilding-design`：本章涉及的设定/力量体系/金手指，写前用 `search_settings`（语义优先，按本章将涉及的实体/矛盾/地点检索最相关设定，返回带 `setting_id` 的条目）核对一致性、防吃书；也可配合 `get_locations` / `search_story_memory`。需要修正时拿返回的 `setting_id` 调 `upsert_setting` 合并更新，勿新建重复条目。
 4. **读者认知态** — 用 `get_reader_perspective` 取当前读者已知/误知态，据此决定本 reveal 还是 withhold（与 `reader-immersion` 的"好奇心缺口"配合）。
 5. **前三章专项** — 若为新书第 1~3 章，调 `opening-chapters` 执行冷开场/前千字法则/首个甜头。
 6. **产出"本章功能卡"**：一句话写清——推进什么 + 埋什么钩子 + 给什么甜头；可 `upsert_preference` 固化，供写后核对。
@@ -65,4 +65,4 @@ version: 2
 
 ## 工具协同
 
-`get_chapter_list` · `update_chapter_plan` · `get_characters` · `get_story_arcs` · `get_timeline` · `search_story_memory` · `get_locations` · `get_reader_perspective` · `create_reader_perspective_entry` · `upsert_preference` · `run_subagent` · `read`/`edit`
+`get_chapter_list` · `update_chapter_plan` · `get_characters` · `get_story_arcs` · `get_timeline` · `search_story_memory` · `get_locations` · `get_reader_perspective` · `create_reader_perspective_entry` · `upsert_preference` · `search_settings` · `run_subagent` · `read`/`edit`

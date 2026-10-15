@@ -28,6 +28,7 @@ var mainAgentTools = []string{
 	"upsert_preference",
 	"upsert_setting",
 	"delete_record",
+	"search_settings",
 	"edit",
 	"read",
 	"search_story_memory",

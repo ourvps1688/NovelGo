@@ -138,6 +138,75 @@ func (s *VectorStore) IndexChunks(ctx context.Context, novelID int64, chunks []C
 	return nil
 }
 
+// UpsertChunks 幂等写入文本块：先按 chunk_id 删除已有行，再插入，避免重复索引。
+// 用于设定等需按 stable id 覆盖更新的场景（与章节的「DeleteChapterChunks + IndexChunks」等价，
+// 但粒度从 chapter_id 细化到 chunk_id）。
+func (s *VectorStore) UpsertChunks(ctx context.Context, novelID int64, chunks []Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if err := s.ensureTable(ctx, novelID); err != nil {
+		return err
+	}
+
+	texts := make([]string, len(chunks))
+	for i, c := range chunks {
+		texts[i] = c.Content
+	}
+	embs, err := s.embedder.EmbedBatch(ctx, texts)
+	if err != nil {
+		return fmt.Errorf("rag: batch embed: %w", err)
+	}
+
+	tableName := s.tableName(novelID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("rag: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	for i, chunk := range chunks {
+		if _, err := tx.ExecContext(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE chunk_id = ?`, tableName), chunk.ID); err != nil {
+			return fmt.Errorf("rag: delete chunk %s: %w", chunk.ID, err)
+		}
+		v, err := sqlite_vec.SerializeFloat32(embs[i])
+		if err != nil {
+			return fmt.Errorf("rag: serialize chunk %s: %w", chunk.ID, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			fmt.Sprintf(`INSERT INTO %s (embedding, chunk_id, content, chunk_type, chapter_id, chunk_index, start_position) VALUES (?, ?, ?, ?, ?, ?, ?)`, tableName),
+			v, chunk.ID, chunk.Content, chunk.ChunkType, chunk.ChapterID, chunk.ChunkIndex, chunk.StartRunePos,
+		); err != nil {
+			return fmt.Errorf("rag: insert chunk %s: %w", chunk.ID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("rag: commit tx: %w", err)
+	}
+
+	s.log.Info("向量幂等写入完成", "novel_id", novelID, "chunks", len(chunks))
+	return nil
+}
+
+// DeleteChunk 删除指定 stable chunk_id 的全部向量块（用于设定删除后清理）。
+// 向量表不存在时静默 no-op（该 novel 从未索引过设定）。
+func (s *VectorStore) DeleteChunk(ctx context.Context, novelID int64, chunkID string) error {
+	exists, err := s.tableExists(ctx, novelID)
+	if err != nil {
+		return fmt.Errorf("rag: check table before delete chunk: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	tableName := s.tableName(novelID)
+	if _, err := s.db.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE chunk_id = ?`, tableName), chunkID); err != nil {
+		return fmt.Errorf("rag: delete chunk %s: %w", chunkID, err)
+	}
+	s.log.Info("已删除向量块", "novel_id", novelID, "chunk_id", chunkID)
+	return nil
+}
+
 // CompactEmbeddingMemory 释放完整重建留下的 ONNX CPU arena 扩展块。
 // 普通查询和增量索引不应逐次调用，以免反复释放和重新分配推理内存。
 func (s *VectorStore) CompactEmbeddingMemory(ctx context.Context) error {

@@ -44,6 +44,19 @@ var (
 	rq     *RefreshQueue
 )
 
+// ── 设定补索引钩子 ──────────────────────────────────────
+// 设定索引逻辑放在更高层的 setting 包，rag 通过函数钩子反向解耦，避免 import 环。
+// 由 app 初始化时调用 RegisterSettingIndexer 注入（指向 setting.ReindexNovelSettings）。
+// 未注入（或向量库未初始化）时 RebuildAll 对设定不做处理，仅依赖 upsert_setting 的实时索引。
+
+// SettingIndexer 重索引整本小说设定的钩子签名。
+type SettingIndexer func(ctx context.Context, novelID int64) error
+
+var settingIndexer SettingIndexer
+
+// RegisterSettingIndexer 注入设定重索引钩子，供 RebuildAll 冷启动补建设定向量。
+func RegisterSettingIndexer(fn SettingIndexer) { settingIndexer = fn }
+
 // InitRefreshQueue 初始化全局 RefreshQueue。多次调用只生效一次。
 func InitRefreshQueue(vs *VectorStore, chStore *chapter.Store, novelStore *novel.Store, logger *slog.Logger) {
 	rqOnce.Do(func() {
@@ -289,6 +302,12 @@ func (q *RefreshQueue) RebuildAll(ctx context.Context) error {
 		if err := q.rebuildNovelIfIncomplete(ctx, n.ID, &didInfer); err != nil {
 			q.logger.Warn("向量完整性检查失败，跳过", "novel_id", n.ID, "err", err)
 			continue
+		}
+		// 冷启动补建设定向量（仅在钩子已注入且向量库就绪时生效）。
+		if settingIndexer != nil {
+			if err := settingIndexer(ctx, n.ID); err != nil {
+				q.logger.Warn("补索引设定失败，跳过", "novel_id", n.ID, "err", err)
+			}
 		}
 	}
 	return nil
