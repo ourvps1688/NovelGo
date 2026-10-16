@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ElementType } from "react";
 import { Palette, BookOpen, Brain, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import StyleView from "@/components/style/StyleView";
@@ -47,10 +47,29 @@ export default function ExtractWorkspaceView({
         : "text-muted-foreground hover:text-foreground hover:bg-background/60"
     }`;
 
+  const SectionHeader = ({
+    icon: Icon,
+    title,
+    note,
+  }: {
+    icon: ElementType;
+    title: string;
+    note: string;
+  }) => (
+    <div className="px-6 py-2 bg-muted/30 border-l-2 border-primary flex items-center gap-2">
+      <Icon className="w-4 h-4 text-muted-foreground" />
+      <span className="text-sm font-medium text-foreground">{title}</span>
+      <span className="text-xs text-muted-foreground">{note}</span>
+    </div>
+  );
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
       {/* 统一范围选择：风格 / 套路 / 心智 */}
       <div className="px-6 pt-4 border-b shrink-0">
+        <p className="text-xs text-muted-foreground mb-2">
+          {t("extract.panelSelectorLabel")}
+        </p>
         <div className="inline-flex items-center gap-1 rounded-lg bg-muted/60 p-1">
           <button
             onClick={() => toggle("style")}
@@ -85,6 +104,11 @@ export default function ExtractWorkspaceView({
       <div className="flex-1 min-h-0 overflow-y-auto">
         {narrativeActive && (
           <div className={scope.style ? "border-b" : ""}>
+            <SectionHeader
+              icon={BookOpen}
+              title={t("extract.narrativeSectionTitle")}
+              note={t("extract.narrativeSectionNote")}
+            />
             <PatternExtractView
               key={narrativeKey}
               currentNovelId={novelId}
@@ -93,12 +117,19 @@ export default function ExtractWorkspaceView({
           </div>
         )}
         {scope.style && (
-          <StyleView
-            focusId={focusSampleId}
-            onFocusHandled={handleFocusSampleHandled}
-            embedded
-            novelId={novelId}
-          />
+          <>
+            <SectionHeader
+              icon={Palette}
+              title={t("extract.styleSectionTitle")}
+              note={t("extract.styleSectionNote")}
+            />
+            <StyleView
+              focusId={focusSampleId}
+              onFocusHandled={handleFocusSampleHandled}
+              embedded
+              novelId={novelId}
+            />
+          </>
         )}
         {!narrativeActive && !scope.style && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
