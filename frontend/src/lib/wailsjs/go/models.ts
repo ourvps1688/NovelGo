@@ -473,6 +473,30 @@ export namespace app {
 	        this.reasoning_effort = source["reasoning_effort"];
 	    }
 	}
+	export class GenerateCoverInput {
+	    novel_id: number;
+	    prompt: string;
+	    provider_name: string;
+	    model: string;
+	    size: string;
+	    style_preset: string;
+	    negative_prompt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GenerateCoverInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.prompt = source["prompt"];
+	        this.provider_name = source["provider_name"];
+	        this.model = source["model"];
+	        this.size = source["size"];
+	        this.style_preset = source["style_preset"];
+	        this.negative_prompt = source["negative_prompt"];
+	    }
+	}
 	export class GetAuthorAliasesResult {
 	    version: number;
 	    groups: AuthorAliasGroupDTO[];
@@ -1109,38 +1133,18 @@ export namespace app {
 	    title: string;
 	    description: string;
 	    genre: string;
-	    kind: string;
-
+	    kind?: string;
+	
 	    static createFrom(source: any = {}) {
 	        return new UpdateNovelInput(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.title = source["title"];
 	        this.description = source["description"];
 	        this.genre = source["genre"];
 	        this.kind = source["kind"];
-	    }
-	}
-	export class GenerateCoverInput {
-	    novel_id: number;
-	    prompt: string;
-	    provider_name: string;
-	    model: string;
-	    size: string;
-
-	    static createFrom(source: any = {}) {
-	        return new GenerateCoverInput(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.novel_id = source["novel_id"];
-	        this.prompt = source["prompt"];
-	        this.provider_name = source["provider_name"];
-	        this.model = source["model"];
-	        this.size = source["size"];
 	    }
 	}
 	export class UpdateNovelSettingInput {
@@ -1704,15 +1708,15 @@ export namespace config {
 	    git_name: string;
 	    git_email: string;
 	    dismissed_version: string;
-	    image_model: string;
-	    image_url: string;
 	    // Go type: time
 	    last_update_check_at: any;
-
+	    image_model: string;
+	    image_url: string;
+	
 	    static createFrom(source: any = {}) {
 	        return new AppSettings(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1725,9 +1729,9 @@ export namespace config {
 	        this.git_name = source["git_name"];
 	        this.git_email = source["git_email"];
 	        this.dismissed_version = source["dismissed_version"];
+	        this.last_update_check_at = this.convertValues(source["last_update_check_at"], null);
 	        this.image_model = source["image_model"];
 	        this.image_url = source["image_url"];
-	        this.last_update_check_at = this.convertValues(source["last_update_check_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -406,6 +406,10 @@ export function MergeMentalSkills(arg1) {
   return window['go']['app']['App']['MergeMentalSkills'](arg1);
 }
 
+export function OptimizeCoverPrompt(arg1, arg2) {
+  return window['go']['app']['App']['OptimizeCoverPrompt'](arg1, arg2);
+}
+
 export function PickAndImportNovel() {
   return window['go']['app']['App']['PickAndImportNovel']();
 }
@@ -496,6 +500,10 @@ export function SetEnabledSkills(arg1) {
 
 export function SetLastSession(arg1) {
   return window['go']['app']['App']['SetLastSession'](arg1);
+}
+
+export function SetNovelKind(arg1, arg2) {
+  return window['go']['app']['App']['SetNovelKind'](arg1, arg2);
 }
 
 export function SetReasoningEffort(arg1) {

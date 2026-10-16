@@ -229,6 +229,8 @@ export function ListStyleSamples(arg1:app.ListStyleSamplesInput):Promise<storage
 
 export function MergeMentalSkills(arg1:app.MergeMentalSkillsInput):Promise<skill.Skill>;
 
+export function OptimizeCoverPrompt(arg1:number,arg2:string):Promise<string>;
+
 export function PickAndImportNovel():Promise<imp.ImportResult>;
 
 export function PickDirectory():Promise<string>;
@@ -274,6 +276,8 @@ export function SetApprovalMode(arg1:string):Promise<void>;
 export function SetEnabledSkills(arg1:app.SetEnabledSkillsInput):Promise<void>;
 
 export function SetLastSession(arg1:string):Promise<void>;
+
+export function SetNovelKind(arg1:number,arg2:string):Promise<novel.Novel>;
 
 export function SetReasoningEffort(arg1:string):Promise<void>;
 

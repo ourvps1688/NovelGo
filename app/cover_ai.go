@@ -20,17 +20,38 @@ import (
 //
 // 复用用户已配置的 LLM Provider（ChatURL + APIKey），不引入新的密钥。
 // 流程：LLM 依据小说标题/题材/描述生成「绘画提示词」→ 调用该 Provider 的图像端点生成封面 → 复用 SaveCover 落库。
+//
+// 尺寸约定：网络小说封面为竖版构图，默认 1024x1536（2:3），详见 coverSizePresets。
 
-// GenerateCoverPromptInput 是生成封面绘画提示词的入参（预留，目前 prompt 由后端依据小说元信息生成）。
-type GenerateCoverInput struct {
-	NovelID      int64  `json:"novel_id"`
-	Prompt       string `json:"prompt"`        // 用户可编辑的绘画提示词；空则后端自动生成
-	ProviderName string `json:"provider_name"` // 复用哪个已配置 Provider 的图像端点
-	Model        string `json:"model"`         // 图像模型，留空走默认 image_model/gpt-image-1
-	Size         string `json:"size"`          // 如 1024x1024，留空默认 1024x1024
+// coverStylePresets 将前端传来的风格键映射为英文绘画风格片段，拼接进提示词。
+var coverStylePresets = map[string]string{
+	"realistic":  "realistic digital painting, highly detailed, dramatic lighting, rich textures",
+	"guofeng":    "Chinese guofeng style, traditional ink-wash and elegant brushwork, classical aesthetics",
+	"anime":      "anime illustration style, vibrant cel-shading, clean lines, expressive characters",
+	"gothic":     "dark gothic atmosphere, heavy shadows, ornate baroque details, melancholic mood",
+	"cyberpunk":  "cyberpunk, neon lights, futuristic megacity, high-tech low-life",
+	"cinematic":  "cinematic composition, film still, volumetric lighting, shallow depth of field",
+	"pixel":      "pixel art style, retro game cover aesthetic",
+	"watercolor": "soft watercolor painting, flowing pigments, dreamy and lyrical",
 }
 
-// GenerateCoverPrompt 调用 LLM 依据小说元信息生成一份封面绘画提示词，供用户预览/编辑。
+// defaultNegativePrompt 网文封面通用负向约束：杜绝文字/水印/变形，保证可商用。
+const defaultNegativePrompt = "text, words, letters, title, logo, watermark, signature, " +
+	"blurry, low resolution, deformed, extra limbs, bad anatomy, distorted proportions, " +
+	"oversaturated, ugly, duplicate, mutated hands, missing fingers"
+
+// GenerateCoverInput 是生成封面的入参。
+type GenerateCoverInput struct {
+	NovelID        int64  `json:"novel_id"`
+	Prompt         string `json:"prompt"`          // 用户可编辑的绘画提示词；空则后端自动生成
+	ProviderName   string `json:"provider_name"`   // 复用哪个已配置 Provider 的图像端点
+	Model          string `json:"model"`           // 图像模型，留空走默认 image_model/gpt-image-1
+	Size           string `json:"size"`            // 如 1024x1536，留空默认 1024x1536（网文竖版）
+	StylePreset    string `json:"style_preset"`    // 风格键（见 coverStylePresets），可空
+	NegativePrompt string `json:"negative_prompt"` // 负向提示词，可空（OpenAI 系会并入 prompt）
+}
+
+// GenerateCoverPrompt 调用 LLM 依据小说元信息生成一份「网络小说封面」绘画提示词，供用户预览/编辑。
 func (a *App) GenerateCoverPrompt(novelID int64) (string, error) {
 	var n novel.Novel
 	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
@@ -45,9 +66,12 @@ func (a *App) GenerateCoverPrompt(novelID int64) (string, error) {
 	messages := []map[string]any{
 		{
 			"role": "system",
-			"content": "你是一名专业的图书封面插画师。请基于用户提供的小说信息，输出一段用于 AI 图像生成的英文绘画提示词（prompt）。" +
-				"要求：1) 突出书名气质与题材核心；2) 给出具体的视觉构图、主体、色调、光影与氛围；3) 避免任何文字/标题出现在画面中；" +
-				"4) 只输出提示词本身，不要解释、不要引号、不要 Markdown。控制在 200 词以内。",
+			"content": "你是一名资深网络小说封面插画师，深谙起点/番茄/晋江等平台的封面审美。" +
+				"请基于用户提供的小说信息，输出一段用于 AI 图像生成的英文绘画提示词（prompt）。" +
+				"要求：1) 竖版封面构图（portrait orientation），主体居中突出、视觉冲击力强，适配 2:3 封面位；" +
+				"2) 紧扣书名气质与题材核心，给出具体构图、主体、服饰/场景、色调、光影与情绪氛围；" +
+				"3) 画面中严禁出现任何文字、书名、标题、logo、水印或 UI 元素；" +
+				"4) 只输出提示词本身，不要解释、不要引号、不要 Markdown，控制在 220 词以内。",
 		},
 		{
 			"role":    "user",
@@ -63,6 +87,45 @@ func (a *App) GenerateCoverPrompt(novelID int64) (string, error) {
 		return "", fmt.Errorf("generate cover prompt: %w", err)
 	}
 	return strings.TrimSpace(prompt), nil
+}
+
+// OptimizeCoverPrompt 调用 LLM 对用户提供/编辑过的封面提示词做精修，强化网文封面表现力（镜像 AI-NWA 的 optimize-prompt）。
+func (a *App) OptimizeCoverPrompt(novelID int64, prompt string) (string, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", fmt.Errorf("提示词为空，无法精修")
+	}
+	var n novel.Novel
+	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
+		return "", fmt.Errorf("optimize cover prompt: %w", err)
+	}
+
+	providerName, modelID, err := a.defaultProviderModel()
+	if err != nil {
+		return "", err
+	}
+
+	messages := []map[string]any{
+		{
+			"role": "system",
+			"content": "你是一名网络小说封面提示词优化师。请在不丢失原意的前提下，重写用户给出的英文绘画提示词，" +
+				"使其更贴合竖版网文封面：强化主体中心构图、题材辨识度、光影质感与商业化吸睛度，" +
+				"并明确排除文字/书名/水印。只输出优化后的提示词，不要解释、不要引号、不要 Markdown。",
+		},
+		{
+			"role":    "user",
+			"content": fmt.Sprintf("书名：%s\n题材：%s\n原提示词：%s", n.Title, n.Genre, prompt),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	out, err := a.llmClient.GenerateText(ctx, providerName, messages, modelID)
+	if err != nil {
+		return "", fmt.Errorf("optimize cover prompt: %w", err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // GenerateCover 调用 Provider 的图像端点生成封面，并复用 SaveCover 落库提交到 Git。
@@ -110,15 +173,34 @@ func (a *App) GenerateCover(input GenerateCoverInput) error {
 	}
 	size := input.Size
 	if size == "" {
-		size = "1024x1024"
+		size = "1024x1536" // 网文竖版封面默认 2:3
+	}
+
+	// 4) 拼接风格预设 + 负向提示词，组装最终 prompt
+	finalPrompt := input.Prompt
+	if preset, ok := coverStylePresets[input.StylePreset]; ok && preset != "" {
+		finalPrompt = preset + ", " + finalPrompt
 	}
 
 	payload := map[string]any{
 		"model":           model,
-		"prompt":          input.Prompt,
+		"prompt":          finalPrompt,
 		"n":               1,
 		"size":            size,
 		"response_format": "b64_json",
+	}
+
+	// OpenAI 系（gpt-image / dall-e）不支持独立 negative_prompt，并入 prompt；
+	// 其余（多为 SD/Comfy 兼容端点）作为独立字段下发。
+	neg := strings.TrimSpace(input.NegativePrompt)
+	if neg == "" {
+		neg = defaultNegativePrompt
+	}
+	if isOpenAIImageModel(model, p.Name) {
+		finalPrompt = finalPrompt + ". Avoid: " + neg + "."
+		payload["prompt"] = finalPrompt
+	} else {
+		payload["negative_prompt"] = neg
 	}
 
 	body, err := json.Marshal(payload)
@@ -182,6 +264,17 @@ func (a *App) defaultProviderModel() (string, string, error) {
 		return name, p.Models[0].ID, nil
 	}
 	return "", "", fmt.Errorf("没有配置可用的 LLM Provider（缺少 API Key）")
+}
+
+// isOpenAIImageModel 判断给定图像模型/供应商是否为 OpenAI 系（gpt-image-* / dall-e），
+// 这类端点不支持独立 negative_prompt 字段，需并入 prompt 文本。
+func isOpenAIImageModel(model, providerName string) bool {
+	m := strings.ToLower(model)
+	if strings.Contains(m, "gpt-image") || strings.Contains(m, "dall-e") || strings.Contains(m, "dalle") {
+		return true
+	}
+	p := strings.ToLower(providerName)
+	return strings.Contains(p, "openai") || strings.Contains(p, "azure")
 }
 
 // deriveImageURL 从 ChatURL 推导 OpenAI 兼容的图像生成端点。
