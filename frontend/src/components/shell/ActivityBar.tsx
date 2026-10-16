@@ -51,7 +51,7 @@ const activities: Activity[] = [
   { id: "skills", icon: Puzzle, labelKey: "shell.skills" },
   { id: "skill-matrix", icon: LayoutGrid, labelKey: "shell.skillMatrix" },
   { id: "style-samples", icon: Sparkles, labelKey: "shell.extract" },
-  { id: "signability", icon: Target, labelKey: "shell.signability" },
+  { id: "signability", icon: Target, labelKey: "shell.workflow" },
 ];
 
 interface Props {

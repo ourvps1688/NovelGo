@@ -188,6 +188,12 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 		b.WriteString("--- ")
 		b.WriteString(sk.Name)
 		b.WriteString(" ---\n")
+		// 来源路径标注：常驻技能正文已注入下方，LLM 无需再次 read；
+		// 若确需重读，给出正确路径，避免其盲目猜测 source 导致 read 失败
+		// （例如内置技能 book-pitch 曾被误读为 ~/.novelgo/skills/book-pitch.md）。
+		b.WriteString("【来源：")
+		b.WriteString(skillReadPath(m.Source, sk.Name))
+		b.WriteString("（只读，正文已注入上方，无需再 read）】\n")
 		b.WriteString(sk.Content)
 		b.WriteString("\n\n")
 	}
@@ -222,6 +228,24 @@ func filterBySource(meta []skill.SkillMeta, source string) []skill.SkillMeta {
 		}
 	}
 	return result
+}
+
+// skillReadPath 返回某技能在 read 工具中应使用的正确路径，依据其来源：
+//   - builtin → /builtin/skills/<name>.md（只读）
+//   - user    → ~/.novelgo/skills/<name>.md
+//   - novel   → skills/<name>.md
+//
+// 注入常驻技能正文时附带此路径，避免 LLM 盲目猜测 skill 来源而 read 失败
+// （例如把内置技能 book-pitch 误读为 ~/.novelgo/skills/book-pitch.md）。
+func skillReadPath(source, name string) string {
+	switch source {
+	case "builtin":
+		return "/builtin/skills/" + name + ".md"
+	case "user":
+		return "~/.novelgo/skills/" + name + ".md"
+	default: // novel 及未知来源
+		return "skills/" + name + ".md"
+	}
 }
 
 func filterByMode(meta []skill.SkillMeta, mode string) []skill.SkillMeta {

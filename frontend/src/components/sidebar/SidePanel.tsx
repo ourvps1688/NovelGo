@@ -13,6 +13,12 @@ import PreferenceList from "@/components/preference/PreferenceList";
 import NovelSettingList from "@/components/novel-setting/NovelSettingList";
 import StyleSampleList from "@/components/style/StyleSampleList";
 import GitHistoryList from "@/components/git/GitHistoryList";
+import SkillMatrixSidebar from "@/components/skill/SkillMatrixSidebar";
+import WorkflowSidebar from "@/components/skill/WorkflowSidebar";
+import type {
+  SourceFilter,
+  ModeFilter,
+} from "@/components/skill/SkillMatrixView";
 import type { novel, chapter } from "@/lib/wailsjs/go/models";
 import type { PanelId } from "@/types/panel";
 import { usePanelStore } from "@/stores/usePanelStore";
@@ -52,6 +58,14 @@ interface Props {
   onSelectStyleSample: (id: number) => void;
   sidePanelWidth: number;
   onSidePanelResize: (w: number) => void;
+  skillMatrixSearch: string;
+  onSkillMatrixSearchChange: (v: string) => void;
+  skillMatrixSourceFilter: SourceFilter;
+  onSkillMatrixSourceFilterChange: (v: SourceFilter) => void;
+  skillMatrixModeFilter: ModeFilter;
+  onSkillMatrixModeFilterChange: (v: ModeFilter) => void;
+  activeWorkflow: string;
+  onSelectWorkflow: (id: string) => void;
 }
 
 export default function SidePanel({
@@ -78,6 +92,14 @@ export default function SidePanel({
   onSelectStyleSample,
   sidePanelWidth,
   onSidePanelResize,
+  skillMatrixSearch,
+  onSkillMatrixSearchChange,
+  skillMatrixSourceFilter,
+  onSkillMatrixSourceFilterChange,
+  skillMatrixModeFilter,
+  onSkillMatrixModeFilterChange,
+  activeWorkflow,
+  onSelectWorkflow,
 }: Props) {
   const { t } = useTranslation();
   const activePanel = usePanelStore((s) => s.sidebarPanel ?? s.activePanel);
@@ -174,6 +196,21 @@ export default function SidePanel({
         <StyleSampleList
           onSelectSample={onSelectStyleSample}
           novelId={novelId}
+        />
+      ) : activePanel === "signability" ? (
+        <WorkflowSidebar
+          activeWorkflow={activeWorkflow}
+          onSelectWorkflow={onSelectWorkflow}
+        />
+      ) : activePanel === "skill-matrix" ? (
+        <SkillMatrixSidebar
+          novelId={novelId}
+          search={skillMatrixSearch}
+          onSearchChange={onSkillMatrixSearchChange}
+          sourceFilter={skillMatrixSourceFilter}
+          onSourceChange={onSkillMatrixSourceFilterChange}
+          modeFilter={skillMatrixModeFilter}
+          onModeChange={onSkillMatrixModeFilterChange}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center">

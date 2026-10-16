@@ -119,7 +119,7 @@
     "githubIssue": "Have questions? File an Issue",
     "githubStar": "If this helps you, please Star",
     "skillMatrix": "Skill Matrix",
-    "signability": "Signability Workflow"
+    "workflow": "Workflow"
   },
   "sidebar": {
     "comingSoon": "Coming Soon",
@@ -992,6 +992,62 @@
     "styleEmpty": "No extracted style profiles yet. Go to the Extract tab, select samples and extract a writing style first.",
     "tokenOverBudget": "Preferences exceed 4k soft budget ({{count}} tokens), consider trimming"
   },
+  "polarStar": {
+    "title": "North Star / Red Lines",
+    "hint": "A meta-goal layer above genre cards: the North Star defines the core direction the book is heading toward; red lines are boundaries that must never be crossed. Injected every round.",
+    "northStarLabel": "North Star (this book's core goal / positioning)",
+    "northStarPlaceholder": "e.g. Deliver the most satisfying power-up flow with \"underdog rise + cyber-xianxia\", proving small people can turn the tables",
+    "bottomLinesLabel": "Red Lines (boundaries never to be crossed)",
+    "bottomLinePlaceholder": "e.g. The protagonist never acts brain-dead; antagonists must have plausible motives",
+    "addLine": "Add a red line",
+    "removeLine": "Remove",
+    "save": "Save",
+    "saving": "Saving...",
+    "saved": "North Star / Red Lines saved",
+    "saveFailed": "Failed to save North Star / Red Lines",
+    "unsaved": "Unsaved changes",
+    "emptyHint": "Not set yet. North Star = where you're heading; red lines = what must never be crossed."
+  },
+  "wizard": {
+    "title": "New Book Wizard",
+    "subtitle": "Pick a creative strategy — we'll auto-enable fitting skills, prefill the genre, and guide you to set North Star / Red Lines.",
+    "stepStrategy": "Step 1 · Choose a creative strategy",
+    "stepInfo": "Step 2 · Fill in the book info",
+    "next": "Next",
+    "back": "Back",
+    "startCreating": "Create & apply strategy",
+    "creating": "Creating...",
+    "genreDefaultHint": "Genre prefilled from the chosen strategy; editable",
+    "northStarRequired": "Recommended",
+    "northStarOptional": "Optional",
+    "appliedToast": "Applied \"{{strategy}}\" strategy: enabled {{count}} skills",
+    "success": "New book created",
+    "launchPrompt": "Launch the Signability Workflow (incl. golden opening chapters) now?",
+    "launchHint": "Launching sends a kickoff instruction to chat, guiding you from blueprint all the way to the signing audit and closed-loop revision.",
+    "launchNow": "Launch Workflow",
+    "launchLater": "Later",
+    "launchedToast": "Launched {{workflow}}. Continue in chat.",
+    "launchFailed": "Failed to launch workflow. Start it later from the Workflows panel.",
+    "launchChatNotReady": "Chat not ready. Start the Signability Workflow later from the Workflows panel.",
+    "genreDefault": {
+      "signing": "Urban rebirth power fantasy",
+      "experimental": "Mind-bending sci-fi"
+    },
+    "strategy": {
+      "signing": {
+        "title": "Signing Sprint",
+        "desc": "Aimed at publication & signing: strict genre constraints, mandatory North Star / Red Lines, paired with the signing workflow and story blueprint."
+      },
+      "free": {
+        "title": "Free Creation",
+        "desc": "Follow your inspiration: keep only style & patterns, no forced checks, relaxed and free."
+      },
+      "experimental": {
+        "title": "Experimental Brainstorm",
+        "desc": "De-emphasize long arcs, emphasize per-chapter payoffs and wild ideas — for avant-garde tries."
+      }
+    }
+  },
   "search": {
     "textMatch": "Text Match",
     "character": "Character",
@@ -1279,8 +1335,9 @@
  "saveFailed": "Save failed",
  "generated": "Generated",
  "unifiedGenerated": "Generated {{count}} skills",
- "structResultTitle": "Narrative Pattern",
- "mindsetResultTitle": "Creative Mental",
+    "structResultTitle": "Narrative Pattern",
+    "mindsetResultTitle": "Creative Mental",
+    "mindsetBoundPersona": "Set mental skill \"{{name}}\" as this book's writing persona",
  "reExtract": "Re-extract",
     "saving": "Saving...",
     "saveToUserSkill": "Save to User Skills",
@@ -1636,6 +1693,7 @@
     "loading": "Loading…",
     "loadFailed": "Failed to load skills",
     "emptyDesc": "(no description)",
+    "categories": "Categories",
     "useWhen": "When to use",
     "command": "Command"
   },
@@ -1676,5 +1734,61 @@
     "configureModelFirst": "Configure a model in Settings first",
     "launchFailed": "Failed to launch chat. Please retry.",
     "enableFailed": "Failed to enable the signability workflow"
+  },
+  "bookpitch": {
+    "title": "New Book Pitch Workflow",
+    "subtitle": "Turn a fleeting spark into a signable book package. Driven entirely by the book-pitch skill in chat.",
+    "enabledBadge": "Enabled",
+    "stage0Title": "Feed the idea",
+    "stage0Skill": "book-pitch",
+    "stage0Goal": "Tell the chat your spark, hook, or vague concept.",
+    "stage0Done": "LLM understands your creative core.",
+    "stage1Title": "Draft package + directions",
+    "stage1Skill": "book-pitch",
+    "stage1Goal": "Calls book-pitch to deliver title, 200-char hook blurb, tags, and 2-3 creative directions.",
+    "stage1Done": "Package draft and directions are on the table.",
+    "stage2Title": "Pick a direction",
+    "stage2Skill": "book-pitch",
+    "stage2Goal": "Choose one of the directions, or ask the LLM to refine them.",
+    "stage2Done": "Creative direction is locked.",
+    "stage3Title": "Adopt and build",
+    "stage3Skill": "book-pitch",
+    "stage3Goal": "Fill the plan below (title required); the system auto-builds the book, enables book-pitch, and prompts genre/platform/style.",
+    "stage3Done": "A new book appears on the shelf, ready to write.",
+    "kickoff": "Start the new book pitch workflow. My initial idea is: \"{{idea}}\". Based on the book-pitch skill, guide me strictly through the following steps and do not skip ahead:\n1. Ask me 1-2 short questions to clarify my core idea, target platform/reader, and central selling point/emotional tone;\n2. After I answer, give me 2-3 creative directions (each with a short positioning + suggested title + 200-char hook blurb + tags + one-line selling point);\n3. Wait until I explicitly pick a direction, then produce the final title, blurb, tags, and one-line selling point for that direction;\n4. Finally, tell me: I can fill the title into the \"Adopt the plan and build the book\" panel below and click \"Create book\" to finish.\nNote: the book-pitch skill content is already in the system context; do NOT call the read tool to load it.",
+    "startButton": "Start / Continue New Book Pitch Workflow",
+    "ideaLabel": "Start with your spark / hook / keywords",
+    "ideaPlaceholder": "e.g. an office worker reborn before the college exam uses future memories to lift his family out of poverty, only to discover he's still caught in a bigger conspiracy...",
+    "ideaRequired": "Please enter a spark / hook / keyword before starting the workflow",
+    "selectNovelFirst": "Select a book on the shelf first as the incubation chat",
+    "configureModelFirst": "Configure a model in Settings first",
+    "launchFailed": "Failed to launch chat. Please retry.",
+    "enableFailed": "Failed to enable the book-pitch skill",
+    "adoptTitle": "Adopt the plan and build the book",
+    "adoptHint": "Bring the agreed title/blurb/tags/direction from the chat. Only the title is required; genre/platform/style are optional prompts.",
+    "fieldTitleReq": "Title (required)",
+    "fieldSummary": "Blurb",
+    "fieldTags": "Tags",
+    "tagsPlaceholder": "rebirth / system / power-fantasy",
+    "fieldDirection": "Chosen direction (optional)",
+    "fieldGenre": "Genre",
+    "fieldPlatform": "Platform",
+    "fieldStyle": "Style",
+    "genreHint": "e.g. urban-rebirth / fantasy / mystery. Optional.",
+    "platformHint": "e.g. Fanqie / Qidian / JJWXC. Optional.",
+    "styleHint": "e.g. power-fantasy / healing / dark. Optional.",
+    "createBtn": "Create book",
+    "creating": "Creating…",
+    "createdToast": "New book created; book-pitch skill enabled",
+    "goalLabel": "Goal: ",
+    "doneLabel": "Done: "
+  },
+  "workflow": {
+    "title": "Workflow",
+    "subtitle": "Select a workflow to begin; new workflows will be listed here one by one.",
+    "signability": "Signability Workflow",
+    "signabilityDesc": "Assess signing potential with a guided blueprint-to-audit loop",
+    "bookpitch": "New Book Pitch Workflow",
+    "bookpitchDesc": "Feed an idea; book-pitch drafts title/blurb/tags & directions, then build the book"
   }
 }

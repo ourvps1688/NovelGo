@@ -1,11 +1,11 @@
 import { useNovelStore } from "./useNovelStore";
 import { usePanelStore } from "@/stores/usePanelStore";
 import { useNovels } from "./useNovels";
-import { useCreateNovel } from "./useCreateNovel";
 import { useUpdateNovel } from "./useUpdateNovel";
 import { useDeleteNovel } from "./useDeleteNovel";
 import { ExportNovel } from "@/lib/wailsjs/go/app/App";
 import NovelEditDialog from "./NovelEditDialog";
+import NewBookWizard from "./NewBookWizard";
 import NovelDeleteDialog from "./NovelDeleteDialog";
 import ExportDialog from "@/components/export/ExportDialog";
 
@@ -27,27 +27,8 @@ export default function NovelDialogs() {
   const setShowCreateDialog = useNovelStore((s) => s.setShowCreateDialog);
   const setExportNovelId = useNovelStore((s) => s.setExportNovelId);
 
-  const createNovel = useCreateNovel();
   const updateNovel = useUpdateNovel();
   const deleteNovel = useDeleteNovel();
-
-  async function handleCreateNovelFromDialog(input: {
-    title: string;
-    description: string;
-    genre: string;
-  }) {
-    try {
-      // mutation 的 onSuccess 已失效 novelKeys.all；handler 只管关 dialog + 切到新小说。
-      const n = await createNovel.mutateAsync(input);
-      setShowCreateDialog(false);
-      // 3.8 后续：删 switchToNovel wrapper，直接调 switchNovel + setActivePanel。
-      await switchNovel(n.id);
-      setActivePanel("chapters");
-    } catch (err) {
-      console.error(err);
-      throw err;
-    }
-  }
 
   async function handleUpdateNovel(input: {
     title: string;
@@ -88,10 +69,14 @@ export default function NovelDialogs() {
 
   return (
     <>
-      <NovelEditDialog
+      <NewBookWizard
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
-        onSave={handleCreateNovelFromDialog}
+        onCreated={async (id) => {
+          setShowCreateDialog(false);
+          await switchNovel(id);
+          setActivePanel("chapters");
+        }}
       />
       <NovelEditDialog
         open={!!editingNovel}

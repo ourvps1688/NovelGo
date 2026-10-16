@@ -12,6 +12,8 @@ import { pattern } from "@/lib/wailsjs/go/models";
 import { useSaveContent } from "@/components/content/useSaveContent";
 import { isContentConflict } from "@/components/content/editorSaveQueue";
 import { reportAIFileChange } from "@/components/content/aiFileChanges";
+import { useSavePersonaSetting } from "@/components/chat/usePersonaSetting";
+import { toastSuccess } from "@/utils/toast";
 import { usePatternProgress } from "@/hooks/usePatternProgress";
 import Markdown from "@/components/Markdown";
 import { splitFrontmatter } from "@/components/content/types";
@@ -65,6 +67,7 @@ function ResultCard({
   const [overwriteContent, setOverwriteContent] = useState<string | null>(null);
   const [checkingSave, setCheckingSave] = useState(false);
   const saveMutation = useSaveContent();
+  const savePersonaSetting = useSavePersonaSetting(result.novelId);
 
   const saveGenerated = async (expectedContent: string) => {
     if (!result) return;
@@ -89,8 +92,15 @@ function ResultCard({
               names: [...current, result.name],
             });
           }
+          // 提完即把该书心智设为本书活跃写作人格（每书独立，覆盖式）。
+          await savePersonaSetting.mutateAsync({
+            enabled: true,
+            kind: "skill",
+            ref: result.name,
+          });
+          toastSuccess(t("extract.mindsetBoundPersona", { name: result.name }));
         } catch {
-          // 自动启用失败不阻塞已保存的 skill，静默忽略。
+          // 自动启用/绑定失败不阻塞已保存的 skill，静默忽略。
         }
       }
       onSaved?.();

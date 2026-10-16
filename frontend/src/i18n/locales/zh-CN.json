@@ -115,7 +115,7 @@
     "githubIssue": "有任何问题？去提 Issue",
     "githubStar": "如果对你有帮助，欢迎 Star",
     "skillMatrix": "技能矩阵",
-    "signability": "签约潜力工作流"
+    "workflow": "工作流"
   },
   "sidebar": {
     "comingSoon": "即将推出",
@@ -969,6 +969,62 @@
     "styleEmpty": "尚无已提取的风格画像。请先到「提取」页选中素材并提取写作风格。",
     "tokenOverBudget": "偏好已超 4k 软上限（{{count}} tokens），建议精简"
   },
+  "polarStar": {
+    "title": "北极星 / 底线",
+    "hint": "高于题材卡的元目标层：北极星定义本书要抵达的核心方向，底线是不可逾越的红线，每轮常驻注入",
+    "northStarLabel": "北极星（本书核心目标 / 定位）",
+    "northStarPlaceholder": "例：用「废柴逆袭 + 赛博修仙」写出最爽的升级流，证明小人物也能翻盘",
+    "bottomLinesLabel": "底线（不可逾越的红线）",
+    "bottomLinePlaceholder": "例：主角绝不无脑降智，反派要有合理动机",
+    "addLine": "添加一条底线",
+    "removeLine": "删除",
+    "save": "保存",
+    "saving": "保存中...",
+    "saved": "北极星 / 底线已保存",
+    "saveFailed": "北极星 / 底线保存失败",
+    "unsaved": "有未保存的改动",
+    "emptyHint": "尚未设定。北极星写「要抵达哪里」，底线写「绝不许越过什么」。"
+  },
+  "wizard": {
+    "title": "开书向导",
+    "subtitle": "选择一种创作策略，系统将自动为你启用适配的技能、预填题材，并引导设定北极星/底线",
+    "stepStrategy": "第一步 · 选择创作策略",
+    "stepInfo": "第二步 · 填写作品信息",
+    "next": "下一步",
+    "back": "上一步",
+    "startCreating": "创建并应用策略",
+    "creating": "创建中...",
+    "genreDefaultHint": "已按所选策略预填题材，可修改",
+    "northStarRequired": "建议必填",
+    "northStarOptional": "可选",
+    "appliedToast": "已应用「{{strategy}}」策略：启用 {{count}} 个技能",
+    "success": "新作品已创建",
+    "launchPrompt": "是否立即启动签约潜力工作流（含黄金三章）？",
+    "launchHint": "启动后会在聊天中发送工作流开场指令，引导你从蓝图一路推进到签约体检与闭环回修。",
+    "launchNow": "立即启动工作流",
+    "launchLater": "稍后再说",
+    "launchedToast": "已启动 {{workflow}}，请到聊天继续",
+    "launchFailed": "启动工作流失败，可稍后从「工作流」入口手动启动",
+    "launchChatNotReady": "聊天尚未就绪，请稍后从「工作流」入口启动签约潜力工作流",
+    "genreDefault": {
+      "signing": "都市重生爽文",
+      "experimental": "脑洞科幻"
+    },
+    "strategy": {
+      "signing": {
+        "title": "签约冲刺",
+        "desc": "奔着上架签约去：强约束题材卡、强制校验北极星/底线，配套签约工作流与故事蓝图"
+      },
+      "free": {
+        "title": "自由创作",
+        "desc": "顺着灵感写：只保留风格与套路，不强制体检，轻松自在"
+      },
+      "experimental": {
+        "title": "实验脑洞",
+        "desc": "弱化长线蓝图、强化单章爽点与脑洞，适合先锋尝试"
+      }
+    }
+  },
   "search": {
     "textMatch": "正文匹配",
     "character": "人物",
@@ -1253,8 +1309,9 @@
  "saveFailed": "保存失败",
  "generated": "已生成",
  "unifiedGenerated": "已生成 {{count}} 份技能",
- "structResultTitle": "叙事套路",
- "mindsetResultTitle": "创作心智",
+    "structResultTitle": "叙事套路",
+    "mindsetResultTitle": "创作心智",
+    "mindsetBoundPersona": "已将此心智「{{name}}」设为本书写作人格",
  "reExtract": "重新提取",
     "saving": "保存中...",
     "saveToUserSkill": "保存到用户技能",
@@ -1597,6 +1654,7 @@
     "loading": "加载中…",
     "loadFailed": "技能加载失败",
     "emptyDesc": "（无描述）",
+    "categories": "分类",
     "useWhen": "何时使用",
     "command": "命令"
   },
@@ -1637,5 +1695,61 @@
     "configureModelFirst": "请先在设置中配置模型",
     "launchFailed": "启动对话失败，请稍后重试",
     "enableFailed": "启用签约工作流失败"
+  },
+  "bookpitch": {
+    "title": "新书孵化工作流",
+    "subtitle": "把一闪而过的灵感，孵化成可签约的作品外包装。全程基于 book-pitch 技能在对话中完成。",
+    "enabledBadge": "已启用",
+    "stage0Title": "投喂灵感",
+    "stage0Skill": "book-pitch",
+    "stage0Goal": "在右侧对话里说出你的灵感、梗、或模糊想法。",
+    "stage0Done": "LLM 已理解你的创意内核。",
+    "stage1Title": "产出外包装 + 方向",
+    "stage1Skill": "book-pitch",
+    "stage1Goal": "调用 book-pitch，给出书名、200字钩子简介、标签，以及 2-3 个创作方向。",
+    "stage1Done": "外包装草案与多方向已给出。",
+    "stage2Title": "选定方向",
+    "stage2Skill": "book-pitch",
+    "stage2Goal": "从给出的方向里挑一个，或让 LLM 继续细化。",
+    "stage2Done": "创作方向已确定。",
+    "stage3Title": "采纳并建书",
+    "stage3Skill": "book-pitch",
+    "stage3Goal": "在下方「采纳方案」面板填入方案（书名必填），系统自动建新书、启用 book-pitch、并引导题材/平台/风格。",
+    "stage3Done": "书架里已出现新书，可直接开始写。",
+    "kickoff": "启动新书孵化工作流。我的初步想法是：「{{idea}}」。请基于 book-pitch 技能，严格按以下步骤引导我，不要跳步：\n1. 先问我 1-2 个简短问题，澄清我的灵感核心、目标平台/读者、核心卖点/情绪基调；\n2. 在我回答后，再给出 2-3 个创作方向（每个方向包含：简短定位 + 书名建议 + 200字钩子简介 + 标签 + 一句话卖点）；\n3. 等我明确选定方向后，再产出该方向最终版书名、简介、标签、一句话卖点；\n4. 最后告诉我：可在界面下方「采纳方案并建书」面板填入书名并点击「创建新书」完成建书。\n注意：book-pitch 技能的内容已在 system 中，无需调用 read 工具加载。",
+    "startButton": "开始 / 继续新书孵化工作流",
+    "ideaLabel": "先写下你的灵感 / 梗 / 关键词",
+    "ideaPlaceholder": "比如：社畜重生回高考前，用未来记忆带全家逆袭，却发现重来一次仍被更大的阴谋卷入…",
+    "ideaRequired": "请先输入一个灵感 / 梗 / 关键词，再启动工作流",
+    "selectNovelFirst": "请先在书架选择一本作为孵化讨论场",
+    "configureModelFirst": "请先在设置中配置模型",
+    "launchFailed": "启动对话失败，请稍后重试",
+    "enableFailed": "启用 book-pitch 技能失败",
+    "adoptTitle": "采纳方案并建书",
+    "adoptHint": "从对话中把确定的书名/简介/标签/方向填进来。只有书名必填；题材/平台/风格为引导项，留空则跳过。",
+    "fieldTitleReq": "书名（必填）",
+    "fieldSummary": "作品简介",
+    "fieldTags": "标签",
+    "tagsPlaceholder": "重生 / 系统 / 爽文",
+    "fieldDirection": "选定方向（可选）",
+    "fieldGenre": "题材",
+    "fieldPlatform": "平台",
+    "fieldStyle": "风格",
+    "genreHint": "如：都市重生 / 玄幻 / 悬疑。可不选。",
+    "platformHint": "如：番茄 / 起点 / 晋江。可不选。",
+    "styleHint": "如：爽文 / 治愈 / 暗黑。可不选。",
+    "createBtn": "创建新书",
+    "creating": "创建中…",
+    "createdToast": "新书已创建，已启用 book-pitch 技能",
+    "goalLabel": "目标：",
+    "doneLabel": "完成："
+  },
+  "workflow": {
+    "title": "工作流",
+    "subtitle": "选择一个工作流开始；后续新增的工作流会在此逐个列出。",
+    "signability": "签约潜力工作流",
+    "signabilityDesc": "评估作品签约潜力，规划蓝图到体检的引导式闭环",
+    "bookpitch": "新书孵化工作流",
+    "bookpitchDesc": "投喂灵感，由 book-pitch 产出书名/简介/标签与方向，一键建书"
   }
 }

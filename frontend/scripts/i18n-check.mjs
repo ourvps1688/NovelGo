@@ -240,7 +240,7 @@ console.log('📋 Checking for hardcoded Chinese in source files...')
 // Recursively find all .tsx/.ts files, excluding i18n locale JSONs
 // 数据素材文件（内容为特定语言的写作约束正文，按设计不入 i18n 翻译，
 // 其内中文非可翻译 UI 文案），跳过硬编码中文检查。
-const ALLOWLIST_FILES = new Set(['genreTemplates.ts', 'styleTemplates.ts', 'platformTemplates.ts'])
+const ALLOWLIST_FILES = new Set(['genreTemplates.ts', 'styleTemplates.ts', 'platformTemplates.ts', 'polarStarData.ts', 'preferenceCategories.ts'])
 
 function findSourceFiles(dir, exts = ['.tsx', '.ts']) {
   const results = []

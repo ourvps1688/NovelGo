@@ -31,8 +31,12 @@ import GitHubLink from "@/components/shell/GitHubLink";
 import SettingsDialog from "@/components/settings/SettingsDialog";
 import HelpDialog from "@/components/help/HelpDialog";
 import ProfileView from "@/components/profile/ProfileView";
-import SkillMatrixView from "@/components/skill/SkillMatrixView";
+import SkillMatrixView, {
+  type SourceFilter,
+  type ModeFilter,
+} from "@/components/skill/SkillMatrixView";
 import SignabilityWorkflowView from "@/components/skill/SignabilityWorkflowView";
+import BookPitchWorkflowView from "@/components/skill/BookPitchWorkflowView";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
 import UpdateDialog from "@/components/update/UpdateDialog";
@@ -143,6 +147,15 @@ export default function WorkspaceView({
   const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null);
+  // 技能矩阵筛选状态提升到 WorkspaceView，供 SidePanel 与 SkillMatrixView 共享。
+  const [skillMatrixSearch, setSkillMatrixSearch] = useState("");
+  const [skillMatrixSourceFilter, setSkillMatrixSourceFilter] =
+    useState<SourceFilter>("all");
+  const [skillMatrixModeFilter, setSkillMatrixModeFilter] =
+    useState<ModeFilter>("all");
+  // 工作流总入口（ActivityBar "工作流"）下的子选择：决定主区渲染哪个工作流视图。
+  // 后续新增工作流时，在此追加并扩展下方 activePanel==="signability" 的渲染分支。
+  const [activeWorkflow, setActiveWorkflow] = useState<string>("signability");
   // 3.8 后续：tabTarget/activeContent/isDirty → useEditorStore；
   // selectedGitFile → useGitStore。写方调 getState().setXxx，读方组件自己订阅。
   // reset 由下方 effect 监听 activeNovelId 变化自动调，等价原 switchToNovel wrapper 的 3 行 setState。
@@ -475,6 +488,14 @@ export default function WorkspaceView({
               onSelectStyleSample={(id) => setStyleSampleFocusId(id)}
               sidePanelWidth={sidePanelWidth}
               onSidePanelResize={setSidePanelWidth}
+              skillMatrixSearch={skillMatrixSearch}
+              onSkillMatrixSearchChange={setSkillMatrixSearch}
+              skillMatrixSourceFilter={skillMatrixSourceFilter}
+              onSkillMatrixSourceFilterChange={setSkillMatrixSourceFilter}
+              skillMatrixModeFilter={skillMatrixModeFilter}
+              onSkillMatrixModeFilterChange={setSkillMatrixModeFilter}
+              activeWorkflow={activeWorkflow}
+              onSelectWorkflow={setActiveWorkflow}
             />
           )}
 
@@ -554,11 +575,24 @@ export default function WorkspaceView({
               <SkillMatrixView
                 novelId={activeNovelId}
                 onOpenSkill={handleMatrixOpenSkill}
+                search={skillMatrixSearch}
+                sourceFilter={skillMatrixSourceFilter}
+                modeFilter={skillMatrixModeFilter}
               />
             </ErrorBoundary>
           ) : activePanel === "signability" ? (
             <ErrorBoundary>
-              <SignabilityWorkflowView novelId={activeNovelId} />
+              {activeWorkflow === "signability" ? (
+                <SignabilityWorkflowView novelId={activeNovelId} />
+              ) : activeWorkflow === "bookpitch" ? (
+                <BookPitchWorkflowView
+                  novelId={activeNovelId}
+                  onCreated={async (id) => {
+                    await switchNovel(id);
+                    setActivePanel("chapters");
+                  }}
+                />
+              ) : null}
             </ErrorBoundary>
           ) : null}
 

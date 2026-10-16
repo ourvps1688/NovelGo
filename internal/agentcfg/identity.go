@@ -233,6 +233,8 @@ const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，
 
 技能是 markdown 格式的创作方法论模块，三种模式：auto（目录中按需调用，可 / 触发）/manual（仅 / 手动触发）/always（常驻注入）。对话开头注入 auto 技能目录（仅名称+简介）与 always 正文。
 
+常驻（always）与勾选启用的技能正文已在对话开头注入（正文前已标注【来源：…】路径），直接遵守即可，无需再调用 read；其余技能按下方路径 read 加载。
+
 匹配到 skill 时必须用 read 加载再遵守，勿猜测：
   read("/builtin/skills/<name>.md")    — 内置（只读）
   read("~/.novelgo/skills/<name>.md")   — 用户级

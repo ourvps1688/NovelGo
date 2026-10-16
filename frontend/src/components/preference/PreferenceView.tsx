@@ -12,6 +12,7 @@ import { useDeletePreference } from "./useDeletePreference";
 import { useCreatePreference } from "./useCreatePreference";
 import { useUpdatePreference } from "./useUpdatePreference";
 import GenreConstraintPicker from "./GenreConstraintPicker";
+import PolarStarPanel from "./PolarStarPanel";
 import PlatformConstraintPicker from "./PlatformConstraintPicker";
 import StyleConstraintPicker from "./StyleConstraintPicker";
 
@@ -388,6 +389,8 @@ export default function PreferenceView({ novelId }: Props) {
           <PlatformConstraintPicker novelId={novelId} />
 
           <StyleConstraintPicker novelId={novelId} />
+
+          <PolarStarPanel novelId={novelId} />
 
           {renderSection(t("preference.globalPreference"), global, true)}
 
