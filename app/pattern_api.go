@@ -14,6 +14,7 @@ import (
 
 type ExtractPatternInput = pattern.ExtractPatternInput
 type ExtractPatternResult = pattern.ExtractPatternResult
+type ExtractPatternAllResult = pattern.ExtractPatternAllResult
 type ExtractPatternProgress = pattern.Progress
 
 // ExtractPattern 从指定小说中提取叙事套路模式
@@ -45,6 +46,42 @@ func (a *App) ExtractPattern(input ExtractPatternInput) (*ExtractPatternResult, 
 		EvidenceRetriever: newMentalEvidenceRetriever(a), // V2-D：向量证据前置（无 ONNX 时自动为 nil）
 	}
 	result, err := extractor.Extract(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("提取模式失败: %w", err)
+	}
+	return result, nil
+}
+
+// ExtractPatternAll 一次共享前缀、多份产物（套路 + 心智）。
+// Flavors 字段为空时退化为单 flavor（等价于 ExtractPattern）。
+func (a *App) ExtractPatternAll(input ExtractPatternInput) (*ExtractPatternAllResult, error) {
+	if a.llmClient == nil {
+		return nil, fmt.Errorf("LLM 客户端未初始化")
+	}
+	if a.chapter == nil {
+		return nil, fmt.Errorf("章节存储未初始化")
+	}
+
+	ctx, cancel := context.WithCancel(a.ctx)
+	defer cancel()
+
+	key := fmt.Sprintf("%s%d", agent.CancelPrefixPattern, input.NovelID)
+	a.cancelMgr.Cancel(key)
+	a.cancelMgr.Register(key, cancel)
+	defer func() {
+		if ctx.Err() == nil {
+			a.cancelMgr.Unregister(key)
+		}
+	}()
+
+	extractor := &pattern.Extractor{
+		Chapters:          a.chapter,
+		LLMClient:         a.llmClient,
+		DB:                a.db,
+		Progress:          a.emitExtractPatternProgress,
+		EvidenceRetriever: newMentalEvidenceRetriever(a), // V2-D：向量证据前置（无 ONNX 时自动为 nil）
+	}
+	result, err := extractor.ExtractAll(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("提取模式失败: %w", err)
 	}

@@ -178,6 +178,10 @@ export function ExtractPattern(arg1) {
   return window['go']['app']['App']['ExtractPattern'](arg1);
 }
 
+export function ExtractPatternAll(arg1) {
+  return window['go']['app']['App']['ExtractPatternAll'](arg1);
+}
+
 export function ExtractStyle(arg1) {
   return window['go']['app']['App']['ExtractStyle'](arg1);
 }

@@ -115,6 +115,8 @@ export function ExportNovel(arg1:number,arg2:string):Promise<void>;
 
 export function ExtractPattern(arg1:pattern.ExtractPatternInput):Promise<pattern.ExtractPatternResult>;
 
+export function ExtractPatternAll(arg1:pattern.ExtractPatternInput):Promise<pattern.ExtractPatternAllResult>;
+
 export function ExtractStyle(arg1:app.ExtractStyleInput):Promise<style.ExtractResult>;
 
 export function FrontendReady():Promise<app.StartupState>;

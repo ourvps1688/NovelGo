@@ -18,6 +18,18 @@ type ExtractPatternInput struct {
 	// （叙事心智模型 / 表达DNA / 创作决策启发式+价值观+诚实边界）分别生成再合并，
 	// 合计 token ≤7k，低于单轮 8k 护栏，提升五层结构的独立保真度（V3 P1）。
 	DeepMultiLens bool `json:"deep_multi_lens,omitempty"`
+	// Flavors 同时提取多种产物（"struct" / "mental"）。非空时优先于 Flavor，
+	// 共享同一套 Pre-step 边界 + Step1 摘要 + Step2 压缩前缀只跑一次，再分别生成各 flavor 技能，
+	// 省去对全书的多遍重读。空时退化为单 flavor（与 Flavor 字段语义一致）。
+	Flavors []string `json:"flavors,omitempty"`
+}
+
+// ExtractPatternAllResult 是 ExtractAll 的产出：一次前缀、多份产物。
+// Struct / Mental 分别为套路模板与创作心智的提取结果；仅当对应 flavor 被请求时非空。
+type ExtractPatternAllResult struct {
+	TaskID string                `json:"task_id,omitempty"`
+	Struct *ExtractPatternResult `json:"struct,omitempty"`
+	Mental *ExtractPatternResult `json:"mental,omitempty"`
 }
 
 type ExtractPatternResult struct {

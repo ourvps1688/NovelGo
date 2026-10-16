@@ -4,10 +4,11 @@ import { useTranslation } from "react-i18next";
 import { toErrorMessage } from "@/utils/error";
 import {
   ExtractPattern,
+  ExtractPatternAll,
   CancelExtractPattern,
   GetContent,
 } from "@/lib/wailsjs/go/app/App";
-import type { pattern } from "@/lib/wailsjs/go/models";
+import { pattern } from "@/lib/wailsjs/go/models";
 import { useSaveContent } from "@/components/content/useSaveContent";
 import { isContentConflict } from "@/components/content/editorSaveQueue";
 import { reportAIFileChange } from "@/components/content/aiFileChanges";
@@ -27,7 +28,8 @@ interface Props {
   reasoningEffort: string; // reasoning effort（model 不支持时为空串）
   title: string; // 小说标题（进度页展示用）
   chapterCount: number; // 本次提取的章节数
-  flavor?: string; // "struct" (default) | "mental"
+  flavor?: string; // "struct" (default) | "mental"，单产物提取时使用
+  flavors?: string[]; // 多产物提取（struct/mental），>1 时走 ExtractPatternAll 一次前缀多产物
   sourceAuthor?: string; // 仅 mental：来源作者，写入 skill frontmatter
   deepMultiLens?: boolean; // 仅 mental：深度多镜头精提（V3 P1，opt-in）
   onExit: () => void; // 返回选择页
@@ -35,105 +37,34 @@ interface Props {
 
 type Status = "running" | "done" | "failed";
 
-interface ExtractResult {
+// 单个产物的提取结果（与 wails 返回的 ExtractPatternResult 对齐，snake_case）。
+interface OneResult {
   taskId: string;
   novelId: number;
   name: string;
   description: string;
   filePath: string;
   rawContent: string;
-  fidelity?: pattern.FidelityScorecard; // V2 产出后保真度自测（仅 mental）
-  demotedModels?: string[]; // V2 确定性门禁降级的心智模型（仅 mental）
+  flavor?: string;
+  fidelity?: pattern.FidelityScorecard;
+  demotedModels?: string[];
 }
 
-export default function PatternSessionView({
-  taskId,
-  novelId,
-  chapterIds,
-  providerName,
-  modelId,
-  reasoningEffort,
-  title,
-  chapterCount,
-  flavor,
-  sourceAuthor,
-  deepMultiLens,
+// ResultCard 渲染单个产物的预览与保存（套路 / 心智复用同一卡片）。
+function ResultCard({
+  result,
   onExit,
-}: Props) {
+  onSaved,
+}: {
+  result: OneResult;
+  onExit: () => void;
+  onSaved?: () => void;
+}) {
   const { t } = useTranslation();
-  const [status, setStatus] = useState<Status>("running");
-  const [result, setResult] = useState<ExtractResult | null>(null);
   const [error, setError] = useState("");
   const [overwriteContent, setOverwriteContent] = useState<string | null>(null);
   const [checkingSave, setCheckingSave] = useState(false);
-  // 5.3 pattern commit 2: SaveContent 走 useSaveContent mutation（复用 5.2 content 领域），
-  //   loading 由 mutation.isPending 推导，删手动 setLoading state。
-  //   流式 ExtractPattern/CancelExtractPattern 改直接 import wailsjs（删 useApp），保持本地 state + try/catch。
   const saveMutation = useSaveContent();
-  const { progress, events, reset } = usePatternProgress(taskId);
-  const startedRef = useRef(false);
-
-  const runExtract = async () => {
-    setStatus("running");
-    setError("");
-    setResult(null);
-    reset();
-
-    // 结构化入参校验（替代 splitModelKey 拆解 + 校验）
-    if (!providerName || !modelId) {
-      setError(t("extract.extractFailed"));
-      setStatus("failed");
-      return;
-    }
-
-    try {
-      const res = await ExtractPattern({
-        task_id: taskId,
-        novel_id: novelId,
-        provider_name: providerName,
-        model_id: modelId,
-        reasoning_effort: reasoningEffort,
-        chapter_ids: chapterIds.length > 0 ? chapterIds : undefined,
-        flavor: flavor || undefined,
-        source_author: sourceAuthor || undefined,
-        deep_multi_lens:
-          deepMultiLens && flavor === "mental" ? deepMultiLens : undefined,
-      });
-      setResult({
-        taskId: res.task_id || taskId,
-        novelId,
-        name: res.name,
-        description: res.description,
-        filePath: res.file_path,
-        rawContent: res.raw_content,
-        fidelity: res.fidelity,
-        demotedModels: res.demoted_models,
-      });
-      setStatus("done");
-    } catch (e: unknown) {
-      const msg = toErrorMessage(e, "");
-      if (!msg.includes("canceled") && !msg.includes("取消")) {
-        setError(msg || t("extract.extractFailed"));
-        setStatus("failed");
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    runExtract();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleCancel = async () => {
-    try {
-      await CancelExtractPattern(novelId);
-    } catch {
-      // ignore cancel errors
-    }
-    onExit();
-  };
 
   const saveGenerated = async (expectedContent: string) => {
     if (!result) return;
@@ -162,6 +93,7 @@ export default function PatternSessionView({
           // 自动启用失败不阻塞已保存的 skill，静默忽略。
         }
       }
+      onSaved?.();
       onExit();
     } catch (e: unknown) {
       setOverwriteContent(null);
@@ -188,9 +120,250 @@ export default function PatternSessionView({
     }
   };
 
-  const { meta, body } = result
-    ? splitFrontmatter(result.rawContent)
-    : { meta: {}, body: "" };
+  const { body } = splitFrontmatter(result.rawContent);
+  const isMental = result.flavor === "mental";
+
+  return (
+    <div className="rounded-lg border bg-card/50 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Sparkle className="w-4 h-4 text-primary" />
+          {isMental
+            ? t("extract.mindsetResultTitle")
+            : t("extract.structResultTitle")}
+          ：「{result.name}」
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onExit}
+            disabled={checkingSave || saveMutation.isPending}
+            className="h-8 px-3 rounded-lg text-sm border border-border hover:bg-muted transition-colors"
+          >
+            {t("extract.cancel")}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={checkingSave || saveMutation.isPending}
+            className="inline-flex items-center gap-1.5 h-8 px-4 rounded-lg text-sm font-medium bg-action-save text-action-save-foreground hover:bg-action-save/80 disabled:opacity-50 transition-colors"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {checkingSave || saveMutation.isPending
+              ? t("extract.saving")
+              : t("extract.saveToUserSkill")}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="px-3 py-2 text-xs text-destructive bg-danger-bg border border-danger-border rounded-md">
+          {error}
+        </div>
+      )}
+
+      {isMental && result.fidelity && (
+        <div className="rounded-lg border bg-muted/10 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-action-save" />
+              {t("extract.fidelity.title")}
+            </span>
+            <span
+              className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                result.fidelity.passed
+                  ? "bg-success/15 text-success-foreground"
+                  : "bg-warning/15 text-warning-foreground"
+              }`}
+            >
+              {result.fidelity.passed
+                ? t("extract.fidelity.passed")
+                : t("extract.fidelity.failed")}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+              <span className="text-muted-foreground">
+                {t("extract.fidelity.knownConsistency")}
+              </span>
+              <span className="font-semibold text-foreground">
+                {result.fidelity.known_consistency}/5
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+              <span className="text-muted-foreground">
+                {t("extract.fidelity.unknownUncertainty")}
+              </span>
+              <span className="font-semibold text-foreground">
+                {result.fidelity.unknown_uncertainty}/5
+              </span>
+            </div>
+          </div>
+          {result.fidelity.issues && result.fidelity.issues.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">
+                {t("extract.fidelity.issues")}
+              </p>
+              <ul className="list-disc pl-5 space-y-0.5 text-xs text-foreground">
+                {result.fidelity.issues.map((iss, i) => (
+                  <li key={i}>{iss}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.demotedModels && result.demotedModels.length > 0 && (
+            <div className="text-xs text-warning-foreground">
+              {t("extract.fidelity.demoted")}
+              {result.demotedModels.join("、")}
+            </div>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            {t("extract.fidelity.note")}
+          </p>
+        </div>
+      )}
+
+      <div className="rounded-lg border bg-muted/10 p-4">
+        <Markdown content={body} />
+      </div>
+
+      <ConfirmDialog
+        open={overwriteContent !== null}
+        title={t("skill.generatedOverwriteTitle")}
+        message={t("skill.generatedOverwriteMessage", { name: result.name })}
+        confirmText={t("skill.generatedConfirmOverwrite")}
+        danger
+        loading={saveMutation.isPending}
+        onClose={() => {
+          if (!saveMutation.isPending) setOverwriteContent(null);
+        }}
+        onConfirm={() => {
+          if (overwriteContent !== null) void saveGenerated(overwriteContent);
+        }}
+      />
+    </div>
+  );
+}
+
+export default function PatternSessionView({
+  taskId,
+  novelId,
+  chapterIds,
+  providerName,
+  modelId,
+  reasoningEffort,
+  title,
+  chapterCount,
+  flavor,
+  flavors,
+  sourceAuthor,
+  deepMultiLens,
+  onExit,
+}: Props) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<Status>("running");
+  const [allResult, setAllResult] =
+    useState<pattern.ExtractPatternAllResult | null>(null);
+  const [error, setError] = useState("");
+  const { progress, events, reset } = usePatternProgress(taskId);
+  const startedRef = useRef(false);
+
+  // 多产物（>1 flavor）走 ExtractPatternAll；否则退化为单产物 ExtractPattern。
+  const activeFlavors =
+    flavors && flavors.length > 0 ? flavors : [flavor || "struct"];
+  const multi = activeFlavors.length > 1;
+  const hasMental = activeFlavors.includes("mental");
+
+  const runExtract = async () => {
+    setStatus("running");
+    setError("");
+    setAllResult(null);
+    reset();
+
+    if (!providerName || !modelId) {
+      setError(t("extract.extractFailed"));
+      setStatus("failed");
+      return;
+    }
+
+    try {
+      let res: pattern.ExtractPatternAllResult;
+      if (multi) {
+        res = await ExtractPatternAll({
+          task_id: taskId,
+          novel_id: novelId,
+          provider_name: providerName,
+          model_id: modelId,
+          reasoning_effort: reasoningEffort,
+          chapter_ids: chapterIds.length > 0 ? chapterIds : undefined,
+          flavors: activeFlavors,
+          source_author: sourceAuthor || undefined,
+          deep_multi_lens:
+            deepMultiLens && hasMental ? deepMultiLens : undefined,
+        });
+      } else {
+        const single = await ExtractPattern({
+          task_id: taskId,
+          novel_id: novelId,
+          provider_name: providerName,
+          model_id: modelId,
+          reasoning_effort: reasoningEffort,
+          chapter_ids: chapterIds.length > 0 ? chapterIds : undefined,
+          flavor: activeFlavors[0],
+          source_author: sourceAuthor || undefined,
+          deep_multi_lens:
+            deepMultiLens && activeFlavors[0] === "mental"
+              ? deepMultiLens
+              : undefined,
+        });
+        res = pattern.ExtractPatternAllResult.createFrom({
+          task_id: single.task_id,
+          struct: activeFlavors[0] === "mental" ? undefined : single,
+          mental: activeFlavors[0] === "mental" ? single : undefined,
+        });
+      }
+      setAllResult(res);
+      setStatus("done");
+    } catch (e: unknown) {
+      const msg = toErrorMessage(e, "");
+      if (!msg.includes("canceled") && !msg.includes("取消")) {
+        setError(msg || t("extract.extractFailed"));
+        setStatus("failed");
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    runExtract();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleCancel = async () => {
+    try {
+      await CancelExtractPattern(novelId);
+    } catch {
+      // ignore cancel errors
+    }
+    onExit();
+  };
+
+  // 将 wails 返回的 ExtractPatternResult 映射为前端展示用的 OneResult。
+  const toOne = (r: pattern.ExtractPatternResult): OneResult => ({
+    taskId: r.task_id ?? "",
+    novelId,
+    name: r.name,
+    description: r.description,
+    filePath: r.file_path,
+    rawContent: r.raw_content,
+    flavor: r.flavor ?? undefined,
+    fidelity: r.fidelity,
+    demotedModels: r.demoted_models,
+  });
+
+  // 收集要展示的产物（按 套路 → 心智 顺序）。
+  const cards: OneResult[] = [];
+  if (allResult?.struct) cards.push(toOne(allResult.struct));
+  if (allResult?.mental) cards.push(toOne(allResult.mental));
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
@@ -199,11 +372,11 @@ export default function PatternSessionView({
           <>
             <span className="text-sm text-muted-foreground flex items-center gap-2">
               <Sparkle className="w-4 h-4 text-primary" />
-              {t(
-                flavor === "mental"
-                  ? "extract.progress.mindsetTitle"
-                  : "extract.progress.title",
-              )}
+              {multi
+                ? t("extract.progress.unifiedTitle")
+                : hasMental
+                  ? t("extract.progress.mindsetTitle")
+                  : t("extract.progress.title")}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -217,36 +390,23 @@ export default function PatternSessionView({
           </>
         )}
 
-        {status === "done" && result && (
+        {status === "done" && (
           <>
             <span className="text-sm text-muted-foreground flex items-center gap-2">
               <Sparkle className="w-4 h-4 text-primary" />
-              {t("extract.generated")}「{result.name}」
+              {multi
+                ? t("extract.unifiedGenerated", { count: cards.length })
+                : t("extract.generated")}
             </span>
             <div className="flex items-center gap-2">
               <button
-                onClick={onExit}
-                disabled={checkingSave || saveMutation.isPending}
-                className="h-8 px-3 rounded-lg text-sm border border-border hover:bg-muted transition-colors"
-              >
-                {t("extract.cancel")}
-              </button>
-              <button
-                onClick={runExtract}
-                disabled={checkingSave || saveMutation.isPending}
+                onClick={() => {
+                  setStatus("running");
+                  runExtract();
+                }}
                 className="h-8 px-3 rounded-lg text-sm border border-border hover:bg-muted transition-colors"
               >
                 {t("extract.reExtract")}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={checkingSave || saveMutation.isPending}
-                className="inline-flex items-center gap-1.5 h-8 px-4 rounded-lg text-sm font-medium bg-action-save text-action-save-foreground hover:bg-action-save/80 disabled:opacity-50 transition-colors"
-              >
-                <Save className="w-3.5 h-3.5" />
-                {checkingSave || saveMutation.isPending
-                  ? t("extract.saving")
-                  : t("extract.saveToUserSkill")}
               </button>
             </div>
           </>
@@ -260,7 +420,10 @@ export default function PatternSessionView({
             </span>
             <div className="flex items-center gap-2">
               <button
-                onClick={runExtract}
+                onClick={() => {
+                  setStatus("running");
+                  runExtract();
+                }}
                 className="h-8 px-3 rounded-lg text-sm border border-border hover:bg-muted transition-colors"
               >
                 {t("extract.reExtract")}
@@ -282,97 +445,15 @@ export default function PatternSessionView({
         </div>
       )}
 
-      {status === "done" && result ? (
+      {status === "done" && allResult ? (
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-3">
-          {Object.keys(meta).length > 0 && (
-            <table className="border bg-muted/20 w-full text-sm rounded-lg overflow-hidden">
-              <tbody>
-                {meta.name && (
-                  <tr className="border-b">
-                    <td className="px-4 py-2 text-muted-foreground whitespace-nowrap w-16">
-                      {t("extract.name")}
-                    </td>
-                    <td className="px-4 py-2 text-foreground font-semibold">
-                      {meta.name}
-                    </td>
-                  </tr>
-                )}
-                {(meta.description || result.description) && (
-                  <tr className="border-b">
-                    <td className="px-4 py-2 text-muted-foreground whitespace-nowrap w-16">
-                      {t("extract.summary")}
-                    </td>
-                    <td className="px-4 py-2 text-foreground">
-                      {meta.description || result.description}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-          {flavor === "mental" && result.fidelity && (
-            <div className="rounded-lg border bg-muted/10 p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-action-save" />
-                  {t("extract.fidelity.title")}
-                </span>
-                <span
-                  className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                    result.fidelity.passed
-                      ? "bg-success/15 text-success-foreground"
-                      : "bg-warning/15 text-warning-foreground"
-                  }`}
-                >
-                  {result.fidelity.passed
-                    ? t("extract.fidelity.passed")
-                    : t("extract.fidelity.failed")}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
-                  <span className="text-muted-foreground">
-                    {t("extract.fidelity.knownConsistency")}
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    {result.fidelity.known_consistency}/5
-                  </span>
-                </div>
-                <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
-                  <span className="text-muted-foreground">
-                    {t("extract.fidelity.unknownUncertainty")}
-                  </span>
-                  <span className="font-semibold text-foreground">
-                    {result.fidelity.unknown_uncertainty}/5
-                  </span>
-                </div>
-              </div>
-              {result.fidelity.issues && result.fidelity.issues.length > 0 && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">
-                    {t("extract.fidelity.issues")}
-                  </p>
-                  <ul className="list-disc pl-5 space-y-0.5 text-xs text-foreground">
-                    {result.fidelity.issues.map((iss, i) => (
-                      <li key={i}>{iss}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {result.demotedModels && result.demotedModels.length > 0 && (
-                <div className="text-xs text-warning-foreground">
-                  {t("extract.fidelity.demoted")}
-                  {result.demotedModels.join("、")}
-                </div>
-              )}
-              <p className="text-[11px] text-muted-foreground">
-                {t("extract.fidelity.note")}
-              </p>
-            </div>
-          )}
-          <div className="rounded-lg border bg-muted/10 p-4">
-            <Markdown content={body} />
-          </div>
+          {cards.map((r) => (
+            <ResultCard
+              key={r.flavor || r.filePath}
+              result={r}
+              onExit={onExit}
+            />
+          ))}
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto p-6">
@@ -381,25 +462,11 @@ export default function PatternSessionView({
             events={events}
             novelTitle={title}
             chapterCount={chapterCount}
-            flavor={flavor}
+            flavor={hasMental ? "mental" : "struct"}
             deepMultiLens={deepMultiLens}
           />
         </div>
       )}
-      <ConfirmDialog
-        open={overwriteContent !== null}
-        title={t("skill.generatedOverwriteTitle")}
-        message={t("skill.generatedOverwriteMessage", { name: result?.name })}
-        confirmText={t("skill.generatedConfirmOverwrite")}
-        danger
-        loading={saveMutation.isPending}
-        onClose={() => {
-          if (!saveMutation.isPending) setOverwriteContent(null);
-        }}
-        onConfirm={() => {
-          if (overwriteContent !== null) void saveGenerated(overwriteContent);
-        }}
-      />
     </div>
   );
 }

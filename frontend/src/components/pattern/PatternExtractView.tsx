@@ -14,7 +14,9 @@ import PatternSessionView from "./PatternSessionView";
 
 interface Props {
   currentNovelId: number;
-  flavor?: "struct" | "mental";
+  // defaultFlavors 由父级「提取范围」勾选（套路/心智）注入，作为初始产物集合；
+  // 组件内仍可微调。为空时默认两者都要（一次前缀多产物）。
+  defaultFlavors?: ("struct" | "mental")[];
 }
 
 type View = "select" | "session";
@@ -30,13 +32,27 @@ interface SessionParams {
   title: string;
   chapterCount: number;
   flavor: string;
+  flavors: ("struct" | "mental")[];
   sourceAuthor: string;
   deepMultiLens: boolean;
 }
 
+// toggleFlavor 在保留至少一个产物的前提下切换 struct/mental 选中态。
+function toggleFlavor(
+  list: ("struct" | "mental")[],
+  f: "struct" | "mental",
+  on: boolean,
+): ("struct" | "mental")[] {
+  const set = new Set(list);
+  if (on) set.add(f);
+  else set.delete(f);
+  if (set.size === 0) set.add(f);
+  return Array.from(set);
+}
+
 export default function PatternExtractView({
   currentNovelId,
-  flavor = "struct",
+  defaultFlavors,
 }: Props) {
   const { t } = useTranslation();
   const userSelectedNovelRef = useRef(false);
@@ -66,6 +82,13 @@ export default function PatternExtractView({
   const [sourceAuthor, setSourceAuthor] = useState("");
   // 深度多镜头精提（V3 P1，opt-in）：仅 mental 有意义，开启后 final 阶段三路聚焦生成再合并。
   const [deepMultiLens, setDeepMultiLens] = useState(false);
+  // 提取产物范围：套路(struct) / 心智(mental)，由 defaultFlavors 注入，默认两者都要。
+  const [flavors, setFlavors] = useState<("struct" | "mental")[]>(() => {
+    const d = (defaultFlavors ?? []).filter(
+      (f) => f === "struct" || f === "mental",
+    );
+    return d.length ? d : (["struct", "mental"] as ("struct" | "mental")[]);
+  });
 
   useEffect(() => {
     if (!userSelectedNovelRef.current) {
@@ -143,6 +166,8 @@ export default function PatternExtractView({
     if (!canExtract || !selectedModel) return;
     // 结构化入参：直接取 selectedModel.ProviderName/ModelID（不再 find + splitModelKey）。
     const taskId = createPatternTaskID();
+    const flav =
+      flavors.length > 0 ? flavors : (["struct"] as ("struct" | "mental")[]);
     setSessionParams({
       taskId,
       novelId: targetNovelId,
@@ -152,7 +177,8 @@ export default function PatternExtractView({
       reasoningEffort,
       title: targetNovelTitle || t("extract.progress.unknownWork"),
       chapterCount: activeChapterCount,
-      flavor,
+      flavor: flav[0],
+      flavors: flav,
       sourceAuthor,
       deepMultiLens,
     });
@@ -166,7 +192,7 @@ export default function PatternExtractView({
     t,
     targetNovelId,
     targetNovelTitle,
-    flavor,
+    flavors,
     sourceAuthor,
     deepMultiLens,
   ]);
@@ -202,6 +228,7 @@ export default function PatternExtractView({
         title={sessionParams.title}
         chapterCount={sessionParams.chapterCount}
         flavor={sessionParams.flavor}
+        flavors={sessionParams.flavors}
         sourceAuthor={sessionParams.sourceAuthor}
         deepMultiLens={sessionParams.deepMultiLens}
         onExit={() => {
@@ -275,6 +302,48 @@ export default function PatternExtractView({
         </div>
       </div>
 
+      {/* 提取产物范围：套路 / 心智（默认两者都要，一次前缀多产物，省去全书重读） */}
+      <div className="px-6 pt-4">
+        <div className="rounded-lg border bg-card px-4 py-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-foreground">
+              {t("extract.flavorScope")}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {t("extract.flavorScopeNote")}
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={flavors.includes("struct")}
+                onChange={(e) =>
+                  setFlavors((prev) =>
+                    toggleFlavor(prev, "struct", e.target.checked),
+                  )
+                }
+                className="h-4 w-4 rounded border-border accent-primary"
+              />
+              {t("extract.flavorStruct")}
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={flavors.includes("mental")}
+                onChange={(e) =>
+                  setFlavors((prev) =>
+                    toggleFlavor(prev, "mental", e.target.checked),
+                  )
+                }
+                className="h-4 w-4 rounded border-border accent-primary"
+              />
+              {t("extract.flavorMental")}
+            </label>
+          </div>
+        </div>
+      </div>
+
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         {chapters.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
@@ -283,7 +352,7 @@ export default function PatternExtractView({
           </div>
         ) : (
           <div className="space-y-3">
-            {flavor === "mental" && (
+            {flavors.includes("mental") && (
               <div className="rounded-lg border bg-card px-4 py-3 space-y-2">
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">

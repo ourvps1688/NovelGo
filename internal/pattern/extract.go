@@ -68,7 +68,29 @@ type Extractor struct {
 }
 
 // Extract 执行完整的模式提取 Pipeline：Pre-step 边界分析 → Step 1 章节摘要 → Step 2 递归压缩 → Step 3 生成技能
+// prefixResult 是共享前缀（Pre-step 边界 + Step1 摘要 + Step2 压缩）的产出，
+// 可供多个 flavor 的 final 阶段复用，避免对全书的多遍重读。
+type prefixResult struct {
+	chunks       []Chunk
+	trace        *Trace
+	chapterCount int
+}
+
 func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*ExtractPatternResult, error) {
+	pr, err := e.runPrefix(ctx, &input)
+	if err != nil {
+		return nil, err
+	}
+	flavor := input.Flavor
+	if flavor == "" {
+		flavor = string(FlavorStruct)
+	}
+	return e.runFinal(ctx, input, pr, flavor)
+}
+
+// runPrefix 执行与 flavor 无关的共享前缀：加载章节 → 结构边界 → 章节摘要 → 递归压缩叙事阶段块。
+// 接收 *ExtractPatternInput 以便回填自动生成的 TaskID 给调用方。
+func (e *Extractor) runPrefix(ctx context.Context, input *ExtractPatternInput) (*prefixResult, error) {
 	if e.Chapters == nil {
 		return nil, fmt.Errorf("章节存储未初始化")
 	}
@@ -106,22 +128,22 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		ContextWindow: contextWindow,
 		BatchBudget:   budget,
 	}
-	e.emit(input, Progress{
+	e.emit(*input, Progress{
 		Stage:   StageLoaded,
 		Message: fmt.Sprintf("已加载 %d 章，开始分析结构边界", len(chapters)),
 	})
 
 	// Pre-step：章节标题分析，获取疑似阶段边界
-	e.emit(input, Progress{
+	e.emit(*input, Progress{
 		Stage:   StageBoundaries,
 		Message: "正在分析结构边界...",
 	})
-	boundaries, err := e.preAnalyzeBoundaries(ctx, input, chapters)
+	boundaries, err := e.preAnalyzeBoundaries(ctx, *input, chapters)
 	if err != nil {
 		return nil, err
 	}
 	trace.Boundaries = boundaries
-	e.emit(input, Progress{
+	e.emit(*input, Progress{
 		Stage:      StageBoundaries,
 		Message:    fmt.Sprintf("已找到 %d 条疑似叙事边界", len(boundaries)),
 		Boundaries: boundaries,
@@ -131,12 +153,12 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 	}
 
 	// Step 1：增量生成章节摘要（已有摘要的跳过）
-	summaries, err := e.ensureSummaries(ctx, input, chapters, boundaries, budget)
+	summaries, err := e.ensureSummaries(ctx, *input, chapters, boundaries, budget)
 	if err != nil {
 		return nil, err
 	}
 	trace.Summaries = summaries
-	e.emit(input, Progress{
+	e.emit(*input, Progress{
 		Stage:   StageSummaries,
 		Message: fmt.Sprintf("已准备 %d 条章节摘要", len(summaries)),
 	})
@@ -145,17 +167,17 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 	}
 
 	// Step 2 第 1 轮：摘要 → 初始叙事阶段块
-	e.emit(input, Progress{
+	e.emit(*input, Progress{
 		Stage:   StageInitialChunks,
 		Message: "正在生成初始叙事阶段块...",
 		Round:   1,
 	})
-	chunks, roundTrace, err := e.initialChunks(ctx, input, summaries, budget)
+	chunks, roundTrace, err := e.initialChunks(ctx, *input, summaries, budget)
 	if err != nil {
 		return nil, err
 	}
 	trace.ChunkRounds = append(trace.ChunkRounds, roundTrace)
-	e.emit(input, Progress{
+	e.emit(*input, Progress{
 		Stage:   StageInitialChunks,
 		Message: fmt.Sprintf("第 1 轮生成 %d 个叙事阶段块", len(chunks)),
 		Round:   1,
@@ -174,14 +196,14 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		e.emit(input, Progress{
+		e.emit(*input, Progress{
 			Stage:   StageCompressChunks,
 			Message: fmt.Sprintf("第 %d 轮压缩中...", round),
 			Round:   round,
 			Tokens:  tokensOfChunks(chunks),
 		})
 		prevTokens := tokensOfChunks(chunks)
-		next, roundTrace, err := e.compressChunks(ctx, input, chunks, readingNumbers, budget, round)
+		next, roundTrace, err := e.compressChunks(ctx, *input, chunks, readingNumbers, budget, round)
 		if err != nil {
 			return nil, err
 		}
@@ -193,7 +215,7 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
-			next, roundTrace, err = e.compressChunks(ctx, input, chunks, readingNumbers, budget, round)
+			next, roundTrace, err = e.compressChunks(ctx, *input, chunks, readingNumbers, budget, round)
 			if err != nil {
 				return nil, fmt.Errorf("第%d轮压缩未返回任何叙事阶段块，重试也失败: %w", round, err)
 			}
@@ -201,7 +223,7 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 				return nil, fmt.Errorf("第%d轮压缩重试后仍未返回任何叙事阶段块，无法继续生成最终技能", round)
 			}
 			nextTokens = tokensOfChunks(next)
-			e.emit(input, Progress{
+			e.emit(*input, Progress{
 				Stage:   StageCompressChunks,
 				Message: fmt.Sprintf("第 %d 轮重试后得到 %d 个叙事阶段块", round, len(next)),
 				Round:   round,
@@ -209,7 +231,7 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 				Chunks:  next,
 			})
 		} else {
-			e.emit(input, Progress{
+			e.emit(*input, Progress{
 				Stage:   StageCompressChunks,
 				Message: fmt.Sprintf("第 %d 轮压缩为 %d 个叙事阶段块", round, len(next)),
 				Round:   round,
@@ -241,15 +263,22 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 		chunks = next
 	}
 
-	// Step 3：所有阶段块 → 最终套路技能
 	trace.FinalTokens = tokensOfChunks(chunks)
-	e.emit(input, Progress{
+	return &prefixResult{chunks: chunks, trace: trace, chapterCount: len(chapters)}, nil
+}
+
+// runFinal 执行 Step 3（final 技能生成）并将产物解析、净化文件名、组装为 ExtractPatternResult。
+// flavor 决定走套路模板（struct）还是创作心智（mental）。
+func (e *Extractor) runFinal(ctx context.Context, input ExtractPatternInput, pr *prefixResult, flavor string) (*ExtractPatternResult, error) {
+	finalInput := input
+	finalInput.Flavor = flavor
+	e.emit(finalInput, Progress{
 		Stage:   StageFinalizing,
-		Message: "正在生成最终套路技能...",
-		Tokens:  trace.FinalTokens,
-		Chunks:  chunks,
+		Message: "正在生成最终技能...",
+		Tokens:  pr.trace.FinalTokens,
+		Chunks:  pr.chunks,
 	})
-	outcome, err := e.finalSkill(ctx, input, chunks, len(chapters))
+	outcome, err := e.finalSkill(ctx, finalInput, pr.chunks, pr.chapterCount)
 	if err != nil {
 		return nil, err
 	}
@@ -259,22 +288,54 @@ func (e *Extractor) Extract(ctx context.Context, input ExtractPatternInput) (*Ex
 	}
 
 	safeName := skill.SanitizeFileName(sk.Name)
-	e.emit(input, Progress{
+	e.emit(finalInput, Progress{
 		Stage:   StageDone,
 		Message: fmt.Sprintf("已生成「%s」", sk.Name),
-		Tokens:  trace.FinalTokens,
+		Tokens:  pr.trace.FinalTokens,
 	})
 	return &ExtractPatternResult{
-		TaskID:        input.TaskID,
+		TaskID:        finalInput.TaskID,
 		Name:          sk.Name,
 		Description:   sk.Description,
 		RawContent:    sk.RawContent,
 		FilePath:      fmt.Sprintf("~/.novelgo/skills/%s.md", safeName),
-		Flavor:        input.Flavor,
+		Flavor:        flavor,
 		Fidelity:      outcome.Fidelity,
 		DemotedModels: outcome.DemotedModels,
-		Trace:         trace,
+		Trace:         pr.trace,
 	}, nil
+}
+
+// ExtractAll 一次共享前缀、多份产物（套路 + 心智）。
+// Flavors 非空时按其中每项生成对应 flavor 的技能；为空则退化为单 flavor（与 Extract 等价）。
+// 套路与心智复用同一套边界/摘要/压缩结果，仅 final 阶段分别调用，省去对全书的多遍重读。
+func (e *Extractor) ExtractAll(ctx context.Context, input ExtractPatternInput) (*ExtractPatternAllResult, error) {
+	pr, err := e.runPrefix(ctx, &input)
+	if err != nil {
+		return nil, err
+	}
+	flavors := input.Flavors
+	if len(flavors) == 0 {
+		f := input.Flavor
+		if f == "" {
+			f = string(FlavorStruct)
+		}
+		flavors = []string{f}
+	}
+
+	out := &ExtractPatternAllResult{TaskID: input.TaskID}
+	for _, fl := range flavors {
+		r, err := e.runFinal(ctx, input, pr, fl)
+		if err != nil {
+			return nil, err
+		}
+		if Flavor(fl) == FlavorMental {
+			out.Mental = r
+		} else {
+			out.Struct = r
+		}
+	}
+	return out, nil
 }
 
 // loadChapters 加载指定 Novel 的章节，支持按 ID 过滤
