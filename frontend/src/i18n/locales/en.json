@@ -521,6 +521,7 @@
     "kindWritingDesc": "The novel you are authoring; you can write chapters and run analysis",
     "kindReferenceDesc": "Imported or flagged reference sample; read-only, analysis only",
     "convertToWriting": "Convert to Writing",
+    "backToBookshelf": "Back to Bookshelf",
     "referenceReadOnlyHint": "Reference books are read-only: you can read and run analysis tools, but cannot write chapters",
     "aiCover": "AI Generate Cover",
     "aiCoverTitle": "AI Generate Cover",

@@ -508,6 +508,7 @@
   "kindWritingDesc": "正在创作的目标书，可正常写章与分析",
   "kindReferenceDesc": "导入或标记为参考的学习样本，只读、仅可分析",
   "convertToWriting": "转为写作书",
+  "backToBookshelf": "返回书架",
   "referenceReadOnlyHint": "参考书为只读，可阅读与运行分析工具，不能写章",
   "aiCover": "AI 生成封面",
   "aiCoverTitle": "AI 生成封面",

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Glasses, Sparkles, ScrollText } from "lucide-react";
+import { ArrowLeft, Glasses, Sparkles, ScrollText } from "lucide-react";
 import { useNovels } from "@/components/novel/useNovels";
 import { useChapters } from "@/components/chapter/useChapters";
 import { useUpdateNovel } from "@/components/novel/useUpdateNovel";
@@ -11,7 +11,13 @@ type Tab = "chapters" | "reader" | "pattern";
 
 // ReferenceAnalyzeView 是参考小说的专属「只读/分析」视图，与写作目标书的创作工作区
 // 完全分离：可查看章节结构、运行读者视角与套路提取等分析工具，但无写章入口。
-export default function ReferenceAnalyzeView({ novelId }: { novelId: number }) {
+export default function ReferenceAnalyzeView({
+  novelId,
+  onBack,
+}: {
+  novelId: number;
+  onBack: () => void;
+}) {
   const { t } = useTranslation();
   const { data: novels = [] } = useNovels();
   const novel = novels.find((n) => n.id === novelId);
@@ -28,9 +34,17 @@ export default function ReferenceAnalyzeView({ novelId }: { novelId: number }) {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
-      {/* 顶部：参考书标识 + 标题 + 转为写作书 */}
+      {/* 顶部：返回书架 + 参考书标识 + 标题 + 转为写作书 */}
       <div className="flex items-center justify-between gap-3 px-6 py-3 border-b shrink-0">
         <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
+            title={t("novel.backToBookshelf")}
+          >
+            <ArrowLeft className="w-4 h-4" />
+            {t("novel.backToBookshelf")}
+          </button>
           <span className="px-1.5 py-0.5 rounded bg-tag-amber text-tag-amber-foreground text-[11px] font-medium shrink-0">
             {t("novel.referenceBadge")}
           </span>

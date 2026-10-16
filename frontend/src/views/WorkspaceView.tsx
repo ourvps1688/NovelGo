@@ -466,7 +466,13 @@ export default function WorkspaceView({
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {isReference ? (
-            <ReferenceAnalyzeView novelId={activeNovelId} />
+            <ReferenceAnalyzeView
+              novelId={activeNovelId}
+              onBack={() => {
+                setActiveNovelId(0);
+                setActivePanel("novels");
+              }}
+            />
           ) : (
             <>
               <ActivityBar onSelect={handleActivitySelect} />
