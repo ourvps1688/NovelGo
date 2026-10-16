@@ -196,7 +196,7 @@ export default function BookshelfView({
             </span>
           )}
           {n.kind === "reference" && (
-            <span className="inline-block self-start text-[11px] px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium border border-amber-500/20 mb-1.5 ml-1.5">
+            <span className="inline-block self-start text-[11px] px-2 py-0.5 rounded-md bg-tag-amber/10 text-tag-amber-foreground font-medium border border-tag-amber/20 mb-1.5 ml-1.5">
               {t("novel.referenceBadge")}
             </span>
           )}
@@ -275,7 +275,7 @@ export default function BookshelfView({
             onClick={() => setTab("reference")}
             className={`h-8 px-3 rounded-md text-sm transition-colors ${
               tab === "reference"
-                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium border border-amber-500/20"
+                ? "bg-tag-amber/10 text-tag-amber-foreground font-medium border border-tag-amber/20"
                 : "text-muted-foreground hover:bg-muted border border-transparent"
             }`}
           >

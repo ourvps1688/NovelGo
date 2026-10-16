@@ -218,7 +218,7 @@ export default function GenerateCoverDialog({
                   className="w-full h-full object-cover block"
                 />
               </div>
-              <p className="text-center text-xs text-emerald-600 dark:text-emerald-400 mt-1.5">
+              <p className="text-center text-xs text-status-ok mt-1.5">
                 {t("novel.coverGenSuccess")}
               </p>
             </div>

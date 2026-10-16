@@ -31,7 +31,7 @@ export default function ReferenceAnalyzeView({ novelId }: { novelId: number }) {
       {/* 顶部：参考书标识 + 标题 + 转为写作书 */}
       <div className="flex items-center justify-between gap-3 px-6 py-3 border-b shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[11px] font-medium shrink-0">
+          <span className="px-1.5 py-0.5 rounded bg-tag-amber text-tag-amber-foreground text-[11px] font-medium shrink-0">
             {t("novel.referenceBadge")}
           </span>
           <h1 className="text-sm font-semibold truncate">{novel?.title}</h1>
@@ -53,7 +53,7 @@ export default function ReferenceAnalyzeView({ novelId }: { novelId: number }) {
               /* 错误由 mutation 上层 toast 处理 */
             }
           }}
-          className="shrink-0 h-7 px-3 rounded-md text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 font-medium transition-colors"
+          className="shrink-0 h-7 px-3 rounded-md text-xs bg-warning hover:bg-warning/80 text-warning-foreground font-medium transition-colors"
         >
           {t("novel.convertToWriting")}
         </button>

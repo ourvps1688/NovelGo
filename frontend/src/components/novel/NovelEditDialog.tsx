@@ -175,7 +175,7 @@ export default function NovelEditDialog({
                 onClick={() => setKind("reference")}
                 className={`flex-1 h-9 rounded-md text-sm border transition-colors ${
                   kind === "reference"
-                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 font-medium"
+                    ? "bg-tag-amber/10 text-tag-amber-foreground border-tag-amber/20 font-medium"
                     : "text-muted-foreground hover:bg-muted border-border"
                 }`}
               >
