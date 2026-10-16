@@ -12,6 +12,28 @@ interface Props {
 
 type ScopeKey = "style" | "struct" | "mental";
 
+function SectionHeader({
+  icon: Icon,
+  title,
+  note,
+}: {
+  icon: ElementType;
+  title: string;
+  note: string;
+}) {
+  return (
+    <div className="px-5 py-3 bg-muted/40 border-b flex items-start gap-3">
+      <div className="mt-0.5 p-1.5 rounded-md bg-primary/10 shrink-0">
+        <Icon className="w-4 h-4 text-primary" />
+      </div>
+      <div className="flex flex-col">
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+        <span className="text-xs text-muted-foreground mt-0.5">{note}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function ExtractWorkspaceView({
   novelId,
   focusSampleId,
@@ -47,30 +69,10 @@ export default function ExtractWorkspaceView({
         : "text-muted-foreground hover:text-foreground hover:bg-background/60"
     }`;
 
-  const SectionHeader = ({
-    icon: Icon,
-    title,
-    note,
-  }: {
-    icon: ElementType;
-    title: string;
-    note: string;
-  }) => (
-    <div className="px-6 py-3 bg-card border-y flex items-start gap-3">
-      <div className="mt-0.5 p-1.5 rounded-md bg-primary/10 shrink-0">
-        <Icon className="w-4 h-4 text-primary" />
-      </div>
-      <div className="flex flex-col">
-        <span className="text-sm font-semibold text-foreground">{title}</span>
-        <span className="text-xs text-muted-foreground mt-0.5">{note}</span>
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background">
       {/* 统一范围选择：风格 / 套路 / 心智 */}
-      <div className="px-6 pt-4 border-b shrink-0">
+      <div className="px-6 pt-4 pb-3 border-b shrink-0">
         <p className="text-xs text-muted-foreground mb-2">
           {t("extract.panelSelectorLabel")}
         </p>
@@ -105,9 +107,9 @@ export default function ExtractWorkspaceView({
         </p>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-6">
         {narrativeActive && (
-          <div className={scope.style ? "border-b" : ""}>
+          <div className="rounded-xl border bg-card overflow-hidden">
             <SectionHeader
               icon={BookOpen}
               title={t("extract.narrativeSectionTitle")}
@@ -121,7 +123,7 @@ export default function ExtractWorkspaceView({
           </div>
         )}
         {scope.style && (
-          <>
+          <div className="rounded-xl border bg-card overflow-hidden">
             <SectionHeader
               icon={Palette}
               title={t("extract.styleSectionTitle")}
@@ -133,7 +135,7 @@ export default function ExtractWorkspaceView({
               embedded
               novelId={novelId}
             />
-          </>
+          </div>
         )}
         {!narrativeActive && !scope.style && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
