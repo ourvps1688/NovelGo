@@ -56,10 +56,14 @@ export default function ExtractWorkspaceView({
     title: string;
     note: string;
   }) => (
-    <div className="px-6 py-2 bg-muted/30 border-l-2 border-primary flex items-center gap-2">
-      <Icon className="w-4 h-4 text-muted-foreground" />
-      <span className="text-sm font-medium text-foreground">{title}</span>
-      <span className="text-xs text-muted-foreground">{note}</span>
+    <div className="px-6 py-3 bg-card border-y flex items-start gap-3">
+      <div className="mt-0.5 p-1.5 rounded-md bg-primary/10 shrink-0">
+        <Icon className="w-4 h-4 text-primary" />
+      </div>
+      <div className="flex flex-col">
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+        <span className="text-xs text-muted-foreground mt-0.5">{note}</span>
+      </div>
     </div>
   );
 
