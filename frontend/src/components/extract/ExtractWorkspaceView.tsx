@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Palette, BookOpen, Brain } from "lucide-react";
+import { Palette, BookOpen, Brain, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import StyleView from "@/components/style/StyleView";
 import PatternExtractView from "@/components/pattern/PatternExtractView";
@@ -43,7 +43,7 @@ export default function ExtractWorkspaceView({
   const chipClass = (active: boolean) =>
     `inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm transition-colors ${
       active
-        ? "bg-background text-foreground shadow-sm"
+        ? "bg-primary text-primary-foreground shadow-sm font-medium"
         : "text-muted-foreground hover:text-foreground hover:bg-background/60"
     }`;
 
@@ -58,6 +58,7 @@ export default function ExtractWorkspaceView({
           >
             <Palette className="w-4 h-4" />
             {t("extract.style")}
+            {scope.style && <Check className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={() => toggle("struct")}
@@ -65,6 +66,7 @@ export default function ExtractWorkspaceView({
           >
             <BookOpen className="w-4 h-4" />
             {t("extract.struct")}
+            {scope.struct && <Check className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={() => toggle("mental")}
@@ -72,6 +74,7 @@ export default function ExtractWorkspaceView({
           >
             <Brain className="w-4 h-4" />
             {t("extract.mindset")}
+            {scope.mental && <Check className="w-3.5 h-3.5" />}
           </button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">

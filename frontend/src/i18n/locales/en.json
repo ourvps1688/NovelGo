@@ -1251,7 +1251,7 @@
  "style": "Style Profile",
  "struct": "Narrative Pattern",
  "mindset": "Creative Mental",
- "unifiedHint": "Select outputs: Pattern & Mental share one book analysis and produce multiple skills in one pass; Style is sample-based and becomes a book preference card.",
+ "unifiedHint": "All three are independent toggles (multi-select): Style is sample-based and becomes a book preference card; Pattern & Mental share one book analysis and produce multiple skills in one pass.",
  "selectScopeHint": "Please select at least one extraction scope",
  "flavorScope": "Extraction outputs",
  "flavorScopeNote": "Pattern & Mental share one book analysis",
