@@ -120,8 +120,14 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
   （现状诊断→规划蓝图→世界设定→写作推进→签约体检→闭环回修六阶段，全程服从题材卡约束，只编排不落库）。
   经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、AC1–AC9 全满足、Phase 4 QA 零缺陷。
   工作区 `skill-studio/20261016-135655-signflow/`（需求/设计/源码/QA 全归档）。
-  - **[ ] 「签约」层产品化 —— 专属 UI 入口**：用户决策「先技能后 UI」，应用内引导式工作流 UI 入口**尚未做**，
-    待技能侧稳定后单独排期（技能内核已可经「技能矩阵 / `/` 触发 / cue（签约潜力·这本书能不能签…）」独立承载引导，不依赖 UI）。
+  - **[x] 「签约」层产品化 —— 专属 UI 入口**：已于 2026-10-16 实现并入库。应用左侧 ActivityBar 新增「签约潜力工作流」面板
+    （`PanelId="signability"`），由 `SignabilityWorkflowView` 承载六阶段导览卡 + 一键启动按钮：
+    - 启动 = **合并式启用 `signability-workflow`（SetEnabledSkills 常驻注入）+ 经 `useChatLaunchStore` 通道向 ChatPanel 发 kickoff 消息**。
+      关键点：`signability-workflow` 是 `mode: manual`，不进技能目录路由（`ListMetaForCatalog` 仅收 `ModeAuto`），故必须「先启用再发消息」才能启动，而非依赖 useWhen 目录路由。
+    - 零侵入通道：新建极小 zustand store `useChatLaunchStore`（register/unregister/send），ChatPanel 挂载时 `register(handleSend)`、卸载 `unregister`；入口面板取 `send` 直接发消息，不改 ChatInput/ChatPanel 既有 props 契约。
+    - 守卫：`novelId===0` 禁用并提示「先选小说」；未配模型（`selected_model_key` 指向模型不存在）禁用并提示「先配模型」。
+    - i18n：新增 `shell.signability` 与 `signability.*` 双语键（标题/副标题/六阶段目标与完成判据/各阶段调用技能/kickoff/启动按钮/禁用提示）。
+    - 门禁：`prettier --check` + `npm run i18n:check` + `tsc -b` + `npm run build` 全绿。
 
 ### P3 — 清理 / 技术债
 - **[ ] `timeline/types.go` 的 `related_entry_ids`**：Python 写入但从未被查询（纯占位数据）。
@@ -190,3 +196,4 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 | 2026-10-16 | 纠正 §5 误判：P2-1 人物关系图可视化**早已实现并入库**（F-5/F-6，`3fc049d`/`02faead`），此前「前端没有关系图 UI」为漏扫；同步 §3/§5/§9 |
 | 2026-10-16 | P2-2 完成：**数据目录迁移做成真正可用功能**。新增 `internal/datamove` 包（含测试）、`platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效、`app.PickDirectory/UpdateDataDir` 重写为安全迁移+回退、前端 `GeneralConfigTab` 加「更改」按钮+进度条+非空确认框；wails 绑定重生成；全门禁绿 |
 | 2026-10-16 | P2-3 技能内核完成（UI 待做）：新增内置编排技能 `signability-workflow`（manual/系统类），把 `story-blueprint`/`worldbuilding-design`/`signability-audit` 编排成六阶段「签约潜力工作流」引导式闭环。经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、Phase 4 QA 零缺陷（AC1–AC9 全满足）。内置技能总数 18→19。工作区 `skill-studio/20261016-135655-signflow/` |
+| 2026-10-16 | P2-3 UI 入口完成：左侧 ActivityBar 新增「签约潜力工作流」面板（`PanelId="signability"` + `SignabilityWorkflowView`）。启动=合并式启用 `signability-workflow`(SetEnabledSkills 常驻注入)+经 `useChatLaunchStore` 通道发 kickoff 消息到 ChatPanel；含选书/配模型守卫与双语 i18n。前端门禁（prettier/i18n:check/tsc/build）全绿 |

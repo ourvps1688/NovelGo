@@ -17,7 +17,8 @@ export type PanelId =
   | "git"
   | "skills"
   | "skill-matrix"
-  | "style-samples";
+  | "style-samples"
+  | "signability";
 
 // 侧栏可额外为 "search"（搜索面板覆盖在 SidePanel 内）。
 export type SidebarPanelId = PanelId | "search";

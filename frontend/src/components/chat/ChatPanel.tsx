@@ -45,6 +45,7 @@ import { useSetLastSession } from "./useSetLastSession";
 import { useSetSelectedModel } from "./useSetSelectedModel";
 import { useSetReasoningEffort } from "./useSetReasoningEffort";
 import { useSetApprovalMode } from "./useSetApprovalMode";
+import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
 
 interface Props {
   novelId: number;
@@ -1272,6 +1273,13 @@ export default function ChatPanel({
       t,
     ],
   );
+
+  // 把当前 handleSend 暴露给跨组件通道（签约潜力工作流等专属入口用）。
+  // handleSend 是 useCallback，依赖变化即重新注册最新闭包；卸载时 unregister。
+  useEffect(() => {
+    useChatLaunchStore.getState().register(handleSend);
+    return () => useChatLaunchStore.getState().unregister();
+  }, [handleSend]);
 
   const hasNovel = novelId > 0;
   const hasTurns = turns.length > 0;

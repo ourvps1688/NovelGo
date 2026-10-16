@@ -32,6 +32,7 @@ import SettingsDialog from "@/components/settings/SettingsDialog";
 import HelpDialog from "@/components/help/HelpDialog";
 import ProfileView from "@/components/profile/ProfileView";
 import SkillMatrixView from "@/components/skill/SkillMatrixView";
+import SignabilityWorkflowView from "@/components/skill/SignabilityWorkflowView";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
 import UpdateDialog from "@/components/update/UpdateDialog";
@@ -554,6 +555,10 @@ export default function WorkspaceView({
                 novelId={activeNovelId}
                 onOpenSkill={handleMatrixOpenSkill}
               />
+            </ErrorBoundary>
+          ) : activePanel === "signability" ? (
+            <ErrorBoundary>
+              <SignabilityWorkflowView novelId={activeNovelId} />
             </ErrorBoundary>
           ) : null}
 
