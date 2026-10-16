@@ -52,6 +52,8 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 | 路由 CI 护栏 | ✅ 完成 | `internal/skill/regression_test.go`（确定性，零 key）+ `.github/workflows/skill-fallback-eval.yml`（夜跑 LLM，需 `DEEPSEEK_API_KEY` secret） |
 | **「签约」智能层** | ✅ 完成且验证 | `signability-audit`（manual）、`story-blueprint`/`worldbuilding-design`（auto）；已用真实 deepseek 验证产出「七维星级表 + 致命伤清单」结构化体检（非空壳） |
 | 编辑器体验 | ✅ 完成 | 墨色主题模块 `monacoTheme.ts`；正文字体/行距/关闭行号/关闭 overview ruler；diff 红调淡；滚动条中性灰 |
+| 人物关系图可视化 | ✅ 完成 | 后端 `GetCharacterRelations` + 前端 `CharacterGraph`（@antv/g6 v5 dagre 树布局、点击详情卡、懒加载）；F-5/F-6 特性已入库 |
+| 数据目录迁移 | ✅ 完成 | `platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效；`internal/datamove` 安全迁移（同盘 rename/跨盘拷贝+回退）；`app.PickDirectory/UpdateDataDir` + 前端「更改」按钮+进度条+非空确认框 |
 | 内置技能总数 | ✅ 18 个 | 含上述 3 个签约技能；题材/偏好层在前端 `genreTemplates.ts`（30+ 题材卡） |
 | 测试基建 | ✅ 完成 | 55 Go 测试包 + 33 前端测试 + `internal/e2e`（3 OS Go 集成测试，覆盖 novel/chapter/git/ONNX 主链路） |
 | 发布链路 | ✅ 完成 | Win(Inno)/Linux(AppImage)/macOS(DMG + codesign + spctl + dmg 挂载验证)，按 `v*` tag 触发 |
@@ -87,10 +89,32 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
   状态：✅ 已完成（2026-10-16）。额外发现 `verify-macos-codesign.yml:39` 同样 pin 2.12.0，已一并对齐以守住 §6.1 版本一致性护栏。
 
 ### P2 — 功能补全 / 产品化
-- **[ ] 人物关系图可视化**：后端 `CharacterRelation` 模型 + `get_character_network` 查询已就绪
-  （`internal/character/types.go:46` 明写 TODO），但**前端没有关系图 UI**。数据采了看不到。
-- **[ ] 数据目录迁移**：`app_config.go:24` TODO——用户改数据目录时，旧目录的小说/数据库不被搬走，
-  有数据「消失」踩坑风险。
+- **[x] 人物关系图可视化**：**已实现并入库**（F-5 虚拟滚动 + F-6 G6 增量更新，提交 `3fc049d`/`02faead`）。
+  后端 `GetCharacterRelations`（`app/character_view.go:26`，有 `TestGetCharacterRelations` 守护）→ wails 绑定生成
+  → `useCharacterRelations` hook → `CharacterGraph.tsx`（@antv/g6 v5，dagre 树布局；节点点击弹角色详情卡、
+  fitView/刷新按钮、loading/error/empty 态、主题感知色）→ `CharacterListView` 的 "graph" 标签页**懒加载**。
+  G6 已按阶段2 F-2 在 `vite.config.ts` 配 `manualChunks` 懒加载。
+  ⚠️ **文档此前写的「前端没有关系图 UI」为漏扫误判，现已纠正**；`internal/character/types.go:46` 的
+  「后续可实现前端可视化关系图」TODO 亦已过时（图已存在），可择机清掉该注释。
+- **[x] 数据目录迁移**：**已实现为真正可用的功能**（2026-10-16）。
+  此前是残骸态——`~/.novelgo/config.json` 的 `data_dir` 是死字段、前端只读输入框、`UpdateDataDir` 是空壳。
+  现做成端到端可用：
+  - `internal/platform/runtime.go`：`resolveDataDir()` 在 `NOVELGO_DATA_DIR`、testing 兜底**之前**读取
+    `config.json` 的 `data_dir`（`readConfiguredDataDir()`，归一化为绝对路径），让配置真正生效。
+  - `internal/datamove/datamove.go`（新包，含 `datamove_test.go`）：`Relocate(src,dst,opts)` 同盘 `os.Rename`、
+    跨盘递归拷贝+校验+删源；目标非空未授权返回 `ErrDstNotEmpty`；源/目标互相嵌套返回 `ErrNestedPath`；
+    进度经 `Progress` 回调上报（已处理/总字节）。
+  - `app/app_config.go`：`PickDirectory()` 弹原生目录框；`UpdateDataDir(path,force)` 重写为
+    归一化→相等/嵌套校验→关 DB→`Relocate`→`config.Save`→`platform.ResetDataDirCache()`→`config.Load`→
+    `initWithConfig`；失败回退 `restoreDataDir`；进度经 `EventsEmit("data:relocate-progress",{done,total})`。
+  - 前端 `GeneralConfigTab.tsx`：数据目录行加「更改」按钮→`PickDirectory`→`UpdateDataDir(dir,false)`；
+    捕获 `ErrDstNotEmpty`（"目标目录非空"）弹 `ConfirmDialog`（danger）让用户决定是否 `force=true` 重试；
+    迁移中显示 `Loader2` 转圈 + 进度条（订阅 `data:relocate-progress`）；成功/失败 `toast`。i18n 新增
+    `dataDir*` 一组键（zh-CN/en 双语）。
+  - wails 绑定：`PickDirectory():Promise<string>`、`UpdateDataDir(arg1,arg2):Promise<void>` 已重生成。
+  - 门禁：`go build ./...` + `go test ./internal/datamove/... ./internal/platform/... ./app/...` +
+    `prettier --check` + `npm run i18n:check` + `npm run build` 全绿。
+  - ⚠️ **`internal/character/types.go:46` 的「后续可实现前端可视化关系图」TODO 已过时**（图早已存在），可择机清掉。
 - **[ ] 「签约」层产品化**：技能能跑出真报告，但**没有引导式「签约潜力」工作流**
   （蓝图 → 写作 → 体检闭环），也没有专属 UI 入口；用户只能聊天打字触发或靠「技能矩阵」发现。
   这是产品核心差异点，值得从「能用」做到「好用」。
@@ -159,3 +183,5 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 |---|---|
 | 2026-10-16 | 初版：固化技术状态、版本矩阵、待办优先级(P1–P3)、升级护栏、已否决方案、环境凭证 |
 | 2026-10-16 | P1 完成：`release.yml`(3处)+`verify-macos-codesign.yml`(1处) Wails CLI 对齐 `v2.16.0`；同步更新 §2/§5/§9 |
+| 2026-10-16 | 纠正 §5 误判：P2-1 人物关系图可视化**早已实现并入库**（F-5/F-6，`3fc049d`/`02faead`），此前「前端没有关系图 UI」为漏扫；同步 §3/§5/§9 |
+| 2026-10-16 | P2-2 完成：**数据目录迁移做成真正可用功能**。新增 `internal/datamove` 包（含测试）、`platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效、`app.PickDirectory/UpdateDataDir` 重写为安全迁移+回退、前端 `GeneralConfigTab` 加「更改」按钮+进度条+非空确认框；wails 绑定重生成；全门禁绿 |

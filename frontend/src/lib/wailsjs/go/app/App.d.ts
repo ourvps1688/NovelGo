@@ -225,6 +225,8 @@ export function MergeMentalSkills(arg1:app.MergeMentalSkillsInput):Promise<skill
 
 export function PickAndImportNovel():Promise<imp.ImportResult>;
 
+export function PickDirectory():Promise<string>;
+
 export function PlaceChapter(arg1:chapter.PlaceInput):Promise<chapter.Chapter>;
 
 export function PlaceVolume(arg1:volume.PlaceInput):Promise<volume.Volume>;
@@ -285,7 +287,7 @@ export function UpdateCharacterGroup(arg1:number,arg2:number,arg3:app.CharacterG
 
 export function UpdateCharacterGroupMemberships(arg1:number,arg2:app.CharacterGroupMembershipInput):Promise<void>;
 
-export function UpdateDataDir(arg1:string):Promise<void>;
+export function UpdateDataDir(arg1:string,arg2:boolean):Promise<void>;
 
 export function UpdateLocation(arg1:number,arg2:number,arg3:app.UpdateLocationInput):Promise<void>;
 

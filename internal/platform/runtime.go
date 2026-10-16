@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -191,6 +192,13 @@ func resolveDataDir() string {
 	if testing.Testing() {
 		return filepath.Join(os.TempDir(), fmt.Sprintf("novelgo-test-%d", os.Getpid()))
 	}
+	// 用户显式配置的数据目录（~/.novelgo/config.json 的 data_dir）。
+	// 优先级低于 NOVELGO_DATA_DIR（已在上方处理），且仅在非测试环境生效，避免测试
+	// 读到真实配置文件而偏离隔离目录。config 包与 platform 互为依赖禁忌，故此处直接
+	// 读取文件而非 import config。
+	if dir := readConfiguredDataDir(); dir != "" {
+		return dir
+	}
 	if runtime.GOOS == "windows" {
 		if dir, err := AppDir(); err == nil {
 			tmp := os.TempDir()
@@ -287,4 +295,41 @@ func systemOnnxPaths(lib string) []string {
 			"/usr/local/lib/" + lib,
 		}
 	}
+}
+
+// readConfiguredDataDir 从启动指针文件 ~/.novelgo/config.json 读取用户配置的数据目录。
+// 该文件由 config 包写入，此处直接读取以避免与 config 包形成 import cycle
+// （config 已依赖 platform）。仅取 data_dir 字段；文件不存在 / 字段为空 / 解析失败时返回空串。
+// 仅在非测试环境调用（见 resolveDataDir），测试隔离由调用方保证。
+func readConfiguredDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(home, ".novelgo", "config.json"))
+	if err != nil {
+		return ""
+	}
+	var probe struct {
+		DataDir string `json:"data_dir"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return ""
+	}
+	dir := strings.TrimSpace(probe.DataDir)
+	if dir == "" {
+		return ""
+	}
+	// 与 config.Save 的归一化保持一致：展开 ~ 并转为绝对路径（正常写入值已是绝对路径，
+	// 此处仅作防御性处理）。
+	if strings.HasPrefix(dir, "~/") {
+		dir = filepath.Join(home, dir[2:])
+	} else if dir == "~" {
+		dir = home
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	return abs
 }

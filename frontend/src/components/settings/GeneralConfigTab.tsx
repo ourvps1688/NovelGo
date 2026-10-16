@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Folder,
+  FolderInput,
   RefreshCw,
   GitFork,
   Languages,
@@ -14,19 +15,41 @@ import {
   GetVersion,
   CheckUpdate,
   GetAppConfig,
+  PickDirectory,
+  UpdateDataDir,
 } from "@/lib/wailsjs/go/app/App";
+import { EventsOn } from "@/lib/wailsjs/runtime";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import type { update as updateModels } from "@/lib/wailsjs/go/models";
 import { useNovels } from "@/components/novel/useNovels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useSaveGitConfig } from "./useSaveGitConfig";
 import { useRebuildNovelIndex } from "./useRebuildNovelIndex";
 import UpdateDialog from "@/components/update/UpdateDialog";
-import { toastError } from "@/utils/toast";
+import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
+
+// formatBytes 把字节数转为可读字符串（用于迁移进度展示）。
+function formatBytes(n: number): string {
+  if (!n || n < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(n) / Math.log(1024)),
+  );
+  const v = n / Math.pow(1024, i);
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
 
 export default function GeneralConfigTab() {
   const { t, i18n } = useTranslation();
   const [dataDir, setDataDir] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [confirmPath, setConfirmPath] = useState<string | null>(null);
   // 3.9: novels 走 useNovels query（共享缓存）。
   const { data: novels = [] } = useNovels();
   // 5.8: settings 走 useSettings query（与 chat/profile 共享 settingsKeys.all 缓存）。
@@ -50,7 +73,7 @@ export default function GeneralConfigTab() {
   // GetAppConfig: 直接 import wailsjs（无结构化类型，启动读一次，query 化收益低）。
   // 失败时 toast 提示（原静默吞错违反规则 9），dataDir 保持空字符串 UI 正常渲染。
   // GetVersion: 直接 import wailsjs，低频 GET，保留命令式。
-  useEffect(() => {
+  const refreshDataDir = useCallback(() => {
     GetAppConfig()
       .then((cfg) => {
         setDataDir((cfg?.data_dir as string) || "");
@@ -58,10 +81,28 @@ export default function GeneralConfigTab() {
       .catch((err) => {
         toastError(toErrorMessage(err, t("settings.loadFailed")));
       });
+  }, [t]);
+
+  useEffect(() => {
+    refreshDataDir();
     GetVersion()
       .then((v) => setAppVersion(v || "dev"))
       .catch(() => {});
-  }, [t]);
+  }, [refreshDataDir]);
+
+  // 订阅后端数据迁移进度事件，用于展示进度条。
+  useEffect(() => {
+    const off = EventsOn("data:relocate-progress", (data: any) => {
+      if (
+        data &&
+        typeof data.done === "number" &&
+        typeof data.total === "number"
+      ) {
+        setProgress({ done: data.done, total: data.total });
+      }
+    });
+    return () => off();
+  }, []);
 
   // GetSettings: 复用 useSettings query（与 chat/profile 共享 settingsKeys.all 缓存）。
   // query data ready 后回填 selectedID/gitName/gitEmail。
@@ -119,6 +160,52 @@ export default function GeneralConfigTab() {
     }
   }
 
+  // 更改数据目录：先选目录，再以 force=false 试迁移；目标非空时后端返回
+  // ErrDstNotEmpty（"目标目录非空"），捕获后弹确认框让用户决定是否强制覆盖。
+  async function handleChangeDir() {
+    if (busy) return;
+    setBusy(true);
+    setProgress(null);
+    try {
+      const dir = await PickDirectory();
+      if (!dir) {
+        setBusy(false);
+        return;
+      }
+      try {
+        await UpdateDataDir(dir, false);
+        toastSuccess(t("settings.dataDirChangeSuccess"));
+        refreshDataDir();
+      } catch (e) {
+        if (toErrorMessage(e).includes("目标目录非空")) {
+          setConfirmPath(dir);
+          return;
+        }
+        throw e;
+      }
+    } catch (e) {
+      toastError(t("settings.dataDirChangeFailed") + ": " + toErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 确认强制迁移：以 force=true 重试，源数据优先合并进目标。
+  async function handleConfirmMigrate() {
+    if (!confirmPath) return;
+    setBusy(true);
+    try {
+      await UpdateDataDir(confirmPath, true);
+      toastSuccess(t("settings.dataDirChangeSuccess"));
+      refreshDataDir();
+    } catch (e) {
+      toastError(t("settings.dataDirChangeFailed") + ": " + toErrorMessage(e));
+    } finally {
+      setBusy(false);
+      setConfirmPath(null);
+    }
+  }
+
   return (
     <div className="flex-1 flex flex-col">
       <h3 className="text-sm font-medium mb-5">{t("settings.basicConfig")}</h3>
@@ -128,14 +215,60 @@ export default function GeneralConfigTab() {
           <Folder className="w-3.5 h-3.5" />
           {t("settings.dataDir")}
         </label>
+        <p className="text-[11px] text-muted-foreground">
+          {t("settings.dataDirHint")}
+        </p>
         <div className="flex items-center gap-2">
           <input
             value={dataDir}
             readOnly
             className="flex-1 h-8 rounded-md border bg-muted/50 px-3 text-xs font-mono focus:outline-none cursor-default"
           />
+          <button
+            onClick={handleChangeDir}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs border hover:bg-muted transition-colors disabled:opacity-50 shrink-0"
+          >
+            {busy ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FolderInput className="w-3.5 h-3.5" />
+            )}
+            {busy
+              ? t("settings.dataDirMigrating")
+              : t("settings.dataDirChange")}
+          </button>
         </div>
+        {progress && (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{
+                  width:
+                    progress.total > 0
+                      ? `${Math.min(100, (progress.done / progress.total) * 100)}%`
+                      : "100%",
+                }}
+              />
+            </div>
+            <span className="text-[11px] text-muted-foreground font-mono shrink-0">
+              {formatBytes(progress.done)} / {formatBytes(progress.total)}
+            </span>
+          </div>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={confirmPath !== null}
+        danger
+        title={t("settings.dataDirConfirmTitle")}
+        message={t("settings.dataDirConfirmMessage")}
+        confirmText={t("settings.dataDirChange")}
+        loading={busy}
+        onConfirm={handleConfirmMigrate}
+        onClose={() => setConfirmPath(null)}
+      />
 
       <div className="mt-6 space-y-3">
         <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">

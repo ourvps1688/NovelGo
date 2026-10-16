@@ -398,6 +398,10 @@ export function PickAndImportNovel() {
   return window['go']['app']['App']['PickAndImportNovel']();
 }
 
+export function PickDirectory() {
+  return window['go']['app']['App']['PickDirectory']();
+}
+
 export function PlaceChapter(arg1) {
   return window['go']['app']['App']['PlaceChapter'](arg1);
 }
@@ -518,8 +522,8 @@ export function UpdateCharacterGroupMemberships(arg1, arg2) {
   return window['go']['app']['App']['UpdateCharacterGroupMemberships'](arg1, arg2);
 }
 
-export function UpdateDataDir(arg1) {
-  return window['go']['app']['App']['UpdateDataDir'](arg1);
+export function UpdateDataDir(arg1, arg2) {
+  return window['go']['app']['App']['UpdateDataDir'](arg1, arg2);
 }
 
 export function UpdateLocation(arg1, arg2, arg3) {
