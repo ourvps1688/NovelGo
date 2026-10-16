@@ -50,11 +50,11 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 |---|---|---|
 | 技能意图路由 | ✅ 完成 | `useWhen` 结构化 + 确定性 cue 路由 + `RouteUserMessageSmart` LLM 兜底（4s 超时 / 0.6 置信 / 失败降级） |
 | 路由 CI 护栏 | ✅ 完成 | `internal/skill/regression_test.go`（确定性，零 key）+ `.github/workflows/skill-fallback-eval.yml`（夜跑 LLM，需 `DEEPSEEK_API_KEY` secret） |
-| **「签约」智能层** | ✅ 完成且验证 | `signability-audit`（manual）、`story-blueprint`/`worldbuilding-design`（auto）；已用真实 deepseek 验证产出「七维星级表 + 致命伤清单」结构化体检（非空壳） |
+| **「签约」智能层** | ✅ 完成且验证 | 3 个专项技能：`signability-audit`（manual，七维体检）、`story-blueprint`/`worldbuilding-design`（auto）；已用真实 deepseek 验证产出「七维星级表 + 致命伤清单」结构化体检（非空壳）。**新增编排层** `signability-workflow`（manual，系统类）——把 3 专项技能串成「现状诊断→规划蓝图→世界设定→写作推进→签约体检→闭环回修」引导式闭环（2026-10-16，见 §5 P2-3） |
 | 编辑器体验 | ✅ 完成 | 墨色主题模块 `monacoTheme.ts`；正文字体/行距/关闭行号/关闭 overview ruler；diff 红调淡；滚动条中性灰 |
 | 人物关系图可视化 | ✅ 完成 | 后端 `GetCharacterRelations` + 前端 `CharacterGraph`（@antv/g6 v5 dagre 树布局、点击详情卡、懒加载）；F-5/F-6 特性已入库 |
 | 数据目录迁移 | ✅ 完成 | `platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效；`internal/datamove` 安全迁移（同盘 rename/跨盘拷贝+回退）；`app.PickDirectory/UpdateDataDir` + 前端「更改」按钮+进度条+非空确认框 |
-| 内置技能总数 | ✅ 18 个 | 含上述 3 个签约技能；题材/偏好层在前端 `genreTemplates.ts`（30+ 题材卡） |
+| 内置技能总数 | ✅ 19 个 | 含 3 个签约专项技能 + 1 个签约编排技能 `signability-workflow`；题材/偏好层在前端 `genreTemplates.ts`（30+ 题材卡） |
 | 测试基建 | ✅ 完成 | 55 Go 测试包 + 33 前端测试 + `internal/e2e`（3 OS Go 集成测试，覆盖 novel/chapter/git/ONNX 主链路） |
 | 发布链路 | ✅ 完成 | Win(Inno)/Linux(AppImage)/macOS(DMG + codesign + spctl + dmg 挂载验证)，按 `v*` tag 触发 |
 
@@ -115,9 +115,13 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
   - 门禁：`go build ./...` + `go test ./internal/datamove/... ./internal/platform/... ./app/...` +
     `prettier --check` + `npm run i18n:check` + `npm run build` 全绿。
   - ⚠️ **`internal/character/types.go:46` 的「后续可实现前端可视化关系图」TODO 已过时**（图早已存在），可择机清掉。
-- **[ ] 「签约」层产品化**：技能能跑出真报告，但**没有引导式「签约潜力」工作流**
-  （蓝图 → 写作 → 体检闭环），也没有专属 UI 入口；用户只能聊天打字触发或靠「技能矩阵」发现。
-  这是产品核心差异点，值得从「能用」做到「好用」。
+- **[x] 「签约」层产品化 —— 技能内核（编排层）**：已实现并入库（`signability-workflow` 内置技能，2026-10-16）。
+  把 `story-blueprint`/`worldbuilding-design`/`signability-audit` 三专项技能编排为引导式「签约潜力工作流」
+  （现状诊断→规划蓝图→世界设定→写作推进→签约体检→闭环回修六阶段，全程服从题材卡约束，只编排不落库）。
+  经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、AC1–AC9 全满足、Phase 4 QA 零缺陷。
+  工作区 `skill-studio/20261016-135655-signflow/`（需求/设计/源码/QA 全归档）。
+  - **[ ] 「签约」层产品化 —— 专属 UI 入口**：用户决策「先技能后 UI」，应用内引导式工作流 UI 入口**尚未做**，
+    待技能侧稳定后单独排期（技能内核已可经「技能矩阵 / `/` 触发 / cue（签约潜力·这本书能不能签…）」独立承载引导，不依赖 UI）。
 
 ### P3 — 清理 / 技术债
 - **[ ] `timeline/types.go` 的 `related_entry_ids`**：Python 写入但从未被查询（纯占位数据）。
@@ -185,3 +189,4 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 | 2026-10-16 | P1 完成：`release.yml`(3处)+`verify-macos-codesign.yml`(1处) Wails CLI 对齐 `v2.16.0`；同步更新 §2/§5/§9 |
 | 2026-10-16 | 纠正 §5 误判：P2-1 人物关系图可视化**早已实现并入库**（F-5/F-6，`3fc049d`/`02faead`），此前「前端没有关系图 UI」为漏扫；同步 §3/§5/§9 |
 | 2026-10-16 | P2-2 完成：**数据目录迁移做成真正可用功能**。新增 `internal/datamove` 包（含测试）、`platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效、`app.PickDirectory/UpdateDataDir` 重写为安全迁移+回退、前端 `GeneralConfigTab` 加「更改」按钮+进度条+非空确认框；wails 绑定重生成；全门禁绿 |
+| 2026-10-16 | P2-3 技能内核完成（UI 待做）：新增内置编排技能 `signability-workflow`（manual/系统类），把 `story-blueprint`/`worldbuilding-design`/`signability-audit` 编排成六阶段「签约潜力工作流」引导式闭环。经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、Phase 4 QA 零缺陷（AC1–AC9 全满足）。内置技能总数 18→19。工作区 `skill-studio/20261016-135655-signflow/` |
