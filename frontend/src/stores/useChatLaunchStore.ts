@@ -6,9 +6,7 @@ import type { PersonaSelection } from "@/components/chat/usePersonaSetting";
 // 的 handleSend 没有经 props 向上透传。ChatPanel 挂载时 register 当前 handleSend，
 // 卸载时 unregister；入口面板取 send 调用即可，零侵入 ChatInput/ChatPanel 现有契约。
 interface ChatLaunchState {
-  send:
-    | ((content: string, persona?: PersonaSelection | null) => void)
-    | null;
+  send: ((content: string, persona?: PersonaSelection | null) => void) | null;
   register: (
     fn: (content: string, persona?: PersonaSelection | null) => void,
   ) => void;
