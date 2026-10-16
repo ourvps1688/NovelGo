@@ -62,6 +62,9 @@ func (c *Client) Reload(providers map[string]Provider) {
 	c.providers = providers
 }
 
+// HTTPClient 返回底层共享的 HTTP 客户端，供非流式请求（如图像生成）复用。
+func (c *Client) HTTPClient() *http.Client { return c.http }
+
 // ChatStream 发起流式对话，返回 SSE 事件 channel。
 //
 // providerName 指明使用哪个 Provider，messages/tools 由调用方按 OpenAI Function Calling 格式组装。

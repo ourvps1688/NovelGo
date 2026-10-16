@@ -11,6 +11,7 @@ interface Props {
     title: string;
     description: string;
     genre: string;
+    kind: string;
   }) => Promise<void>;
 }
 
@@ -24,6 +25,7 @@ export default function NovelEditDialog({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [genre, setGenre] = useState("");
+  const [kind, setKind] = useState("writing");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -43,6 +45,7 @@ export default function NovelEditDialog({
       setTitle(novel?.title ?? "");
       setDescription(novel?.description ?? "");
       setGenre(novel?.genre ?? "");
+      setKind(novel?.kind === "reference" ? "reference" : "writing");
       setSaving(false);
       setError("");
     }
@@ -62,6 +65,7 @@ export default function NovelEditDialog({
         title: title.trim(),
         description: description.trim(),
         genre: genre.trim(),
+        kind: kind,
       });
     } catch (e) {
       setError(toErrorMessage(e, t("novel.saveFailedRetry")));
@@ -148,6 +152,41 @@ export default function NovelEditDialog({
               rows={3}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+              {t("novel.editKind")}
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setKind("writing")}
+                className={`flex-1 h-9 rounded-md text-sm border transition-colors ${
+                  kind === "writing"
+                    ? "bg-primary/10 text-primary border-primary/20 font-medium"
+                    : "text-muted-foreground hover:bg-muted border-border"
+                }`}
+              >
+                {t("novel.kindWriting")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setKind("reference")}
+                className={`flex-1 h-9 rounded-md text-sm border transition-colors ${
+                  kind === "reference"
+                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 font-medium"
+                    : "text-muted-foreground hover:bg-muted border-border"
+                }`}
+              >
+                {t("novel.kindReference")}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {kind === "reference"
+                ? t("novel.kindReferenceDesc")
+                : t("novel.kindWritingDesc")}
+            </p>
           </div>
         </div>
 

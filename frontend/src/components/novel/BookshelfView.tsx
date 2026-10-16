@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect } from "react";
+import { useState, useRef, useLayoutEffect, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,8 +9,10 @@ import {
   Camera,
   Download,
   Upload,
+  Wand2,
 } from "lucide-react";
 import BookCover from "@/components/sidebar/BookCover";
+import GenerateCoverDialog from "@/components/novel/GenerateCoverDialog";
 import { useNovels } from "@/components/novel/useNovels";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import type { novel } from "@/lib/wailsjs/go/models";
@@ -36,6 +38,17 @@ export default function BookshelfView({
   // 3.2: 数据 + UI 状态从 store/query 订阅（原由 WorkspaceView 注入 props）。
   // useNovels 与 WorkspaceView 共享 novelKeys.all 缓存，不重复 fetch。
   const { data: novels = [] } = useNovels();
+  // 参考/写作分栏：kind=reference 为参考小说，其余（含默认 writing）为写作目标书。
+  const [tab, setTab] = useState<"writing" | "reference">("writing");
+  const writingNovels = useMemo(
+    () => novels.filter((n) => n.kind !== "reference"),
+    [novels],
+  );
+  const referenceNovels = useMemo(
+    () => novels.filter((n) => n.kind === "reference"),
+    [novels],
+  );
+  const list = tab === "reference" ? referenceNovels : writingNovels;
   const activeNovelId = useNovelStore((s) => s.activeNovelId);
   const setEditingNovel = useNovelStore((s) => s.setEditingNovel);
   const setDeletingNovel = useNovelStore((s) => s.setDeletingNovel);
@@ -43,6 +56,7 @@ export default function BookshelfView({
   const setExportNovelId = useNovelStore((s) => s.setExportNovelId);
   const [coverKeys, setCoverKeys] = useState<Record<number, number>>({});
   const [coverError, setCoverError] = useState<Record<number, string>>({});
+  const [generateFor, setGenerateFor] = useState<novel.Novel | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef<number | null>(null);
 
@@ -63,7 +77,7 @@ export default function BookshelfView({
     1,
     Math.floor((innerWidth + GAP) / (MIN_COL + GAP)),
   );
-  const rowCount = Math.ceil(novels.length / columnCount);
+  const rowCount = Math.ceil(list.length / columnCount);
 
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
@@ -85,6 +99,13 @@ export default function BookshelfView({
   function handleCoverClick(novelID: number, e: React.MouseEvent) {
     e.stopPropagation();
     triggerCoverUpload(novelID);
+  }
+
+  function handleCoverGenerated(novelID: number) {
+    setCoverKeys((prev) => ({
+      ...prev,
+      [novelID]: (prev[novelID] ?? 0) + 1,
+    }));
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -114,6 +135,7 @@ export default function BookshelfView({
   }
 
   function renderCard(n: novel.Novel) {
+    const isReference = n.kind === "reference";
     return (
       <div
         key={n.id}
@@ -127,14 +149,27 @@ export default function BookshelfView({
         >
           <div className="w-full aspect-[3/4] mb-3 rounded-sm overflow-hidden relative">
             <BookCover novelId={n.id} refreshKey={coverKeys[n.id]} />
-            {/* 悬浮封面上传按钮 */}
-            <button
-              onClick={(e) => handleCoverClick(n.id, e)}
-              className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
-              title={t("novel.changeCover")}
-            >
-              <Camera className="w-5 h-5 text-white" />
-            </button>
+            {/* 悬浮封面操作（参考书只读，不提供封面上传/生成入口） */}
+            {!isReference && (
+              <div
+                onClick={(e) => handleCoverClick(n.id, e)}
+                className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                title={t("novel.changeCover")}
+              >
+                <Camera className="w-5 h-5 text-white" />
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setGenerateFor(n);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-primary text-primary-foreground text-xs font-medium shadow hover:opacity-90 transition-opacity"
+                  title={t("novel.aiCover")}
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  {t("novel.aiCover")}
+                </button>
+              </div>
+            )}
           </div>
           {coverError[n.id] && (
             <div className="text-xs text-destructive flex items-center gap-2 mb-1">
@@ -158,6 +193,11 @@ export default function BookshelfView({
           ) : (
             <span className="inline-block self-start text-[11px] px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border mb-1.5">
               {t("novel.uncategorized")}
+            </span>
+          )}
+          {n.kind === "reference" && (
+            <span className="inline-block self-start text-[11px] px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium border border-amber-500/20 mb-1.5 ml-1.5">
+              {t("novel.referenceBadge")}
             </span>
           )}
           {n.description && (
@@ -216,10 +256,35 @@ export default function BookshelfView({
       />
 
       {/* 顶部工具栏 */}
-      <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-        <span className="text-sm text-muted-foreground">
-          {t("novel.totalWorks", { count: novels.length })}
-        </span>
+      <div className="flex items-center justify-between px-6 py-4 border-b shrink-0 gap-3 flex-wrap">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setTab("writing")}
+            className={`h-8 px-3 rounded-md text-sm transition-colors ${
+              tab === "writing"
+                ? "bg-primary/10 text-primary font-medium border border-primary/15"
+                : "text-muted-foreground hover:bg-muted border border-transparent"
+            }`}
+          >
+            {t("novel.tabWriting")}
+            <span className="ml-1.5 text-xs opacity-70">
+              {writingNovels.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setTab("reference")}
+            className={`h-8 px-3 rounded-md text-sm transition-colors ${
+              tab === "reference"
+                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium border border-amber-500/20"
+                : "text-muted-foreground hover:bg-muted border border-transparent"
+            }`}
+          >
+            {t("novel.tabReference")}
+            <span className="ml-1.5 text-xs opacity-70">
+              {referenceNovels.length}
+            </span>
+          </button>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onImportNovel}
@@ -246,6 +311,17 @@ export default function BookshelfView({
             <p className="text-sm">{t("novel.noWorksYet")}</p>
           </div>
         </div>
+      ) : list.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex flex-col items-center gap-3 text-muted-foreground border-2 border-dashed border-border rounded-2xl px-16 py-12">
+            <BookOpen className="w-12 h-12 opacity-40" />
+            <p className="text-sm">
+              {tab === "reference"
+                ? t("novel.tabReference") + " " + t("novel.noWorksYet")
+                : t("novel.noWorksYet")}
+            </p>
+          </div>
+        </div>
       ) : (
         /* 书架网格（F-5: 按行虚拟滚动，列数自适应容器宽度） */
         <div
@@ -261,7 +337,7 @@ export default function BookshelfView({
           >
             {rowVirtualizer.getVirtualItems().map((vr) => {
               const start = vr.index * columnCount;
-              const rowNovels = novels.slice(start, start + columnCount);
+              const rowNovels = list.slice(start, start + columnCount);
               return (
                 <div
                   key={vr.key}
@@ -290,6 +366,13 @@ export default function BookshelfView({
           </div>
         </div>
       )}
+
+      <GenerateCoverDialog
+        open={!!generateFor}
+        novel={generateFor}
+        onClose={() => setGenerateFor(null)}
+        onGenerated={handleCoverGenerated}
+      />
     </div>
   );
 }

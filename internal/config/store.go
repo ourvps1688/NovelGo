@@ -24,7 +24,14 @@ type AppSettings struct {
 	LastUpdateCheckAt time.Time `gorm:"column:last_update_check_at"              json:"last_update_check_at"` // 上次自动更新检查时间，用于 12h 节流；零值表示从未检查
 
 	TrackingStartedAt *time.Time `gorm:"column:tracking_started_at" json:"-"`
-	TrackingStartDate string     `gorm:"column:tracking_start_date;not null;default:''" json:"-"`
+
+	// 封面 AI 生成配置。ImageModel 为图像模型标识（默认 gpt-image-1）；
+	// ImageURL 为图像生成端点，留空则按 Provider.ChatURL 自动推导。
+	// 复用用户已配置的 LLM Provider（ChatURL + APIKey），不引入新的密钥。
+	ImageModel string `gorm:"column:image_model;not null;default:'gpt-image-1'" json:"image_model"`
+	ImageURL   string `gorm:"column:image_url;not null;default:''"               json:"image_url"`
+
+	TrackingStartDate string `gorm:"column:tracking_start_date;not null;default:''" json:"-"`
 }
 
 func (AppSettings) TableName() string { return "app_config" }

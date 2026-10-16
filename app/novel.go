@@ -57,6 +57,7 @@ func (a *App) CreateNovel(input CreateNovelInput) (*novel.Novel, error) {
 		Title:       input.Title,
 		Description: input.Description,
 		Genre:       input.Genre,
+		Kind:        novel.KindWriting, // 新建默认是写作目标书
 	}
 	if err := a.novel.DB.WithContext(a.ctx).Create(&n).Error; err != nil {
 		return nil, fmt.Errorf("failed to create novel: %w", err)
@@ -115,6 +116,7 @@ type UpdateNovelInput struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Genre       string `json:"genre"`
+	Kind        string `json:"kind,omitempty"` // 写作/参考类型；空表示沿用现有值
 }
 
 // UpdateNovel 更新小说信息。PUT 全量覆盖用户可编辑字段。
@@ -126,8 +128,28 @@ func (a *App) UpdateNovel(novelID int64, input UpdateNovelInput) (*novel.Novel, 
 	n.Title = input.Title
 	n.Description = input.Description
 	n.Genre = input.Genre
+	// 仅在显式传入合法类型时覆盖，避免旧前端未传 kind 时误清空
+	if input.Kind == novel.KindWriting || input.Kind == novel.KindReference {
+		n.Kind = input.Kind
+	}
 	if err := a.novel.DB.WithContext(a.ctx).Save(&n).Error; err != nil {
 		return nil, fmt.Errorf("update novel: %w", err)
+	}
+	return &n, nil
+}
+
+// SetNovelKind 切换小说的写作/参考类型。用于书架或详情页的一键切换。
+func (a *App) SetNovelKind(novelID int64, kind string) (*novel.Novel, error) {
+	if kind != novel.KindWriting && kind != novel.KindReference {
+		return nil, fmt.Errorf("未知的小说类型: %q（应为 writing 或 reference）", kind)
+	}
+	var n novel.Novel
+	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
+		return nil, fmt.Errorf("set novel kind: %w", err)
+	}
+	n.Kind = kind
+	if err := a.novel.DB.WithContext(a.ctx).Save(&n).Error; err != nil {
+		return nil, fmt.Errorf("set novel kind: %w", err)
 	}
 	return &n, nil
 }

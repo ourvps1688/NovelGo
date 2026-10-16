@@ -34,6 +34,7 @@ export default function NovelDialogs() {
     title: string;
     description: string;
     genre: string;
+    kind: string;
   }) {
     if (!editingNovel) return;
     try {

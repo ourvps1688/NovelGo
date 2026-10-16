@@ -103,6 +103,9 @@ export default function SidePanel({
 }: Props) {
   const { t } = useTranslation();
   const activePanel = usePanelStore((s) => s.sidebarPanel ?? s.activePanel);
+  // 参考小说：章节列表只读，隐藏新建/写入入口。
+  const isReference =
+    novels.find((n) => n.id === novelId)?.kind === "reference";
   const [isDragging, setIsDragging] = useState(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(sidePanelWidth);
@@ -175,6 +178,7 @@ export default function SidePanel({
           onSelectNovelGo={onSelectNovelGo}
           onSelectVolumeOutline={onSelectVolumeOutline}
           onExportNovel={() => onExportNovel(novelId)}
+          readOnly={isReference}
         />
       ) : activePanel === "characters" ? (
         <CharacterList novelId={novelId} />

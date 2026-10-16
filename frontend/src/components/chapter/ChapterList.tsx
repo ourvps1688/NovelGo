@@ -20,6 +20,7 @@ interface Props {
   onSelectNovelGo: () => void;
   onSelectVolumeOutline: (path: string, volumeName: string) => void;
   onExportNovel: () => void;
+  readOnly?: boolean; // 参考小说：只读，隐藏新建章节入口
 }
 
 interface ChapterGroup {
@@ -45,6 +46,7 @@ export default function ChapterList({
   onSelectNovelGo,
   onSelectVolumeOutline,
   onExportNovel,
+  readOnly,
 }: Props) {
   const { t } = useTranslation();
   const target = useEditorStore((state) => state.tabTarget);
@@ -188,22 +190,24 @@ export default function ChapterList({
           >
             <Download aria-hidden="true" className="h-3.5 w-3.5" />
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              openCreate(
-                activeChapter
-                  ? (activeChapter.volume_id ?? null)
-                  : (volumes[volumes.length - 1]?.id ?? null),
-              )
-            }
-            disabled={novelId <= 0 || loadError || loading || place.isPending}
-            aria-label={t("chapterManagement.createChapter")}
-            title={t("chapterManagement.createChapter")}
-            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-          >
-            <Plus aria-hidden="true" className="h-4 w-4" />
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() =>
+                openCreate(
+                  activeChapter
+                    ? (activeChapter.volume_id ?? null)
+                    : (volumes[volumes.length - 1]?.id ?? null),
+                )
+              }
+              disabled={novelId <= 0 || loadError || loading || place.isPending}
+              aria-label={t("chapterManagement.createChapter")}
+              title={t("chapterManagement.createChapter")}
+              className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <Plus aria-hidden="true" className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 

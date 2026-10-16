@@ -190,6 +190,14 @@ export function FrontendReady() {
   return window['go']['app']['App']['FrontendReady']();
 }
 
+export function GenerateCover(arg1) {
+  return window['go']['app']['App']['GenerateCover'](arg1);
+}
+
+export function GenerateCoverPrompt(arg1) {
+  return window['go']['app']['App']['GenerateCoverPrompt'](arg1);
+}
+
 export function GetAppConfig() {
   return window['go']['app']['App']['GetAppConfig']();
 }

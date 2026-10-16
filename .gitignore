@@ -15,6 +15,7 @@ models/
 /build/runtime/
 !/build/runtime/models/vocab.txt
 /build/dist/
+frontend/.vite-tmp/
 /build/*.AppDir/
 /build/windows/*
 !/build/windows/info.json

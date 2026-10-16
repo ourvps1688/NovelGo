@@ -85,6 +85,7 @@ func doImport(ctx context.Context, logger *slog.Logger, db *gorm.DB, result *Res
 	n := novel.Novel{
 		Title:       title,
 		Description: fmt.Sprintf("从 %s 导入，共 %d 章", filePath, chapterCount),
+		Kind:        novel.KindReference, // 导入的书默认作为参考小说
 	}
 
 	// ── Step 1: 创建 Novel 记录（拿 ID，文件路径依赖此 ID） ──

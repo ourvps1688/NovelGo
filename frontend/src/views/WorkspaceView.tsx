@@ -25,6 +25,7 @@ import NovelSettingView from "@/components/novel-setting/NovelSettingView";
 import ChapterManagementView from "@/components/chapter-management/ChapterManagementView";
 import BookshelfView from "@/components/novel/BookshelfView";
 import NovelDialogs from "@/components/novel/NovelDialogs";
+import ReferenceAnalyzeView from "@/components/novel/ReferenceAnalyzeView";
 import ImportProgressDialog from "@/components/novel/ImportProgressDialog";
 import ChatPanel from "@/components/chat/ChatPanel";
 import GitHubLink from "@/components/shell/GitHubLink";
@@ -115,6 +116,9 @@ export default function WorkspaceView({
   // 对话框开关 + setter 由 NovelDialogs 订阅（3.6）；唯独 setExportNovelId 留此
   // —— SidePanel 通过 onExportNovel 触发开 dialog，setter 引用稳定不引发重渲染。
   const activeNovelId = useNovelStore((s) => s.activeNovelId);
+  // 参考小说：进入专属只读/分析视图（ReferenceAnalyzeView）。
+  const isReference =
+    novels.find((n) => n.id === activeNovelId)?.kind === "reference";
   useEditorTabTitles(activeNovelId);
   const setActiveNovelId = useNovelStore((s) => s.setActiveNovelId);
   const setExportNovelId = useNovelStore((s) => s.setExportNovelId);
@@ -461,160 +465,166 @@ export default function WorkspaceView({
         </header>
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          <ActivityBar onSelect={handleActivitySelect} />
-
-          {!sidebarClosed && activePanel !== "chapter-management" && (
-            <SidePanel
-              novels={novels}
-              novelId={activeNovelId}
-              onSelectNovel={handleSelectNovel}
-              onSelectChapter={handleSelectChapter}
-              onSelectNovelGo={handleSelectNovelGo}
-              onSelectVolumeOutline={handleSelectVolumeOutline}
-              onExportNovel={(id) => setExportNovelId(id)}
-              showCreate={showCreate}
-              setShowCreate={setShowCreate}
-              title={title}
-              setTitle={setTitle}
-              description={description}
-              setDescription={setDescription}
-              onCreateNovel={handleCreateNovel}
-              activeSkillName={activeSkillName}
-              onSelectSkill={handleSelectSkill}
-              onEditSkill={handleEditSkill}
-              onNewSkill={handleNewSkill}
-              onSearchNavigateEntity={handleSearchNavigateEntity}
-              onSearchNavigateChapter={handleSearchNavigateChapter}
-              onSelectStyleSample={(id) => setStyleSampleFocusId(id)}
-              sidePanelWidth={sidePanelWidth}
-              onSidePanelResize={setSidePanelWidth}
-              skillMatrixSearch={skillMatrixSearch}
-              onSkillMatrixSearchChange={setSkillMatrixSearch}
-              skillMatrixSourceFilter={skillMatrixSourceFilter}
-              onSkillMatrixSourceFilterChange={setSkillMatrixSourceFilter}
-              skillMatrixModeFilter={skillMatrixModeFilter}
-              onSkillMatrixModeFilterChange={setSkillMatrixModeFilter}
-              activeWorkflow={activeWorkflow}
-              onSelectWorkflow={setActiveWorkflow}
-            />
-          )}
-
-          {activePanel === "chapter-management" ? (
-            <ErrorBoundary>
-              <ChapterManagementView
-                key={activeNovelId}
-                novelId={activeNovelId}
-              />
-            </ErrorBoundary>
-          ) : activePanel === "novels" ? (
-            <BookshelfView
-              onSelectNovel={handleSelectNovel}
-              onSaveCover={handleSaveCover}
-              onImportNovel={() => importNovel.startImport()}
-            />
+          {isReference ? (
+            <ReferenceAnalyzeView novelId={activeNovelId} />
           ) : (
-            CONTENT_PANEL_IDS.has(activePanel) && (
-              <ContentPanel ref={contentRef} />
-            )
-          )}
+            <>
+              <ActivityBar onSelect={handleActivitySelect} />
 
-          {/* Always mounted: pattern extraction is a long-running task, unmounting would interrupt progress listeners */}
-          <div
-            className={
-              activePanel === "style-samples"
-                ? "flex-1 flex flex-col min-h-0"
-                : "hidden"
-            }
-          >
-            <ErrorBoundary>
-              <ExtractWorkspaceView
-                novelId={activeNovelId}
-                focusSampleId={styleSampleFocusId}
-                onFocusSampleHandled={() => setStyleSampleFocusId(null)}
-              />
-            </ErrorBoundary>
-          </div>
-          {activePanel === "characters" ? (
-            <ErrorBoundary>
-              <CharacterListView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "locations" ? (
-            <ErrorBoundary>
-              <LocationListView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "storyarcs" ? (
-            <ErrorBoundary>
-              <ArcListView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "timeline" ? (
-            <ErrorBoundary>
-              <TimelineView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "reader" ? (
-            <ErrorBoundary>
-              <ReaderView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "preferences" ? (
-            <ErrorBoundary>
-              <PreferenceView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "novel-settings" ? (
-            <ErrorBoundary>
-              <NovelSettingView novelId={activeNovelId} />
-            </ErrorBoundary>
-          ) : activePanel === "git" ? (
-            <ErrorBoundary>
-              <GitCommitView />
-            </ErrorBoundary>
-          ) : activePanel === "profile" ? (
-            <ErrorBoundary>
-              <ProfileView />
-            </ErrorBoundary>
-          ) : activePanel === "skill-matrix" ? (
-            <ErrorBoundary>
-              <SkillMatrixView
-                novelId={activeNovelId}
-                onOpenSkill={handleMatrixOpenSkill}
-                search={skillMatrixSearch}
-                sourceFilter={skillMatrixSourceFilter}
-                modeFilter={skillMatrixModeFilter}
-              />
-            </ErrorBoundary>
-          ) : activePanel === "signability" ? (
-            <ErrorBoundary>
-              {activeWorkflow === "signability" ? (
-                <SignabilityWorkflowView novelId={activeNovelId} />
-              ) : activeWorkflow === "bookpitch" ? (
-                <BookPitchWorkflowView
+              {!sidebarClosed && activePanel !== "chapter-management" && (
+                <SidePanel
+                  novels={novels}
                   novelId={activeNovelId}
-                  onCreated={async (id) => {
-                    await switchNovel(id);
-                    setActivePanel("chapters");
-                  }}
+                  onSelectNovel={handleSelectNovel}
+                  onSelectChapter={handleSelectChapter}
+                  onSelectNovelGo={handleSelectNovelGo}
+                  onSelectVolumeOutline={handleSelectVolumeOutline}
+                  onExportNovel={(id) => setExportNovelId(id)}
+                  showCreate={showCreate}
+                  setShowCreate={setShowCreate}
+                  title={title}
+                  setTitle={setTitle}
+                  description={description}
+                  setDescription={setDescription}
+                  onCreateNovel={handleCreateNovel}
+                  activeSkillName={activeSkillName}
+                  onSelectSkill={handleSelectSkill}
+                  onEditSkill={handleEditSkill}
+                  onNewSkill={handleNewSkill}
+                  onSearchNavigateEntity={handleSearchNavigateEntity}
+                  onSearchNavigateChapter={handleSearchNavigateChapter}
+                  onSelectStyleSample={(id) => setStyleSampleFocusId(id)}
+                  sidePanelWidth={sidePanelWidth}
+                  onSidePanelResize={setSidePanelWidth}
+                  skillMatrixSearch={skillMatrixSearch}
+                  onSkillMatrixSearchChange={setSkillMatrixSearch}
+                  skillMatrixSourceFilter={skillMatrixSourceFilter}
+                  onSkillMatrixSourceFilterChange={setSkillMatrixSourceFilter}
+                  skillMatrixModeFilter={skillMatrixModeFilter}
+                  onSkillMatrixModeFilterChange={setSkillMatrixModeFilter}
+                  activeWorkflow={activeWorkflow}
+                  onSelectWorkflow={setActiveWorkflow}
                 />
-              ) : null}
-            </ErrorBoundary>
-          ) : null}
+              )}
 
-          <div
-            style={{
-              display:
-                activePanel === "chapter-management" ||
-                activePanel === "profile"
-                  ? "none"
-                  : "contents",
-            }}
-          >
-            <ChatPanel
-              novelId={activeNovelId}
-              onApprove={handleApprove}
-              onReject={handleReject}
-              onApprovalFileEdit={handleApprovalFileEdit}
-              onFileEditFinished={handleFileEditFinished}
-              chatPanelWidth={chatPanelWidth}
-              onChatPanelResize={setChatPanelWidth}
-            />
-          </div>
+              {activePanel === "chapter-management" ? (
+                <ErrorBoundary>
+                  <ChapterManagementView
+                    key={activeNovelId}
+                    novelId={activeNovelId}
+                  />
+                </ErrorBoundary>
+              ) : activePanel === "novels" ? (
+                <BookshelfView
+                  onSelectNovel={handleSelectNovel}
+                  onSaveCover={handleSaveCover}
+                  onImportNovel={() => importNovel.startImport()}
+                />
+              ) : (
+                CONTENT_PANEL_IDS.has(activePanel) && (
+                  <ContentPanel ref={contentRef} />
+                )
+              )}
+
+              {/* Always mounted: pattern extraction is a long-running task, unmounting would interrupt progress listeners */}
+              <div
+                className={
+                  activePanel === "style-samples"
+                    ? "flex-1 flex flex-col min-h-0"
+                    : "hidden"
+                }
+              >
+                <ErrorBoundary>
+                  <ExtractWorkspaceView
+                    novelId={activeNovelId}
+                    focusSampleId={styleSampleFocusId}
+                    onFocusSampleHandled={() => setStyleSampleFocusId(null)}
+                  />
+                </ErrorBoundary>
+              </div>
+              {activePanel === "characters" ? (
+                <ErrorBoundary>
+                  <CharacterListView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "locations" ? (
+                <ErrorBoundary>
+                  <LocationListView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "storyarcs" ? (
+                <ErrorBoundary>
+                  <ArcListView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "timeline" ? (
+                <ErrorBoundary>
+                  <TimelineView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "reader" ? (
+                <ErrorBoundary>
+                  <ReaderView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "preferences" ? (
+                <ErrorBoundary>
+                  <PreferenceView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "novel-settings" ? (
+                <ErrorBoundary>
+                  <NovelSettingView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "git" ? (
+                <ErrorBoundary>
+                  <GitCommitView />
+                </ErrorBoundary>
+              ) : activePanel === "profile" ? (
+                <ErrorBoundary>
+                  <ProfileView />
+                </ErrorBoundary>
+              ) : activePanel === "skill-matrix" ? (
+                <ErrorBoundary>
+                  <SkillMatrixView
+                    novelId={activeNovelId}
+                    onOpenSkill={handleMatrixOpenSkill}
+                    search={skillMatrixSearch}
+                    sourceFilter={skillMatrixSourceFilter}
+                    modeFilter={skillMatrixModeFilter}
+                  />
+                </ErrorBoundary>
+              ) : activePanel === "signability" ? (
+                <ErrorBoundary>
+                  {activeWorkflow === "signability" ? (
+                    <SignabilityWorkflowView novelId={activeNovelId} />
+                  ) : activeWorkflow === "bookpitch" ? (
+                    <BookPitchWorkflowView
+                      novelId={activeNovelId}
+                      onCreated={async (id) => {
+                        await switchNovel(id);
+                        setActivePanel("chapters");
+                      }}
+                    />
+                  ) : null}
+                </ErrorBoundary>
+              ) : null}
+
+              <div
+                style={{
+                  display:
+                    activePanel === "chapter-management" ||
+                    activePanel === "profile"
+                      ? "none"
+                      : "contents",
+                }}
+              >
+                <ChatPanel
+                  novelId={activeNovelId}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                  onApprovalFileEdit={handleApprovalFileEdit}
+                  onFileEditFinished={handleFileEditFinished}
+                  chatPanelWidth={chatPanelWidth}
+                  onChatPanelResize={setChatPanelWidth}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         <StatusBar />

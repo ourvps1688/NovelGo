@@ -121,6 +121,10 @@ export function ExtractStyle(arg1:app.ExtractStyleInput):Promise<style.ExtractRe
 
 export function FrontendReady():Promise<app.StartupState>;
 
+export function GenerateCover(arg1:app.GenerateCoverInput):Promise<void>;
+
+export function GenerateCoverPrompt(arg1:number):Promise<string>;
+
 export function GetAppConfig():Promise<Record<string, any>>;
 
 export function GetArcNodes(arg1:number):Promise<Array<storyarc.ArcNode>>;

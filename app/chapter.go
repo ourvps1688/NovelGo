@@ -6,6 +6,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/novel"
 )
 
 // ensureChapterIDsInNovel 确认章节 ID 均属于当前小说。
@@ -59,9 +60,25 @@ func (a *App) UpdateChapterTitle(novelID, chapterID int64, title string) error {
 	return a.chapter.UpdateTitle(a.ctx, nil, novelID, chapterID, title)
 }
 
+// ensureWritable 确认目标小说是可写作的目标书。
+// 参考小说（kind=reference）为只读/仅分析，禁止从其发起写章。
+func (a *App) ensureWritable(novelID int64) error {
+	var n novel.Novel
+	if err := a.novel.DB.WithContext(a.ctx).First(&n, novelID).Error; err != nil {
+		return fmt.Errorf("check novel kind: %w", err)
+	}
+	if n.IsReference() {
+		return fmt.Errorf("参考书为只读，不能新建或写入章节；如需写作请改为「写作」类型")
+	}
+	return nil
+}
+
 // CreateChapter 创建新章节。同时创建空正文文件。
 // 新章节默认追加到最后一卷；尚未建卷时追加到未分卷组。
 func (a *App) CreateChapter(input CreateChapterInput) (*chapter.Chapter, error) {
+	if err := a.ensureWritable(input.NovelID); err != nil {
+		return nil, err
+	}
 	ch, err := a.chapterService.CreateDefault(a.ctx, input.NovelID, input.Title)
 	if err == nil && a.activity != nil {
 		a.activity.AddActivity(a.ctx, activity.ActivityDelta{ChaptersCreated: 1})
@@ -71,6 +88,12 @@ func (a *App) CreateChapter(input CreateChapterInput) (*chapter.Chapter, error) 
 
 // PlaceChapter 新建或移动章节，并将其置于目标章节组的指定位置。
 func (a *App) PlaceChapter(input PlaceChapterInput) (*chapter.Chapter, error) {
+	// SourceChapterID 为空表示新建章节，参考书禁止。
+	if input.SourceChapterID == nil {
+		if err := a.ensureWritable(input.NovelID); err != nil {
+			return nil, err
+		}
+	}
 	ch, err := a.chapterService.Place(a.ctx, input)
 	if err == nil && input.SourceChapterID == nil && a.activity != nil {
 		a.activity.AddActivity(a.ctx, activity.ActivityDelta{ChaptersCreated: 1})

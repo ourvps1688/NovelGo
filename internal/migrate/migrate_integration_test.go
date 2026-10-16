@@ -229,8 +229,8 @@ func TestRunMigratesOldestSupportedDatabaseEndToEnd(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM writing_log`); n != 1 {
 		t.Fatalf("重复迁移后应只有一条写作日汇总: got %d", n)
 	}
-	if n := count(`SELECT COUNT(*) FROM migrate_state WHERE status = 'done'`); n != 8 {
-		t.Fatalf("状态丢失后应重建全部迁移状态: got %d, want 8", n)
+	if n := count(`SELECT COUNT(*) FROM migrate_state WHERE status = 'done'`); n != 9 {
+		t.Fatalf("状态丢失后应重建全部迁移状态: got %d, want 9", n)
 	}
 }
 
