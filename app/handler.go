@@ -363,7 +363,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 7. 初始化 MCP 工具注册表
 	a.registry = mcp_tools.NewRegistry(a.logger)
 	mcp_tools.RegisterAllTools(a.registry)
-	a.mcpServer = mcpserver.New(a.registry, db, a.currentNovel, a.logger, []string{"get_chapter_list"})
+	a.mcpServer = mcpserver.New(a.registry, db, a.currentNovel, a.logger, []string{"get_chapter_list", "list_volumes"})
 
 	// 8. 初始化 LLM 客户端
 	userConfig, err := llm.LoadUserConfig(config.LLMConfigPath())

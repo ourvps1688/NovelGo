@@ -13,6 +13,7 @@ var readOnlyTools = map[string]bool{
 	"search_story_memory":     true,
 	"get_timeline":            true,
 	"get_chapter_list":        true,
+	"list_volumes":            true,
 	"get_characters":          true,
 	"get_locations":           true,
 	"get_story_arcs":          true,

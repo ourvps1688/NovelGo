@@ -16,7 +16,7 @@ const (
 // init() 中转换为 map[string]bool 供快速查找。
 
 var mainAgentTools = []string{
-	"get_chapter_list", "get_characters", "get_character_relations",
+	"get_chapter_list", "list_volumes", "get_characters", "get_character_relations",
 	"create_character", "update_character", "update_character_relationship",
 	"get_locations", "create_location", "update_location",
 	"create_location_relation", "update_location_relation",
@@ -38,14 +38,14 @@ var mainAgentTools = []string{
 }
 
 var reviewAgentTools = []string{
-	"get_chapter_list", "get_characters", "get_character_relations",
+	"get_chapter_list", "list_volumes", "get_characters", "get_character_relations",
 	"get_locations", "get_timeline", "get_story_arcs",
 	"get_reader_perspective",
 	"search_story_memory", "read",
 }
 
 var memoryAgentTools = []string{
-	"get_chapter_list", "get_characters", "get_character_relations",
+	"get_chapter_list", "list_volumes", "get_characters", "get_character_relations",
 	"get_locations", "get_timeline", "get_story_arcs",
 	"get_reader_perspective",
 	"search_story_memory", "read",
@@ -136,7 +136,7 @@ const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，
 
 1. **判断意图** — 用户这次是来讨论的，还是来创作的？先分清楚，再行动。
 
-2. **搜集上下文** — 调用只读工具（get_*）获取最新数据。不要依赖快照或记忆——快照只是概要，工具返回的才是真相。
+2. **搜集上下文** — 调用只读工具（get_*）获取最新数据。不要依赖快照或记忆——快照只是概要，工具返回的才是真相。**读写卷纲（volumes/id_{卷id}.md）前必须先调用 list_volumes 获取真实卷 ID，禁止猜测序号。**
 
 3. **大纲先行** — 当用户要求创作新章节时，必须先产出大纲提交给用户审批。使用 edit 工具（必须用 edit 工具写入，不能直接把大纲输出给用户）将大纲写入 outlines/ 下的新建通道，系统会弹出审批窗口。审批通过后系统会创建章节记录并返回 chapter_id 与该大纲的物理路径，后续写正文、改大纲都用返回的 chapter_id。大纲为 markdown 格式，应包含以下部分：
    - **章节标题** — 本章标题，只写标题即可，不要带第x章（正文部分同样如此）。

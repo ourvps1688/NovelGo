@@ -11,6 +11,7 @@ import (
 // toolDisplayNames 工具名 → 中文展示名称。
 var toolDisplayNames = map[string]string{
 	"get_chapter_list":                "查看章节目录",
+	"list_volumes":                    "查看卷列表",
 	"search_story_memory":             "搜索故事记忆",
 	"get_timeline":                    "查看故事时间线",
 	"create_timeline_entry":           "记录追踪条目",
@@ -47,6 +48,7 @@ var toolDisplayNames = map[string]string{
 // toolActivityKinds 工具名 → 前端展示类别。
 var toolActivityKinds = map[string]string{
 	"get_chapter_list":                "browse",
+	"list_volumes":                    "view",
 	"search_story_memory":             "memory",
 	"get_timeline":                    "view",
 	"create_timeline_entry":           "write",
