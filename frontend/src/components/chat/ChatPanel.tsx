@@ -1281,6 +1281,18 @@ export default function ChatPanel({
     return () => useChatLaunchStore.getState().unregister();
   }, [handleSend]);
 
+  // 新书孵化工作流（空书架自动建书）通过 pendingKickoff 把 kickoff 消息交给"当前
+  // novelId 上下文的 ChatPanel"发送，规避入口面板直接取 send 时闭包仍是旧 novelId
+  // 的竞态。依赖 launchSend 与 selectedModel：二者就绪（ChatPanel 已用新 novelId
+  // 重新注册 send、且模型已恢复）后才真正发送，避免消息因 selectedModel 未就绪而丢失。
+  const launchSend = useChatLaunchStore((s) => s.send);
+  const pendingKickoff = useChatLaunchStore((s) => s.pendingKickoff);
+  useEffect(() => {
+    if (!pendingKickoff || !launchSend || !selectedModel) return;
+    useChatLaunchStore.getState().setPendingKickoff(null);
+    launchSend(pendingKickoff);
+  }, [pendingKickoff, launchSend, selectedModel]);
+
   const hasNovel = novelId > 0;
   const hasTurns = turns.length > 0;
   const hasActiveSession =

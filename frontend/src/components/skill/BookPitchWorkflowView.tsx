@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Sparkles, Play, Check, AlertTriangle, Loader2 } from "lucide-react";
 import {
@@ -9,6 +9,7 @@ import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
 import { useCreateNovel } from "@/components/novel/useCreateNovel";
+import { useNovelStore } from "@/components/novel/useNovelStore";
 import {
   CATEGORY_CREATIVE,
   CATEGORY_PLATFORM,
@@ -49,11 +50,15 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   const [platform, setPlatform] = useState("");
   const [style, setStyle] = useState("");
 
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const adoptSectionRef = useRef<HTMLDivElement>(null);
+
   const enabledQuery = useEnabledSkills(novelId);
   const setEnabled = useSetEnabledSkills(novelId);
   const modelsQuery = useModels();
   const settingsQuery = useSettings();
   const createNovel = useCreateNovel();
+  const switchNovel = useNovelStore((s) => s.switchNovel);
 
   const enabledSet = useMemo(
     () => new Set(enabledQuery.data ?? []),
@@ -68,10 +73,6 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   );
 
   const handleStart = useCallback(async () => {
-    if (!novelId) {
-      toastError(t("bookpitch.selectNovelFirst"));
-      return;
-    }
     if (!hasModel) {
       toastError(t("bookpitch.configureModelFirst"));
       return;
@@ -81,6 +82,37 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
       toastError(t("bookpitch.ideaRequired"));
       return;
     }
+
+    // 书架为空：用书名灵感直接建第一本书作为孵化讨论场，随后自动发起对话。
+    // 不必要求用户先手动建书——本工作流本就是用来从 0 创建第一本书的。
+    if (!novelId) {
+      setLaunching(true);
+      try {
+        const seedTitle = idea.slice(0, 20);
+        const n = await createNovel.mutateAsync({
+          title: seedTitle,
+          description: idea.slice(0, 200),
+          genre: "",
+        });
+        // 新书无既有技能，直接启用 book-pitch 作为孵化技能。
+        try {
+          await SetEnabledSkills({ novel_id: n.id, names: ADOPT_SKILLS });
+        } catch {
+          // 技能启用失败不阻塞建书，静默忽略。
+        }
+        await switchNovel(n.id);
+        // 写入待发 kickoff：交由 ChatPanel 在新 novelId 上下文就绪（send 重新注册、
+        // 模型恢复）后自动发送，规避入口面板直接取 send 时闭包仍是旧 novelId 的竞态。
+        const kickoff = t("bookpitch.kickoff", { idea });
+        useChatLaunchStore.getState().setPendingKickoff(kickoff);
+      } catch (err) {
+        toastError(toErrorMessage(err, t("bookpitch.launchFailed")));
+      } finally {
+        setLaunching(false);
+      }
+      return;
+    }
+
     const send = useChatLaunchStore.getState().send;
     if (!send) {
       toastError(t("bookpitch.launchFailed"));
@@ -98,7 +130,16 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     } finally {
       setLaunching(false);
     }
-  }, [novelId, hasModel, ideaDraft, enabledQuery.data, setEnabled, t]);
+  }, [
+    novelId,
+    hasModel,
+    ideaDraft,
+    enabledQuery.data,
+    setEnabled,
+    createNovel,
+    switchNovel,
+    t,
+  ]);
 
   const canSave = title.trim().length > 0 && !saving;
 
@@ -147,13 +188,8 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     }
   }
 
-  const noNovel = !novelId;
-  const buttonDisabled = launching || noNovel || !hasModel;
-  const buttonTitle = noNovel
-    ? t("bookpitch.selectNovelFirst")
-    : !hasModel
-      ? t("bookpitch.configureModelFirst")
-      : "";
+  const buttonDisabled = launching || !hasModel;
+  const buttonTitle = !hasModel ? t("bookpitch.configureModelFirst") : "";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -218,134 +254,146 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
           ))}
         </div>
 
-        {/* 采纳方案并建书：书名必填，题材/平台/风格为可选引导项。 */}
-        <div className="mt-5 rounded-lg border bg-muted/30 p-4 max-w-3xl space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold">
-              {t("bookpitch.adoptTitle")}
-            </h2>
-            <p className="text-[12px] text-muted-foreground mt-1">
-              {t("bookpitch.adoptHint")}
+        {/* 采纳方案并建书：只在工作流启动后显示；启动前隐藏，避免用户先填表。 */}
+        {isEnabled ? (
+          <div
+            ref={adoptSectionRef}
+            className="mt-5 rounded-lg border bg-muted/30 p-4 max-w-3xl space-y-3"
+          >
+            <div>
+              <h2 className="text-sm font-semibold">
+                {t("bookpitch.adoptTitle")}
+              </h2>
+              <p className="text-[12px] text-muted-foreground mt-1">
+                {t("bookpitch.adoptHint")}
+              </p>
+            </div>
+
+            {error && (
+              <p className="text-sm text-destructive bg-danger-bg border border-danger-border rounded-md px-3 py-2">
+                {error}
+              </p>
+            )}
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t("bookpitch.fieldTitleReq")}
+              </label>
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t("novel.enterBookTitle")}
+                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t("bookpitch.fieldSummary")}
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={t("novel.summaryPlaceholder")}
+                rows={3}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t("bookpitch.fieldTags")}
+              </label>
+              <input
+                type="text"
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+                placeholder={t("bookpitch.tagsPlaceholder")}
+                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t("bookpitch.fieldDirection")}
+              </label>
+              <input
+                type="text"
+                value={direction}
+                onChange={(e) => setDirection(e.target.value)}
+                placeholder={t("bookpitch.adoptHint")}
+                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  {t("bookpitch.fieldGenre")}
+                </label>
+                <input
+                  type="text"
+                  value={genre}
+                  onChange={(e) => setGenre(e.target.value)}
+                  placeholder={t("bookpitch.genreHint")}
+                  className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  {t("bookpitch.fieldPlatform")}
+                </label>
+                <input
+                  type="text"
+                  value={platform}
+                  onChange={(e) => setPlatform(e.target.value)}
+                  placeholder={t("bookpitch.platformHint")}
+                  className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  {t("bookpitch.fieldStyle")}
+                </label>
+                <input
+                  type="text"
+                  value={style}
+                  onChange={(e) => setStyle(e.target.value)}
+                  placeholder={t("bookpitch.styleHint")}
+                  className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={handleAdopt}
+                disabled={!canSave}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+                {saving ? t("bookpitch.creating") : t("bookpitch.createBtn")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-lg border border-dashed bg-muted/20 p-6 max-w-3xl text-center">
+            <p className="text-sm text-muted-foreground">
+              {t("bookpitch.adoptLockedHint")}
             </p>
           </div>
-
-          {error && (
-            <p className="text-sm text-destructive bg-danger-bg border border-danger-border rounded-md px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              {t("bookpitch.fieldTitleReq")}
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={t("novel.enterBookTitle")}
-              className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              {t("bookpitch.fieldSummary")}
-            </label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t("novel.summaryPlaceholder")}
-              rows={3}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              {t("bookpitch.fieldTags")}
-            </label>
-            <input
-              type="text"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder={t("bookpitch.tagsPlaceholder")}
-              className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              {t("bookpitch.fieldDirection")}
-            </label>
-            <input
-              type="text"
-              value={direction}
-              onChange={(e) => setDirection(e.target.value)}
-              placeholder={t("bookpitch.adoptHint")}
-              className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                {t("bookpitch.fieldGenre")}
-              </label>
-              <input
-                type="text"
-                value={genre}
-                onChange={(e) => setGenre(e.target.value)}
-                placeholder={t("bookpitch.genreHint")}
-                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                {t("bookpitch.fieldPlatform")}
-              </label>
-              <input
-                type="text"
-                value={platform}
-                onChange={(e) => setPlatform(e.target.value)}
-                placeholder={t("bookpitch.platformHint")}
-                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                {t("bookpitch.fieldStyle")}
-              </label>
-              <input
-                type="text"
-                value={style}
-                onChange={(e) => setStyle(e.target.value)}
-                placeholder={t("bookpitch.styleHint")}
-                className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-1">
-            <button
-              type="button"
-              onClick={handleAdopt}
-              disabled={!canSave}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
-              {saving ? t("bookpitch.creating") : t("bookpitch.createBtn")}
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       <div className="px-6 py-4 border-t shrink-0">
-        {!hasModel && !noNovel && (
+        {!hasModel && !!novelId && (
           <div className="flex items-center gap-2 mb-2 text-[12px] text-destructive">
             <AlertTriangle className="w-3.5 h-3.5" />
             {t("bookpitch.configureModelFirst")}
