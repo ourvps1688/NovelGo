@@ -1,10 +1,19 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Sparkles, Play, Check, AlertTriangle, Loader2 } from "lucide-react";
+import {
+  Sparkles,
+  Play,
+  Check,
+  AlertTriangle,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
 import {
   useEnabledSkills,
   useSetEnabledSkills,
 } from "@/components/chat/useNovelSkills";
+import { useSessions } from "@/components/chat/useSessions";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
@@ -15,11 +24,23 @@ import { useNovelStore } from "@/components/novel/useNovelStore";
 import {
   CATEGORY_CREATIVE,
   CATEGORY_PLATFORM,
+  CATEGORY_TAGS,
+  CATEGORY_DIRECTION,
+  CATEGORY_HOOK,
 } from "@/components/preference/preferenceCategories";
-import { CreatePreference, SetEnabledSkills } from "@/lib/wailsjs/go/app/App";
+import {
+  CreatePreference,
+  GetSessionMessages,
+  SetEnabledSkills,
+} from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
+import {
+  extractPitchJSON,
+  pitchSignature,
+  type PitchData,
+} from "./bookPitchParse";
 
 // 被编排的 manual 技能名（经 SetEnabledSkills 常驻注入 system 上下文）。
 const SKILL_NAME = "book-pitch";
@@ -51,6 +72,7 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   const [genre, setGenre] = useState("");
   const [platform, setPlatform] = useState("");
   const [style, setStyle] = useState("");
+  const [oneLiner, setOneLiner] = useState("");
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const adoptSectionRef = useRef<HTMLDivElement>(null);
@@ -68,7 +90,25 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   // - 保存/取消后由 workflow 清空，避免把已建好的书再次当成孵化器。
   const incubatorId = useBookPitchStore((s) => s.incubatorId);
   const setIncubatorId = useBookPitchStore((s) => s.setIncubatorId);
+  const appliedPitchSig = useBookPitchStore((s) => s.appliedPitchSig);
+  const setAppliedPitchSig = useBookPitchStore((s) => s.setAppliedPitchSig);
   const isIncubating = incubatorId !== null && incubatorId === novelId;
+
+  // 孵化中：轮询本书最新会话的助手消息，检测 book-pitch 终稿 JSON 并自动回填表单。
+  // enabled 仅在 incubatorId 有效时；refetchInterval 让对话定稿后数秒内自动抓取。
+  const sessionsQuery = useSessions({
+    novelId: incubatorId ?? 0,
+    page: 1,
+    size: 5,
+    search: "",
+  });
+  const latestSid = sessionsQuery.data?.items?.[0]?.session_id ?? "";
+  const msgQuery = useQuery({
+    queryKey: ["bookpitch-session-messages", latestSid],
+    queryFn: () => GetSessionMessages(latestSid),
+    enabled: !!latestSid,
+    refetchInterval: isIncubating ? 2500 : false,
+  });
 
   const enabledSet = useMemo(
     () => new Set(enabledQuery.data ?? []),
@@ -155,6 +195,58 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     t,
   ]);
 
+  // 把解析出的终稿数据回填到表单；force=true 时无视签名强制覆盖（手动「重新解析」用）。
+  const fillFromData = useCallback(
+    (d: PitchData, force: boolean) => {
+      const sig = pitchSignature(d);
+      if (!force && sig === appliedPitchSig) return;
+      setTitle(d.title);
+      setDescription(d.description);
+      setTags(d.tags);
+      setDirection(d.direction);
+      setGenre(d.genre);
+      setPlatform(d.platform);
+      setStyle(d.style);
+      setOneLiner(d.oneLiner);
+      setAppliedPitchSig(sig);
+      toastSuccess(t("bookpitch.parsedToast"));
+    },
+    [appliedPitchSig, t],
+  );
+
+  // 自动回填：孵化中且拿到会话消息后，从最新一条助手消息往前找首个终稿 JSON。
+  useEffect(() => {
+    if (!isIncubating) return;
+    const msgs = msgQuery.data;
+    if (!msgs || msgs.length === 0) return;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role !== "assistant") continue;
+      const data = extractPitchJSON(msgs[i].content || "");
+      if (data) {
+        fillFromData(data, false);
+        break;
+      }
+    }
+  }, [msgQuery.data, isIncubating, fillFromData]);
+
+  // 手动「重新解析对话」：无视已应用签名，强制用最新终稿 JSON 覆盖表单。
+  const handleReparse = useCallback(() => {
+    const msgs = msgQuery.data;
+    if (!msgs || msgs.length === 0) {
+      toastError(t("bookpitch.noParse"));
+      return;
+    }
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role !== "assistant") continue;
+      const data = extractPitchJSON(msgs[i].content || "");
+      if (data) {
+        fillFromData(data, true);
+        return;
+      }
+    }
+    toastError(t("bookpitch.noParse"));
+  }, [msgQuery.data, fillFromData, t]);
+
   const canSave = title.trim().length > 0 && !saving;
 
   async function handleAdopt() {
@@ -180,12 +272,19 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         // 技能启用失败不阻塞建书，静默忽略。
       }
 
-      // 引导项：平台 / 风格 非空则写入本书偏好（题材已写入 novel.genre 字段）。
+      // 引导项：平台 / 风格 / 标签 / 方向 / 一句话卖点 非空则写入本书偏好
+      // （题材已写入 novel.genre 字段；书名/简介随小说主体更新）。
       const extra: Array<{ category: string; content: string }> = [];
       if (platform.trim())
         extra.push({ category: CATEGORY_PLATFORM, content: platform.trim() });
       if (style.trim())
         extra.push({ category: CATEGORY_CREATIVE, content: style.trim() });
+      if (tags.trim())
+        extra.push({ category: CATEGORY_TAGS, content: tags.trim() });
+      if (direction.trim())
+        extra.push({ category: CATEGORY_DIRECTION, content: direction.trim() });
+      if (oneLiner.trim())
+        extra.push({ category: CATEGORY_HOOK, content: oneLiner.trim() });
       for (const e of extra) {
         try {
           await CreatePreference(n.id, {
@@ -282,13 +381,27 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
             ref={adoptSectionRef}
             className="mt-5 rounded-lg border bg-muted/30 p-4 max-w-3xl space-y-3"
           >
-            <div>
-              <h2 className="text-sm font-semibold">
-                {t("bookpitch.adoptTitle")}
-              </h2>
-              <p className="text-[12px] text-muted-foreground mt-1">
-                {t("bookpitch.adoptHint")}
-              </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">
+                  {t("bookpitch.adoptTitle")}
+                </h2>
+                <p className="text-[12px] text-muted-foreground mt-1">
+                  {t("bookpitch.adoptHint")}
+                </p>
+                <p className="text-[12px] text-muted-foreground mt-1">
+                  {t("bookpitch.parsedHint")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleReparse}
+                disabled={!latestSid}
+                className="shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                {t("bookpitch.reparseBtn")}
+              </button>
             </div>
 
             {error && (
@@ -347,6 +460,19 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 onChange={(e) => setDirection(e.target.value)}
                 placeholder={t("bookpitch.adoptHint")}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                {t("bookpitch.fieldOneLiner")}
+              </label>
+              <textarea
+                value={oneLiner}
+                onChange={(e) => setOneLiner(e.target.value)}
+                placeholder={t("bookpitch.oneLinerPlaceholder")}
+                rows={2}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             </div>
 
