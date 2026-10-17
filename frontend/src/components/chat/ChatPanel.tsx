@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { MessageSquare, Loader2, History, Plus } from "lucide-react";
+import { MessageSquare, Loader2, History, Plus, Sparkles } from "lucide-react";
 import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { useQueryClient } from "@tanstack/react-query";
 import { GetSession, Chat } from "@/lib/wailsjs/go/app/App";
@@ -46,6 +46,9 @@ import { useSetSelectedModel } from "./useSetSelectedModel";
 import { useSetReasoningEffort } from "./useSetReasoningEffort";
 import { useSetApprovalMode } from "./useSetApprovalMode";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
+import { useBookPitchStore } from "@/stores/useBookPitchStore";
+import { useNovelStore } from "@/components/novel/useNovelStore";
+import { usePanelStore } from "@/stores/usePanelStore";
 
 interface Props {
   novelId: number;
@@ -1305,6 +1308,21 @@ export default function ChatPanel({
       ? t("chat.configureModelFirst")
       : t("chat.inputPlaceholder");
 
+  // 新书孵化返回提示：当存在进行中的孵化器且用户不在新书孵化面板时显示，
+  // 避免用户聊完天之后找不到「采纳方案并建书」表单。
+  const incubatorId = useBookPitchStore((s) => s.incubatorId);
+  const activePanel = usePanelStore((s) => s.activePanel);
+  const switchNovel = useNovelStore((s) => s.switchNovel);
+  const setActivePanel = usePanelStore((s) => s.setActivePanel);
+  const showBookPitchReturnBanner =
+    incubatorId !== null && activePanel !== "bookpitch";
+  const handleReturnToBookPitch = useCallback(() => {
+    if (incubatorId != null) {
+      void switchNovel(incubatorId);
+    }
+    setActivePanel("bookpitch");
+  }, [incubatorId, switchNovel, setActivePanel]);
+
   // 草稿 key：已有会话按 sessionId，新对话（未选中/新开）按小说分槽
   const draftKey = sessionId ? sessionId : `new_${novelId}`;
 
@@ -1347,6 +1365,20 @@ export default function ChatPanel({
           onSelectSession={handleSelectSession}
         />
       </div>
+
+      {showBookPitchReturnBanner && (
+        <button
+          type="button"
+          onClick={handleReturnToBookPitch}
+          className="shrink-0 flex items-center gap-2 w-full px-4 py-2 text-left text-sm text-primary bg-primary/5 border-b border-primary/20 hover:bg-primary/10 transition-colors cursor-pointer"
+        >
+          <Sparkles className="w-4 h-4 shrink-0" />
+          <span className="flex-1">{t("bookpitch.returnBanner")}</span>
+          <span className="font-medium underline shrink-0">
+            {t("bookpitch.returnBannerAction")}
+          </span>
+        </button>
+      )}
 
       <div
         ref={scrollContainerRef}

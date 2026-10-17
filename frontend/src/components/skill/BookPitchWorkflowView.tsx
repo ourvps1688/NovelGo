@@ -340,6 +340,13 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         // 同一签名已处理过则跳过，避免重复回填与保存。
         if (sig === appliedPitchSig) return;
         fillFromData(data, false);
+        // 自动滚动到「采纳方案并建书」区域，让用户立即看到可保存的表单。
+        requestAnimationFrame(() => {
+          adoptSectionRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
         // 构造合并数据：用户手动改过的字段保留其手动值，其余用 AI 最新 JSON；
         // 空值不覆盖（保留已有内容）。这样自动保存不会抹掉用户确认过的字段。
         const merged: PitchData = {
@@ -431,6 +438,12 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
       const data = extractPitchJSON(msgs[i].content || "");
       if (data) {
         fillFromData(data, true); // 强制全量覆盖（已清空 manual 保护）
+        requestAnimationFrame(() => {
+          adoptSectionRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        });
         // 全量覆盖后直接保存书架：manual 已清空，merged == data。
         setAutoSaving(true);
         (async () => {

@@ -456,6 +456,7 @@
     "importBook": "Import Book",
     "newWork": "New Work",
     "aiPitchNewBook": "AI Pitch New Book",
+    "continueBookPitch": "Continue Book Pitch",
     "noWorksYet": "No works yet, create your first one",
     "changeCover": "Change Cover",
     "uncategorized": "Uncategorized",
@@ -1841,6 +1842,8 @@
     "saving": "Saving…",
     "savedToast": "Book info saved; book-pitch skill enabled",
     "autoSavedToast": "Bookshelf info auto-updated from final JSON",
+    "returnBanner": "A new book pitch is in progress. AI has auto-filled the \"Adopt the plan\" form from the chat. Return to confirm and save.",
+    "returnBannerAction": "Return to Book Pitch",
     "goalLabel": "Goal: ",
     "doneLabel": "Done: "
   },

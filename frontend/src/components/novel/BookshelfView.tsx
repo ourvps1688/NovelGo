@@ -16,6 +16,7 @@ import BookCover from "@/components/sidebar/BookCover";
 import GenerateCoverDialog from "@/components/novel/GenerateCoverDialog";
 import { useNovels } from "@/components/novel/useNovels";
 import { useNovelStore } from "@/components/novel/useNovelStore";
+import { useBookPitchStore } from "@/stores/useBookPitchStore";
 import type { novel } from "@/lib/wailsjs/go/models";
 import { toErrorMessage } from "@/utils/error";
 
@@ -24,6 +25,7 @@ interface Props {
   onSaveCover: (novelID: number, file: File) => Promise<void>;
   onImportNovel: () => void;
   onStartBookPitch: () => void;
+  onContinueBookPitch: () => void;
 }
 
 // 与原 grid-cols-[repeat(auto-fill,minmax(180px,1fr))] + gap-5 对齐
@@ -36,6 +38,7 @@ export default function BookshelfView({
   onSaveCover,
   onImportNovel,
   onStartBookPitch,
+  onContinueBookPitch,
 }: Props) {
   const { t } = useTranslation();
   // 3.2: 数据 + UI 状态从 store/query 订阅（原由 WorkspaceView 注入 props）。
@@ -53,6 +56,7 @@ export default function BookshelfView({
   );
   const list = tab === "reference" ? referenceNovels : writingNovels;
   const activeNovelId = useNovelStore((s) => s.activeNovelId);
+  const incubatorId = useBookPitchStore((s) => s.incubatorId);
   const setEditingNovel = useNovelStore((s) => s.setEditingNovel);
   const setDeletingNovel = useNovelStore((s) => s.setDeletingNovel);
   const setShowCreateDialog = useNovelStore((s) => s.setShowCreateDialog);
@@ -296,13 +300,23 @@ export default function BookshelfView({
             <Upload className="w-4 h-4" />
             {t("novel.importBook")}
           </button>
-          <button
-            onClick={onStartBookPitch}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-primary/30 text-primary hover:bg-primary/5 transition-colors"
-          >
-            <Sparkles className="w-4 h-4" />
-            {t("novel.aiPitchNewBook")}
-          </button>
+          {incubatorId ? (
+            <button
+              onClick={onContinueBookPitch}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-primary/30 text-primary hover:bg-primary/5 transition-colors"
+            >
+              <Sparkles className="w-4 h-4" />
+              {t("novel.continueBookPitch")}
+            </button>
+          ) : (
+            <button
+              onClick={onStartBookPitch}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-primary/30 text-primary hover:bg-primary/5 transition-colors"
+            >
+              <Sparkles className="w-4 h-4" />
+              {t("novel.aiPitchNewBook")}
+            </button>
+          )}
           <button
             onClick={() => setShowCreateDialog(true)}
             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm bg-primary text-primary-foreground hover:opacity-90 transition-opacity"

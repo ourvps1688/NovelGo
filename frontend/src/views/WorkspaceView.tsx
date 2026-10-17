@@ -531,6 +531,14 @@ export default function WorkspaceView({
                     useBookPitchStore.getState().setIncubatorId(null);
                     setActivePanel("bookpitch");
                   }}
+                  onContinueBookPitch={() => {
+                    // 继续当前孵化器：切回孵化器小说并打开新书孵化面板。
+                    const id = useBookPitchStore.getState().incubatorId;
+                    if (id != null) {
+                      void switchNovel(id);
+                    }
+                    setActivePanel("bookpitch");
+                  }}
                 />
               ) : (
                 CONTENT_PANEL_IDS.has(activePanel) && (

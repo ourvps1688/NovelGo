@@ -445,6 +445,7 @@
     "importBook": "导入书籍",
     "newWork": "新建作品",
     "aiPitchNewBook": "AI 孵化新书",
+    "continueBookPitch": "继续孵化",
     "noWorksYet": "还没有作品，创建第一部吧",
     "changeCover": "更换封面",
     "uncategorized": "未分类",
@@ -1802,6 +1803,8 @@
     "saving": "保存中…",
     "savedToast": "书籍信息已保存，已启用 book-pitch 技能",
     "autoSavedToast": "已根据终稿 JSON 自动更新书架信息",
+    "returnBanner": "当前有一本新书正在孵化中。AI 已根据对话自动填入「采纳方案并建书」表单，可返回确认并保存。",
+    "returnBannerAction": "返回新书孵化",
     "goalLabel": "目标：",
     "doneLabel": "完成："
   },
