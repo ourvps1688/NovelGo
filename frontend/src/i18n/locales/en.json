@@ -1824,6 +1824,9 @@
     "createBtn": "Create book",
     "creating": "Creating…",
     "createdToast": "New book created; book-pitch skill enabled",
+    "saveBtn": "Save book",
+    "saving": "Saving…",
+    "savedToast": "Book info saved; book-pitch skill enabled",
     "goalLabel": "Goal: ",
     "doneLabel": "Done: "
   },

@@ -1785,6 +1785,9 @@
     "createBtn": "创建新书",
     "creating": "创建中…",
     "createdToast": "新书已创建，已启用 book-pitch 技能",
+    "saveBtn": "保存书籍",
+    "saving": "保存中…",
+    "savedToast": "书籍信息已保存，已启用 book-pitch 技能",
     "goalLabel": "目标：",
     "doneLabel": "完成："
   },

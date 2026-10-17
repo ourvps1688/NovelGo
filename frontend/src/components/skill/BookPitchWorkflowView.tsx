@@ -9,6 +9,7 @@ import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
 import { useCreateNovel } from "@/components/novel/useCreateNovel";
+import { useUpdateNovel } from "@/components/novel/useUpdateNovel";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import {
   CATEGORY_CREATIVE,
@@ -58,7 +59,16 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   const modelsQuery = useModels();
   const settingsQuery = useSettings();
   const createNovel = useCreateNovel();
+  const updateNovel = useUpdateNovel();
   const switchNovel = useNovelStore((s) => s.switchNovel);
+
+  // 书架为空时自动创建的"孵化器"小说 id。最终「采纳方案」应直接更新这本书，
+  // 而不是再创建一本，避免用户得到两本重复/临时书。
+  const [incubatingNovelId, setIncubatingNovelId] = useState<number | null>(
+    null,
+  );
+  const isIncubating =
+    incubatingNovelId !== null && incubatingNovelId === novelId;
 
   const enabledSet = useMemo(
     () => new Set(enabledQuery.data ?? []),
@@ -101,6 +111,8 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
           // 技能启用失败不阻塞建书，静默忽略。
         }
         await switchNovel(n.id);
+        // 标记这本自动创建的小说是"孵化器"：后续「采纳方案」直接更新它，而不是再建一本。
+        setIncubatingNovelId(n.id);
         // 写入待发 kickoff：交由 ChatPanel 在新 novelId 上下文就绪（send 重新注册、
         // 模型恢复）后自动发送，规避入口面板直接取 send 时闭包仍是旧 novelId 的竞态。
         const kickoff = t("bookpitch.kickoff", { idea });
@@ -148,11 +160,24 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     setSaving(true);
     setError("");
     try {
-      const n = await createNovel.mutateAsync({
-        title: title.trim(),
-        description: description.trim(),
-        genre: genre.trim(),
-      });
+      // 孵化器小说：直接更新原书，避免产生第二本重复/临时书。
+      // 其它情况（选中已有书进入工作流）仍按「新书孵化」语义创建一本新书。
+      const targetId = isIncubating ? incubatingNovelId! : null;
+      const n = targetId
+        ? await updateNovel.mutateAsync({
+            id: targetId,
+            input: {
+              title: title.trim(),
+              description: description.trim(),
+              genre: genre.trim(),
+              kind: "",
+            },
+          })
+        : await createNovel.mutateAsync({
+            title: title.trim(),
+            description: description.trim(),
+            genre: genre.trim(),
+          });
 
       // 启用 book-pitch（新书无既有技能，直接 set）。
       try {
@@ -179,7 +204,9 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         }
       }
 
-      toastSuccess(t("bookpitch.createdToast"));
+      toastSuccess(
+        isIncubating ? t("bookpitch.savedToast") : t("bookpitch.createdToast"),
+      );
       await onCreated(n.id);
     } catch (e) {
       setError(toErrorMessage(e, t("novel.saveFailedRetry")));
@@ -379,7 +406,13 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 ) : (
                   <Sparkles className="w-4 h-4" />
                 )}
-                {saving ? t("bookpitch.creating") : t("bookpitch.createBtn")}
+                {saving
+                  ? isIncubating
+                    ? t("bookpitch.saving")
+                    : t("bookpitch.creating")
+                  : isIncubating
+                    ? t("bookpitch.saveBtn")
+                    : t("bookpitch.createBtn")}
               </button>
             </div>
           </div>
