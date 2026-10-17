@@ -160,7 +160,7 @@ type CreateStoryArcItem struct {
 
 // CreateStoryArcArgs 是 create_story_arc 的参数。
 type CreateStoryArcArgs struct {
-	StoryArcs []CreateStoryArcItem `json:"story_arcs" jsonschema:"required,description=要创建的弧线列表（1-5个）" validate:"required,min=1,max=5,dive"`
+	StoryArcs []CreateStoryArcItem `json:"story_arcs" jsonschema:"required,description=要创建的弧线列表（1-20个）" validate:"required,min=1,max=20,dive"`
 }
 
 // CreateStoryArcTool 创建新叙事弧线。
@@ -168,7 +168,7 @@ type CreateStoryArcTool struct{}
 
 func (t *CreateStoryArcTool) Name() string { return "create_story_arc" }
 func (t *CreateStoryArcTool) Description() string {
-	return "批量创建叙事弧线（1-5个）。保证原子性，失败时返回具体条目原因。" +
+	return "批量创建叙事弧线（1-20个）。保证原子性，失败时返回具体条目原因。" +
 		"弧线类型：main（主线）/ sub（支线）/ character（角色线）/ background（背景线）。" +
 		"弧线是跨越多章节的故事线容器，内部节点通过 create_arc_node 添加。"
 }

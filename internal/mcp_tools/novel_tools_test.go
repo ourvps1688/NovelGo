@@ -66,3 +66,34 @@ func TestGetChapterListGroupsByVolume(t *testing.T) {
 		t.Errorf("total = %v, want 4", got)
 	}
 }
+
+func TestListVolumes(t *testing.T) {
+	db, tc, ctx := setupRWEnv(t)
+	firstID := seedVolume(t, db, tc.NovelID, "第一卷", 1)
+	secondID := seedVolume(t, db, tc.NovelID, "第二卷", 2)
+
+	registry := mcp_tools.NewRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	mcp_tools.RegisterNovelTools(registry)
+	result := registry.Execute(ctx, "list_volumes", []byte(`{}`), tc, nil)
+	if !result.Success {
+		t.Fatalf("list_volumes failed: %s", result.Error)
+	}
+
+	content, ok := result.Data["content"].(string)
+	if !ok {
+		t.Fatalf("content = %#v, want string", result.Data["content"])
+	}
+
+	if result.Data["count"] != 2 {
+		t.Errorf("count = %v, want 2", result.Data["count"])
+	}
+	if !strings.Contains(content, fmt.Sprintf("[id:%d] 第一卷", firstID)) {
+		t.Errorf("content missing first volume: %s", content)
+	}
+	if !strings.Contains(content, fmt.Sprintf("[id:%d] 第二卷", secondID)) {
+		t.Errorf("content missing second volume: %s", content)
+	}
+	if !strings.Contains(content, fmt.Sprintf("volumes/id_%d.md", firstID)) {
+		t.Errorf("content missing first volume path: %s", content)
+	}
+}
