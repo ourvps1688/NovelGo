@@ -35,7 +35,7 @@ import {
   UpdateNovel,
 } from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
-import { toastError, toastSuccess } from "@/utils/toast";
+import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import { novelKeys, preferenceKeys } from "@/lib/queryKeys";
 import {
@@ -80,6 +80,93 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const adoptSectionRef = useRef<HTMLDivElement>(null);
+
+  // v2：字段级增量回填所需的统一映射与手动编辑保护。
+  const FIELD_NAMES = [
+    "title",
+    "description",
+    "tags",
+    "direction",
+    "genre",
+    "platform",
+    "style",
+    "oneLiner",
+  ] as const;
+  type FieldName = (typeof FIELD_NAMES)[number];
+
+  // 字段名 i18n key 映射：冲突提示时本地化展示字段名（避免源码硬编码中文）。
+  const FIELD_I18N: Record<FieldName, string> = {
+    title: "bookpitch.fTitle",
+    description: "bookpitch.fDesc",
+    tags: "bookpitch.fTags",
+    direction: "bookpitch.fDirection",
+    genre: "bookpitch.fGenre",
+    platform: "bookpitch.fPlatform",
+    style: "bookpitch.fStyle",
+    oneLiner: "bookpitch.fOneLiner",
+  };
+
+  // 最新表单值快照，供 fillFromData 读取当前值做冲突判定（避免闭包陈旧）。
+  const formRef = useRef<Record<FieldName, string>>({
+    title,
+    description,
+    tags,
+    direction,
+    genre,
+    platform,
+    style,
+    oneLiner,
+  });
+  useEffect(() => {
+    formRef.current = {
+      title,
+      description,
+      tags,
+      direction,
+      genre,
+      platform,
+      style,
+      oneLiner,
+    };
+  }, [title, description, tags, direction, genre, platform, style, oneLiner]);
+
+  // 用户手动编辑过的字段集合：受自动 JSON 覆盖保护。
+  const manualFieldsRef = useRef<Set<FieldName>>(new Set());
+
+  // 按字段名读写 state 的映射表。
+  const setField = useCallback((f: FieldName, v: string) => {
+    switch (f) {
+      case "title":
+        setTitle(v);
+        break;
+      case "description":
+        setDescription(v);
+        break;
+      case "tags":
+        setTags(v);
+        break;
+      case "direction":
+        setDirection(v);
+        break;
+      case "genre":
+        setGenre(v);
+        break;
+      case "platform":
+        setPlatform(v);
+        break;
+      case "style":
+        setStyle(v);
+        break;
+      case "oneLiner":
+        setOneLiner(v);
+        break;
+    }
+  }, []);
+
+  // 标记某字段被用户手动编辑（不再被自动 JSON 覆盖）。
+  const markManual = useCallback((f: FieldName) => {
+    manualFieldsRef.current.add(f);
+  }, []);
 
   const enabledQuery = useEnabledSkills(novelId);
   const setEnabled = useSetEnabledSkills(novelId);
@@ -199,23 +286,43 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     t,
   ]);
 
-  // 把解析出的终稿数据回填到表单；force=true 时无视签名强制覆盖（手动「重新解析」用）。
+  // 把解析出的终稿数据回填到表单。
+  // v2 字段级增量：force=true 时无视签名与手动保护，全量覆盖；
+  // 否则只更新「用户未手动改过」的字段，并跳过空值（不清除已有内容）。
+  // 若某字段用户已手动改过且 AI 有新建议值，记录为冲突并保留用户值，仅提示。
   const fillFromData = useCallback(
     (d: PitchData, force: boolean) => {
       const sig = pitchSignature(d);
       if (!force && sig === appliedPitchSig) return;
-      setTitle(d.title);
-      setDescription(d.description);
-      setTags(d.tags);
-      setDirection(d.direction);
-      setGenre(d.genre);
-      setPlatform(d.platform);
-      setStyle(d.style);
-      setOneLiner(d.oneLiner);
+      if (force) manualFieldsRef.current.clear();
+
+      const conflicts: FieldName[] = [];
+      for (const f of FIELD_NAMES) {
+        const incoming = d[f] ?? "";
+        // 空值不覆盖：保留用户/历史已有内容。
+        if (!incoming) continue;
+        // 非强制且用户已手动改过：保留手动值，有新建议则记冲突。
+        if (!force && manualFieldsRef.current.has(f)) {
+          const current = formRef.current[f] ?? "";
+          if (incoming !== current) conflicts.push(f);
+          continue;
+        }
+        if (incoming !== (formRef.current[f] ?? "")) {
+          setField(f, incoming);
+        }
+      }
       setAppliedPitchSig(sig);
-      toastSuccess(t("bookpitch.parsedToast"));
+      if (conflicts.length > 0) {
+        toastInfo(
+          t("bookpitch.conflictToast", {
+            fields: conflicts.map((f) => t(FIELD_I18N[f])).join("、"),
+          }),
+        );
+      } else {
+        toastSuccess(t("bookpitch.parsedToast"));
+      }
     },
-    [appliedPitchSig, t],
+    [appliedPitchSig, setField, t],
   );
 
   // 自动回填 + 自动保存书架：孵化中且拿到会话消息后，从最新一条助手消息
@@ -233,17 +340,60 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         // 同一签名已处理过则跳过，避免重复回填与保存。
         if (sig === appliedPitchSig) return;
         fillFromData(data, false);
+        // 构造合并数据：用户手动改过的字段保留其手动值，其余用 AI 最新 JSON；
+        // 空值不覆盖（保留已有内容）。这样自动保存不会抹掉用户确认过的字段。
+        const merged: PitchData = {
+          title:
+            manualFieldsRef.current.has("title") &&
+            (formRef.current.title ?? "")
+              ? formRef.current.title
+              : data.title || formRef.current.title || "",
+          description:
+            manualFieldsRef.current.has("description") &&
+            (formRef.current.description ?? "")
+              ? formRef.current.description
+              : data.description || formRef.current.description || "",
+          tags:
+            manualFieldsRef.current.has("tags") && (formRef.current.tags ?? "")
+              ? formRef.current.tags
+              : data.tags || formRef.current.tags || "",
+          direction:
+            manualFieldsRef.current.has("direction") &&
+            (formRef.current.direction ?? "")
+              ? formRef.current.direction
+              : data.direction || formRef.current.direction || "",
+          genre:
+            manualFieldsRef.current.has("genre") &&
+            (formRef.current.genre ?? "")
+              ? formRef.current.genre
+              : data.genre || formRef.current.genre || "",
+          platform:
+            manualFieldsRef.current.has("platform") &&
+            (formRef.current.platform ?? "")
+              ? formRef.current.platform
+              : data.platform || formRef.current.platform || "",
+          style:
+            manualFieldsRef.current.has("style") &&
+            (formRef.current.style ?? "")
+              ? formRef.current.style
+              : data.style || formRef.current.style || "",
+          oneLiner:
+            manualFieldsRef.current.has("oneLiner") &&
+            (formRef.current.oneLiner ?? "")
+              ? formRef.current.oneLiner
+              : data.oneLiner || formRef.current.oneLiner || "",
+        };
         // 异步自动保存到小说主体 + 偏好，不阻塞 UI；失败静默（用户仍可手动保存）。
         setAutoSaving(true);
         (async () => {
           try {
             await UpdateNovel(incubatorId, {
-              title: data.title.trim(),
-              description: data.description.trim(),
-              genre: data.genre.trim(),
+              title: merged.title.trim(),
+              description: merged.description.trim(),
+              genre: merged.genre.trim(),
               kind: "",
             });
-            await persistPitchPreferences(incubatorId, data);
+            await persistPitchPreferences(incubatorId, merged);
             qc.invalidateQueries({ queryKey: novelKeys.all });
             qc.invalidateQueries({
               queryKey: preferenceKeys.list(incubatorId),
@@ -268,8 +418,9 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     t,
   ]);
 
-  // 手动「重新解析对话」：无视已应用签名，强制用最新终稿 JSON 覆盖表单。
-  const handleReparse = useCallback(() => {
+  // 手动「采用 AI 建议」：无视签名与手动保护，以最新终稿 JSON 全量覆盖表单并保存书架。
+  const handleAdoptAll = useCallback(() => {
+    if (!incubatorId) return;
     const msgs = msgQuery.data;
     if (!msgs || msgs.length === 0) {
       toastError(t("bookpitch.noParse"));
@@ -279,12 +430,34 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
       if (msgs[i].role !== "assistant") continue;
       const data = extractPitchJSON(msgs[i].content || "");
       if (data) {
-        fillFromData(data, true);
+        fillFromData(data, true); // 强制全量覆盖（已清空 manual 保护）
+        // 全量覆盖后直接保存书架：manual 已清空，merged == data。
+        setAutoSaving(true);
+        (async () => {
+          try {
+            await UpdateNovel(incubatorId, {
+              title: data.title.trim(),
+              description: data.description.trim(),
+              genre: data.genre.trim(),
+              kind: "",
+            });
+            await persistPitchPreferences(incubatorId, data);
+            qc.invalidateQueries({ queryKey: novelKeys.all });
+            qc.invalidateQueries({
+              queryKey: preferenceKeys.list(incubatorId),
+            });
+            toastSuccess(t("bookpitch.autoSavedToast"));
+          } catch {
+            // 静默：用户可再次点保存
+          } finally {
+            setAutoSaving(false);
+          }
+        })();
         return;
       }
     }
     toastError(t("bookpitch.noParse"));
-  }, [msgQuery.data, fillFromData, t]);
+  }, [msgQuery.data, fillFromData, incubatorId, qc, t]);
 
   // 把解析出的引导项持久化为本书偏好（自动保存 + 手动保存共用）。
   async function persistPitchPreferences(
@@ -457,12 +630,12 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
               </div>
               <button
                 type="button"
-                onClick={handleReparse}
+                onClick={handleAdoptAll}
                 disabled={!latestSid}
                 className="shrink-0 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                {t("bookpitch.reparseBtn")}
+                {t("bookpitch.adoptAllBtn")}
               </button>
             </div>
 
@@ -480,7 +653,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 ref={titleInputRef}
                 type="text"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  markManual("title");
+                  setTitle(e.target.value);
+                }}
                 placeholder={t("novel.enterBookTitle")}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
@@ -492,7 +668,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
               </label>
               <textarea
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => {
+                  markManual("description");
+                  setDescription(e.target.value);
+                }}
                 placeholder={t("novel.summaryPlaceholder")}
                 rows={3}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -506,7 +685,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
               <input
                 type="text"
                 value={tags}
-                onChange={(e) => setTags(e.target.value)}
+                onChange={(e) => {
+                  markManual("tags");
+                  setTags(e.target.value);
+                }}
                 placeholder={t("bookpitch.tagsPlaceholder")}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
@@ -519,7 +701,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
               <input
                 type="text"
                 value={direction}
-                onChange={(e) => setDirection(e.target.value)}
+                onChange={(e) => {
+                  markManual("direction");
+                  setDirection(e.target.value);
+                }}
                 placeholder={t("bookpitch.adoptHint")}
                 className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
@@ -531,7 +716,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
               </label>
               <textarea
                 value={oneLiner}
-                onChange={(e) => setOneLiner(e.target.value)}
+                onChange={(e) => {
+                  markManual("oneLiner");
+                  setOneLiner(e.target.value);
+                }}
                 placeholder={t("bookpitch.oneLinerPlaceholder")}
                 rows={2}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -546,7 +734,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 <input
                   type="text"
                   value={genre}
-                  onChange={(e) => setGenre(e.target.value)}
+                  onChange={(e) => {
+                    markManual("genre");
+                    setGenre(e.target.value);
+                  }}
                   placeholder={t("bookpitch.genreHint")}
                   className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
@@ -558,7 +749,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 <input
                   type="text"
                   value={platform}
-                  onChange={(e) => setPlatform(e.target.value)}
+                  onChange={(e) => {
+                    markManual("platform");
+                    setPlatform(e.target.value);
+                  }}
                   placeholder={t("bookpitch.platformHint")}
                   className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
@@ -570,7 +764,10 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 <input
                   type="text"
                   value={style}
-                  onChange={(e) => setStyle(e.target.value)}
+                  onChange={(e) => {
+                    markManual("style");
+                    setStyle(e.target.value);
+                  }}
                   placeholder={t("bookpitch.styleHint")}
                   className="w-full h-9 rounded-md border bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />

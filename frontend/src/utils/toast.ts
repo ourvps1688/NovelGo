@@ -22,3 +22,8 @@ export function toastError(msg: string) {
 export function toastSuccess(msg: string) {
   return toast.success(msg);
 }
+
+/** 显示中性信息 toast，用于非错误也非强成功的提示（如字段冲突提示）。 */
+export function toastInfo(msg: string) {
+  return toast.info(msg);
+}
