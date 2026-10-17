@@ -5,6 +5,19 @@ category: 包装
 mode: manual
 author: builtin
 version: 2
+useWhen:
+  - intent: "起书名 / 写简介 / 选标签 / 定方向 / 一句话卖点 / 作品外包装"
+    cues:
+      - "书名"
+      - "简介"
+      - "标签"
+      - "卖点"
+      - "包装"
+      - "起名"
+      - "作品名"
+      - "一句话简介"
+      - "定方向"
+      - "一句话卖点"
 ---
 
 # 作品外包装（Book Pitch）
