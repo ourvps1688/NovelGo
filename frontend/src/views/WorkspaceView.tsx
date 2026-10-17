@@ -59,6 +59,7 @@ import { useNovels } from "@/components/novel/useNovels";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import { useCreateNovel } from "@/components/novel/useCreateNovel";
 import { useSaveCover } from "@/components/novel/useSaveCover";
+import { useBookPitchStore } from "@/stores/useBookPitchStore";
 import { novelKeys } from "@/lib/queryKeys";
 import { useQueryClient } from "@tanstack/react-query";
 import { toastError } from "@/utils/toast";
@@ -525,6 +526,11 @@ export default function WorkspaceView({
                   onSelectNovel={handleSelectNovel}
                   onSaveCover={handleSaveCover}
                   onImportNovel={() => importNovel.startImport()}
+                  onStartBookPitch={() => {
+                    // 从书架进入孵化器：清空旧的孵化器会话，确保每次进入都是全新的开书流程。
+                    useBookPitchStore.getState().setIncubatorId(null);
+                    setActivePanel("bookpitch");
+                  }}
                 />
               ) : (
                 CONTENT_PANEL_IDS.has(activePanel) && (
@@ -596,17 +602,17 @@ export default function WorkspaceView({
                 </ErrorBoundary>
               ) : activePanel === "signability" ? (
                 <ErrorBoundary>
-                  {activeWorkflow === "signability" ? (
-                    <SignabilityWorkflowView novelId={activeNovelId} />
-                  ) : activeWorkflow === "bookpitch" ? (
-                    <BookPitchWorkflowView
-                      novelId={activeNovelId}
-                      onCreated={async (id) => {
-                        await switchNovel(id);
-                        setActivePanel("chapters");
-                      }}
-                    />
-                  ) : null}
+                  <SignabilityWorkflowView novelId={activeNovelId} />
+                </ErrorBoundary>
+              ) : activePanel === "bookpitch" ? (
+                <ErrorBoundary>
+                  <BookPitchWorkflowView
+                    novelId={activeNovelId}
+                    onCreated={async (id) => {
+                      await switchNovel(id);
+                      setActivePanel("chapters");
+                    }}
+                  />
                 </ErrorBoundary>
               ) : null}
 

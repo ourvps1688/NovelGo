@@ -8,6 +8,7 @@ import {
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
+import { useBookPitchStore } from "@/stores/useBookPitchStore";
 import { useCreateNovel } from "@/components/novel/useCreateNovel";
 import { useUpdateNovel } from "@/components/novel/useUpdateNovel";
 import { useNovelStore } from "@/components/novel/useNovelStore";
@@ -62,13 +63,12 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   const updateNovel = useUpdateNovel();
   const switchNovel = useNovelStore((s) => s.switchNovel);
 
-  // 书架为空时自动创建的"孵化器"小说 id。最终「采纳方案」应直接更新这本书，
-  // 而不是再创建一本，避免用户得到两本重复/临时书。
-  const [incubatingNovelId, setIncubatingNovelId] = useState<number | null>(
-    null,
-  );
-  const isIncubating =
-    incubatingNovelId !== null && incubatingNovelId === novelId;
+  // 新书孵化器小说 id 提升到全局 store：
+  // - 卸载 BookPitchWorkflowView 后仍保留，切回 bookpitch 面板可继续。
+  // - 保存/取消后由 workflow 清空，避免把已建好的书再次当成孵化器。
+  const incubatorId = useBookPitchStore((s) => s.incubatorId);
+  const setIncubatorId = useBookPitchStore((s) => s.setIncubatorId);
+  const isIncubating = incubatorId !== null && incubatorId === novelId;
 
   const enabledSet = useMemo(
     () => new Set(enabledQuery.data ?? []),
@@ -93,52 +93,52 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
       return;
     }
 
-    // 书架为空：用书名灵感直接建第一本书作为孵化讨论场，随后自动发起对话。
-    // 不必要求用户先手动建书——本工作流本就是用来从 0 创建第一本书的。
-    if (!novelId) {
+    // 已经在孵化当前书：仅继续发 kickoff（用户可能想追加灵感或重新发起讨论）。
+    if (isIncubating) {
+      const send = useChatLaunchStore.getState().send;
+      if (!send) {
+        toastError(t("bookpitch.launchFailed"));
+        return;
+      }
       setLaunching(true);
       try {
-        const seedTitle = idea.slice(0, 20);
-        const n = await createNovel.mutateAsync({
-          title: seedTitle,
-          description: idea.slice(0, 200),
-          genre: "",
-        });
-        // 新书无既有技能，直接启用 book-pitch 作为孵化技能。
-        try {
-          await SetEnabledSkills({ novel_id: n.id, names: ADOPT_SKILLS });
-        } catch {
-          // 技能启用失败不阻塞建书，静默忽略。
-        }
-        await switchNovel(n.id);
-        // 标记这本自动创建的小说是"孵化器"：后续「采纳方案」直接更新它，而不是再建一本。
-        setIncubatingNovelId(n.id);
-        // 写入待发 kickoff：交由 ChatPanel 在新 novelId 上下文就绪（send 重新注册、
-        // 模型恢复）后自动发送，规避入口面板直接取 send 时闭包仍是旧 novelId 的竞态。
-        const kickoff = t("bookpitch.kickoff", { idea });
-        useChatLaunchStore.getState().setPendingKickoff(kickoff);
+        const base = new Set(enabledQuery.data ?? []);
+        base.add(SKILL_NAME);
+        await setEnabled.mutateAsync([...base]);
+        send(t("bookpitch.kickoff", { idea }));
       } catch (err) {
-        toastError(toErrorMessage(err, t("bookpitch.launchFailed")));
+        toastError(toErrorMessage(err, t("bookpitch.enableFailed")));
       } finally {
         setLaunching(false);
       }
       return;
     }
 
-    const send = useChatLaunchStore.getState().send;
-    if (!send) {
-      toastError(t("bookpitch.launchFailed"));
-      return;
-    }
+    // 新建孵化器：无论当前有没有 active 书，都创建一本临时小说作为讨论场。
+    // 这样 bookpitch 始终是「开新书」流程，不会误把当前已有书当成工作对象。
     setLaunching(true);
     try {
-      const base = new Set(enabledQuery.data ?? []);
-      base.add(SKILL_NAME);
-      await setEnabled.mutateAsync([...base]);
+      const seedTitle = idea.slice(0, 20);
+      const n = await createNovel.mutateAsync({
+        title: seedTitle,
+        description: idea.slice(0, 200),
+        genre: "",
+      });
+      // 新书无既有技能，直接启用 book-pitch 作为孵化技能。
+      try {
+        await SetEnabledSkills({ novel_id: n.id, names: ADOPT_SKILLS });
+      } catch {
+        // 技能启用失败不阻塞建书，静默忽略。
+      }
+      // 把这本临时小说标记为当前孵化器。
+      setIncubatorId(n.id);
+      await switchNovel(n.id);
+      // 写入待发 kickoff：交由 ChatPanel 在新 novelId 上下文就绪（send 重新注册、
+      // 模型恢复）后自动发送，规避入口面板直接取 send 时闭包仍是旧 novelId 的竞态。
       const kickoff = t("bookpitch.kickoff", { idea });
-      send(kickoff);
+      useChatLaunchStore.getState().setPendingKickoff(kickoff);
     } catch (err) {
-      toastError(toErrorMessage(err, t("bookpitch.enableFailed")));
+      toastError(toErrorMessage(err, t("bookpitch.launchFailed")));
     } finally {
       setLaunching(false);
     }
@@ -146,38 +146,32 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     novelId,
     hasModel,
     ideaDraft,
+    isIncubating,
     enabledQuery.data,
     setEnabled,
     createNovel,
     switchNovel,
+    setIncubatorId,
     t,
   ]);
 
   const canSave = title.trim().length > 0 && !saving;
 
   async function handleAdopt() {
-    if (!canSave) return;
+    if (!canSave || !isIncubating || incubatorId == null) return;
     setSaving(true);
     setError("");
     try {
-      // 孵化器小说：直接更新原书，避免产生第二本重复/临时书。
-      // 其它情况（选中已有书进入工作流）仍按「新书孵化」语义创建一本新书。
-      const targetId = isIncubating ? incubatingNovelId! : null;
-      const n = targetId
-        ? await updateNovel.mutateAsync({
-            id: targetId,
-            input: {
-              title: title.trim(),
-              description: description.trim(),
-              genre: genre.trim(),
-              kind: "",
-            },
-          })
-        : await createNovel.mutateAsync({
-            title: title.trim(),
-            description: description.trim(),
-            genre: genre.trim(),
-          });
+      // 直接更新孵化器小说，不会产生第二本。
+      const n = await updateNovel.mutateAsync({
+        id: incubatorId,
+        input: {
+          title: title.trim(),
+          description: description.trim(),
+          genre: genre.trim(),
+          kind: "",
+        },
+      });
 
       // 启用 book-pitch（新书无既有技能，直接 set）。
       try {
@@ -204,9 +198,9 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         }
       }
 
-      toastSuccess(
-        isIncubating ? t("bookpitch.savedToast") : t("bookpitch.createdToast"),
-      );
+      // 孵化完成：清空孵化器，避免已建好的书被再次当成孵化器。
+      setIncubatorId(null);
+      toastSuccess(t("bookpitch.savedToast"));
       await onCreated(n.id);
     } catch (e) {
       setError(toErrorMessage(e, t("novel.saveFailedRetry")));
@@ -281,8 +275,9 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
           ))}
         </div>
 
-        {/* 采纳方案并建书：只在工作流启动后显示；启动前隐藏，避免用户先填表。 */}
-        {isEnabled ? (
+        {/* 采纳方案并建书：只在当前小说确实是进行中的孵化器时显示；
+            否则说明用户刚进入 bookpitch 面板，还没开始新的孵化流程。 */}
+        {isIncubating ? (
           <div
             ref={adoptSectionRef}
             className="mt-5 rounded-lg border bg-muted/30 p-4 max-w-3xl space-y-3"
@@ -406,20 +401,14 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
                 ) : (
                   <Sparkles className="w-4 h-4" />
                 )}
-                {saving
-                  ? isIncubating
-                    ? t("bookpitch.saving")
-                    : t("bookpitch.creating")
-                  : isIncubating
-                    ? t("bookpitch.saveBtn")
-                    : t("bookpitch.createBtn")}
+                {saving ? t("bookpitch.saving") : t("bookpitch.saveBtn")}
               </button>
             </div>
           </div>
         ) : (
           <div className="mt-5 rounded-lg border border-dashed bg-muted/20 p-6 max-w-3xl text-center">
             <p className="text-sm text-muted-foreground">
-              {t("bookpitch.adoptLockedHint")}
+              {t("bookpitch.startHint")}
             </p>
           </div>
         )}

@@ -10,6 +10,7 @@ import {
   Download,
   Upload,
   Wand2,
+  Sparkles,
 } from "lucide-react";
 import BookCover from "@/components/sidebar/BookCover";
 import GenerateCoverDialog from "@/components/novel/GenerateCoverDialog";
@@ -22,6 +23,7 @@ interface Props {
   onSelectNovel: (n: novel.Novel) => void;
   onSaveCover: (novelID: number, file: File) => Promise<void>;
   onImportNovel: () => void;
+  onStartBookPitch: () => void;
 }
 
 // 与原 grid-cols-[repeat(auto-fill,minmax(180px,1fr))] + gap-5 对齐
@@ -33,6 +35,7 @@ export default function BookshelfView({
   onSelectNovel,
   onSaveCover,
   onImportNovel,
+  onStartBookPitch,
 }: Props) {
   const { t } = useTranslation();
   // 3.2: 数据 + UI 状态从 store/query 订阅（原由 WorkspaceView 注入 props）。
@@ -292,6 +295,13 @@ export default function BookshelfView({
           >
             <Upload className="w-4 h-4" />
             {t("novel.importBook")}
+          </button>
+          <button
+            onClick={onStartBookPitch}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm border border-primary/30 text-primary hover:bg-primary/5 transition-colors"
+          >
+            <Sparkles className="w-4 h-4" />
+            {t("novel.aiPitchNewBook")}
           </button>
           <button
             onClick={() => setShowCreateDialog(true)}

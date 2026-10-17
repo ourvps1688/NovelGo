@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
-import { Target, Check, Sparkles } from "lucide-react";
+import { Target, Check } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-// 工作流注册表：后续新增工作流时，只需在此数组追加一项（id / labelKey /
-// descKey / icon），SidePanel 会自动列出，主区按 activeWorkflow 渲染对应视图。
-// id 同时是 WorkspaceView 中 activeWorkflow 子状态的取值。
+// 工作流注册表：只保留「在当前书上运行」的工作流。
+// 新书孵化（book-pitch）是书架级动作，已迁移到 BookshelfView 顶部入口，
+// 不再放在工作流面板里，避免和当前 active 书混淆。
 interface WorkflowDef {
   id: string;
   labelKey: string;
@@ -18,12 +18,6 @@ const WORKFLOWS: WorkflowDef[] = [
     labelKey: "workflow.signability",
     descKey: "workflow.signabilityDesc",
     icon: Target,
-  },
-  {
-    id: "bookpitch",
-    labelKey: "workflow.bookpitch",
-    descKey: "workflow.bookpitchDesc",
-    icon: Sparkles,
   },
 ];
 
