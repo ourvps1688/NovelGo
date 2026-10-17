@@ -1792,6 +1792,7 @@
     "saveBtn": "保存书籍",
     "saving": "保存中…",
     "savedToast": "书籍信息已保存，已启用 book-pitch 技能",
+    "autoSavedToast": "已根据终稿 JSON 自动更新书架信息",
     "goalLabel": "目标：",
     "doneLabel": "完成："
   },

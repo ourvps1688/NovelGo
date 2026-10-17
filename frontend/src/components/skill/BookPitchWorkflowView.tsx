@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   Sparkles,
@@ -32,10 +32,12 @@ import {
   CreatePreference,
   GetSessionMessages,
   SetEnabledSkills,
+  UpdateNovel,
 } from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
+import { novelKeys, preferenceKeys } from "@/lib/queryKeys";
 import {
   extractPitchJSON,
   pitchSignature,
@@ -58,8 +60,10 @@ interface Props {
 
 export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const [launching, setLaunching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
   const [error, setError] = useState("");
   // 启动前必须输入的灵感/梗/关键词；会拼进 kickoff，避免 LLM 无的放矢。
   const [ideaDraft, setIdeaDraft] = useState("");
@@ -214,20 +218,55 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     [appliedPitchSig, t],
   );
 
-  // 自动回填：孵化中且拿到会话消息后，从最新一条助手消息往前找首个终稿 JSON。
+  // 自动回填 + 自动保存书架：孵化中且拿到会话消息后，从最新一条助手消息
+  // 往前找首个终稿 JSON；解析到新书签即回填表单，并立即把书名/简介/题材
+  // 写入小说主体、把标签/方向/卖点/平台/风格写入本书偏好，让书架实时刷新。
   useEffect(() => {
-    if (!isIncubating) return;
+    if (!isIncubating || !incubatorId) return;
     const msgs = msgQuery.data;
     if (!msgs || msgs.length === 0) return;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].role !== "assistant") continue;
       const data = extractPitchJSON(msgs[i].content || "");
       if (data) {
+        const sig = pitchSignature(data);
+        // 同一签名已处理过则跳过，避免重复回填与保存。
+        if (sig === appliedPitchSig) return;
         fillFromData(data, false);
+        // 异步自动保存到小说主体 + 偏好，不阻塞 UI；失败静默（用户仍可手动保存）。
+        setAutoSaving(true);
+        (async () => {
+          try {
+            await UpdateNovel(incubatorId, {
+              title: data.title.trim(),
+              description: data.description.trim(),
+              genre: data.genre.trim(),
+              kind: "",
+            });
+            await persistPitchPreferences(incubatorId, data);
+            qc.invalidateQueries({ queryKey: novelKeys.all });
+            qc.invalidateQueries({
+              queryKey: preferenceKeys.list(incubatorId),
+            });
+            toastSuccess(t("bookpitch.autoSavedToast"));
+          } catch {
+            // 自动保存失败不 toast，避免打扰；用户可继续聊天或手动保存。
+          } finally {
+            setAutoSaving(false);
+          }
+        })();
         break;
       }
     }
-  }, [msgQuery.data, isIncubating, fillFromData]);
+  }, [
+    msgQuery.data,
+    isIncubating,
+    incubatorId,
+    appliedPitchSig,
+    fillFromData,
+    qc,
+    t,
+  ]);
 
   // 手动「重新解析对话」：无视已应用签名，强制用最新终稿 JSON 覆盖表单。
   const handleReparse = useCallback(() => {
@@ -247,7 +286,42 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
     toastError(t("bookpitch.noParse"));
   }, [msgQuery.data, fillFromData, t]);
 
-  const canSave = title.trim().length > 0 && !saving;
+  // 把解析出的引导项持久化为本书偏好（自动保存 + 手动保存共用）。
+  async function persistPitchPreferences(
+    novelID: number,
+    data: PitchData,
+  ): Promise<void> {
+    const extra: Array<{ category: string; content: string }> = [];
+    if (data.platform.trim())
+      extra.push({
+        category: CATEGORY_PLATFORM,
+        content: data.platform.trim(),
+      });
+    if (data.style.trim())
+      extra.push({ category: CATEGORY_CREATIVE, content: data.style.trim() });
+    if (data.tags.trim())
+      extra.push({ category: CATEGORY_TAGS, content: data.tags.trim() });
+    if (data.direction.trim())
+      extra.push({
+        category: CATEGORY_DIRECTION,
+        content: data.direction.trim(),
+      });
+    if (data.oneLiner.trim())
+      extra.push({ category: CATEGORY_HOOK, content: data.oneLiner.trim() });
+    for (const e of extra) {
+      try {
+        await CreatePreference(novelID, {
+          is_global: false,
+          category: e.category,
+          content: e.content,
+        } as app.CreatePreferenceInput);
+      } catch {
+        // 偏好写入失败不阻塞主流程，静默忽略。
+      }
+    }
+  }
+
+  const canSave = title.trim().length > 0 && !saving && !autoSaving;
 
   async function handleAdopt() {
     if (!canSave || !isIncubating || incubatorId == null) return;
@@ -274,28 +348,16 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
 
       // 引导项：平台 / 风格 / 标签 / 方向 / 一句话卖点 非空则写入本书偏好
       // （题材已写入 novel.genre 字段；书名/简介随小说主体更新）。
-      const extra: Array<{ category: string; content: string }> = [];
-      if (platform.trim())
-        extra.push({ category: CATEGORY_PLATFORM, content: platform.trim() });
-      if (style.trim())
-        extra.push({ category: CATEGORY_CREATIVE, content: style.trim() });
-      if (tags.trim())
-        extra.push({ category: CATEGORY_TAGS, content: tags.trim() });
-      if (direction.trim())
-        extra.push({ category: CATEGORY_DIRECTION, content: direction.trim() });
-      if (oneLiner.trim())
-        extra.push({ category: CATEGORY_HOOK, content: oneLiner.trim() });
-      for (const e of extra) {
-        try {
-          await CreatePreference(n.id, {
-            is_global: false,
-            category: e.category,
-            content: e.content,
-          } as app.CreatePreferenceInput);
-        } catch {
-          // 偏好写入失败不阻塞建书，静默忽略。
-        }
-      }
+      await persistPitchPreferences(n.id, {
+        title,
+        description,
+        tags,
+        direction,
+        genre,
+        platform,
+        style,
+        oneLiner,
+      });
 
       // 孵化完成：清空孵化器，避免已建好的书被再次当成孵化器。
       setIncubatorId(null);

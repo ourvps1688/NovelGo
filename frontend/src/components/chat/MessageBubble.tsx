@@ -1,5 +1,6 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import Markdown from "@/components/Markdown";
+import { sanitizeAssistantContent } from "./messageUtils";
 
 interface Props {
   role: "user" | "assistant";
@@ -8,6 +9,12 @@ interface Props {
 
 export default memo(function MessageBubble({ role, content }: Props) {
   const isUser = role === "user";
+  // 助手消息末尾可能携带机器可读的结构化数据块（如 book-pitch JSON），
+  // 这些块不应渲染在聊天 UI 中。
+  const displayContent = useMemo(
+    () => (isUser ? content : sanitizeAssistantContent(content)),
+    [isUser, content],
+  );
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -19,7 +26,7 @@ export default memo(function MessageBubble({ role, content }: Props) {
         }`}
       >
         <Markdown
-          content={content}
+          content={displayContent}
           className={isUser ? "markdown-user" : undefined}
         />
       </div>

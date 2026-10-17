@@ -126,5 +126,11 @@ export function pitchSignature(d: PitchData): string {
     d.platform,
     d.style,
     d.oneLiner,
-  ].join("");
+  ].join("\u0001");
+}
+
+// 从消息文本中移除 ```bookpitch 机器 JSON 围栏块，避免在聊天 UI 中显示。
+export function stripPitchJSON(text: string): string {
+  if (!text) return text;
+  return text.replace(/```bookpitch\s*[\s\S]*?```\s*\n?/g, "").trimEnd();
 }

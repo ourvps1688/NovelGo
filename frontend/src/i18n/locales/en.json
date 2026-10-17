@@ -1831,6 +1831,7 @@
     "saveBtn": "Save book",
     "saving": "Saving…",
     "savedToast": "Book info saved; book-pitch skill enabled",
+    "autoSavedToast": "Bookshelf info auto-updated from final JSON",
     "goalLabel": "Goal: ",
     "doneLabel": "Done: "
   },
