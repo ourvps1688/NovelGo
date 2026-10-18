@@ -15,6 +15,7 @@ import StyleSampleList from "@/components/style/StyleSampleList";
 import GitHistoryList from "@/components/git/GitHistoryList";
 import SkillMatrixSidebar from "@/components/skill/SkillMatrixSidebar";
 import WorkflowSidebar from "@/components/skill/WorkflowSidebar";
+import PipelineStageRail from "@/components/pipeline/PipelineStageRail";
 import type {
   SourceFilter,
   ModeFilter,
@@ -66,6 +67,7 @@ interface Props {
   onSkillMatrixModeFilterChange: (v: ModeFilter) => void;
   activeWorkflow: string;
   onSelectWorkflow: (id: string) => void;
+  onStageRailClick: () => void;
 }
 
 export default function SidePanel({
@@ -100,6 +102,7 @@ export default function SidePanel({
   onSkillMatrixModeFilterChange,
   activeWorkflow,
   onSelectWorkflow,
+  onStageRailClick,
 }: Props) {
   const { t } = useTranslation();
   const activePanel = usePanelStore((s) => s.sidebarPanel ?? s.activePanel);
@@ -143,6 +146,7 @@ export default function SidePanel({
       {isDragging && (
         <div className="fixed inset-0 z-50 cursor-col-resize select-none" />
       )}
+      <PipelineStageRail novelId={novelId} onClick={onStageRailClick} />
       {activePanel === "search" ? (
         <SearchPanel
           novelId={novelId}

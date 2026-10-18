@@ -5,7 +5,7 @@ const CHATPANEL_KEY = "novelgo_chatpanel_width";
 
 const SIDEPANEL_DEFAULT = 224;
 // AI 对话面板：默认加宽保证 LLM 输出可读；max 提到 1200 便于宽屏拖拽
-const CHATPANEL_DEFAULT = 460;
+const CHATPANEL_DEFAULT = 520;
 
 function loadNumber(
   key: string,

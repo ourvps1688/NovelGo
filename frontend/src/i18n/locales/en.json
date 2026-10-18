@@ -1862,7 +1862,7 @@
     "running": "Running",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
-      "s3": "Writing chapter by chapter — finish the chapter, then return here and click Continue at the gate."
+      "s3": "Writing chapter by chapter — keep writing until you have 3 chapters (golden opening), then click Continue to enter the signability audit."
     },
     "blueprint": {
       "generating": "Generating blueprint…",
