@@ -585,13 +585,13 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			patterns = patterns[1:]
 		}
 		if isStuckLoop(patterns, toolOutputs, loopCount) {
-			// 命中死循环：直接中断对话（不再靠提醒继续）
-			interrupted = true
-			interruptErr = &LoopInterrupt{Reason: "检测到重复调用循环，已中断对话"}
+			// 命中死循环：先注入系统提醒，给 agent 一次基于已有信息直接输出的机会，
+			// 而非直接中断。若提醒后仍继续循环，isStuckLoop 会在后续轮次再次触发，
+			// 直到 MaxTurns 耗尽，避免一次性硬中断导致对话被用户感知为"崩溃"。
+			a.appendMsg("system", "检测到重复调用模式，请基于已有信息直接输出，不要继续调用工具。", "", nil, &opts, runningTokens)
 			emit(AgentEvent{
 				TurnID: opts.TurnID, Type: EventToolCall, Phase: "loop_detected", Timestamp: time.Now(),
 			})
-			break
 		}
 		recentPatterns = patterns
 
