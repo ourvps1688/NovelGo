@@ -25,6 +25,7 @@ import (
 	"github.com/novelgo/novelgo/internal/mcpserver"
 	"github.com/novelgo/novelgo/internal/migrate"
 	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/reader"
@@ -98,6 +99,7 @@ type App struct {
 	writing    *writing.Store
 	volume     *volume.Store
 	activity   *activity.Store
+	pipeline   *pipeline.Service
 }
 
 // New 创建 App 实例。初始化在 OnStartup 中完成。
@@ -384,6 +386,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 10.5 初始化 style store（全局风格素材）
 	a.style = style.NewStore(db, a.logger)
 	a.db = db
+	a.pipeline = pipeline.NewService(db)
 
 	// 11. 异步初始化向量存储和搜索服务（不阻塞 UI）
 	go func() {
