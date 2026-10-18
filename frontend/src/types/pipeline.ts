@@ -1,23 +1,10 @@
-// 创作流水线前端类型。字段名与后端 PipelineRun 的 JSON 序列化一致（PascalCase）。
+// 创作流水线前端类型。PipelineRun 直接使用 wails 生成的 pipeline.PipelineRun，
+// 避免手写类型与生成类型不一致导致 TS2345。
 
 export type PipelineStatus =
   "pending" | "running" | "paused" | "awaiting_gate" | "finished" | "aborted";
 
 export type PipelineMode = "new" | "continue";
-
-export interface PipelineRun {
-  ID: number;
-  NovelID: number;
-  RunID: string;
-  Mode: PipelineMode;
-  StartChapter: number | null;
-  CurrentStage: string;
-  Status: PipelineStatus;
-  AutoRun: boolean;
-  ContextJSON: string;
-  CreatedAt: string;
-  UpdatedAt: string;
-}
 
 export type ControlCmd = "pause" | "resume" | "stop";
 export type GateDecision = "continue" | "modify" | "abort";

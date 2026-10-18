@@ -6,8 +6,8 @@ import {
   ResumePipeline,
   ControlPipeline,
 } from "@/lib/wailsjs/go/app/App";
+import { pipeline } from "@/lib/wailsjs/go/models";
 import type {
-  PipelineRun,
   StagePayload,
   GatePayload,
   ControlAckPayload,
@@ -19,7 +19,7 @@ import type {
 // C 期：状态推进由用户在前端显式点「继续/修改/终止」驱动，后端只负责
 // 持久化与广播；A 期（PR5）将把顺序逻辑下沉到后端 Orchestrator。
 export function usePipeline(novelId: number) {
-  const [run, setRun] = useState<PipelineRun | null>(null);
+  const [run, setRun] = useState<pipeline.PipelineRun | null>(null);
   const [stage, setStage] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [gate, setGate] = useState<GatePayload | null>(null);
@@ -41,7 +41,7 @@ export function usePipeline(novelId: number) {
 
     // 进入时拉取当前活跃流水线，恢复进度。
     GetPipelineState(novelId)
-      .then((r: PipelineRun) => {
+      .then((r: pipeline.PipelineRun) => {
         setRun(r);
         setStage(r.CurrentStage);
         setStatus(r.Status);
@@ -60,7 +60,7 @@ export function usePipeline(novelId: number) {
   const start = useCallback(
     (mode: string = "new", startChapter: number | null = null) => {
       return StartPipeline(novelId, mode, startChapter).then(
-        (r: PipelineRun) => {
+        (r: pipeline.PipelineRun) => {
           setRun(r);
           setStage(r.CurrentStage);
           setStatus(r.Status);
