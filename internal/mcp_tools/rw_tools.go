@@ -546,7 +546,10 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	if feedback != "" {
 		injects = append(injects, InjectMessage{Role: "user", Content: "用户通过了审批并反馈：" + feedback})
 	}
-	// 章节正文全量替换且内容较长时注入维护提醒
+	// 写后状态维护已由后端自动派发 statesync 子 Agent 处理（见 scheduleStateSync），
+	// 不再要求主 Agent 内联执行维护写工具——否则主 Agent 容易陷入「反复 get_* 确认」的
+	// 只读循环，被 isStuckLoop 守卫强制中断（见之前 dev 日志 turn 39/41 卡死）。
+	// 这里只注入一条说明，提示主 Agent 无需手动维护，直接基于本次修改向用户汇报即可。
 	if !ref.IsOutline && a.ChangeType == "full_replace" && len([]rune(proposed)) > 500 {
 		reminder := fmt.Sprintf("你刚刚完成了《%s》的全量替换。", ch.Title)
 		if number, err := chStore.GetReadingNumberByID(ctx, nil, tc.NovelID, ch.ID); err != nil {
@@ -556,7 +559,7 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 		}
 		injects = append(injects, InjectMessage{
 			Role:    "user",
-			Content: reminder + "请执行以下维护操作：\n1. 检查并更新角色设定（性格变化、新能力、身份转变等）\n2. 更新故事时间线（伏笔回收、新伏笔记录、章节计划推进）\n3. 更新读者认知（新悬念、已回收悬念）\n4. 更新故事弧线节点进度\n完成后向用户汇报修改摘要。",
+			Content: reminder + "系统已在后台自动派发「状态同步子 Agent」负责维护（更新角色/关系/地点/弧线/时间线/读者认知台账）。你无需手动调用任何维护写工具，直接基于本次修改向用户做简要汇报即可。",
 		})
 	}
 	if a.ChangeType == "line_range_replace" {
