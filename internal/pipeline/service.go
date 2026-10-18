@@ -444,12 +444,17 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		s.logger.Error("S4 体检：落库闸门状态失败", "err", err)
 		return
 	}
+	// Summary 用人话结论；结构化 JSON 已落 ContextJSON.Audit，前端 SignabilityAuditView 负责解析展示。
+	summary := audit.Summary
+	if summary == "" {
+		summary = "签约体检已完成，请确认是否继续或进入修复闭环。"
+	}
 	emitGate(ctx, GatePayload{
 		RunID:   runID,
 		NovelID: novelID,
 		Stage:   StageS4,
 		GateID:  GateG4,
-		Summary: string(auditJSON),
+		Summary: summary,
 		Options: []string{"continue", "fix", "abort"},
 	})
 }

@@ -1867,6 +1867,7 @@
       "title": "Your confirmation is required",
       "continue": "Continue",
       "modify": "Continue after editing",
+      "fix": "Enter fix loop",
       "abort": "Abort"
     },
     "stage": {
