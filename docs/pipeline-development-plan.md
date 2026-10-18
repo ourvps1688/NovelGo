@@ -89,6 +89,8 @@
 
 > **为什么先行**：PR2 的 S2 蓝图、PR3 的 S4 签约体检都依赖「确定性触发 skill」。不在 PR1 做，PR2 会卡住。
 
+> **实现状态（PR1 实际交付，2026-10-18）**：PR1（提交 `6885897`）以**单轮 `llmClient.GenerateText` 骨架**实现 `RunSkill`，**并非**多轮 agent loop；C 期 orchestrator（`orchestrator_c.go`）亦未调用 `RunSkill`。多轮化升级与 S2 接线不归入 1.0，而是作为 **PR2 §3.0 的前置缺口**在 PR2 内补完，对外接口签名保持不变。
+
 ---
 
 ## 2. PR1 — 闭环跑通 + 运行控制（C 期 MVP）
@@ -128,7 +130,22 @@
 
 **目标**：S2 真正完成「自动建卷 / 写卷纲落库」（不只是 markdown）；G2 确认。
 
-### 3.1 `create_volume` MCP 工具（PR2 硬前置）
+### 3.0 PR2 前置缺口（源于 PR1 实际交付，须在 §3.1/§3.2 之前补）
+
+> 原计划 §1.3 假定 `RunSkill` 在 1.0 基建即实现为 `internal/agent.Run` 多轮循环；但 PR1 实际以单轮 `GenerateText` 骨架落地（见 `internal/pipeline/skillrun.go` 注释），且 C 期 orchestrator 不调用它。这两项是 PR2 的硬前置，必须先补：
+
+- **T1 升级 `RunSkill` 为多轮 agent loop**：内部从 `llmClient.GenerateText` 改为 `internal/agent.Run`（传 `input.Whitelist` + `AgentType` + `ParentTurnID`），对外签名 `RunSkill(ctx, skillStore, llmClient, provider, model, name, input)` 不变。升级不影响 PR1——C 期从不调用 `RunSkill`。
+- **T2 接线 orchestrator S2 → RunSkill**：在 S2 节点调用 `RunSkill(ctx, "story-blueprint", input{Whitelist: blueprintAgentTools})`，产物（卷划分 JSON + 经工具落库的卷记录）写回 `ContextJSON`。
+
+### PR2 内部子任务顺序（建议，依赖序）
+
+1. **T1** 升级 `RunSkill` 多轮化（见 §3.0）。
+2. **T2** orchestrator S2 节点接线 `RunSkill` + 产物落库（见 §3.0）。
+3. **T3** 新增 `create_volume` MCP 工具（`internal/mcp_tools/volume_tools.go`）+ 在 `registry.go` / `identity.go`(`mainAgentTools`) 注册（见 §3.1）。
+4. **T4** S2 执行+落库：story-blueprint 产出卷划分 → 逐卷 `create_volume(outline)` → `EmitStage(S2,done)` → `EmitGate(G2)`（见 §3.2）。
+5. **T5** 前端 `BlueprintWorkflowView.tsx` + G2 确认卡 + `skillrun_test.go`（mock 白名单越权被拒）。
+
+### 3.1 `create_volume` MCP 工具（PR2 硬前置，对应 T3）
 | 文件 | 动作 | 说明 |
 |---|---|---|
 | `internal/mcp_tools/volume_tools.go` | 新增 | `RegisterVolumeTools(r)`；`create_volume` 工具：`CreateVolumeArgs{Name string; BeforeVolumeID *int64; Outline *string}`；实现调 `volume.NewStore(ctx).Place(...)` 建卷记录，若 `Outline` 非空同步写 `volumes/id_{新卷id}.md`（复用现有文件 write 通道 `rw_tools.go:36`） |
