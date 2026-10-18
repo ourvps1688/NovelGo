@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Play } from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
-import { PIPELINE_STAGES } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
 import SignabilityAuditView from "./SignabilityAuditView";
@@ -11,35 +10,18 @@ interface Props {
   novelId: number;
 }
 
-// C 期向导：线性阶段进度条 + 运行控制 + 闸门确认。
+// C 期向导：运行控制 + 阶段内容 + 闸门确认。
+// 阶段进度条已上提到 WorkspaceView 顶部全局条，避免重复并方便跨面板查看。
 // 实际创作（孵化 / 逐章写作）仍走现有 UI，向导只负责可见进度与「仅点继续」的闭环。
 export default function PipelineWizard({ novelId }: Props) {
   const { t } = useTranslation();
   const { run, stage, status, gate, start, resume, control } =
     usePipeline(novelId);
 
-  const activeIndex = PIPELINE_STAGES.indexOf(
-    stage as (typeof PIPELINE_STAGES)[number],
-  );
-
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-1 border-b px-4 py-2">
-        {PIPELINE_STAGES.map((s, i) => (
-          <div
-            key={s}
-            className={`rounded px-2 py-1 text-xs ${
-              i === activeIndex
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {t(`pipeline.stage.${s}`)}
-          </div>
-        ))}
-        <div className="ml-auto">
-          <PipelineControlBar status={status} onControl={control} />
-        </div>
+      <div className="flex items-center justify-end border-b px-4 py-2">
+        <PipelineControlBar status={status} onControl={control} />
       </div>
 
       <div className="flex-1 overflow-auto p-4">

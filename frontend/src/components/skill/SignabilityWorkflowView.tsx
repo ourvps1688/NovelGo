@@ -1,7 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Target, Play, AlertTriangle, Loader2 } from "lucide-react";
-import { StartPipeline } from "@/lib/wailsjs/go/app/App";
+import { Target, Play, ArrowRight, AlertTriangle, Loader2 } from "lucide-react";
+import { StartPipeline, GetPipelineState } from "@/lib/wailsjs/go/app/App";
+import { pipeline } from "@/lib/wailsjs/go/models";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { usePanelStore } from "@/stores/usePanelStore";
@@ -18,6 +19,7 @@ interface Props {
 export default function SignabilityWorkflowView({ novelId }: Props) {
   const { t } = useTranslation();
   const [launching, setLaunching] = useState(false);
+  const [activeRun, setActiveRun] = useState<pipeline.PipelineRun | null>(null);
 
   const modelsQuery = useModels();
   const settingsQuery = useSettings();
@@ -26,6 +28,23 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
   // 模型是否就绪：selected_model_key 指向的模型仍存在于模型列表。
   const selectedKey = settingsQuery.data?.selected_model_key || "";
   const hasModel = !!modelsQuery.data?.find((m) => m.Key === selectedKey);
+
+  // 检测当前小说是否已有运行中的 pipeline，以便显示「继续」而非「开始」。
+  useEffect(() => {
+    if (!novelId) {
+      setActiveRun(null);
+      return;
+    }
+    GetPipelineState(novelId)
+      .then((r) => {
+        if (r.Status === "finished" || r.Status === "aborted") {
+          setActiveRun(null);
+        } else {
+          setActiveRun(r);
+        }
+      })
+      .catch(() => setActiveRun(null));
+  }, [novelId]);
 
   const handleStart = useCallback(async () => {
     if (!novelId) {
@@ -47,6 +66,10 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
       setLaunching(false);
     }
   }, [novelId, hasModel, setActivePanel, t]);
+
+  const handleContinue = useCallback(() => {
+    setActivePanel("pipeline");
+  }, [setActivePanel]);
 
   const noNovel = !novelId;
   const buttonDisabled = launching || noNovel || !hasModel;
@@ -113,20 +136,40 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
             {t("signability.configureModelFirst")}
           </div>
         )}
-        <button
-          type="button"
-          disabled={buttonDisabled}
-          title={buttonTitle}
-          onClick={handleStart}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {launching ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Play className="w-4 h-4" />
-          )}
-          {t("signability.startButton")}
-        </button>
+        {activeRun ? (
+          <div className="flex flex-col gap-1">
+            <p className="text-xs text-muted-foreground">
+              {t("signability.continueHint", {
+                stage: t(`pipeline.stage.${activeRun.CurrentStage}`),
+              })}
+            </p>
+            <button
+              type="button"
+              disabled={buttonDisabled}
+              title={buttonTitle}
+              onClick={handleContinue}
+              className="inline-flex w-fit items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ArrowRight className="w-4 h-4" />
+              {t("signability.continueButton")}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={buttonDisabled}
+            title={buttonTitle}
+            onClick={handleStart}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {launching ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Play className="w-4 h-4" />
+            )}
+            {t("signability.startButton")}
+          </button>
+        )}
       </div>
     </div>
   );

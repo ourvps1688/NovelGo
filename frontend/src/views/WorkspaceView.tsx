@@ -39,6 +39,7 @@ import SkillMatrixView, {
 import SignabilityWorkflowView from "@/components/skill/SignabilityWorkflowView";
 import BookPitchWorkflowView from "@/components/skill/BookPitchWorkflowView";
 import PipelineWizard from "@/components/pipeline/PipelineWizard";
+import PipelineStageBar from "@/components/pipeline/PipelineStageBar";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
 import UpdateDialog from "@/components/update/UpdateDialog";
@@ -472,6 +473,11 @@ export default function WorkspaceView({
             />
           </div>
         </header>
+
+        <PipelineStageBar
+          novelId={activeNovelId}
+          onClick={() => setActivePanel("pipeline")}
+        />
 
         <div className="flex-1 flex min-h-0 overflow-hidden">
           {isReference ? (

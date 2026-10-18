@@ -1737,7 +1737,9 @@
     "stage4Skill": "signability-audit",
     "stage5Skill": "回对应阶段技能",
     "kickoff": "开始签约潜力工作流：请先帮我做现状诊断，然后从规划蓝图一路推进到签约体检与闭环回修。",
-    "startButton": "开始 / 继续签约潜力工作流",
+    "startButton": "开始签约潜力工作流",
+    "continueButton": "继续当前工作流",
+    "continueHint": "当前已有运行中的流水线，阶段：{{stage}}。点击返回流水线面板继续推进。",
     "selectNovelFirst": "请先在左侧选择一部作品",
     "configureModelFirst": "请先在设置中配置模型",
     "launchFailed": "启动对话失败，请稍后重试",
@@ -1846,6 +1848,9 @@
     "start": "开始流水线",
     "continue": "继续",
     "currentStage": "当前阶段：{{stage}}",
+    "stageBarTitle": "点击返回流水线面板",
+    "awaitingGate": "等待确认",
+    "running": "运行中",
     "hint": {
       "s1": "蓝图孵化中——请在左侧完成大纲与设定后点击「继续」。",
       "s3": "逐章写作中——完成本章后回到这里点击闸门「继续」。"

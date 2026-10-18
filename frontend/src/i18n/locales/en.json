@@ -1776,7 +1776,9 @@
     "stage4Skill": "signability-audit",
     "stage5Skill": "back to the relevant stage skill",
     "kickoff": "Start the signability workflow: first run the diagnosis, then advance from blueprint planning through to the signability audit and the repair loop.",
-    "startButton": "Start / Continue Signability Workflow",
+    "startButton": "Start Signability Workflow",
+    "continueButton": "Continue Current Workflow",
+    "continueHint": "A pipeline is already running at stage {{stage}}. Click to return to the pipeline panel and continue.",
     "selectNovelFirst": "Select a book on the left first",
     "configureModelFirst": "Configure a model in Settings first",
     "launchFailed": "Failed to launch chat. Please retry.",
@@ -1885,6 +1887,9 @@
     "start": "Start Pipeline",
     "continue": "Continue",
     "currentStage": "Current stage: {{stage}}",
+    "stageBarTitle": "Click to return to pipeline panel",
+    "awaitingGate": "Awaiting confirmation",
+    "running": "Running",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
       "s3": "Writing chapter by chapter — finish the chapter, then return here and click Continue at the gate."
