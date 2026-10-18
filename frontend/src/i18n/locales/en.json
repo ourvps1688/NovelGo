@@ -1847,7 +1847,7 @@
       "G1": "Blueprint Gate",
       "S2": "Worldbuilding",
       "S3": "Chapter Writing",
-      "G3b": "Chapter Gate",
+      "G3b": "Milestone Gate",
       "S4": "Signability Audit",
       "S5": "Fix Loop",
       "S4b": "Audit Revision",
@@ -1857,12 +1857,12 @@
     "start": "Start Pipeline",
     "continue": "Continue",
     "currentStage": "Current stage: {{stage}}",
-    "stageBarTitle": "Click to return to pipeline panel",
+    "stageBarTitle": "Creation Pipeline",
     "awaitingGate": "Awaiting confirmation",
     "running": "Running",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
-      "s3": "Writing chapter by chapter — keep writing until you have 3 chapters (golden opening), then click Continue to enter the signability audit."
+      "s3": "Writing chapter by chapter — keep writing according to the volume outline. When you reach a volume milestone (e.g. the first 3 chapters, or later every 5 chapters / volume boundary), a milestone gate will prompt you to enter the signability audit and fix loop. Click Continue once the milestone is reached."
     },
     "blueprint": {
       "generating": "Generating blueprint…",

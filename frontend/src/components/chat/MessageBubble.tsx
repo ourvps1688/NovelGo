@@ -19,7 +19,7 @@ export default memo(function MessageBubble({ role, content }: Props) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[78%] rounded-2xl px-4 py-3 break-words text-sm leading-relaxed ${
+        className={`max-w-[92%] rounded-2xl px-4 py-3 break-words text-sm leading-relaxed ${
           isUser
             ? "bg-bubble-user text-bubble-user-foreground rounded-br-md shadow-xs"
             : "bg-card border border-border/40 text-foreground rounded-bl-md shadow-xs"

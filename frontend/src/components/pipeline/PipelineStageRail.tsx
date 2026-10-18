@@ -12,8 +12,8 @@ interface Props {
   onClick: () => void;
 }
 
-// 右侧边栏内的垂直阶段轨：占用空间少，适合在 SidePanel 顶部常驻展示。
-// 点击后跳回流水线面板。
+// 右侧边栏内的迷你流水线进度：只显示当前阶段 + 一条分段进度条，
+// 避免在窄边栏里堆叠 9 行文字破坏整体 UI。
 export default function PipelineStageRail({ novelId, onClick }: Props) {
   const { t } = useTranslation();
   const [run, setRun] = useState<pipeline.PipelineRun | null>(null);
@@ -68,48 +68,63 @@ export default function PipelineStageRail({ novelId, onClick }: Props) {
   const activeIndex = PIPELINE_STAGES.indexOf(
     run.CurrentStage as (typeof PIPELINE_STAGES)[number],
   );
+  const currentStage =
+    activeIndex >= 0 ? PIPELINE_STAGES[activeIndex] : run.CurrentStage;
 
   return (
-    <div
-      className="px-3 py-2.5 border-b bg-sidebar cursor-pointer hover:bg-accent/30 transition-colors shrink-0"
-      onClick={onClick}
-      title={t("pipeline.stageBarTitle")}
-    >
-      <div className="flex items-center gap-1.5 mb-2">
-        <Workflow className="w-3.5 h-3.5 text-primary" />
-        <span className="text-[11px] font-medium text-muted-foreground">
-          {t("pipeline.stageBarTitle")}
-        </span>
-      </div>
-      <div className="space-y-1">
-        {PIPELINE_STAGES.map((s, i) => {
-          const isActive = i === activeIndex;
-          const isDone = activeIndex !== -1 && i < activeIndex;
-          return (
-            <div
-              key={s}
-              className={`flex items-center gap-2 text-[11px] leading-tight ${
-                isActive
-                  ? "text-primary font-medium"
-                  : isDone
-                    ? "text-muted-foreground"
-                    : "text-muted-foreground/50"
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+    <div className="px-3 py-2.5 border-b bg-sidebar shrink-0">
+      <button
+        type="button"
+        onClick={onClick}
+        title={t("pipeline.stageBarTitle")}
+        className="w-full text-left group cursor-pointer"
+      >
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Workflow className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span className="text-xs font-medium text-foreground truncate">
+              {t("pipeline.stageBarTitle")}
+            </span>
+          </div>
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
+              run.Status === "awaiting_gate"
+                ? "bg-warning/15 text-warning-foreground"
+                : "bg-primary/10 text-primary"
+            }`}
+          >
+            {run.Status === "awaiting_gate"
+              ? t("pipeline.awaitingGate")
+              : t("pipeline.running")}
+          </span>
+        </div>
+
+        <p className="text-[11px] text-muted-foreground mb-1.5 truncate">
+          {t("pipeline.currentStage", {
+            stage: t(`pipeline.stage.${currentStage}`),
+          })}
+        </p>
+
+        <div className="flex items-center gap-[3px]" role="progressbar">
+          {PIPELINE_STAGES.map((s, i) => {
+            const isActive = i === activeIndex;
+            const isDone = activeIndex !== -1 && i < activeIndex;
+            return (
+              <div
+                key={s}
+                title={t(`pipeline.stage.${s}`)}
+                className={`flex-1 h-1.5 rounded-full transition-colors ${
                   isActive
                     ? "bg-primary"
                     : isDone
                       ? "bg-muted-foreground"
-                      : "bg-muted-foreground/30"
+                      : "bg-muted"
                 }`}
               />
-              <span className="truncate">{t(`pipeline.stage.${s}`)}</span>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </button>
     </div>
   );
 }
