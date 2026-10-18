@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,9 @@ type Service struct {
 	appCtx       context.Context
 	logger       *slog.Logger
 	skillRunner  SkillRunnerFunc
+	// chapterCount 返回本书已落库章节数，用于「黄金三章后自动进入 S4a 签约体检」的触发判定。
+	// 测试可替换为 stub 以确定性驱动 S3→S4 流转。
+	chapterCount func(ctx context.Context, novelID int64) (int, error)
 }
 
 // NewService 构造流水线服务。
@@ -63,6 +67,15 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 		// 降级：不实际执行 skill（测试 / 未配置模型时），S2 直接落闸。
 		s.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
 			return SkillOutput{}, nil
+		}
+	}
+	if s.store != nil && s.store.db != nil {
+		s.chapterCount = func(ctx context.Context, novelID int64) (int, error) {
+			var c int64
+			if err := s.store.db.WithContext(ctx).Table("chapters").Where("novel_id = ?", novelID).Count(&c).Error; err != nil {
+				return 0, err
+			}
+			return int(c), nil
 		}
 	}
 	return s
@@ -120,6 +133,53 @@ func (s *Service) ResumePipeline(ctx context.Context, runID, decision, feedback 
 
 	if err := s.store.AppendGateDecision(ctx, runID, run.CurrentStage, decision, feedback); err != nil {
 		return err
+	}
+
+	// ── 特殊阶段处理（S3 黄金三章触发 S4 / S4 决策 / S5 自动复评兜底）──
+	// 这些阶段需要异步跑 skill 或依赖章节计数，不走通用线性流转。
+	switch run.CurrentStage {
+	case StageS3:
+		if decision == "abort" {
+			return s.abortRun(ctx, run)
+		}
+		// 写完黄金三章且尚未做过签约体检 → 自动进入 S4a 签约体检。
+		if s.reachedGoldenThree(ctx, run.NovelID) && !s.auditPassed(ctx, run.RunID) {
+			s.enterAudit(ctx, run)
+			return nil
+		}
+		// 否则维持逐章循环：置 S3 awaiting_gate 并广播 G3b 里程碑闸（PR4 将改为按章号智能触发）。
+		if err := s.store.SetStageStatus(ctx, runID, StageS3, StatusAwaitingGate, run.ContextJSON); err != nil {
+			return err
+		}
+		emitGate(ctx, GatePayload{
+			RunID:   runID,
+			NovelID: run.NovelID,
+			Stage:   StageS3,
+			GateID:  GateG3b,
+			Summary: "",
+			Options: []string{"continue", "abort"},
+		})
+		return nil
+	case StageS4:
+		if decision == "abort" {
+			return s.abortRun(ctx, run)
+		}
+		if decision == "fix" {
+			// 不通过 → 进入 S5 修复闭环。
+			s.enterFix(ctx, run)
+			return nil
+		}
+		// continue（通过或强制继续）：标记已体检，回到 S3 继续写作（不再自动弹体检）。
+		updated := s.markAuditedJSON(run.ContextJSON)
+		if err := s.store.SetStageStatus(ctx, runID, StageS3, StatusRunning, updated); err != nil {
+			return err
+		}
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: StageS3, Status: StatusRunning})
+		return nil
+	case StageS5:
+		// S5 由异步循环（executeFix→executeAudit）自动回到 S4 复评；此处仅作安全兜底。
+		s.enterAudit(ctx, run)
+		return nil
 	}
 
 	next, gate, err := NextStage(run.CurrentStage, decision)
@@ -264,6 +324,224 @@ func blueprintPrompt(novelID int64) string {
 	return "请基于本书当前设定（先 read novelgo.md 与已有设定/卷纲了解现状），按 story-blueprint 方法论规划全书卷纲：" +
 		"将全书划分为若干卷（通常 3-8 卷），每卷明确主题、核心冲突推进、爽点/情绪节奏与起止节点；" +
 		"随后调用 create_volume 逐卷落库（name 必填、outline 写入该卷纲摘要），最后用中文给出一份卷结构概览作为回复。"
+}
+
+// ── S4 签约体检 / S5 修复闭环（PR3）────────────────────────────────
+
+// abortRun 终止流水线并广播终止事件（供特殊阶段处理复用）。
+func (s *Service) abortRun(ctx context.Context, run *PipelineRun) error {
+	if err := s.store.SetStatus(ctx, run.RunID, StatusAborted, run.ContextJSON); err != nil {
+		return err
+	}
+	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: run.CurrentStage, Status: StatusAborted})
+	return nil
+}
+
+// reachedGoldenThree 判断本书是否已写完「黄金三章」，触发 S4a 签约体检。
+func (s *Service) reachedGoldenThree(ctx context.Context, novelID int64) bool {
+	if s.chapterCount == nil {
+		return false
+	}
+	n, err := s.chapterCount(ctx, novelID)
+	if err != nil {
+		s.logger.Warn("S4 触发：统计章节数失败", "err", err)
+		return false
+	}
+	return n >= 3
+}
+
+// auditPassed 返回本书是否已做过签约体检（S4Audited 标记）。
+func (s *Service) auditPassed(ctx context.Context, runID string) bool {
+	run, err := s.store.GetByRunID(ctx, runID)
+	if err != nil {
+		return false
+	}
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	return ctxt.S4Audited
+}
+
+// markAuditedJSON 在原 ContextJSON 上置 S4Audited=true 并返回序列化结果。
+func (s *Service) markAuditedJSON(contextJSON string) string {
+	var ctxt GateContext
+	if contextJSON != "" {
+		_ = json.Unmarshal([]byte(contextJSON), &ctxt)
+	}
+	ctxt.S4Audited = true
+	b, err := json.Marshal(ctxt)
+	if err != nil {
+		return contextJSON
+	}
+	return string(b)
+}
+
+// enterAudit 置 S4 running 并异步执行 signability-audit。
+func (s *Service) enterAudit(ctx context.Context, run *PipelineRun) {
+	if err := s.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, run.ContextJSON); err != nil {
+		s.logger.Error("S4 进入失败", "err", err)
+		return
+	}
+	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS4, Status: StatusRunning})
+	go s.executeAudit(run.RunID, run.NovelID)
+}
+
+// enterFix 置 S5 running 并异步执行 signability-fix 修复循环。
+func (s *Service) enterFix(ctx context.Context, run *PipelineRun) {
+	if err := s.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, run.ContextJSON); err != nil {
+		s.logger.Error("S5 进入失败", "err", err)
+		return
+	}
+	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS5, Status: StatusRunning})
+	go s.executeFix(run.RunID, run.NovelID)
+}
+
+// executeAudit 异步执行 S4 签约体检：跑 signability-audit（只读）→ 解析 issue 清单 →
+// 写回 ContextJSON.Audit → 置 S4 awaiting_gate 并广播 G4 闸门（options: continue/fix/abort）。
+func (s *Service) executeAudit(runID string, novelID int64) {
+	ctx := s.appCtx
+	run, err := s.store.GetByRunID(ctx, runID)
+	if err != nil {
+		s.logger.Error("S4 体检：加载流水线失败", "run_id", runID, "err", err)
+		return
+	}
+
+	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
+		NovelID:   novelID,
+		Prompt:    signabilityPrompt(novelID),
+		MaxTurns:  12,
+		SessionID: "pipeline:" + runID + ":audit",
+	})
+	if err != nil {
+		s.logger.Error("S4 体检执行失败", "run_id", runID, "err", err)
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS4, Status: StatusRunning, Note: "签约体检失败：" + err.Error()})
+		return
+	}
+
+	audit := parseAudit(out.Text)
+	auditJSON, _ := json.Marshal(audit)
+
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	ctxt.Audit = string(auditJSON)
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
+		updated = []byte(run.ContextJSON)
+	}
+
+	// 守卫：若异步执行期间用户已推进（如点了 fix / continue），不覆盖新状态。
+	cur, gerr := s.store.GetByRunID(ctx, runID)
+	if gerr == nil && (cur.CurrentStage != StageS4 || cur.Status != StatusRunning) {
+		s.logger.Info("S4 体检：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
+		return
+	}
+
+	if err := s.store.SetStageStatus(ctx, runID, StageS4, StatusAwaitingGate, string(updated)); err != nil {
+		s.logger.Error("S4 体检：落库闸门状态失败", "err", err)
+		return
+	}
+	emitGate(ctx, GatePayload{
+		RunID:   runID,
+		NovelID: novelID,
+		Stage:   StageS4,
+		GateID:  GateG4,
+		Summary: string(auditJSON),
+		Options: []string{"continue", "fix", "abort"},
+	})
+}
+
+// executeFix 异步执行 S5 修复：跑 signability-fix（按 issue 清单改稿 / 同步台账）→
+// 修复完成后自动回到 executeAudit 复评（仍异步）。复评由 G4 闸门交回用户决策。
+func (s *Service) executeFix(runID string, novelID int64) {
+	ctx := s.appCtx
+	run, err := s.store.GetByRunID(ctx, runID)
+	if err != nil {
+		s.logger.Error("S5 修复：加载流水线失败", "run_id", runID, "err", err)
+		return
+	}
+
+	out, err := s.skillRunner(ctx, "signability-fix", SkillInput{
+		NovelID:   novelID,
+		Prompt:    fixPrompt(novelID, run.ContextJSON),
+		MaxTurns:  12,
+		SessionID: "pipeline:" + runID + ":fix",
+	})
+	if err != nil {
+		s.logger.Error("S5 修复执行失败", "run_id", runID, "err", err)
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5, Status: StatusRunning, Note: "修复失败：" + err.Error()})
+		return
+	}
+	_ = out
+
+	// 守卫：若异步期间状态已变更（如用户中止），不自动复评。
+	cur, gerr := s.store.GetByRunID(ctx, runID)
+	if gerr == nil && (cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
+		s.logger.Info("S5 修复：状态已变更，放弃复评", "stage", cur.CurrentStage, "status", cur.Status)
+		return
+	}
+
+	// 修复完成 → 复位为 S4 体检态并自动复评（仍异步）。
+	// 复位到 S4 running 是为了让 executeAudit 的「状态未变更」守卫判定通过，
+	// 否则守卫会因当前为 S5 而放弃落 G4 闸门，导致复评结果无家可归（见测试 TestServiceAuditFixLoopReAudit）。
+	if err := s.store.SetStageStatus(ctx, runID, StageS4, StatusRunning, run.ContextJSON); err != nil {
+		s.logger.Error("S5 修复：复评前复位阶段失败", "err", err)
+		return
+	}
+	s.executeAudit(runID, novelID)
+}
+
+// auditJSONRe 提取 signability-audit 输出中的 ```json ... ``` 结构化块。
+var auditJSONRe = regexp.MustCompile("(?s)```json\\s*(.*?)```")
+
+// parseAudit 从 skill 输出文本解析结构化体检结果；失败则退化为单条 P0 issue。
+func parseAudit(text string) AuditData {
+	data := AuditData{Verdict: "needs_fix"}
+	m := auditJSONRe.FindStringSubmatch(text)
+	raw := text
+	if len(m) > 1 {
+		raw = m[1]
+	}
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		return AuditData{
+			Verdict: "needs_fix",
+			Summary: text,
+			Issues:  []AuditIssue{{ID: "I1", Level: "P0", Area: "总体", Desc: text}},
+		}
+	}
+	if data.Verdict == "" {
+		data.Verdict = "needs_fix"
+	}
+	if data.Issues == nil {
+		data.Issues = []AuditIssue{}
+	}
+	return data
+}
+
+// signabilityPrompt 构造 S4 签约体检阶段的任务提示词。
+func signabilityPrompt(novelID int64) string {
+	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
+		"用 get_chapter_list 列出章节，抽样通读前三章（黄金三章）+ 最新章 + 任意中段章，逐维打分并举证；"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥25/35 → pass。", novelID)
+}
+
+// fixPrompt 构造 S5 修复阶段的任务提示词，内嵌 S4 产出的 issue 清单 JSON。
+func fixPrompt(novelID int64, contextJSON string) string {
+	var ctxt GateContext
+	if contextJSON != "" {
+		_ = json.Unmarshal([]byte(contextJSON), &ctxt)
+	}
+	audit := ctxt.Audit
+	if audit == "" {
+		audit = "{}"
+	}
+	return fmt.Sprintf("本书 novel_id=%d。以下是 S4 签约体检产出的 issue 清单（JSON），请逐条修复：\n%s\n\n"+
+		"按 signability-fix 方法论：P0 优先于 P1，用 edit/update_chapter_plan/create_volume/台账写工具修复，"+
+		"修复后给出不超过 15 行的修复摘要。", novelID, audit)
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。

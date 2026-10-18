@@ -15,6 +15,42 @@ import (
 // agentTypeBlueprint 是蓝图规划 Agent 在 agent.Run 中的 AgentType 字符串。
 const agentTypeBlueprint = "blueprint"
 
+// agentTypeSignability / agentTypeFix 分别是签约体检 / 修复执行 Agent 的 AgentType 字符串。
+const (
+	agentTypeSignability = "signability"
+	agentTypeFix         = "fix"
+)
+
+// skillAgentType 按 skill 名返回其在 agent.Run 中使用的 AgentType。
+// 蓝图规划走 BlueprintAgent（可建卷），签约体检走 SignabilityAgent（只读），
+// 修复执行走 FixAgent（可改稿 + 同步台账）；未知 skill 默认 BlueprintAgent。
+func skillAgentType(name string) agentcfg.AgentType {
+	switch name {
+	case "signability-audit":
+		return agentcfg.SignabilityAgent
+	case "signability-fix":
+		return agentcfg.FixAgent
+	case "story-blueprint":
+		return agentcfg.BlueprintAgent
+	default:
+		return agentcfg.BlueprintAgent
+	}
+}
+
+// skillAgentTypeString 返回 skillAgentType 对应的 agent.Run AgentType 字符串。
+func skillAgentTypeString(name string) string {
+	switch name {
+	case "signability-audit":
+		return agentTypeSignability
+	case "signability-fix":
+		return agentTypeFix
+	case "story-blueprint":
+		return agentTypeBlueprint
+	default:
+		return agentTypeBlueprint
+	}
+}
+
 // SkillInput 是 RunSkill 的输入：编排给该 skill 的具体任务 + 轮数上限 + 落库 session。
 type SkillInput struct {
 	NovelID   int64
@@ -48,7 +84,7 @@ func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llm
 		return SkillOutput{}, fmt.Errorf("skill %q 未找到", name)
 	}
 
-	at := agentcfg.BlueprintAgent
+	at := skillAgentType(name)
 	sysPrompt := agentcfg.AgentIdentity(at) + "\n\n# 本次任务方法论\n" + sk.Content
 
 	msgs := []map[string]any{
@@ -74,7 +110,7 @@ func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llm
 		AllowedTools: agentcfg.Allowlist(at),
 		Model:        model,
 		ProviderName: providerName,
-		AgentType:    agentTypeBlueprint,
+		AgentType:    skillAgentTypeString(name),
 		MaxTurns:     input.MaxTurns,
 	}
 	if opts.MaxTurns <= 0 {

@@ -4,6 +4,7 @@ import { usePipeline } from "@/hooks/usePipeline";
 import { PIPELINE_STAGES } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
+import SignabilityAuditView from "./SignabilityAuditView";
 import PipelineControlBar from "./PipelineControlBar";
 
 interface Props {
@@ -66,6 +67,14 @@ export default function PipelineWizard({ novelId }: Props) {
 
             {stage === "S2" ? (
               <BlueprintWorkflowView
+                run={run}
+                stage={stage}
+                status={status}
+                gate={gate}
+                onResume={resume}
+              />
+            ) : stage === "S4" || stage === "S5" ? (
+              <SignabilityAuditView
                 run={run}
                 stage={stage}
                 status={status}

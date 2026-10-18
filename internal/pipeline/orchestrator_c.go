@@ -9,6 +9,9 @@ const (
 	StageS2 = "S2"  // 蓝图（PR2 落库）
 	StageS3 = "S3"  // 逐章写作（含评分门禁 + statesync）
 	GateG3b = "G3b" // 里程碑闸（PR4 启用，每 5 章 / 卷边界）
+	StageS4 = "S4"  // 签约体检（signability-audit，只读体检 + issue 清单）
+	StageS5 = "S5"  // 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）
+	GateG4  = "G4"  // 签约体检确认闸（出 S4 时停留，用户决定 continue / fix / abort）
 	StageS6 = "S6"  // 完本终检
 )
 
@@ -35,6 +38,22 @@ func NextStage(current, decision string) (next string, gate string, err error) {
 		}
 		// 逐章循环：每章后由前端触发里程碑闸门（PR4 真正启用 G3b）
 		return StageS3, GateG3b, nil
+	case StageS4:
+		if decision == "abort" {
+			return "", "", nil
+		}
+		if decision == "fix" {
+			// 不通过 → 进入 S5 修复闭环
+			return StageS5, "", nil
+		}
+		// continue（通过或强制继续）→ 回到 S3 继续写作
+		return StageS3, "", nil
+	case StageS5:
+		if decision == "abort" {
+			return "", "", nil
+		}
+		// S5 由异步循环（executeFix→executeAudit）自动回到 S4 复评；此处兜底。
+		return StageS4, "", nil
 	default:
 		return "", "", fmt.Errorf("未知阶段 %q", current)
 	}

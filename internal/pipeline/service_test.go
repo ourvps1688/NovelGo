@@ -2,9 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // 测试中无 Wails runtime 上下文，将事件发射器替换为无操作，避免
@@ -116,4 +119,130 @@ func gotStatusSafe(r *PipelineRun) string {
 		return "<nil>"
 	}
 	return r.Status
+}
+
+// TestParseAuditExtractsJSON 验证 parseAudit 能从 skill 输出中抽取 ```json 结构化块。
+func TestParseAuditExtractsJSON(t *testing.T) {
+	text := "分析如下：\n```json\n" +
+		`{"verdict":"pass","score":30,"summary":"ok","issues":[{"id":"I1","level":"P1","area":"x","desc":"y"}]}` +
+		"\n```"
+	data := parseAudit(text)
+	require.Equal(t, "pass", data.Verdict)
+	require.Equal(t, 30, data.Score)
+	require.Len(t, data.Issues, 1)
+	require.Equal(t, "P1", data.Issues[0].Level)
+}
+
+// TestParseAuditDegradesOnGarbage 验证 parseAudit 在输出无 JSON 块时退化为单条 P0 issue。
+func TestParseAuditDegradesOnGarbage(t *testing.T) {
+	data := parseAudit("完全不是 JSON 的乱码文本")
+	require.Equal(t, "needs_fix", data.Verdict)
+	require.Len(t, data.Issues, 1)
+	require.Equal(t, "P0", data.Issues[0].Level)
+	require.Contains(t, data.Summary, "乱码")
+}
+
+// TestServiceGoldenThreeTriggersAudit 验证：写完黄金三章（chapterCount≥3）且尚未体检时，
+// S3 的「继续」会自动进入 S4 签约体检，异步体检完成后着陆 G4 闸门且 audit 写入 ContextJSON。
+func TestServiceGoldenThreeTriggersAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	// 模拟已写完黄金三章
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 3, nil }
+	// stub 体检返回结构化 issue 清单
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"开篇吸引力不足","issues":[{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章钩子弱"}]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "signability-audit" {
+			return SkillOutput{Text: "体检结论：\n```json\n" + auditJSON + "\n```"}, nil
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+	ctx := context.Background()
+	run, err := svc.StartPipeline(ctx, 400, "new", nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)              // 等 S2 蓝图落闸
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S2->S3
+	got, _ := svc.GetPipelineState(ctx, 400)
+	require.Equal(t, StageS3, got.CurrentStage)
+
+	// S3 写完一章后「继续」：黄金三章已达成且未体检 → 自动进入 S4 体检
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", ""))
+
+	// 异步 executeAudit 应把体检结果写回并落 G4 闸门
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS4, got.CurrentStage)
+	require.Contains(t, got.ContextJSON, "audit", "ContextJSON 应写入 audit 字段")
+	require.Contains(t, got.ContextJSON, "needs_fix", "audit 应保留 verdict")
+
+	// 体检完成后 S4Audited 仍应为 false（仅当用户在 G4 选 continue 才置位，避免回 S3 后重复触发）
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.False(t, ctxt.S4Audited, "体检完成但用户尚未出 G4 时不应置 S4Audited")
+}
+
+// TestServiceAuditContinueMarksAudited 验证：G4 选 continue（通过/强制继续）后，
+// 置 S4Audited=true 并回到 S3 写作，后续 S3 不再自动触发体检。
+func TestServiceAuditContinueMarksAudited(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{Text: "ok"}, nil
+	}
+	ctx := context.Background()
+	run, err := svc.StartPipeline(ctx, 401, "new", nil)
+	require.NoError(t, err)
+	// 直接进入 S4（已在 G4 闸门前，模拟已体检），context 含 audit
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
+		`{"audit":"{\"verdict\":\"needs_fix\",\"score\":20,\"summary\":\"需打磨\",\"issues\":[]}"}`))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", ""))
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS3, got.CurrentStage, "通过/继续后应回到 S3 写作")
+	require.Equal(t, StatusRunning, got.Status)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.True(t, ctxt.S4Audited, "continue 后应置 S4Audited，避免 S3 重复触发体检")
+}
+
+// TestServiceAuditFixLoopReAudit 验证：G4 选 fix 后进入 S5 修复闭环，
+// 修复完成后自动回到 S4 复评，复评结果（pass）重写 ContextJSON.Audit。
+func TestServiceAuditFixLoopReAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	var auditCalls int
+	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-audit":
+			auditCalls++
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "signability-fix":
+			return SkillOutput{Text: "已按 issue 修复：强化开篇钩子、补人设记忆点"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 402, "new", nil)
+	require.NoError(t, err)
+	// 直接进入 S4（首轮体检已落库，G4 闸门待决策），准备选 fix → S5
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
+		`{"audit":"{\"verdict\":\"needs_fix\"}"}`))
+
+	// S4 选择 fix → 进入 S5 修复闭环，修复完成后自动回到 S4 复评
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	// 异步链 executeFix → executeAudit 最终应停在 S4 awaiting_gate（复评结果）
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS4, got.CurrentStage, "复评后应在 S4 闸门")
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Contains(t, ctxt.Audit, "pass", "复评应反映修复后的 pass 结论")
+	require.Equal(t, 1, auditCalls, "修复后应再跑一次体检做复评")
 }

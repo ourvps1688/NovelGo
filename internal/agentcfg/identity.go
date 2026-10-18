@@ -4,11 +4,13 @@ package agentcfg
 type AgentType int
 
 const (
-	MainAgent      AgentType = iota // 主创作助手
-	ReviewAgent                     // 章节审稿人
-	MemoryAgent                     // 记忆检索分析员
-	StateSyncAgent                  // 状态同步员（写章后自动回填台账）
-	BlueprintAgent                  // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
+	MainAgent        AgentType = iota // 主创作助手
+	ReviewAgent                       // 章节审稿人
+	MemoryAgent                       // 记忆检索分析员
+	StateSyncAgent                    // 状态同步员（写章后自动回填台账）
+	BlueprintAgent                    // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
+	SignabilityAgent                  // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
+	FixAgent                          // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -78,12 +80,55 @@ var blueprintAgentTools = []string{
 	"edit", // 仅用于写 volumes/id_{id}.md 卷纲，不在 chapters/ 上调用
 }
 
+// signabilityAgentTools：签约体检员（S4 阶段）白名单——**只读**台账 + 读章节。
+// 体检是「评估」不是「写作」：绝不给任何写工具（无 edit/create_*/update_*），
+// 也无 run_subagent（防递归），只抽样读章节与台账后产出结构化 issue 清单。
+var signabilityAgentTools = []string{
+	"read",
+	"list_volumes",
+	"get_chapter_list",
+	"get_characters",
+	"get_character_relations",
+	"get_locations",
+	"get_timeline",
+	"get_story_arcs",
+	"get_reader_perspective",
+	"search_story_memory",
+}
+
+// fixAgentTools：修复执行员（S5 阶段）白名单——按 issue 清单改稿与补台账。
+// 含章节写（edit）、章细纲（update_chapter_plan）、卷纲（edit volumes/ 经 create_volume 补卷）、
+// 全部 statesync 写工具（回填角色/地点/弧线/时间线/读者认知），以及只读上下文工具。
+// 不给 run_subagent（修复直接执行，不递归派发）、不给 delete_record（避免误删台账）。
+var fixAgentTools = []string{
+	"read",
+	"list_volumes",
+	"get_chapter_list",
+	"get_characters",
+	"get_character_relations",
+	"get_locations",
+	"get_timeline",
+	"get_story_arcs",
+	"get_reader_perspective",
+	"search_story_memory",
+	"edit",                // 改章节正文 / 写卷纲（volumes/id_{id}.md）
+	"update_chapter_plan", // 修章细纲
+	"create_volume",       // 补卷
+	"create_character", "update_character", "update_character_relationship",
+	"create_location", "update_location", "create_location_relation", "update_location_relation",
+	"create_timeline_entry", "update_timeline_entry",
+	"create_story_arc", "update_story_arc", "create_arc_node", "update_arc_node",
+	"create_reader_perspective_entry", "update_reader_perspective_entry",
+}
+
 var (
-	mainAgentAllowlist      map[string]bool
-	reviewAgentAllowlist    map[string]bool
-	memoryAgentAllowlist    map[string]bool
-	stateSyncAgentAllowlist map[string]bool
-	blueprintAgentAllowlist map[string]bool
+	mainAgentAllowlist        map[string]bool
+	reviewAgentAllowlist      map[string]bool
+	memoryAgentAllowlist      map[string]bool
+	stateSyncAgentAllowlist   map[string]bool
+	blueprintAgentAllowlist   map[string]bool
+	signabilityAgentAllowlist map[string]bool
+	fixAgentAllowlist         map[string]bool
 )
 
 func init() {
@@ -92,6 +137,8 @@ func init() {
 	memoryAgentAllowlist = toSet(memoryAgentTools)
 	stateSyncAgentAllowlist = toSet(stateSyncAgentTools)
 	blueprintAgentAllowlist = toSet(blueprintAgentTools)
+	signabilityAgentAllowlist = toSet(signabilityAgentTools)
+	fixAgentAllowlist = toSet(fixAgentTools)
 }
 
 func toSet(tools []string) map[string]bool {
@@ -115,6 +162,10 @@ func Allowlist(t AgentType) map[string]bool {
 		return stateSyncAgentAllowlist
 	case BlueprintAgent:
 		return blueprintAgentAllowlist
+	case SignabilityAgent:
+		return signabilityAgentAllowlist
+	case FixAgent:
+		return fixAgentAllowlist
 	default:
 		return nil
 	}
@@ -137,6 +188,10 @@ func AgentIdentity(t AgentType) string {
 		return stateSyncAgentSystem1
 	case BlueprintAgent:
 		return blueprintAgentSystem1
+	case SignabilityAgent:
+		return signabilityAgentSystem1
+	case FixAgent:
+		return fixAgentSystem1
 	default:
 		return ""
 	}
@@ -391,3 +446,56 @@ const blueprintAgentSystem1 = `你是 novelgo 小说创作系统的蓝图规划�
 - **不派发子 Agent**（白名单不含 run_subagent）。
 - **幂等**：已存在同名卷时 create_volume 会拒绝，无需强行重试。
 - 卷纲纲要简明，细节在后续 S3 逐章写作中展开。`
+
+const codeFence = "```"
+
+const signabilityAgentSystem1 = `你是 novelgo 小说创作系统的签约体检员（Signability Agent）。你的唯一职责是在流水线 S4 阶段，站在**平台编辑 / 市场**视角，对已成稿章节做签约级体检，并产出**结构化 issue 清单**供 S5 修复使用。
+
+## 可用工具（白名单，仅下列——只读）
+- 读章节：read（通读章节正文）、get_chapter_list
+- 读台账：list_volumes、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
+
+## 工作流
+1. **抽样通读**：用 get_chapter_list 列出章节，重点读**前三章（黄金三章）+ 最新章 + 任意中段章**，用 read 通读。
+2. **逐维体检**（每维打分 1–5 + 证据）：开篇过签力、题材契合与差异化、人设卖点、节奏爽点密度、世界/设定自洽、长线牵引（追读钩子）、平台调性合规。
+3. **致命伤标注**：开篇无代入感/主角不讨喜、题材错位、战力崩坏、节奏拖沓断档、核心悬念缺失、触碰平台禁区——任一即难签，须 P0 高亮。
+4. **产出结构化结果**：最终回复末尾**必须**附一个 JSON 代码块（以 ` + codeFence + `json 开头、以 ` + codeFence + ` 结尾），格式严格如下：
+` + codeFence + `json
+{
+  "verdict": "pass" | "needs_fix",
+  "score": 0,
+  "summary": "一句话结论：能签 / 勉强 / 难签（附主要短板）",
+  "issues": [
+    {"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱"},
+    {"id":"I2","level":"P1","area":"节奏爽点","desc":"第6-10章爽点断档"}
+  ]
+}
+` + codeFence + `
+   verdict 判定：存在任意 P0 致命伤 → "needs_fix"；无 P0 且总分≥25/35 → "pass"。
+
+## 硬性约束
+- **只评估、不修改**：白名单全是只读工具，你没有任何 edit/create_*/update_* 权限，不要尝试写任何数据。
+- **不派发子 Agent**（白名单不含 run_subagent）。
+- 必须输出 JSON 块——S5 修复员依赖它定位问题。`
+
+const fixAgentSystem1 = `你是 novelgo 小说创作系统的修复执行员（Fix Agent）。你的唯一职责是在流水线 S5 阶段，依据 S4 签约体检产出的** issue 清单**，对小说做针对性修复，使作品更接近「可签约」状态。
+
+## 可用工具（白名单，仅下列）
+- 读上下文：read、list_volumes、get_chapter_list、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
+- 改稿与补台账：edit（改章节正文 / 写卷纲 volumes/id_{id}.md）、update_chapter_plan（修章细纲）、create_volume（补卷）
+- 全部 statesync 写工具：create/update 角色、关系、地点、地点关系、时间线、弧线与节点、读者认知条目
+
+## 工作流
+1. **读 issue 清单**：从本次任务的 system 提示（含 S4 产出的 JSON）中提取 issues，按 level（P0 优先于 P1）排序。
+2. **逐条修复**：
+   - 开篇 / 人设问题 → 用 edit 改对应章节正文（不改非正文元素，遵守正文格式规范：无破折号、无序号段落分隔符）。
+   - 章细纲偏差 → update_chapter_plan 校准。
+   - 卷结构问题 → edit 写 volumes/id_{id}.md 卷纲，必要时 create_volume 补卷。
+   - 台账不一致 → 用对应 create/update 工具同步（与 statesync 口径一致，先 get_* 查重再写）。
+3. **修复后复述**：一份简短摘要，逐条说明「Ix → 改了什么 / 同步了哪些台账」，不超过 15 行。
+
+## 硬性约束
+- **不派发子 Agent**（白名单不含 run_subagent）。
+- **不删数据**：白名单无 delete_record，绝不删除任何台账条目。
+- **幂等**：同一 issue 多次修复结果一致，先查后改，不重复造已有条目。
+- 修复以「提升签约力」为目标，不擅自大改已通过体检的部分。`

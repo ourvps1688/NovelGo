@@ -63,3 +63,36 @@ func TestExecuteBlueprintPersistsAndGates(t *testing.T) {
 	require.Contains(t, got.ContextJSON, "blueprint", "ContextJSON 应写入 blueprint 字段")
 	require.Contains(t, got.ContextJSON, "蓝图生成完成", "blueprint 应汇总蓝图文本")
 }
+
+// TestSignabilityAgentAllowlistReadOnly 验证签约体检 Agent 白名单为只读：
+// 可读章节/台账，但绝不含任何写工具（edit/create_*/update_*）或越权工具（run_subagent/delete_record）。
+func TestSignabilityAgentAllowlistReadOnly(t *testing.T) {
+	allow := agentcfg.Allowlist(agentcfg.SignabilityAgent)
+	require.True(t, allow["read"], "体检应能用 read")
+	require.True(t, allow["get_chapter_list"], "体检应能用 get_chapter_list")
+	require.True(t, allow["list_volumes"], "体检应能用 list_volumes")
+	require.True(t, allow["get_characters"], "体检应能用 get_characters")
+	require.True(t, allow["get_reader_perspective"], "体检应能用 get_reader_perspective")
+	require.True(t, allow["search_story_memory"], "体检应能用 search_story_memory")
+
+	// 越权/写工具必须全部禁止
+	for _, forbidden := range []string{"edit", "create_volume", "update_chapter_plan", "run_subagent", "delete_record"} {
+		require.False(t, allow[forbidden], "签约体检禁止写/越权工具: "+forbidden)
+	}
+}
+
+// TestFixAgentAllowlistCanWrite 验证修复 Agent 白名单：可改稿/补卷纲/同步台账，
+// 但禁止 run_subagent（不递归派发）与 delete_record（不误删台账）。
+func TestFixAgentAllowlistCanWrite(t *testing.T) {
+	allow := agentcfg.Allowlist(agentcfg.FixAgent)
+	require.True(t, allow["edit"], "修复应能用 edit 改稿")
+	require.True(t, allow["update_chapter_plan"], "修复应能用 update_chapter_plan 修章细纲")
+	require.True(t, allow["create_volume"], "修复应能用 create_volume 补卷")
+	require.True(t, allow["create_character"], "修复应能用 create_character 补角色")
+	require.True(t, allow["update_timeline_entry"], "修复应能用 update_timeline_entry 同步时间线")
+	require.True(t, allow["create_reader_perspective_entry"], "修复应能用 create_reader_perspective_entry 同步读者认知")
+
+	for _, forbidden := range []string{"run_subagent", "delete_record"} {
+		require.False(t, allow[forbidden], "修复禁止越权/删除工具: "+forbidden)
+	}
+}
