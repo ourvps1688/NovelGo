@@ -19,6 +19,7 @@ import (
 	_ "github.com/novelgo/novelgo/internal/migrate/v162" // blank：注册 novels.kind 列与历史回填迁移
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/personasetting"
+	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/reader"
 	"github.com/novelgo/novelgo/internal/review"
@@ -108,6 +109,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&volume.Volume{},
 		&writingconfig.WritingConfig{},
 		&personasetting.PersonaSetting{},
+		&pipeline.PipelineRun{},
 		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}

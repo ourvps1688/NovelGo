@@ -19,7 +19,8 @@ export type PanelId =
   | "skill-matrix"
   | "style-samples"
   | "signability"
-  | "bookpitch";
+  | "bookpitch"
+  | "pipeline";
 
 // 侧栏可额外为 "search"（搜索面板覆盖在 SidePanel 内）。
 export type SidebarPanelId = PanelId | "search";

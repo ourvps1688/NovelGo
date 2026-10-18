@@ -42,6 +42,10 @@ export function ConfirmQuit() {
   return window['go']['app']['App']['ConfirmQuit']();
 }
 
+export function ControlPipeline(arg1, arg2) {
+  return window['go']['app']['App']['ControlPipeline'](arg1, arg2);
+}
+
 export function CreateArcNode(arg1, arg2) {
   return window['go']['app']['App']['CreateArcNode'](arg1, arg2);
 }
@@ -294,6 +298,10 @@ export function GetPersonaSetting(arg1) {
   return window['go']['app']['App']['GetPersonaSetting'](arg1);
 }
 
+export function GetPipelineState(arg1) {
+  return window['go']['app']['App']['GetPipelineState'](arg1);
+}
+
 export function GetPlatform() {
   return window['go']['app']['App']['GetPlatform']();
 }
@@ -438,6 +446,10 @@ export function RecordCreativeActivity(arg1) {
   return window['go']['app']['App']['RecordCreativeActivity'](arg1);
 }
 
+export function ResumePipeline(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ResumePipeline'](arg1, arg2, arg3);
+}
+
 export function RetryStartup() {
   return window['go']['app']['App']['RetryStartup']();
 }
@@ -512,6 +524,10 @@ export function SetReasoningEffort(arg1) {
 
 export function SetSelectedModel(arg1, arg2) {
   return window['go']['app']['App']['SetSelectedModel'](arg1, arg2);
+}
+
+export function StartPipeline(arg1, arg2, arg3) {
+  return window['go']['app']['App']['StartPipeline'](arg1, arg2, arg3);
 }
 
 export function TestConnection(arg1) {
