@@ -1855,5 +1855,41 @@
     "signabilityDesc": "Assess signing potential with a guided blueprint-to-audit loop",
     "bookpitch": "New Book Pitch Workflow",
     "bookpitchDesc": "Feed an idea; book-pitch drafts title/blurb/tags & directions, then build the book"
+  },
+  "pipeline": {
+    "title": "Creation Pipeline",
+    "control": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "stop": "Stop"
+    },
+    "gate": {
+      "title": "Your confirmation is required",
+      "continue": "Continue",
+      "modify": "Continue after editing",
+      "abort": "Abort"
+    },
+    "stage": {
+      "S1": "Incubate Blueprint",
+      "G1": "Blueprint Gate",
+      "S2": "Worldbuilding",
+      "S3": "Chapter Writing",
+      "G3b": "Chapter Gate",
+      "S4a": "Polish & QA",
+      "S5": "Signability Audit",
+      "S4b": "Audit Revision",
+      "S6": "Export Draft"
+    },
+    "empty": "No pipeline run is in progress.",
+    "start": "Start Pipeline",
+    "currentStage": "Current stage: {{stage}}",
+    "hint": {
+      "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
+      "s3": "Writing chapter by chapter — finish the chapter, then return here and click Continue at the gate."
+    },
+    "ended": {
+      "finished": "Pipeline finished.",
+      "aborted": "Pipeline aborted."
+    }
   }
 }

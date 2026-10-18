@@ -26,6 +26,12 @@ import {writingconfig} from '../models';
 import {imp} from '../models';
 import {skill} from '../models';
 import {search} from '../models';
+import type {PipelineRun} from '@/types/pipeline';
+
+export function StartPipeline(arg1:number,arg2:string,arg3:number|null):Promise<PipelineRun>;
+export function GetPipelineState(arg1:number):Promise<PipelineRun>;
+export function ResumePipeline(arg1:string,arg2:string,arg3:string):Promise<void>;
+export function ControlPipeline(arg1:string,arg2:string):Promise<void>;
 
 export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;
 

@@ -38,12 +38,13 @@ import SkillMatrixView, {
 } from "@/components/skill/SkillMatrixView";
 import SignabilityWorkflowView from "@/components/skill/SignabilityWorkflowView";
 import BookPitchWorkflowView from "@/components/skill/BookPitchWorkflowView";
+import PipelineWizard from "@/components/pipeline/PipelineWizard";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
 import UpdateDialog from "@/components/update/UpdateDialog";
 import ErrorBoundary from "@/components/shared/ErrorBoundary";
 import { GetPlatform, ApproveTool } from "@/lib/wailsjs/go/app/App";
-import { Settings, User, HelpCircle, Moon, Sun } from "lucide-react";
+import { Settings, User, HelpCircle, Moon, Sun, Workflow } from "lucide-react";
 import { WindowToggleMaximise } from "@/lib/wailsjs/runtime/runtime";
 import Logo from "@/components/Logo";
 import { useThemeStore, type Theme } from "@/stores/useThemeStore";
@@ -444,6 +445,13 @@ export default function WorkspaceView({
               <HelpCircle className="w-5 h-5" />
             </button>
             <button
+              onClick={() => setActivePanel("pipeline")}
+              className={`text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center ml-1 ${activePanel === "pipeline" ? "text-foreground" : ""}`}
+              title={t("pipeline.title")}
+            >
+              <Workflow className="w-5 h-5" />
+            </button>
+            <button
               onClick={toggleTheme}
               className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center"
               title={THEME_LABEL[theme]}
@@ -621,6 +629,10 @@ export default function WorkspaceView({
                       setActivePanel("chapters");
                     }}
                   />
+                </ErrorBoundary>
+              ) : activePanel === "pipeline" ? (
+                <ErrorBoundary>
+                  <PipelineWizard novelId={activeNovelId} />
                 </ErrorBoundary>
               ) : null}
 
