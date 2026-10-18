@@ -157,6 +157,7 @@
     "aiChat": "AI Chat",
     "history": "History",
     "newChat": "New Chat",
+    "stateSyncHint": "Syncing story state in the background…",
     "loadSettingsFailed": "Failed to load settings, model list and preferences may be inaccurate",
     "modelsLoadFailed": "Failed to load models",
     "settingsLoadFailed": "Failed to load settings",

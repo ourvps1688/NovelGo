@@ -923,6 +923,12 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 }
 
 func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) {
+	// 通知前端：后台状态同步开始（轻量进度提示，见 useStateSyncProgress）
+	wails.EventsEmit(ctx, "statesync:progress", map[string]any{
+		"novel_id":   novelID,
+		"chapter_id": chapterID,
+		"status":     "started",
+	})
 	instruction := fmt.Sprintf(
 		"刚刚完成了章节（chapter_id=%d）的修改并已落盘。请读取该章正文（read 路径 chapters/id_%d.md），"+
 			"将其涉及的角色、地点、弧线节点、时间线（伏笔/章节计划）、读者认知变化，对照现有台账做**增量**同步："+
@@ -938,7 +944,19 @@ func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 		ToolID:      tc.ToolID,
 	}); err != nil {
 		tc.LoggerOrDefault().Warn("state-sync 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
+		wails.EventsEmit(ctx, "statesync:progress", map[string]any{
+			"novel_id":   novelID,
+			"chapter_id": chapterID,
+			"status":     "done",
+			"error":      err.Error(),
+		})
+		return
 	}
+	wails.EventsEmit(ctx, "statesync:progress", map[string]any{
+		"novel_id":   novelID,
+		"chapter_id": chapterID,
+		"status":     "done",
+	})
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {

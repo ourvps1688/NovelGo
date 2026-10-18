@@ -149,6 +149,7 @@
     "aiChat": "AI 对话",
     "history": "历史",
     "newChat": "新对话",
+    "stateSyncHint": "后台状态同步中…",
     "loadSettingsFailed": "加载设置失败，模型列表和偏好可能不准确",
     "modelsLoadFailed": "加载模型失败",
     "settingsLoadFailed": "加载设置失败",

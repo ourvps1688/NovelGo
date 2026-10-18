@@ -49,6 +49,7 @@ import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
 import { useBookPitchStore } from "@/stores/useBookPitchStore";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import { usePanelStore } from "@/stores/usePanelStore";
+import { useStateSyncProgress } from "@/hooks/useStateSyncProgress";
 
 interface Props {
   novelId: number;
@@ -97,6 +98,7 @@ export default function ChatPanel({
   const qc = useQueryClient();
   const compressMutation = useCompressContext();
   const cancelChatMutation = useCancelChat();
+  const { syncing: stateSyncing } = useStateSyncProgress();
   const setLastSessionMutation = useSetLastSession();
   const setSelectedModelMutation = useSetSelectedModel();
   const setReasoningEffortMutation = useSetReasoningEffort();
@@ -1378,6 +1380,13 @@ export default function ChatPanel({
             {t("bookpitch.returnBannerAction")}
           </span>
         </button>
+      )}
+
+      {stateSyncing && (
+        <div className="shrink-0 flex items-center gap-2 w-full px-4 py-1.5 text-left text-xs text-muted-foreground bg-primary/5 border-b border-primary/10">
+          <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+          <span>{t("chat.stateSyncHint")}</span>
+        </div>
       )}
 
       <div

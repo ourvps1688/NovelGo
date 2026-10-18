@@ -1,0 +1,6 @@
+feat(frontend): 后台状态同步（statesync）轻量进度提示
+
+- 写章（full_replace）后系统自动 debounce 派发 statesync 子 Agent 同步台账，但派发在 turn 已返回的 goroutine 中，sub_agent 事件到不了前端已退订的 turn 频道。
+- 改为后端 runStateSync 在开始前/结束后 emit 全局 wails 事件 statesync:progress（含 novel_id/chapter_id/status），前端用独立 hook useStateSyncProgress 订阅并以 Set<chapterId> 跟踪进行中（含 60s 安全网超时）。
+- ChatPanel 在 bookpitch 返回条后渲染一条「后台状态同步中…」细条（Loader2 旋转），写完章即提示、同步完自动消失。
+- i18n：chat.stateSyncHint（中/英）。前端门禁（prettier/i18n:check/eslint 0 error/build）全绿；go build 通过。
