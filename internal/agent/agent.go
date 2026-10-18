@@ -154,6 +154,10 @@ func agentTypeFromString(s string) agentcfg.AgentType {
 		return agentcfg.StateSyncAgent
 	case "blueprint":
 		return agentcfg.BlueprintAgent
+	case "signability":
+		return agentcfg.SignabilityAgent
+	case "fix":
+		return agentcfg.FixAgent
 	default:
 		return agentcfg.MainAgent
 	}

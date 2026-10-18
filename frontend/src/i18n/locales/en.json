@@ -1875,8 +1875,8 @@
       "S2": "Worldbuilding",
       "S3": "Chapter Writing",
       "G3b": "Chapter Gate",
-      "S4a": "Polish & QA",
-      "S5": "Signability Audit",
+      "S4": "Signability Audit",
+      "S5": "Fix Loop",
       "S4b": "Audit Revision",
       "S6": "Export Draft"
     },
@@ -1893,6 +1893,15 @@
       "title": "Book Volume Structure",
       "volumeCount": "{{n}} volumes",
       "empty": "No volume structure generated yet; click Continue to skip."
+    },
+    "signability": {
+      "title": "Signability Audit",
+      "auditing": "Running signability audit…",
+      "fixing": "Fixing issues from audit…",
+      "score": "Score {{n}}/35",
+      "issues": "Issue List",
+      "noIssues": "No significant issues found.",
+      "fixNote": "Fixes done; re-auditing automatically."
     },
     "ended": {
       "finished": "Pipeline finished.",

@@ -32,14 +32,15 @@ export interface ControlAckPayload {
   status: string;
 }
 
-// 线性阶段顺序（C 期 MVP 实际用到 S1→G1→S3；其余为后续 PR 预留）。
+// 线性阶段顺序。S4 = 签约体检（signability-audit，只读体检 + issue 清单），
+// S5 = 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）。
 export const PIPELINE_STAGES = [
   "S1",
   "G1",
   "S2",
   "S3",
   "G3b",
-  "S4a",
+  "S4",
   "S5",
   "S4b",
   "S6",
