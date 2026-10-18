@@ -4,16 +4,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
+	"github.com/novelgo/novelgo/internal/agent"
+	"github.com/novelgo/novelgo/internal/agentcfg"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/skill"
 )
 
-// SkillInput 是 RunSkill 的输入：编排给该 skill 的具体任务 + 工具白名单 + 轮数上限。
+// agentTypeBlueprint 是蓝图规划 Agent 在 agent.Run 中的 AgentType 字符串。
+const agentTypeBlueprint = "blueprint"
+
+// SkillInput 是 RunSkill 的输入：编排给该 skill 的具体任务 + 轮数上限 + 落库 session。
 type SkillInput struct {
 	NovelID   int64
 	Prompt    string
-	Whitelist []string
+	Whitelist []string // 预留：RunSkill 内部统一使用 agentcfg.BlueprintAgent 白名单
 	MaxTurns  int
+	// SessionID 用于多轮会话落库（选项 a）。为空时内部生成，便于审计与回放。
+	SessionID string
 }
 
 // SkillOutput 是 RunSkill 的产物文本与结构化产物。
@@ -22,25 +31,59 @@ type SkillOutput struct {
 	Artifacts map[string]string
 }
 
-// RunSkill 把 builtin skill 正文作 system prompt，跑一次性 agent run 并返回产物。
+// RunSkill 把 builtin skill 正文作 system prompt，跑 internal/agent.Run 的多轮 agent loop 并返回产物。
 //
-// 注意：PR1 实现为「加载 + 构造 system prompt + 单次 LLM 生成」的先行骨架，
-// 与 app/skill_audit_e2e_test.go 的范式一致，可确定性触发并回收产物。
-// PR2/PR3 将把内部从单次 GenerateText 升级为 internal/agent.Run 的多轮 agent loop
-// （挂载 input.Whitelist 工具、设置 AgentType/ParentTurnID），对外接口保持不变。
-func RunSkill(ctx context.Context, skillStore *skill.Store, llmClient *llm.Client, providerName, modelID, name string, input SkillInput) (SkillOutput, error) {
+// 与 PR1 的单轮 GenerateText 骨架不同，这里走完整 agent 循环：挂载 blueprint 白名单工具
+// （create_volume / read / list_volumes / edit-卷纲），由 AgentType="blueprint" 驱动，
+// 多轮内可调用 create_volume 真正建卷落库。对外签名在 PR1 基础上把 llmClient 前置为
+// *agent.Agent（多轮循环需要 Agent 的 registry/db/工具执行能力），其余语义保持不变。
+//
+// 会话消息按 SessionID 落库到 session.messages（独立 pipeline session），可追溯、可回放。
+func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llmClient *llm.Client, providerName, modelID, name string, input SkillInput) (SkillOutput, error) {
+	if ag == nil {
+		return SkillOutput{}, fmt.Errorf("skill %q 执行失败: agent 未初始化", name)
+	}
 	sk, ok := skillStore.Get(0, name)
 	if !ok {
 		return SkillOutput{}, fmt.Errorf("skill %q 未找到", name)
 	}
-	sysPrompt := "你是一名资深网文创作助手，请严格依据以下方法论执行任务。\n\n" + sk.Content
+
+	at := agentcfg.BlueprintAgent
+	sysPrompt := agentcfg.AgentIdentity(at) + "\n\n# 本次任务方法论\n" + sk.Content
+
 	msgs := []map[string]any{
 		{"role": "system", "content": sysPrompt},
 		{"role": "user", "content": input.Prompt},
 	}
-	out, err := llmClient.GenerateText(ctx, providerName, msgs, modelID)
+
+	model, ok := llmClient.ProviderModel(providerName, modelID)
+	if !ok {
+		return SkillOutput{}, fmt.Errorf("模型未找到: %s/%s", providerName, modelID)
+	}
+
+	sessionID := input.SessionID
+	if sessionID == "" {
+		sessionID = "pipeline:" + uuid.NewString()
+	}
+
+	opts := agent.RunOptions{
+		TurnID:       1,
+		SessionID:    sessionID,
+		NovelID:      input.NovelID,
+		Messages:     msgs,
+		AllowedTools: agentcfg.Allowlist(at),
+		Model:        model,
+		ProviderName: providerName,
+		AgentType:    agentTypeBlueprint,
+		MaxTurns:     input.MaxTurns,
+	}
+	if opts.MaxTurns <= 0 {
+		opts.MaxTurns = 12
+	}
+
+	result, err := ag.Run(ctx, opts)
 	if err != nil {
 		return SkillOutput{}, fmt.Errorf("skill %q 执行失败: %w", name, err)
 	}
-	return SkillOutput{Text: out, Artifacts: map[string]string{}}, nil
+	return SkillOutput{Text: result.FinalText, Artifacts: map[string]string{}}, nil
 }

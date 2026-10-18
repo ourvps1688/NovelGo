@@ -49,6 +49,9 @@ type GateContext struct {
 	Stages []string       `json:"stages,omitempty"`
 	Gates  []GateDecision `json:"gates,omitempty"`
 	Extra  string         `json:"extra,omitempty"`
+	// Blueprint 是 S2 蓝图阶段产出的卷结构概览 JSON（由 create_volume 落库的卷记录汇总），
+	// 供前端 BlueprintWorkflowView 渲染与 G1 闸门确认时回看。
+	Blueprint string `json:"blueprint,omitempty"`
 }
 
 // Store 封装 pipeline_runs 表的读写。

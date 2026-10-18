@@ -1882,10 +1882,17 @@
     },
     "empty": "No pipeline run is in progress.",
     "start": "Start Pipeline",
+    "continue": "Continue",
     "currentStage": "Current stage: {{stage}}",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
       "s3": "Writing chapter by chapter — finish the chapter, then return here and click Continue at the gate."
+    },
+    "blueprint": {
+      "generating": "Generating blueprint…",
+      "title": "Book Volume Structure",
+      "volumeCount": "{{n}} volumes",
+      "empty": "No volume structure generated yet; click Continue to skip."
     },
     "ended": {
       "finished": "Pipeline finished.",

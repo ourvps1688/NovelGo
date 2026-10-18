@@ -152,6 +152,8 @@ func agentTypeFromString(s string) agentcfg.AgentType {
 		return agentcfg.MemoryAgent
 	case "statesync":
 		return agentcfg.StateSyncAgent
+	case "blueprint":
+		return agentcfg.BlueprintAgent
 	default:
 		return agentcfg.MainAgent
 	}

@@ -8,6 +8,7 @@ const (
 	ReviewAgent                     // 章节审稿人
 	MemoryAgent                     // 记忆检索分析员
 	StateSyncAgent                  // 状态同步员（写章后自动回填台账）
+	BlueprintAgent                  // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -16,7 +17,7 @@ const (
 // init() 中转换为 map[string]bool 供快速查找。
 
 var mainAgentTools = []string{
-	"get_chapter_list", "list_volumes", "get_characters", "get_character_relations",
+	"get_chapter_list", "list_volumes", "create_volume", "get_characters", "get_character_relations",
 	"create_character", "update_character", "update_character_relationship",
 	"get_locations", "create_location", "update_location",
 	"create_location_relation", "update_location_relation",
@@ -66,11 +67,23 @@ var stateSyncAgentTools = []string{
 	"search_story_memory",
 }
 
+// blueprintAgentTools：蓝图规划员（S2 阶段）白名单——只给建卷/读上下文/写卷纲的工具，
+// 绝不给章节正文写工具（edit 仅用于 volumes/ 卷纲，禁止 chapters/）、不给 run_subagent（防递归）、
+// 不给删除类工具（防止蓝图阶段误删台账）。
+var blueprintAgentTools = []string{
+	"create_volume",
+	"read",
+	"list_volumes",
+	"get_chapter_list",
+	"edit", // 仅用于写 volumes/id_{id}.md 卷纲，不在 chapters/ 上调用
+}
+
 var (
 	mainAgentAllowlist      map[string]bool
 	reviewAgentAllowlist    map[string]bool
 	memoryAgentAllowlist    map[string]bool
 	stateSyncAgentAllowlist map[string]bool
+	blueprintAgentAllowlist map[string]bool
 )
 
 func init() {
@@ -78,6 +91,7 @@ func init() {
 	reviewAgentAllowlist = toSet(reviewAgentTools)
 	memoryAgentAllowlist = toSet(memoryAgentTools)
 	stateSyncAgentAllowlist = toSet(stateSyncAgentTools)
+	blueprintAgentAllowlist = toSet(blueprintAgentTools)
 }
 
 func toSet(tools []string) map[string]bool {
@@ -99,6 +113,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return memoryAgentAllowlist
 	case StateSyncAgent:
 		return stateSyncAgentAllowlist
+	case BlueprintAgent:
+		return blueprintAgentAllowlist
 	default:
 		return nil
 	}
@@ -119,6 +135,8 @@ func AgentIdentity(t AgentType) string {
 		return memoryAgentSystem1
 	case StateSyncAgent:
 		return stateSyncAgentSystem1
+	case BlueprintAgent:
+		return blueprintAgentSystem1
 	default:
 		return ""
 	}
@@ -354,3 +372,22 @@ const stateSyncAgentSystem1 = `你是小说创作系统的状态同步员（Stat
 - **幂等**：同一章多次同步结果一致，不重复创建已存在条目（先 get_* 查重）。
 - **服从题材卡「禁止漂移」**：若本章内容与题材约束冲突，仍照实记录正文状态，但可在摘要里标注冲突点提示主 Agent。
 - 拿不准的不要乱写；缺信息就留空，不要编造角色/设定细节。`
+
+const blueprintAgentSystem1 = `你是 novelgo 小说创作系统的蓝图规划员（Blueprint Agent）。你的唯一职责是在流水线 S2 阶段，基于本书当前设定与孵化产出，规划清晰的卷纲结构，并通过工具把卷记录落库。
+
+## 可用工具（白名单，仅下列）
+- 读取上下文：read（读 novelgo.md / 设定文件 / 已有卷纲）、list_volumes、get_chapter_list
+- 建卷：create_volume（批量创建卷，含卷名与卷纲 outline）
+- 写卷纲：edit（仅用于 volumes/id_{id}.md，绝不在 chapters/ 上调用）
+
+## 工作流程
+1. **了解本书**：用 read 读 novelgo.md 与关键设定，用 list_volumes 看是否已有卷结构。
+2. **规划卷纲**：按 story-blueprint 方法论，把全书划分为若干卷（通常 3-8 卷）。每卷有明确主题、核心冲突推进、爽点/情绪节奏、起止节点。
+3. **落库建卷**：调用 create_volume 逐卷创建（name 必填，outline 写入该卷纲摘要）。卷序默认追加到末尾，必要时用 before_volume_id 调整。
+4. **产出总结**：一份卷结构概览（卷名 + 一句话主题 + 关键内容），不超过 20 行，作为最终回复文本。
+
+## 硬性约束
+- **绝不写章节正文**：你没有任何 chapters/ 的写权限，也不要尝试。
+- **不派发子 Agent**（白名单不含 run_subagent）。
+- **幂等**：已存在同名卷时 create_volume 会拒绝，无需强行重试。
+- 卷纲纲要简明，细节在后续 S3 逐章写作中展开。`

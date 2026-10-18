@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -386,7 +387,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 10.5 初始化 style store（全局风格素材）
 	a.style = style.NewStore(db, a.logger)
 	a.db = db
-	a.pipeline = pipeline.NewService(db)
+
+	// 解析默认模型（"provider/model"），供 S2 蓝图阶段多轮 agent 使用。
+	defaultProv, defaultModel := a.parseModelKey(a.settings.SelectedModelKey)
+	a.pipeline = pipeline.NewService(db, a.agent, a.skill, a.llmClient, defaultProv, defaultModel, a.ctx, a.logger)
 
 	// 11. 异步初始化向量存储和搜索服务（不阻塞 UI）
 	go func() {
@@ -442,4 +446,24 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	)
 	initSucceeded = true
 	return nil
+}
+
+// parseModelKey 把 "provider/model" 形式的模型 key 解析为 (provider, model)。
+// key 非法或为空时，回退到第一个可用 provider 的第一个模型，保证 S2 蓝图阶段总有可用模型。
+func (a *App) parseModelKey(key string) (provider, model string) {
+	if key != "" {
+		if idx := strings.IndexByte(key, '/'); idx > 0 {
+			p, m := key[:idx], key[idx+1:]
+			if p != "" && m != "" {
+				return p, m
+			}
+		}
+	}
+	// 回退：取首个 provider 的首个模型
+	for name, p := range a.llmClient.Providers() {
+		if len(p.Models) > 0 {
+			return name, p.Models[0].ID
+		}
+	}
+	return "", ""
 }

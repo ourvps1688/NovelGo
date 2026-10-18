@@ -1,8 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { Play } from "lucide-react";
+import { ArrowRight, Play } from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
 import { PIPELINE_STAGES } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
+import BlueprintWorkflowView from "./BlueprintWorkflowView";
 import PipelineControlBar from "./PipelineControlBar";
 
 interface Props {
@@ -62,17 +63,42 @@ export default function PipelineWizard({ novelId }: Props) {
             <p className="text-sm text-muted-foreground">
               {t("pipeline.currentStage", { stage })}
             </p>
-            {gate ? <PipelineGateCard gate={gate} onResume={resume} /> : null}
-            {!gate && stage === "S1" ? (
-              <p className="text-sm text-muted-foreground">
-                {t("pipeline.hint.s1")}
-              </p>
-            ) : null}
-            {!gate && stage === "S3" ? (
-              <p className="text-sm text-muted-foreground">
-                {t("pipeline.hint.s3")}
-              </p>
-            ) : null}
+
+            {stage === "S2" ? (
+              <BlueprintWorkflowView
+                run={run}
+                stage={stage}
+                status={status}
+                gate={gate}
+                onResume={resume}
+              />
+            ) : (
+              <>
+                {gate ? (
+                  <PipelineGateCard gate={gate} onResume={resume} />
+                ) : null}
+                {!gate && stage === "S1" ? (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      {t("pipeline.hint.s1")}
+                    </p>
+                    <button
+                      type="button"
+                      className="inline-flex w-fit items-center gap-1 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm"
+                      onClick={() => resume("continue")}
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                      {t("pipeline.continue")}
+                    </button>
+                  </div>
+                ) : null}
+                {!gate && stage === "S3" ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("pipeline.hint.s3")}
+                  </p>
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
 
