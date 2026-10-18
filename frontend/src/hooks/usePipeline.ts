@@ -34,6 +34,14 @@ export function usePipeline(novelId: number) {
       if (p.novel_id !== novelId) return;
       setGate(p);
       setStatus("awaiting_gate");
+      // 闸门携带最新阶段状态；重新拉取 run 以拿到最新 ContextJSON
+      // （S2 蓝图完成后 Blueprint 字段落在此处，需刷新才能渲染卷结构）。
+      GetPipelineState(novelId)
+        .then((r: pipeline.PipelineRun) => {
+          setRun(r);
+          setStage(r.CurrentStage);
+        })
+        .catch(() => {});
     });
     const offAck = EventsOn("pipeline:control:ack", (p: ControlAckPayload) => {
       setStatus(p.status);

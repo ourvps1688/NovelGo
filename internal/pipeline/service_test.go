@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"log/slog"
 	"testing"
+	"time"
 )
 
 // 测试中无 Wails runtime 上下文，将事件发射器替换为无操作，避免
@@ -15,7 +17,7 @@ func init() {
 
 func TestServiceStartAndResume(t *testing.T) {
 	db := newTestDB(t)
-	svc := NewService(db)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 	run, err := svc.StartPipeline(ctx, 100, "new", nil)
 	if err != nil {
@@ -24,10 +26,12 @@ func TestServiceStartAndResume(t *testing.T) {
 	if run.CurrentStage != StageS1 || run.Status != StatusRunning {
 		t.Fatalf("unexpected run: %+v", run)
 	}
-	// S1 -> 确认 -> 应进入 G1 闸门（awaiting_gate）
+	// S1 -> 确认 -> 应进入 S2 并异步执行蓝图，最终落到 G1 闸门（awaiting_gate）
 	if err := svc.ResumePipeline(ctx, run.RunID, "continue", ""); err != nil {
 		t.Fatalf("resume1: %v", err)
 	}
+	// S2 蓝图为异步执行，轮询等待闸门落定（无 agent 时 skillRunner 为空操作，应很快完成）。
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
 	got, _ := svc.GetPipelineState(ctx, 100)
 	if got.CurrentStage != StageS2 || got.Status != StatusAwaitingGate {
 		t.Fatalf("after resume1: %+v", got)
@@ -44,7 +48,7 @@ func TestServiceStartAndResume(t *testing.T) {
 
 func TestServiceControl(t *testing.T) {
 	db := newTestDB(t)
-	svc := NewService(db)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 	run, _ := svc.StartPipeline(ctx, 200, "new", nil)
 	if err := svc.ControlPipeline(ctx, run.RunID, "pause"); err != nil {
@@ -77,7 +81,7 @@ func TestServiceControl(t *testing.T) {
 
 func TestServiceResumeAbort(t *testing.T) {
 	db := newTestDB(t)
-	svc := NewService(db)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 	run, _ := svc.StartPipeline(ctx, 300, "new", nil)
 	if err := svc.ResumePipeline(ctx, run.RunID, "abort", ""); err != nil {
@@ -91,6 +95,20 @@ func TestServiceResumeAbort(t *testing.T) {
 	if err := svc.ResumePipeline(ctx, run.RunID, "continue", ""); err == nil {
 		t.Fatalf("已中止的流水线不应可推进")
 	}
+}
+
+// waitForStageStatus 轮询流水线状态直到匹配 target，超时则失败。
+func waitForStageStatus(t *testing.T, svc *Service, runID, target string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		r, err := svc.store.GetByRunID(context.Background(), runID)
+		if err == nil && r.Status == target {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("等待状态 %s 超时 (run=%s)", target, runID)
 }
 
 func gotStatusSafe(r *PipelineRun) string {
