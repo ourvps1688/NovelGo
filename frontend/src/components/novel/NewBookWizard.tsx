@@ -43,12 +43,7 @@ const STRATEGIES: StrategyDef[] = [
     titleKey: "wizard.strategy.signing.title",
     descKey: "wizard.strategy.signing.desc",
     icon: Target,
-    skills: [
-      "signability-workflow",
-      "story-blueprint",
-      "worldbuilding-design",
-      "signability-audit",
-    ],
+    skills: ["story-blueprint", "worldbuilding-design", "signability-audit"],
     genreDefaultKey: "wizard.genreDefault.signing",
     requireNorthStar: true,
   },

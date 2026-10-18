@@ -1,18 +1,12 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Target, Play, Check, AlertTriangle, Loader2 } from "lucide-react";
-import {
-  useEnabledSkills,
-  useSetEnabledSkills,
-} from "@/components/chat/useNovelSkills";
+import { Target, Play, AlertTriangle, Loader2 } from "lucide-react";
+import { StartPipeline } from "@/lib/wailsjs/go/app/App";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
-import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
+import { usePanelStore } from "@/stores/usePanelStore";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-
-// 被编排的 manual 技能名（经 SetEnabledSkills 常驻注入 system 上下文）。
-const SKILL_NAME = "signability-workflow";
 
 // 仅承载阶段 key；技能标识与 kickoff 提示均经 i18n 注入（避免硬编码中文）。
 const STAGES = ["stage0", "stage1", "stage2", "stage3", "stage4", "stage5"];
@@ -25,25 +19,13 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
   const { t } = useTranslation();
   const [launching, setLaunching] = useState(false);
 
-  const enabledQuery = useEnabledSkills(novelId);
-  const setEnabled = useSetEnabledSkills(novelId);
   const modelsQuery = useModels();
   const settingsQuery = useSettings();
-
-  const enabledSet = useMemo(
-    () => new Set(enabledQuery.data ?? []),
-    [enabledQuery.data],
-  );
-  const isEnabled = enabledSet.has(SKILL_NAME);
+  const setActivePanel = usePanelStore((s) => s.setActivePanel);
 
   // 模型是否就绪：selected_model_key 指向的模型仍存在于模型列表。
   const selectedKey = settingsQuery.data?.selected_model_key || "";
-  const hasModel = useMemo(
-    () => !!modelsQuery.data?.find((m) => m.Key === selectedKey),
-    [modelsQuery.data, selectedKey],
-  );
-
-  const kickoff = t("signability.kickoff");
+  const hasModel = !!modelsQuery.data?.find((m) => m.Key === selectedKey);
 
   const handleStart = useCallback(async () => {
     if (!novelId) {
@@ -54,25 +36,17 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
       toastError(t("signability.configureModelFirst"));
       return;
     }
-    const send = useChatLaunchStore.getState().send;
-    if (!send) {
-      toastError(t("signability.launchFailed"));
-      return;
-    }
     setLaunching(true);
     try {
-      // 合并式启用：保留本书既有启用清单，仅追加本工作流技能。
-      const base = new Set(enabledQuery.data ?? []);
-      base.add(SKILL_NAME);
-      await setEnabled.mutateAsync([...base]);
-      // 技能已常驻注入，发 kickoff 消息驱动 LLM 进入工作流。
-      send(kickoff);
+      // PR3 后签约潜力工作流由 pipeline 状态机驱动，不再走 chat skill。
+      await StartPipeline(novelId, "new", null);
+      setActivePanel("pipeline");
     } catch (err) {
-      toastError(toErrorMessage(err, t("signability.enableFailed")));
+      toastError(toErrorMessage(err, t("signability.launchFailed")));
     } finally {
       setLaunching(false);
     }
-  }, [novelId, hasModel, enabledQuery.data, setEnabled, kickoff, t]);
+  }, [novelId, hasModel, setActivePanel, t]);
 
   const noNovel = !novelId;
   const buttonDisabled = launching || noNovel || !hasModel;
@@ -88,12 +62,6 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
         <div className="flex items-center gap-2">
           <Target className="w-5 h-5 text-primary" />
           <h1 className="text-lg font-semibold">{t("signability.title")}</h1>
-          {isEnabled && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary border border-primary/30 px-2 py-0.5 text-[11px]">
-              <Check className="w-3 h-3" />
-              {t("signability.enabledBadge")}
-            </span>
-          )}
         </div>
         <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
           {t("signability.subtitle")}
