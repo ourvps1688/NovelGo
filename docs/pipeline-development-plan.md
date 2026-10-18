@@ -93,7 +93,7 @@
 
 ---
 
-## 2. PR1 — 闭环跑通 + 运行控制（C 期 MVP）
+## 2. PR1 — 闭环跑通 + 运行控制（C 期 MVP，已落地 2026-10-18）
 
 **目标**：用户点「继续」即推进；运行中可随时暂停/恢复/停止，状态持久化可续跑。最小可见闭环：`S1(book-pitch) → G1 → S3(单章含评分门禁+statesync) → awaiting_gate`。
 
@@ -126,7 +126,7 @@
 
 ---
 
-## 3. PR2 — 自动建卷 + S2 蓝图节点（落库）
+## 3. PR2 — 自动建卷 + S2 蓝图节点（落库，已落地 2026-10-18）
 
 **目标**：S2 真正完成「自动建卷 / 写卷纲落库」（不只是 markdown）；G2 确认。
 
@@ -164,7 +164,7 @@
 
 ---
 
-## 4. PR3 — S4a 签约评审 + S5 修复闭环
+## 4. PR3 — S4a 签约评审 + S5 修复闭环（已落地 2026-10-18）
 
 **目标**：写完黄金三章 → S4a 签约体检 → 不过则 S5 按 issue list 修复 → 复评，直到通过或用户强制继续。
 
@@ -219,31 +219,56 @@
 
 ---
 
-## 6. PR5 — A 期 Orchestrator 状态机 + S6 完本
+## 6. PR5 — A 期 Orchestrator 状态机 + S6 完本（未实现，待 PR5）
 
-**目标**：顺序/闸门/复评逻辑下沉后端，确定性；完本有收口；支持「自动跑到下一闸」。
+**目标**：顺序/闸门/复评逻辑下沉后端，确定性；完本有收口；支持「自动跑到下一闸」；导入/续写自动选入口。
 
-### 6.1 `internal/pipeline/orchestrator.go`
-- `Stage` 枚举（S0|S1..S6|S3_loop）+ 流转表（线性 + 循环 + S4→S5→复评回边）。
-- `Orchestrator`：
-  - 持 `run_id` / `current_stage` / `store` / `events`；
-  - `Run(ctx)` 按表推进，节点 = `RunSkill` / `edit` 工具 / `create_volume`；
-  - 闸门点 `EmitGate` + **阻塞等 `ResumePipeline`**（用 channel 等待，非忙等）；
-  - 上阶段产物注入下阶段 agent 上下文（确定性产物传递，写 `ContextJSON`）；
-  - `auto_run` 模式：自主连跑多阶段/多章，仅在 `EvGate` 停下；
-  - 安全检查点：阶段切换前、S3 各步间、S5 每轮前、自动连跑每章间，轮询 `Status`。
-- 前端在 A 期**退化**：仅渲染 `EvStage` / `EvGate` / `EvControlAck`，不再持有顺序逻辑（`PipelineWizard` 退化为进度显示器）。
+### 6.1 设计要点（相对原计划 §6 的修正，贴合当前 C 期代码）
 
-### 6.2 S6 完本终检 + G终
-- S6 = `RunSkill("signability-audit", 全本)` → 终检报告 → `EmitGate(G终)` → `Status=finished`。
+> 当前（PR1–PR4 落地后）阶段流转逻辑是**双源**：`service.go` 的 `ResumePipeline` 里硬编码了 S3 里程碑 / S4 / S5 的特殊分支（约 145–225 行），而 `orchestrator_c.go` 的 `NextStage` 只兜底 S1→G1→S2 与线性收尾。`StageS6` 常量已定义但从未被任何流转引用；`PipelineRun.AutoRun` 字段已存在但无任何接线。PR5 要把这些收敛成**单一可信源**。
 
-### 6.3 入口自动判定（§3.1.5）
-- `Orchestrator` 依 `pipeline_runs.mode` + 小说状态（章节数 / Volumes 是否存在 / 台账是否齐全）选入口：无章节→S1；有章节>3 且无台账→S0；已就绪→S3。
-- S0 导入对齐（§3.1.2）：归卷 → 补存量章细纲 → 全量 statesync → 现状体检 → S5 存量修复 → 汇入公共循环。
+- **逻辑下沉到 `Orchestrator`**：新增 `internal/pipeline/orchestrator.go`，`Orchestrator` 持 `run_id / current_stage / store / events / skillRunner`，暴露 `Advance(ctx, run, decision) error` 统一推进。`service.go` 的 `ResumePipeline` 退化为薄壳——仅做参数校验 + `AppendGateDecision` + 调 `orchestrator.Advance`；原 S3/S4/S5 特殊分支整体上移到 `Orchestrator.Advance` 内按 `current_stage` 分派。
+- **A 期状态机（DAG）**：流转表覆盖 S0|S1..S6 全阶段 + 回边（S4→S5→复评回 S4/S4b）+ 循环（S3 逐章）。节点动作类型：`RunSkill`（S1/S2/S4/S4b/S5/S6）、里程碑判定（S3）、`create_volume`（S2/S5 补卷）、`edit`（S3 实际写作走前端 chat，后端只判定）。所有推进确定性，不依赖 LLM 记忆步骤。
+- **S6 完本终检**：新增 `enterFinalAudit(ctx, run)`（复用 `enterAudit` 范式，`reason="final"`，stage=S6）→ `executeFinalAudit` 跑 `signability-audit` 全本 → 落 **G终闸门**（`options: ["finish", "fix", "abort"]`）。`finish` 置 `Status=finished`；`fix` 进入 S5 修后复评，复评通过再回 S6；`abort` 置 aborted。
+- **auto_run 自主连跑**：`StartPipeline` 增加 `autoRun bool` 参数并写入 `AutoRun` 字段。`Orchestrator.Advance` 在 `autoRun=true` 时，每完成一个**非闸门节点**自动以 `continue` 决策继续推进；仅在 `EvGate` 停下。闸门自动裁决策略：G3b 普通闸 auto-`continue`；G4 通过 auto-`continue` / 不通过 auto-`fix`；G终需人工 `finish`（避免误判完本）。同时支持 `ControlPipeline(cmd="set_auto")` 运行中切换。
+- **安全检查点**：阶段切换前、S3 各章间、S5 每轮前、auto_run 每章间，轮询 `Status==paused/aborted`，命中即挂起持久化（复用 PR1 `ControlPipeline` 的 pause/resume/stop）。
+- **S0 导入/续写自动选入口**：新增 `DetermineEntryStage(novelID)`——无章节→S1；有章节>3 且无台账→S0；已就绪（有章节且有台账）→S3。`StartPipeline` 据结果置初始 `CurrentStage`；S0 对齐子流程（归卷 → 补存量章细纲 → 全量 statesync → 现状体检 → S5 存量修复 → 汇入公共循环）编排进 `Orchestrator`。
+- **前端退化**：`PipelineWizard` 移除顺序决策逻辑，仅订阅 `EvStage / EvGate / EvControlAck` 做纯进度展示；阶段条加入 S6 + G终。`PipelineControlBar` 增加「自动运行」开关（调 `StartPipeline(autoRun)` 或 `ControlPipeline("set_auto")`）。
 
-### 测试
-- `orchestrator_test.go`（完整 DAG）：从 S1 跑通至 S6，验证闸门阻塞/恢复、auto_run 仅在闸门停、paused 在安全检查点中断、S4→S5→复评回边、重启后续跑。
-- 端到端：起 `wails dev`，A 期模式跑完一本短篇（3 卷 × 数章），断言 `pipeline_runs` 终态 `finished` 且各产物落库。
+### 6.2 代码改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `internal/pipeline/orchestrator.go`（**新增**） | `Orchestrator` 结构体 + `Advance(ctx, run, decision)` 统一流转；全阶段节点表与回边；`enterFinalAudit` / `executeFinalAudit`（S6）；`DetermineEntryStage`（S0 选入口）；`autoRun` 连跑与安全检查点轮询。 |
+| `internal/pipeline/orchestrator_c.go` | 常量定义（`Stage*`/`Gate*`）保留；`NextStage` 函数迁移到 `orchestrator.go` 后**删除本文件函数**，避免双源。 |
+| `internal/pipeline/service.go` | 1) `ResumePipeline` 改为调 `orchestrator.Advance`（原 S3/S4/S5 特殊分支移除，Logic 上移）；2) `StartPipeline` 增加 `autoRun bool` 并写入 `AutoRun`；3) `ControlPipeline` 增加 `set_auto` 命令切换 `AutoRun`；4) S6/G终 的 `finish` 决策置 `Status=finished`。 |
+| `internal/pipeline/store.go` | `GateContext` 新增 `EntryStage string` / `ImportAligned bool`（S0 状态追踪，json 字段 `entry_stage` / `import_aligned`）；`PipelineRun` 已有 `AutoRun` / `StartChapter`。 |
+| `frontend/src/components/pipeline/PipelineWizard.tsx` | 顺序逻辑移除，纯展示；阶段进度条加入 S6 + G终；S6 视图复用 `SignabilityAuditView` 终检样式。 |
+| `frontend/src/components/pipeline/PipelineControlBar.tsx` | 增加「自动运行」开关 → `StartPipeline(autoRun)` / `ControlPipeline("set_auto")`。 |
+| `frontend/src/i18n/locales/zh-CN.json` / `en.json` | 新增 `pipeline.stage.S6`（「完本终检 / Final Audit」）、`pipeline.gate.finish`（「确认完本」）、S0 相关文案、`pipeline.autoRun`（「自动运行」）；G终选项 label。 |
+
+### 6.3 测试
+
+- 新增 `internal/pipeline/orchestrator_test.go`（完整 DAG）：
+  - `TestOrchestratorFullRun`：从 S1 跑通至 S6 → G终 → `Status==finished`；断言各产物（卷记录 / 体检 JSON / 修复痕迹）落库。
+  - `TestOrchestratorGateBlockResume`：S3/G4/G终 闸门点 `Advance` 后 `Status==awaiting_gate`，`ResumePipeline` 恢复后继续。
+  - `TestOrchestratorAutoRunStopsAtGate`：`autoRun=true` 时连续推进直到首个 `EvGate`，不在非闸门节点停留。
+  - `TestOrchestratorPauseAtCheckpoint`：S5 每轮前 / S3 章间置 `paused`，断言 `Advance` 挂起且不推进。
+  - `TestOrchestratorS4S5ReAuditEdge`：S4→fix→S5→复评→S4 回边正确；`audit_stage` 在 S4/S4b 间保持。
+  - `TestOrchestratorS0ImportEntry`：注入老书（有章节无台账）→ `DetermineEntryStage` 返回 S0 → 跑对齐子流程至汇入 S3 循环。
+  - `TestOrchestratorResumeAfterRestart`：模拟中断后 `GetByRunID` 恢复 `current_stage`+`context_json` 续跑。
+- 端到端：起 `wails dev`，A 期 `autoRun` 跑完一本短篇（3 卷 × 数章），断言 `pipeline_runs` 终态 `finished` 且各产物落库。
+- CI 门禁同前：prettier / i18n:check / eslint(0 error) / `npm run build` / `go build ./...` / gofmt + golangci-lint。
+
+### 6.4 完成判据（验收）
+
+- [ ] `orchestrator.go` 成为唯一流转源，`ResumePipeline` 无阶段分支硬编码。
+- [ ] S6 完本终检 + G终 + `finished` 收口可跑通。
+- [ ] `auto_run` 可一键连跑并在闸门/安全检查点停。
+- [ ] S0 导入/续写依据小说状态自动选入口并跑通对齐子流程。
+- [ ] 前端 `PipelineWizard` 仅展示、无顺序逻辑；`PipelineControlBar` 有自动运行开关。
+- [ ] `orchestrator_test.go` 全部用例绿。
+
 
 ---
 
