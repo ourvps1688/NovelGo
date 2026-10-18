@@ -28,8 +28,8 @@ export default function PipelineWizard({ novelId }: Props) {
             key={s}
             className={`rounded px-2 py-1 text-xs ${
               i === activeIndex
-                ? "bg-black text-white"
-                : "bg-gray-100 text-gray-500"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground"
             }`}
           >
             {t(`pipeline.stage.${s}`)}
@@ -43,10 +43,12 @@ export default function PipelineWizard({ novelId }: Props) {
       <div className="flex-1 overflow-auto p-4">
         {!run ? (
           <div className="flex flex-col items-start gap-3">
-            <p className="text-sm text-gray-600">{t("pipeline.empty")}</p>
+            <p className="text-sm text-muted-foreground">
+              {t("pipeline.empty")}
+            </p>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded bg-black px-3 py-1.5 text-white text-sm"
+              className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm"
               onClick={() => start("new", null)}
             >
               <Play className="w-4 h-4" />
@@ -57,21 +59,25 @@ export default function PipelineWizard({ novelId }: Props) {
 
         {run && status !== "finished" && status !== "aborted" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-muted-foreground">
               {t("pipeline.currentStage", { stage })}
             </p>
             {gate ? <PipelineGateCard gate={gate} onResume={resume} /> : null}
             {!gate && stage === "S1" ? (
-              <p className="text-sm text-gray-500">{t("pipeline.hint.s1")}</p>
+              <p className="text-sm text-muted-foreground">
+                {t("pipeline.hint.s1")}
+              </p>
             ) : null}
             {!gate && stage === "S3" ? (
-              <p className="text-sm text-gray-500">{t("pipeline.hint.s3")}</p>
+              <p className="text-sm text-muted-foreground">
+                {t("pipeline.hint.s3")}
+              </p>
             ) : null}
           </div>
         ) : null}
 
         {status === "finished" || status === "aborted" ? (
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-muted-foreground">
             {t(`pipeline.ended.${status}`)}
           </p>
         ) : null}

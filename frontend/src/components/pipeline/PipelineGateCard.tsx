@@ -11,17 +11,17 @@ interface Props {
 export default function PipelineGateCard({ gate, onResume }: Props) {
   const { t } = useTranslation();
   return (
-    <div className="rounded border border-amber-300 bg-amber-50 p-3">
-      <div className="font-medium text-amber-800">
+    <div className="rounded border border-warning-border bg-warning p-3">
+      <div className="font-medium text-warning-foreground">
         {t("pipeline.gate.title")}
       </div>
       {gate.summary ? (
-        <p className="mt-1 text-sm text-gray-600">{gate.summary}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{gate.summary}</p>
       ) : null}
       <div className="mt-3 flex gap-2">
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded bg-black px-3 py-1 text-white text-sm"
+          className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1 text-primary-foreground text-sm"
           onClick={() => onResume("continue")}
         >
           <Check className="w-4 h-4" />
@@ -37,7 +37,7 @@ export default function PipelineGateCard({ gate, onResume }: Props) {
         </button>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded border border-red-300 px-3 py-1 text-sm text-red-600"
+          className="inline-flex items-center gap-1 rounded border border-danger-border px-3 py-1 text-sm text-red-600"
           onClick={() => onResume("abort")}
         >
           <X className="w-4 h-4" />
