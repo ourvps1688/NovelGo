@@ -246,3 +246,126 @@ func TestServiceAuditFixLoopReAudit(t *testing.T) {
 	require.Contains(t, ctxt.Audit, "pass", "复评应反映修复后的 pass 结论")
 	require.Equal(t, 1, auditCalls, "修复后应再跑一次体检做复评")
 }
+
+// withCapturedGates 临时接管 emitGate，收集所有发出的闸门事件，测试结束后还原。
+func withCapturedGates(t *testing.T) *[]GatePayload {
+	t.Helper()
+	var captured []GatePayload
+	orig := emitGate
+	emitGate = func(_ context.Context, p GatePayload) { captured = append(captured, p) }
+	t.Cleanup(func() { emitGate = orig })
+	return &captured
+}
+
+// startS3Run 直接把流水线置为 S3 写作态（带给定 ContextJSON），跳过 S1/S2 异步路径以便精确控制。
+func startS3Run(t *testing.T, svc *Service, novelID int64, contextJSON string) string {
+	t.Helper()
+	run, err := svc.StartPipeline(context.Background(), novelID, "new", nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.SetStageStatus(context.Background(), run.RunID, StageS3, StatusRunning, contextJSON))
+	return run.RunID
+}
+
+// TestServiceMilestoneGateOffersAudit 验证：已体检过（last_audit_chapter=3）且当前章数=8
+// （距上次 5 章）时，S3「继续」应弹出 G3b 里程碑闸，且提供 audit_now 选项。
+func TestServiceMilestoneGateOffersAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 8, nil }
+	captured := withCapturedGates(t)
+	ctx := context.Background()
+
+	runID := startS3Run(t, svc, 500, `{"last_audit_chapter":3,"s4_audited":true}`)
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
+
+	require.NotEmpty(t, *captured, "应弹出 G3b 里程碑闸")
+	last := (*captured)[len(*captured)-1]
+	require.Equal(t, StageS3, last.Stage)
+	require.Equal(t, GateG3b, last.GateID)
+	require.Contains(t, last.Options, "audit_now", "里程碑闸应提供进入体检选项")
+	require.NotContains(t, last.Options, "modify", "PR4 不再使用 modify 选项")
+}
+
+// TestServiceVolumeBoundaryOffersAudit 验证：跨卷边界（volumeBoundary=true）时，
+// 即便章数未达 5 章间距，S3「继续」也应弹出 G3b 里程碑闸并提供 audit_now。
+func TestServiceVolumeBoundaryOffersAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 3, nil }
+	svc.volumeBoundary = func(_ context.Context, _ int64) (bool, error) { return true, nil }
+	captured := withCapturedGates(t)
+	ctx := context.Background()
+
+	runID := startS3Run(t, svc, 501, `{"last_audit_chapter":3,"s4_audited":true}`)
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
+
+	require.NotEmpty(t, *captured)
+	last := (*captured)[len(*captured)-1]
+	require.Equal(t, StageS3, last.Stage)
+	require.Equal(t, GateG3b, last.GateID)
+	require.Contains(t, last.Options, "audit_now", "卷边界应触发复检选项")
+}
+
+// TestServiceNonMilestoneGateNoAudit 验证：已体检过且章数仅 +1（未达 5 章、未跨卷）时，
+// S3「继续」只弹普通逐章闸，不提供 audit_now，避免频繁打断写作。
+func TestServiceNonMilestoneGateNoAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 4, nil }
+	svc.volumeBoundary = func(_ context.Context, _ int64) (bool, error) { return false, nil }
+	captured := withCapturedGates(t)
+	ctx := context.Background()
+
+	runID := startS3Run(t, svc, 502, `{"last_audit_chapter":3,"s4_audited":true}`)
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
+
+	require.NotEmpty(t, *captured)
+	last := (*captured)[len(*captured)-1]
+	require.Equal(t, StageS3, last.Stage)
+	require.Equal(t, GateG3b, last.GateID)
+	require.ElementsMatch(t, []string{"continue", "abort"}, last.Options, "普通逐章闸不应提供 audit_now")
+}
+
+// TestServiceAuditNowEntersS4b 验证：G3b 选 audit_now 应进入 S4b 卷边界复评阶段，
+// 且 ContextJSON.audit_stage 记录为 S4b（供修复后复评回到同阶段）。
+func TestServiceAuditNowEntersS4b(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 8, nil }
+	ctx := context.Background()
+
+	runID := startS3Run(t, svc, 503, `{"last_audit_chapter":3,"s4_audited":true}`)
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "audit_now", ""))
+
+	waitForStageStatus(t, svc, runID, StatusAwaitingGate)
+	got, _ := svc.store.GetByRunID(ctx, runID)
+	require.Equal(t, StageS4b, got.CurrentStage, "audit_now 应进入 S4b 卷边界复评")
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Equal(t, StageS4b, ctxt.AuditStage, "audit_stage 应记录为 S4b")
+	require.Equal(t, "milestone", ctxt.AuditReason)
+}
+
+// TestServiceMilestoneResetsLastAuditChapter 验证：卷边界复评后用户选 continue，
+// ContextJSON.last_audit_chapter 应更新为当前章数，避免立刻再次复检。
+func TestServiceMilestoneResetsLastAuditChapter(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 8, nil }
+	ctx := context.Background()
+
+	runID := startS3Run(t, svc, 504, `{"last_audit_chapter":3,"s4_audited":true}`)
+	// 里程碑闸选 audit_now → 进入 S4b
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "audit_now", ""))
+	waitForStageStatus(t, svc, runID, StatusAwaitingGate)
+	got, _ := svc.store.GetByRunID(ctx, runID)
+	require.Equal(t, StageS4b, got.CurrentStage)
+
+	// G4 选 continue → 回到 S3，且 last_audit_chapter 更新为 8
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
+	got, _ = svc.store.GetByRunID(ctx, runID)
+	require.Equal(t, StageS3, got.CurrentStage)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Equal(t, 8, ctxt.LastAuditChapter, "复评后应把 last_audit_chapter 推进到当前章数")
+}

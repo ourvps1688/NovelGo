@@ -58,6 +58,13 @@ type GateContext struct {
 	// S4Audited 标记本书是否已做过一次签约体检（无论通过与否）。一旦为 true，
 	// S3 逐章循环不再自动触发 S4a（避免每章都弹体检），改由 PR4 的 G3b 里程碑智能触发。
 	S4Audited bool `json:"s4_audited,omitempty"`
+	// LastAuditChapter 记录上次签约体检（S4/S4b）时本书已落库章节数；供 PR4 里程碑闸计算间距
+	// （每 5 章触发一次复检）。未体检过为 0，等同强制下次进入里程碑判定。
+	LastAuditChapter int `json:"last_audit_chapter,omitempty"`
+	// AuditReason 记录上次进入体检的触发原因：golden3（黄金三章首检）| milestone（章节里程碑）| volume（卷边界）。
+	AuditReason string `json:"audit_reason,omitempty"`
+	// AuditStage 记录上次体检所处的阶段（S4 首检 / S4b 卷边界复评），供修复后复评回到同阶段。
+	AuditStage string `json:"audit_stage,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。

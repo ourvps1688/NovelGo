@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Edit3, Wrench, X } from "lucide-react";
+import { Check, Edit3, Stethoscope, Wrench, X } from "lucide-react";
 import type { GatePayload, GateDecision } from "@/types/pipeline";
 
 interface Props {
@@ -31,6 +31,12 @@ export default function PipelineGateCard({ gate, onResume }: Props) {
       icon: <Wrench className="w-4 h-4" />,
       variant:
         "inline-flex items-center gap-1 rounded border px-3 py-1 text-sm",
+    },
+    audit_now: {
+      label: t("pipeline.gate.auditNow"),
+      icon: <Stethoscope className="w-4 h-4" />,
+      variant:
+        "inline-flex items-center gap-1 rounded bg-primary px-3 py-1 text-primary-foreground text-sm",
     },
     modify: {
       label: t("pipeline.gate.modify"),

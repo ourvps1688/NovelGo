@@ -40,7 +40,7 @@ export default function SignabilityAuditView({
 }: Props) {
   const { t } = useTranslation();
 
-  if (stage !== "S4" && stage !== "S5") return null;
+  if (stage !== "S4" && stage !== "S4b" && stage !== "S5") return null;
 
   const isFix = stage === "S5";
 

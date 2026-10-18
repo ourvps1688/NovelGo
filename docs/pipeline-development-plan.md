@@ -182,21 +182,40 @@
 
 ---
 
-## 5. PR4 — G3b 里程碑闸 + 卷边界 S4b 复评
+## 5. PR4 — G3b 里程碑闸 + 卷边界 S4b 复评（已落地 2026-10-19）
 
-**目标**：长线写作的多节点质量闸门就位。
+**目标**：长线写作的多节点质量闸门就位；解决「写完多章仍停在逐章写作、无法再触发签约体检」的卡点。
 
-### 5.1 G3b 里程碑闸
-- 计数器基于**全书绝对章号**（`ch % 5 == 0`）或卷边界，取先到者。
-- 在 `orchestrator` 的 S3 循环每章结束后判定：`EmitGate(G3b)` + 置 `awaiting_gate`；用户 `resume` 后继续。
-- 续写模式（§3.1.4）：老书 ch20 → 下次闸 ch25 或下一卷边界。
+### 5.1 设计要点（相对原 §5 的修正）
+- **触发驱动**：C 期架构下，S3 写作本身走前端 chat，流水线只在用户点「继续/检查进度」时评估一次。因此 G3b 闸在 `ResumePipeline` 的 S3 分支按**当前章节数**判定，而非后台监听每章落库。
+- **里程碑判定**（满足任一即弹 G3b 并给 `audit_now` 选项）：
+  1. `当前章数 - ContextJSON.last_audit_chapter >= 5`（每 5 章复检一次）；
+  2. **跨卷边界**：最新两章的 `volume_id` 不同（即刚进入新卷）。
+- **首检**：`章数 >= 3 && !S4Audited` → 走原黄金三章首检（进入 S4，reason=golden3），与 PR3 行为一致。
+- **G3b 选项**：
+  - 里程碑闸：`["continue", "audit_now", "abort"]`；
+  - 普通逐章闸（未达里程碑）：`["continue", "abort"]`，文案提示「继续写作，累计 5 章或进入新卷会提示体检」。
+- **卷边界复评用 S4b 阶段**：`audit_now` 或跨卷触发的复检进入 `S4b`（reason=milestone/volume），首检走 `S4`。`S4/S4b` 在 `ResumePipeline` 共用一套处理逻辑；`executeFix` 复评后回到 `ContextJSON.audit_stage` 记录的同阶段。
 
-### 5.2 卷边界 S4b 复评
-- S3 循环检测到「本章为卷末」→ 触发 S4b（`RunSkill("signability-audit")` 全卷/累计）→ S5 修复 → 复评。
-- 复用 PR3 的 S4/S5 节点，仅触发时机不同。
+### 5.2 代码改动清单
+| 文件 | 改动 |
+|---|---|
+| `internal/pipeline/store.go` | `GateContext` 新增 `LastAuditChapter int` / `AuditReason string` / `AuditStage string`（json 字段 `last_audit_chapter` / `audit_reason` / `audit_stage`）。 |
+| `internal/pipeline/service.go` | 1) `Service` 新增可替换 `volumeBoundary` 函数（默认 `defaultVolumeBoundary`，查最新两章 `volume_id` 比较）；2) `enterAudit(ctx, run, reason)` 按 reason 选 `S4`/`S4b`，并把 `AuditReason`/`AuditStage` 写回 `ContextJSON`；3) `markAuditedJSON(ctx, chapterCount)` 置 `S4Audited=true` 且 `LastAuditChapter=当前章数`；4) `executeAudit` 以 `run.CurrentStage` 作为 audit 阶段，`isAuditStage` 守卫放宽到 S4/S4b；5) `executeFix` 复评前复位到 `ctxt.AuditStage`；6) `ResumePipeline` S3 分支加入 `audit_now` + 里程碑判定，S4/S4b 合并处理，S5 兜底按 `AuditStage` 回到同阶段。 |
+| `frontend/src/types/pipeline.ts` | `GateDecision` 增加 `"audit_now"`。 |
+| `frontend/src/components/pipeline/PipelineGateCard.tsx` | `config` 增加 `audit_now` 项（图标 `Stethoscope`，label `pipeline.gate.auditNow`）。 |
+| `frontend/src/components/pipeline/PipelineWizard.tsx` | 1) S3 无闸时增加「检查进度 / 继续写作」按钮触发 `resume("continue")`（让里程碑判定可触发）；2) 审计视图条件加入 `S4b`。 |
+| `frontend/src/components/pipeline/SignabilityAuditView.tsx` | 阶段判定加入 `S4b`（复检视图与 S4 同款）。 |
+| `frontend/src/i18n/locales/zh-CN.json` / `en.json` | 新增 `pipeline.gate.auditNow`；`pipeline.stage.S4b` 改为「卷边界复评 / Volume Re-audit」；`pipeline.hint.s3` 明确里程碑触发条件。 |
 
-### 测试
-- `orchestrator_test.go` —— 模拟写 6 章，断言第 5 章后 `EmitGate(G3b)` 一次；模拟卷末，断言 S4b 触发一次。
+### 5.3 测试
+- 现有 `service_test.go` 全绿（黄金三章首检 / continue 置位 / fix 闭环复评 三条用例兼容 S4b 改动）。
+- 新增 `service_test.go`：
+  - `TestServiceMilestoneGateOffersAudit`：注入 `chapterCount=8` 且 `last_audit_chapter=3` → S3 `continue` 应落 G3b 闸且 `options` 含 `audit_now`；
+  - `TestServiceVolumeBoundaryOffersAudit`：注入 `volumeBoundary=true` → S3 `continue` 落 G3b 且 `options` 含 `audit_now`；
+  - `TestServiceAuditNowEntersS4b`：G3b 选 `audit_now` → `CurrentStage==S4b` 且 `audit_stage==S4b`；
+  - `TestServiceNonMilestoneGateNoAudit`：注入 `chapterCount=4` 且 `last_audit_chapter=3` → G3b `options` 仅 `[continue, abort]`；
+  - `TestServiceMilestoneResetsLastAuditChapter`：复检后 `continue` → `last_audit_chapter` 更新为当前章数。
 
 ---
 

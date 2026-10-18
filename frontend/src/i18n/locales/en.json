@@ -1840,6 +1840,7 @@
       "continue": "Continue",
       "modify": "Continue after editing",
       "fix": "Enter fix loop",
+      "auditNow": "Enter Signability Audit",
       "abort": "Abort"
     },
     "stage": {
@@ -1850,19 +1851,20 @@
       "G3b": "Milestone Gate",
       "S4": "Signability Audit",
       "S5": "Fix Loop",
-      "S4b": "Audit Revision",
+      "S4b": "Volume Re-audit",
       "S6": "Export Draft"
     },
     "empty": "No pipeline run is in progress.",
     "start": "Start Pipeline",
     "continue": "Continue",
+    "checkProgress": "Check Writing Progress",
     "currentStage": "Current stage: {{stage}}",
     "stageBarTitle": "Creation Pipeline",
     "awaitingGate": "Awaiting confirmation",
     "running": "Running",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
-      "s3": "Writing chapter by chapter — keep writing according to the volume outline. When you reach a volume milestone (e.g. the first 3 chapters, or later every 5 chapters / volume boundary), a milestone gate will prompt you to enter the signability audit and fix loop. Click Continue once the milestone is reached."
+      "s3": "Writing chapter by chapter — keep writing according to the volume outline. A milestone gate offering \"Enter Signability Audit\" appears every 5 chapters since the last audit, or when you cross into a new volume. Click \"Check Writing Progress\" to trigger that check."
     },
     "blueprint": {
       "generating": "Generating blueprint…",

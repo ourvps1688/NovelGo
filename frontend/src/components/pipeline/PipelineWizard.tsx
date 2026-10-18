@@ -55,7 +55,7 @@ export default function PipelineWizard({ novelId }: Props) {
                 gate={gate}
                 onResume={resume}
               />
-            ) : stage === "S4" || stage === "S5" ? (
+            ) : stage === "S4" || stage === "S4b" || stage === "S5" ? (
               <SignabilityAuditView
                 run={run}
                 stage={stage}
@@ -84,9 +84,19 @@ export default function PipelineWizard({ novelId }: Props) {
                   </div>
                 ) : null}
                 {!gate && stage === "S3" ? (
-                  <p className="text-sm text-muted-foreground">
-                    {t("pipeline.hint.s3")}
-                  </p>
+                  <div className="flex flex-col gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      {t("pipeline.hint.s3")}
+                    </p>
+                    <button
+                      type="button"
+                      className="inline-flex w-fit items-center gap-1 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm"
+                      onClick={() => resume("continue")}
+                    >
+                      <ArrowRight className="h-4 w-4" />
+                      {t("pipeline.checkProgress")}
+                    </button>
+                  </div>
                 ) : null}
               </>
             )}

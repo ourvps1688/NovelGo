@@ -4,15 +4,16 @@ import "fmt"
 
 // 阶段与闸门标识（PR1 C 期 MVP 用到的子集；后续 PR 扩展为完整 DAG）。
 const (
-	StageS1 = "S1"  // 孵化（book-pitch）
-	GateG1  = "G1"  // 蓝图确认闸
-	StageS2 = "S2"  // 蓝图（PR2 落库）
-	StageS3 = "S3"  // 逐章写作（含评分门禁 + statesync）
-	GateG3b = "G3b" // 里程碑闸（PR4 启用，每 5 章 / 卷边界）
-	StageS4 = "S4"  // 签约体检（signability-audit，只读体检 + issue 清单）
-	StageS5 = "S5"  // 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）
-	GateG4  = "G4"  // 签约体检确认闸（出 S4 时停留，用户决定 continue / fix / abort）
-	StageS6 = "S6"  // 完本终检
+	StageS1  = "S1"  // 孵化（book-pitch）
+	GateG1   = "G1"  // 蓝图确认闸
+	StageS2  = "S2"  // 蓝图（PR2 落库）
+	StageS3  = "S3"  // 逐章写作（含评分门禁 + statesync）
+	GateG3b  = "G3b" // 里程碑闸（PR4 启用，每 5 章 / 卷边界）
+	StageS4  = "S4"  // 签约体检（signability-audit，只读体检 + issue 清单）
+	StageS4b = "S4b" // 卷边界复评（PR4：每 5 章 / 跨卷时触发，复用 S4 节点）
+	StageS5  = "S5"  // 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）
+	GateG4   = "G4"  // 签约体检确认闸（出 S4 时停留，用户决定 continue / fix / abort）
+	StageS6  = "S6"  // 完本终检
 )
 
 // NextStage 按当前阶段与用户决策，返回下一阶段与「进入下一阶段前需停留的闸门」。

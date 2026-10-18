@@ -7,7 +7,8 @@ export type PipelineStatus =
 export type PipelineMode = "new" | "continue";
 
 export type ControlCmd = "pause" | "resume" | "stop";
-export type GateDecision = "continue" | "modify" | "abort" | "fix";
+export type GateDecision =
+  "continue" | "modify" | "abort" | "fix" | "audit_now";
 
 export interface StagePayload {
   run_id: string;

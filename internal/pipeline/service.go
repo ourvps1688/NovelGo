@@ -36,6 +36,9 @@ type Service struct {
 	// chapterCount 返回本书已落库章节数，用于「黄金三章后自动进入 S4a 签约体检」的触发判定。
 	// 测试可替换为 stub 以确定性驱动 S3→S4 流转。
 	chapterCount func(ctx context.Context, novelID int64) (int, error)
+	// volumeBoundary 判断本书最新两章是否分属不同卷（即刚跨入新卷）。用于 PR4 卷边界复检触发。
+	// 测试可替换为 stub 以确定性驱动。
+	volumeBoundary func(ctx context.Context, novelID int64) (bool, error)
 }
 
 // NewService 构造流水线服务。
@@ -77,6 +80,7 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 			}
 			return int(c), nil
 		}
+		s.volumeBoundary = s.defaultVolumeBoundary
 	}
 	return s
 }
@@ -142,12 +146,40 @@ func (s *Service) ResumePipeline(ctx context.Context, runID, decision, feedback 
 		if decision == "abort" {
 			return s.abortRun(ctx, run)
 		}
-		// 写完黄金三章且尚未做过签约体检 → 自动进入 S4a 签约体检。
-		if s.reachedGoldenThree(ctx, run.NovelID) && !s.auditPassed(ctx, run.RunID) {
-			s.enterAudit(ctx, run)
+		// 用户显式选择「进入签约体检」（里程碑闸提供），直接进体检（卷边界复检走 S4b）。
+		if decision == "audit_now" {
+			s.enterAudit(ctx, run, "milestone")
 			return nil
 		}
-		// 否则维持逐章循环：置 S3 awaiting_gate 并广播 G3b 里程碑闸（PR4 将改为按章号智能触发）。
+		// 首检：写完黄金三章且尚未做过签约体检 → 自动进入 S4 签约体检。
+		if s.reachedGoldenThree(ctx, run.NovelID) && !s.auditPassed(ctx, run.RunID) {
+			s.enterAudit(ctx, run, "golden3")
+			return nil
+		}
+		// 已体检过：按 PR4 里程碑逻辑判定是否弹「可复检」的 G3b 闸。
+		n, _ := s.chapterCount(ctx, run.NovelID)
+		var ctxt GateContext
+		if run.ContextJSON != "" {
+			_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+		}
+		sinceLast := n - ctxt.LastAuditChapter
+		crossed := s.crossedVolumeBoundary(ctx, run.NovelID)
+		if n >= 3 && (sinceLast >= 5 || crossed) {
+			// 里程碑闸：提供「进入签约体检」选项，引导用户在节点处复检。
+			if err := s.store.SetStageStatus(ctx, runID, StageS3, StatusAwaitingGate, run.ContextJSON); err != nil {
+				return err
+			}
+			emitGate(ctx, GatePayload{
+				RunID:   runID,
+				NovelID: run.NovelID,
+				Stage:   StageS3,
+				GateID:  GateG3b,
+				Summary: milestoneSummary(n, sinceLast, crossed),
+				Options: []string{"continue", "audit_now", "abort"},
+			})
+			return nil
+		}
+		// 普通逐章闸：维持循环，提示继续写作，待达里程碑或卷边界再提示体检。
 		if err := s.store.SetStageStatus(ctx, runID, StageS3, StatusAwaitingGate, run.ContextJSON); err != nil {
 			return err
 		}
@@ -156,11 +188,11 @@ func (s *Service) ResumePipeline(ctx context.Context, runID, decision, feedback 
 			NovelID: run.NovelID,
 			Stage:   StageS3,
 			GateID:  GateG3b,
-			Summary: "",
+			Summary: fmt.Sprintf("已完成第 %d 章。继续写作下一章；累计写满 5 章或进入新卷时会提示进入签约体检。", n),
 			Options: []string{"continue", "abort"},
 		})
 		return nil
-	case StageS4:
+	case StageS4, StageS4b:
 		if decision == "abort" {
 			return s.abortRun(ctx, run)
 		}
@@ -170,15 +202,25 @@ func (s *Service) ResumePipeline(ctx context.Context, runID, decision, feedback 
 			return nil
 		}
 		// continue（通过或强制继续）：标记已体检，回到 S3 继续写作（不再自动弹体检）。
-		updated := s.markAuditedJSON(run.ContextJSON)
+		n, _ := s.chapterCount(ctx, run.NovelID)
+		updated := s.markAuditedJSON(run.ContextJSON, n)
 		if err := s.store.SetStageStatus(ctx, runID, StageS3, StatusRunning, updated); err != nil {
 			return err
 		}
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: StageS3, Status: StatusRunning})
 		return nil
 	case StageS5:
-		// S5 由异步循环（executeFix→executeAudit）自动回到 S4 复评；此处仅作安全兜底。
-		s.enterAudit(ctx, run)
+		// S5 由异步循环（executeFix→executeAudit）自动回到 S4 复评；此处仅作安全兜底，
+		// 按上下文记录的体检阶段回到同阶段（S4b 卷边界复评 / S4 首检）。
+		var ctxt GateContext
+		if run.ContextJSON != "" {
+			_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+		}
+		reason := "milestone"
+		if ctxt.AuditStage == StageS4b {
+			reason = "volume"
+		}
+		s.enterAudit(ctx, run, reason)
 		return nil
 	}
 
@@ -350,6 +392,54 @@ func (s *Service) reachedGoldenThree(ctx context.Context, novelID int64) bool {
 	return n >= 3
 }
 
+// crossedVolumeBoundary 判断本书最新两章是否分属不同卷（即刚跨入新卷）。
+// 用于 PR4「卷边界复检」触发：一旦进入新卷，里程碑闸即提供「进入签约体检」选项。
+func (s *Service) crossedVolumeBoundary(ctx context.Context, novelID int64) bool {
+	if s.volumeBoundary == nil {
+		return false
+	}
+	crossed, err := s.volumeBoundary(ctx, novelID)
+	if err != nil {
+		s.logger.Warn("卷边界判定：查询失败", "err", err)
+		return false
+	}
+	return crossed
+}
+
+// defaultVolumeBoundary 取本书按全局阅读序最新的两章，比较其 volume_id 是否不同。
+// 复用了 chapter 仓储的排序口径（未分卷 NULL 优先、再按 volumes.sort_order、chapters.sort_order、id）。
+func (s *Service) defaultVolumeBoundary(ctx context.Context, novelID int64) (bool, error) {
+	if s.store == nil || s.store.db == nil {
+		return false, nil
+	}
+	type volRow struct {
+		VolumeID *int64
+	}
+	var rows []volRow
+	err := s.store.db.WithContext(ctx).
+		Table("chapters").
+		Select("chapters.volume_id").
+		Joins("LEFT JOIN volumes ON volumes.id = chapters.volume_id").
+		Where("chapters.novel_id = ?", novelID).
+		Order("chapters.volume_id IS NULL DESC, volumes.sort_order DESC, chapters.sort_order DESC, chapters.id DESC").
+		Limit(2).
+		Scan(&rows).Error
+	if err != nil {
+		return false, err
+	}
+	if len(rows) < 2 {
+		return false, nil
+	}
+	a, b := rows[0].VolumeID, rows[1].VolumeID
+	if a == nil && b == nil {
+		return false, nil
+	}
+	if a == nil || b == nil {
+		return true, nil
+	}
+	return *a != *b, nil
+}
+
 // auditPassed 返回本书是否已做过签约体检（S4Audited 标记）。
 func (s *Service) auditPassed(ctx context.Context, runID string) bool {
 	run, err := s.store.GetByRunID(ctx, runID)
@@ -363,13 +453,15 @@ func (s *Service) auditPassed(ctx context.Context, runID string) bool {
 	return ctxt.S4Audited
 }
 
-// markAuditedJSON 在原 ContextJSON 上置 S4Audited=true 并返回序列化结果。
-func (s *Service) markAuditedJSON(contextJSON string) string {
+// markAuditedJSON 在原 ContextJSON 上置 S4Audited=true 并记录当前已体检到的章节数，
+// 返回序列化结果。chapterCount 用于 PR4 里程碑闸的间距判定（避免每章重复复检）。
+func (s *Service) markAuditedJSON(contextJSON string, chapterCount int) string {
 	var ctxt GateContext
 	if contextJSON != "" {
 		_ = json.Unmarshal([]byte(contextJSON), &ctxt)
 	}
 	ctxt.S4Audited = true
+	ctxt.LastAuditChapter = chapterCount
 	b, err := json.Marshal(ctxt)
 	if err != nil {
 		return contextJSON
@@ -377,13 +469,45 @@ func (s *Service) markAuditedJSON(contextJSON string) string {
 	return string(b)
 }
 
-// enterAudit 置 S4 running 并异步执行 signability-audit。
-func (s *Service) enterAudit(ctx context.Context, run *PipelineRun) {
-	if err := s.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, run.ContextJSON); err != nil {
+// isAuditStage 判定给定阶段是否为体检阶段（S4 首检 / S4b 卷边界复评）。
+func isAuditStage(stage string) bool {
+	return stage == StageS4 || stage == StageS4b
+}
+
+// milestoneSummary 生成 G3b 里程碑闸的提示文案（中文，由后端直接下发给前端展示）。
+func milestoneSummary(n, sinceLast int, crossed bool) string {
+	if crossed {
+		return fmt.Sprintf("已跨入新卷（累计 %d 章，距上次体检 %d 章）。建议在「卷边界复评」中做一次全卷签约体检，或继续写作。", n, sinceLast)
+	}
+	return fmt.Sprintf("已写 %d 章，距上次签约体检已过 %d 章（每 5 章触发一次）。建议进入签约体检与修复闭环，或继续写作。", n, sinceLast)
+}
+
+// enterAudit 置体检阶段 running 并异步执行 signability-audit。
+// reason 决定进入的阶段：golden3 → S4（首检）；milestone / volume → S4b（卷边界复评）。
+// 同时把触发原因与体检阶段写回 ContextJSON，供修复后复评回到同阶段。
+func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason string) {
+	stage := StageS4
+	if reason != "golden3" {
+		stage = StageS4b
+	}
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	ctxt.AuditReason = reason
+	ctxt.AuditStage = stage
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		s.logger.Warn("S4 进入：序列化上下文失败", "err", merr)
+		updated = []byte(run.ContextJSON)
+	}
+	if err := s.store.SetStageStatus(ctx, run.RunID, stage, StatusRunning, string(updated)); err != nil {
 		s.logger.Error("S4 进入失败", "err", err)
 		return
 	}
-	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS4, Status: StatusRunning})
+	run.CurrentStage = stage
+	run.ContextJSON = string(updated)
+	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: stage, Status: StatusRunning})
 	go s.executeAudit(run.RunID, run.NovelID)
 }
 
@@ -397,8 +521,9 @@ func (s *Service) enterFix(ctx context.Context, run *PipelineRun) {
 	go s.executeFix(run.RunID, run.NovelID)
 }
 
-// executeAudit 异步执行 S4 签约体检：跑 signability-audit（只读）→ 解析 issue 清单 →
-// 写回 ContextJSON.Audit → 置 S4 awaiting_gate 并广播 G4 闸门（options: continue/fix/abort）。
+// executeAudit 异步执行签约体检：跑 signability-audit（只读）→ 解析 issue 清单 →
+// 写回 ContextJSON.Audit → 置体检阶段 awaiting_gate 并广播 G4 闸门（options: continue/fix/abort）。
+// 体检阶段（S4 首检 / S4b 卷边界复评）以进入时的 run.CurrentStage 为准，保证复评回到同阶段。
 func (s *Service) executeAudit(runID string, novelID int64) {
 	ctx := s.appCtx
 	run, err := s.store.GetByRunID(ctx, runID)
@@ -406,6 +531,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		s.logger.Error("S4 体检：加载流水线失败", "run_id", runID, "err", err)
 		return
 	}
+	auditStage := run.CurrentStage // S4 或 S4b
 
 	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
@@ -415,7 +541,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	})
 	if err != nil {
 		s.logger.Error("S4 体检执行失败", "run_id", runID, "err", err)
-		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS4, Status: StatusRunning, Note: "签约体检失败：" + err.Error()})
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: auditStage, Status: StatusRunning, Note: "签约体检失败：" + err.Error()})
 		return
 	}
 
@@ -435,12 +561,12 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 
 	// 守卫：若异步执行期间用户已推进（如点了 fix / continue），不覆盖新状态。
 	cur, gerr := s.store.GetByRunID(ctx, runID)
-	if gerr == nil && (cur.CurrentStage != StageS4 || cur.Status != StatusRunning) {
+	if gerr == nil && (!isAuditStage(cur.CurrentStage) || cur.Status != StatusRunning) {
 		s.logger.Info("S4 体检：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
 		return
 	}
 
-	if err := s.store.SetStageStatus(ctx, runID, StageS4, StatusAwaitingGate, string(updated)); err != nil {
+	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
 		s.logger.Error("S4 体检：落库闸门状态失败", "err", err)
 		return
 	}
@@ -452,7 +578,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	emitGate(ctx, GatePayload{
 		RunID:   runID,
 		NovelID: novelID,
-		Stage:   StageS4,
+		Stage:   auditStage,
 		GateID:  GateG4,
 		Summary: summary,
 		Options: []string{"continue", "fix", "abort"},
@@ -489,10 +615,18 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		return
 	}
 
-	// 修复完成 → 复位为 S4 体检态并自动复评（仍异步）。
-	// 复位到 S4 running 是为了让 executeAudit 的「状态未变更」守卫判定通过，
+	// 修复完成 → 复位为原体检阶段（S4 / S4b）并自动复评（仍异步）。
+	// 复位到对应体检阶段 running 是为了让 executeAudit 的「状态未变更」守卫判定通过，
 	// 否则守卫会因当前为 S5 而放弃落 G4 闸门，导致复评结果无家可归（见测试 TestServiceAuditFixLoopReAudit）。
-	if err := s.store.SetStageStatus(ctx, runID, StageS4, StatusRunning, run.ContextJSON); err != nil {
+	auditStage := StageS4
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	if ctxt.AuditStage != "" {
+		auditStage = ctxt.AuditStage
+	}
+	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusRunning, run.ContextJSON); err != nil {
 		s.logger.Error("S5 修复：复评前复位阶段失败", "err", err)
 		return
 	}
