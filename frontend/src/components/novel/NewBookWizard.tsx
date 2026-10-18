@@ -1,27 +1,21 @@
 import { useEffect, useState } from "react";
 import { PenLine, Plus, Sparkles, Target, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { CreatePreference, SetEnabledSkills } from "@/lib/wailsjs/go/app/App";
+import {
+  CreatePreference,
+  SetEnabledSkills,
+  StartPipeline,
+} from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
 import { toErrorMessage } from "@/utils/error";
-import { toastError, toastSuccess } from "@/utils/toast";
-import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
+import { toastSuccess } from "@/utils/toast";
+import { usePanelStore } from "@/stores/usePanelStore";
 import { useCreateNovel } from "./useCreateNovel";
 import {
   POLAR_STAR_CATEGORY,
   serializePolar,
   type PolarData,
 } from "@/components/preference/polarStarData";
-
-// 等待 React 完成「切换小说 → ChatPanel 用新 novelId 重新 register(send)」的渲染提交，
-// 避免把 kickoff 误发到旧书。双 rAF 覆盖一次完整 commit 周期。
-function nextFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
-async function flushToNextRender(): Promise<void> {
-  await nextFrame();
-  await nextFrame();
-}
 
 type StrategyKey = "signing" | "free" | "experimental";
 
@@ -79,6 +73,7 @@ interface Props {
 export default function NewBookWizard({ open, onClose, onCreated }: Props) {
   const { t } = useTranslation();
   const createNovel = useCreateNovel();
+  const setActivePanel = usePanelStore((s) => s.setActivePanel);
 
   const [step, setStep] = useState<1 | 2>(1);
   const [strategyKey, setStrategyKey] = useState<StrategyKey>("signing");
@@ -192,32 +187,19 @@ export default function NewBookWizard({ open, onClose, onCreated }: Props) {
     }
   }
 
-  // 「立即启动」：先切到新书（bind chat），等 ChatPanel 用新 novelId 重注册 send，
-  // 再发签约工作流 kickoff。切书在 onCreated 内完成（含 setActivePanel）。
+  // 「立即启动」：建书后直接启动签约潜力流水线并切到流水线面板。
+  // PR3 后该工作流由 pipeline 状态机驱动，不再走 chat skill kickoff。
   async function handleLaunchConfirm() {
     const id = launchPromptId;
     if (id == null || saving) return;
     setSaving(true);
     try {
       await onCreated(id);
-      await flushToNextRender();
-      const send = useChatLaunchStore.getState().send;
-      if (send) {
-        // 再确保本工作流技能已启用（建书时已随策略启用，此处幂等兜底）。
-        const base = new Set(strategy.skills);
-        base.add("signability-workflow");
-        try {
-          await SetEnabledSkills({ novel_id: id, names: [...base] });
-        } catch {
-          // 兜底启用失败不阻塞 kickoff。
-        }
-        send(t("signability.kickoff"));
-        toastSuccess(
-          t("wizard.launchedToast", { workflow: t("workflow.signability") }),
-        );
-      } else {
-        toastError(t("wizard.launchChatNotReady"));
-      }
+      await StartPipeline(id, "new", null);
+      setActivePanel("pipeline");
+      toastSuccess(
+        t("wizard.launchedToast", { workflow: t("workflow.signability") }),
+      );
     } catch (e) {
       setError(toErrorMessage(e, t("wizard.launchFailed")));
     } finally {
