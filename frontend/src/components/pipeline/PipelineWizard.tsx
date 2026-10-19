@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Play } from "lucide-react";
+import { ArrowRight, CheckCircle, Play } from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
@@ -15,13 +15,17 @@ interface Props {
 // 实际创作（孵化 / 逐章写作）仍走现有 UI，向导只负责可见进度与「仅点继续」的闭环。
 export default function PipelineWizard({ novelId }: Props) {
   const { t } = useTranslation();
-  const { run, stage, status, gate, start, resume, control } =
+  const { run, stage, status, gate, autoRun, start, resume, control } =
     usePipeline(novelId);
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-end border-b px-4 py-2">
-        <PipelineControlBar status={status} onControl={control} />
+        <PipelineControlBar
+          status={status}
+          autoRun={autoRun}
+          onControl={control}
+        />
       </div>
 
       <div className="flex-1 overflow-auto p-4">
@@ -55,7 +59,10 @@ export default function PipelineWizard({ novelId }: Props) {
                 gate={gate}
                 onResume={resume}
               />
-            ) : stage === "S4" || stage === "S4b" || stage === "S5" ? (
+            ) : stage === "S4" ||
+              stage === "S4b" ||
+              stage === "S5" ||
+              stage === "S6" ? (
               <SignabilityAuditView
                 run={run}
                 stage={stage}
@@ -88,14 +95,25 @@ export default function PipelineWizard({ novelId }: Props) {
                     <p className="text-sm text-muted-foreground">
                       {t("pipeline.hint.s3")}
                     </p>
-                    <button
-                      type="button"
-                      className="inline-flex w-fit items-center gap-1 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm"
-                      onClick={() => resume("continue")}
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                      {t("pipeline.checkProgress")}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex w-fit items-center gap-1 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm"
+                        onClick={() => resume("continue")}
+                      >
+                        <ArrowRight className="h-4 w-4" />
+                        {t("pipeline.checkProgress")}
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex w-fit items-center gap-1 rounded border px-3 py-1.5 text-sm"
+                        title={t("pipeline.gate.finishBookHint")}
+                        onClick={() => resume("finish_book")}
+                      >
+                        <CheckCircle className="h-4 w-4" />
+                        {t("pipeline.gate.finishBook")}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </>

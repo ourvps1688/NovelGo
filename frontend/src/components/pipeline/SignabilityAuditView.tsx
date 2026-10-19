@@ -26,11 +26,12 @@ interface Props {
   onResume: (decision: GateDecision, feedback?: string) => void;
 }
 
-// S4 签约体检 / S5 修复闭环视图：
+// S4 签约体检 / S5 修复闭环 / S6 完本终检视图：
 // - 后端异步跑 signability-audit（只读体检）期间显示「体检中」；
-// - 完成后经 G4 闸门携带 issue 清单（gate.summary 或 run.ContextJSON.audit）渲染 verdict + 问题列表；
-// - S5 修复期间显示「修复中」，修复完成自动回到 S4 复评（仍由 G4 闸门交回用户）。
-// 非 S4/S5 阶段返回 null，由父组件按原逻辑渲染。
+// - 完成后经 G4/G终 闸门携带 issue 清单（gate.summary 或 run.ContextJSON.audit）渲染 verdict + 问题列表；
+// - S5 修复期间显示「修复中」，修复完成自动回到 S4 复评（仍由 G4 闸门交回用户）；
+// - S6 完本终检复用相同样式，终检闸门（G终）提供 finish/fix/abort。
+// 非 S4/S4b/S5/S6 阶段返回 null，由父组件按原逻辑渲染。
 export default function SignabilityAuditView({
   run,
   stage,
@@ -40,9 +41,11 @@ export default function SignabilityAuditView({
 }: Props) {
   const { t } = useTranslation();
 
-  if (stage !== "S4" && stage !== "S4b" && stage !== "S5") return null;
+  if (stage !== "S4" && stage !== "S4b" && stage !== "S5" && stage !== "S6")
+    return null;
 
   const isFix = stage === "S5";
+  const isFinal = stage === "S6";
 
   // 生成中 / 修复中：对应阶段 running 且无闸门。
   if (status === "running" && !gate) {
@@ -85,7 +88,11 @@ export default function SignabilityAuditView({
           <ShieldAlert className="h-4 w-4 text-danger-foreground" />
         )}
         <span className="text-sm font-medium">
-          {t("pipeline.signability.title")}
+          {t(
+            isFinal
+              ? "pipeline.signability.finalTitle"
+              : "pipeline.signability.title",
+          )}
         </span>
         {audit?.score != null ? (
           <span className="text-xs text-muted-foreground">

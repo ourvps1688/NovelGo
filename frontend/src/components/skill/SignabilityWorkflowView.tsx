@@ -55,7 +55,7 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
     setLaunching(true);
     try {
       // PR3 后签约潜力工作流由 pipeline 状态机驱动，不再走 chat skill。
-      await StartPipeline(novelId, "new", null);
+      await StartPipeline(novelId, "new", null, false);
       setActivePanel("pipeline");
     } catch (err) {
       toastError(toErrorMessage(err, t("signability.launchFailed")));

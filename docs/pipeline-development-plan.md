@@ -219,9 +219,11 @@
 
 ---
 
-## 6. PR5 — A 期 Orchestrator 状态机 + S6 完本（未实现，待 PR5）
+## 6. PR5 — A 期 Orchestrator 状态机 + S6 完本（已落地 2026-10-20）
 
 **目标**：顺序/闸门/复评逻辑下沉后端，确定性；完本有收口；支持「自动跑到下一闸」；导入/续写自动选入口。
+
+> **实现状态（PR5 实际交付，2026-10-20）**：后端 `orchestrator.go` 成为唯一流转源，`ResumePipeline` 退化为薄壳（仅参数校验 + `AppendGateDecision` + 调 `Orchestrator.Advance`）；S6 完本终检 + G终 + `Status=finished` 收口跑通；`auto_run` 一键连跑至首个闸门/安全检查点即停（G1 蓝图闸与 G终仍需人工确认，避免误判完本）；S0 入口自动判定（无章→S1 / 有章无台账→S0 / 已就绪→S3）已接入 `StartPipeline`。**已知缺口**：S0 对齐子流程（归卷 → 补存量章细纲 → 全量 statesync → 现状体检 → 存量修复）本 PR 仅实现「汇入公共循环」（`setS3Running` 直接落 S3 running），完整存量对齐依赖 statesync / volume 落库 API，留待后续 PR；`orchestrator_test.go` 7 用例全绿。
 
 ### 6.1 设计要点（相对原计划 §6 的修正，贴合当前 C 期代码）
 
@@ -262,12 +264,12 @@
 
 ### 6.4 完成判据（验收）
 
-- [ ] `orchestrator.go` 成为唯一流转源，`ResumePipeline` 无阶段分支硬编码。
-- [ ] S6 完本终检 + G终 + `finished` 收口可跑通。
-- [ ] `auto_run` 可一键连跑并在闸门/安全检查点停。
-- [ ] S0 导入/续写依据小说状态自动选入口并跑通对齐子流程。
-- [ ] 前端 `PipelineWizard` 仅展示、无顺序逻辑；`PipelineControlBar` 有自动运行开关。
-- [ ] `orchestrator_test.go` 全部用例绿。
+- [x] `orchestrator.go` 成为唯一流转源，`ResumePipeline` 无阶段分支硬编码（仅 `AppendGateDecision` + `Advance`）。
+- [x] S6 完本终检 + G终 + `finished` 收口可跑通（`finish` 置 `finished`、`fix` 进 S5 复评、`abort` 置 aborted）。
+- [x] `auto_run` 可一键连跑并在闸门/安全检查点停（G1、G终仍人工确认；受 `autoFixCap=3` 防无限循环）。
+- [x] S0 导入/续写依据小说状态自动选入口（`DetermineEntryStage`：无章→S1 / 有章无台账→S0 / 已就绪→S3）。**注**：S0 完整对齐子流程（归卷/补纲/statesync/存量修复）本 PR 仅落地「汇入公共循环」，留待后续 PR。
+- [x] 前端 `PipelineWizard` 仅展示、无顺序逻辑；`PipelineControlBar` 有自动运行开关（同时支持 `set_auto` 运行中切换）。
+- [x] `orchestrator_test.go` 全部用例绿（7 用例：FullRun / GateBlockResume / AutoRunStopsAtGate / PauseAtCheckpoint / S4S5ReAuditEdge / S0ImportEntry / ResumeAfterRestart）。
 
 
 ---

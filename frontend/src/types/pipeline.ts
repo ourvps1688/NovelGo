@@ -6,9 +6,15 @@ export type PipelineStatus =
 
 export type PipelineMode = "new" | "continue";
 
-export type ControlCmd = "pause" | "resume" | "stop";
+export type ControlCmd = "pause" | "resume" | "stop" | "set_auto";
 export type GateDecision =
-  "continue" | "modify" | "abort" | "fix" | "audit_now";
+  | "continue"
+  | "modify"
+  | "abort"
+  | "fix"
+  | "audit_now"
+  | "finish_book"
+  | "finish";
 
 export interface StagePayload {
   run_id: string;
@@ -33,9 +39,11 @@ export interface ControlAckPayload {
   status: string;
 }
 
-// 线性阶段顺序。S4 = 签约体检（signability-audit，只读体检 + issue 清单），
-// S5 = 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）。
+// 线性阶段顺序。S0 = 导入/续写对齐入口；S4 = 签约体检（signability-audit，只读体检 + issue 清单）；
+// S5 = 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）；S6 = 完本终检；
+// GEnd = 完本终检闸门（确认 finish / 修复 fix / 终止 abort）。
 export const PIPELINE_STAGES = [
+  "S0",
   "S1",
   "G1",
   "S2",
@@ -45,4 +53,5 @@ export const PIPELINE_STAGES = [
   "S5",
   "S4b",
   "S6",
+  "GEnd",
 ] as const;

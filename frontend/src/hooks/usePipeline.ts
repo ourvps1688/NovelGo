@@ -66,8 +66,12 @@ export function usePipeline(novelId: number) {
   }, [novelId]);
 
   const start = useCallback(
-    (mode: string = "new", startChapter: number | null = null) => {
-      return StartPipeline(novelId, mode, startChapter).then(
+    (
+      mode: string = "new",
+      startChapter: number | null = null,
+      autoRun = false,
+    ) => {
+      return StartPipeline(novelId, mode, startChapter, autoRun).then(
         (r: pipeline.PipelineRun) => {
           setRun(r);
           setStage(r.CurrentStage);
@@ -92,10 +96,20 @@ export function usePipeline(novelId: number) {
   const control = useCallback(
     (cmd: ControlCmd) => {
       if (!run) return Promise.reject(new Error("no run"));
-      return ControlPipeline(run.RunID, cmd);
+      return ControlPipeline(run.RunID, cmd).then(() => {
+        // 控制指令（含 set_auto 切换自动运行）后重新拉取 run，确保 UI 状态与后端一致。
+        return GetPipelineState(novelId)
+          .then((r: pipeline.PipelineRun) => {
+            setRun(r);
+            setStatus(r.Status);
+          })
+          .catch(() => {});
+      });
     },
-    [run],
+    [run, novelId],
   );
 
-  return { run, stage, status, gate, start, resume, control };
+  const autoRun = run?.AutoRun ?? false;
+
+  return { run, stage, status, gate, autoRun, start, resume, control };
 }

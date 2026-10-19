@@ -1830,6 +1830,7 @@
   },
   "pipeline": {
     "title": "Creation Pipeline",
+    "autoRun": "Auto Run",
     "control": {
       "pause": "Pause",
       "resume": "Resume",
@@ -1841,9 +1842,13 @@
       "modify": "Continue after editing",
       "fix": "Enter fix loop",
       "auditNow": "Enter Signability Audit",
+      "finishBook": "Final Audit",
+      "finishBookHint": "Run a signability-level final audit on the whole book, then finish once no fatal issues remain",
+      "finish": "Confirm Completion",
       "abort": "Abort"
     },
     "stage": {
+      "S0": "Import Align",
       "S1": "Incubate Blueprint",
       "G1": "Blueprint Gate",
       "S2": "Worldbuilding",
@@ -1852,7 +1857,8 @@
       "S4": "Signability Audit",
       "S5": "Fix Loop",
       "S4b": "Volume Re-audit",
-      "S6": "Export Draft"
+      "S6": "Final Audit",
+      "GEnd": "Final Gate"
     },
     "empty": "No pipeline run is in progress.",
     "start": "Start Pipeline",
@@ -1874,6 +1880,7 @@
     },
     "signability": {
       "title": "Signability Audit",
+      "finalTitle": "Final Audit",
       "auditing": "Running signability audit…",
       "fixing": "Fixing issues from audit…",
       "score": "Score {{n}}/35",

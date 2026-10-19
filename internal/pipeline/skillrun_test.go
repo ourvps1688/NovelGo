@@ -50,7 +50,7 @@ func TestExecuteBlueprintPersistsAndGates(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	run, err := svc.StartPipeline(ctx, 1, "new", nil)
+	run, err := svc.StartPipeline(ctx, 1, "new", nil, false)
 	require.NoError(t, err)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS2, StatusRunning, run.ContextJSON))
 

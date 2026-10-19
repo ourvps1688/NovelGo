@@ -6,12 +6,12 @@ import (
 	"github.com/novelgo/novelgo/internal/pipeline"
 )
 
-// StartPipeline 启动一次创作流水线（mode: new|continue；续写模式传 startChapter）。
-func (a *App) StartPipeline(novelID int64, mode string, startChapter *int) (*pipeline.PipelineRun, error) {
+// StartPipeline 启动一次创作流水线（mode: new|continue；续写模式传 startChapter；autoRun 开启自动连跑）。
+func (a *App) StartPipeline(novelID int64, mode string, startChapter *int, autoRun bool) (*pipeline.PipelineRun, error) {
 	if a.pipeline == nil {
 		return nil, fmt.Errorf("创作流水线服务未初始化")
 	}
-	return a.pipeline.StartPipeline(a.ctx, novelID, mode, startChapter)
+	return a.pipeline.StartPipeline(a.ctx, novelID, mode, startChapter, autoRun)
 }
 
 // GetPipelineState 返回指定小说当前活跃的流水线（无则返回错误）。

@@ -61,10 +61,16 @@ type GateContext struct {
 	// LastAuditChapter 记录上次签约体检（S4/S4b）时本书已落库章节数；供 PR4 里程碑闸计算间距
 	// （每 5 章触发一次复检）。未体检过为 0，等同强制下次进入里程碑判定。
 	LastAuditChapter int `json:"last_audit_chapter,omitempty"`
-	// AuditReason 记录上次进入体检的触发原因：golden3（黄金三章首检）| milestone（章节里程碑）| volume（卷边界）。
+	// AuditReason 记录上次进入体检的触发原因：golden3（黄金三章首检）| milestone（章节里程碑）| volume（卷边界）| final（完本终检）。
 	AuditReason string `json:"audit_reason,omitempty"`
-	// AuditStage 记录上次体检所处的阶段（S4 首检 / S4b 卷边界复评），供修复后复评回到同阶段。
+	// AuditStage 记录上次体检所处的阶段（S4 首检 / S4b 卷边界复评 / S6 完本终检），供修复后复评回到同阶段。
 	AuditStage string `json:"audit_stage,omitempty"`
+	// FixRounds 记录 S5 自动修复已发生的轮数，供 auto_run 模式判断是否达到上限改交人工。
+	FixRounds int `json:"fix_rounds,omitempty"`
+	// EntryStage 记录本书启动流水线时由 DetermineEntryStage 选定的入口阶段（S0/S1/S3），用于追溯。
+	EntryStage string `json:"entry_stage,omitempty"`
+	// ImportAligned 标记 S0 导入对齐子流程是否已完成（汇入公共循环后置 true）。
+	ImportAligned bool `json:"import_aligned,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。
@@ -139,6 +145,16 @@ func (s *Store) SetStageStatus(ctx context.Context, runID, stage, status, contex
 			"status":        status,
 			"context_json":  contextJSON,
 			"updated_at":    time.Now(),
+		}).Error
+}
+
+// SetAutoRun 切换流水线的 auto_run 开关（运行中由 ControlPipeline("set_auto") 调用）。
+func (s *Store) SetAutoRun(ctx context.Context, runID string, autoRun bool) error {
+	return s.db.WithContext(ctx).Model(&PipelineRun{}).
+		Where("run_id = ?", runID).
+		Updates(map[string]any{
+			"auto_run":   autoRun,
+			"updated_at": time.Now(),
 		}).Error
 }
 

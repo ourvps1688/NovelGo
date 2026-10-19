@@ -195,7 +195,7 @@ export default function NewBookWizard({ open, onClose, onCreated }: Props) {
     setSaving(true);
     try {
       await onCreated(id);
-      await StartPipeline(id, "new", null);
+      await StartPipeline(id, "new", null, false);
       setActivePanel("pipeline");
       toastSuccess(
         t("wizard.launchedToast", { workflow: t("workflow.signability") }),

@@ -22,7 +22,7 @@ func TestServiceStartAndResume(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
-	run, err := svc.StartPipeline(ctx, 100, "new", nil)
+	run, err := svc.StartPipeline(ctx, 100, "new", nil, false)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestServiceControl(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
-	run, _ := svc.StartPipeline(ctx, 200, "new", nil)
+	run, _ := svc.StartPipeline(ctx, 200, "new", nil, false)
 	if err := svc.ControlPipeline(ctx, run.RunID, "pause"); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestServiceResumeAbort(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
-	run, _ := svc.StartPipeline(ctx, 300, "new", nil)
+	run, _ := svc.StartPipeline(ctx, 300, "new", nil, false)
 	if err := svc.ResumePipeline(ctx, run.RunID, "abort", ""); err != nil {
 		t.Fatalf("abort: %v", err)
 	}
@@ -158,8 +158,12 @@ func TestServiceGoldenThreeTriggersAudit(t *testing.T) {
 		return SkillOutput{Text: "ok"}, nil
 	}
 	ctx := context.Background()
-	run, err := svc.StartPipeline(ctx, 400, "new", nil)
+	// 入口判定：启动时尚无章节 → 从 S1 孵化起步（之后再把章数置为 3 模拟写完黄金三章）。
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 0, nil }
+	run, err := svc.StartPipeline(ctx, 400, "new", nil, false)
 	require.NoError(t, err)
+	// 进入 S3 后模拟已写完黄金三章（3 章），供首检触发判定。
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 3, nil }
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2
 	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)              // 等 S2 蓝图落闸
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S2->S3
@@ -191,7 +195,7 @@ func TestServiceAuditContinueMarksAudited(t *testing.T) {
 		return SkillOutput{Text: "ok"}, nil
 	}
 	ctx := context.Background()
-	run, err := svc.StartPipeline(ctx, 401, "new", nil)
+	run, err := svc.StartPipeline(ctx, 401, "new", nil, false)
 	require.NoError(t, err)
 	// 直接进入 S4（已在 G4 闸门前，模拟已体检），context 含 audit
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
@@ -228,7 +232,7 @@ func TestServiceAuditFixLoopReAudit(t *testing.T) {
 		}
 	}
 
-	run, err := svc.StartPipeline(ctx, 402, "new", nil)
+	run, err := svc.StartPipeline(ctx, 402, "new", nil, false)
 	require.NoError(t, err)
 	// 直接进入 S4（首轮体检已落库，G4 闸门待决策），准备选 fix → S5
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
@@ -260,7 +264,7 @@ func withCapturedGates(t *testing.T) *[]GatePayload {
 // startS3Run 直接把流水线置为 S3 写作态（带给定 ContextJSON），跳过 S1/S2 异步路径以便精确控制。
 func startS3Run(t *testing.T, svc *Service, novelID int64, contextJSON string) string {
 	t.Helper()
-	run, err := svc.StartPipeline(context.Background(), novelID, "new", nil)
+	run, err := svc.StartPipeline(context.Background(), novelID, "new", nil, false)
 	require.NoError(t, err)
 	require.NoError(t, svc.store.SetStageStatus(context.Background(), run.RunID, StageS3, StatusRunning, contextJSON))
 	return run.RunID
