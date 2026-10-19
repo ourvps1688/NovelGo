@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -922,8 +923,10 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 	stateSyncMu.Unlock()
 }
 
-func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) {
-	// 通知前端：后台状态同步开始（轻量进度提示，见 useStateSyncProgress）
+// RunStateSyncForChapter 对指定章节执行后台状态同步（statesync 子 Agent）。
+// runSub 为实际派发子 Agent 的函数（调用方决定用 ToolContext.RunSubAgent 还是 agent.RunSubAgent）；
+// logger 用于失败日志；toolID 标识调用来源（用于 statesync 进度事件）。返回派发错误（非阻断调用方可忽略）。
+func RunStateSyncForChapter(ctx context.Context, runSub func(ctx context.Context, req SubAgentRequest) (string, error), logger *slog.Logger, toolID string, novelID, chapterID int64) error {
 	wails.EventsEmit(ctx, "statesync:progress", map[string]any{
 		"novel_id":   novelID,
 		"chapter_id": chapterID,
@@ -937,26 +940,37 @@ func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 			"严禁编辑章节文件或 novelgo.md，严禁再派发子 Agent。完成后输出一份简短同步摘要（改了哪些台账）。",
 		chapterID, chapterID,
 	)
-	if _, err := tc.RunSubAgent(ctx, SubAgentRequest{
+	if _, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "statesync",
 		NovelID:     novelID,
 		Instruction: instruction,
-		ToolID:      tc.ToolID,
+		ToolID:      toolID,
 	}); err != nil {
-		tc.LoggerOrDefault().Warn("state-sync 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
+		if logger != nil {
+			logger.Warn("state-sync 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
+		}
 		wails.EventsEmit(ctx, "statesync:progress", map[string]any{
 			"novel_id":   novelID,
 			"chapter_id": chapterID,
 			"status":     "done",
 			"error":      err.Error(),
 		})
-		return
+		return err
 	}
 	wails.EventsEmit(ctx, "statesync:progress", map[string]any{
 		"novel_id":   novelID,
 		"chapter_id": chapterID,
 		"status":     "done",
 	})
+	return nil
+}
+
+// runStateSync 写后由后端自动派发（见 scheduleStateSync），委托 RunStateSyncForChapter 完成实际工作。
+func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) {
+	if tc.RunSubAgent == nil {
+		return
+	}
+	_ = RunStateSyncForChapter(ctx, tc.RunSubAgent, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {

@@ -6,7 +6,8 @@ export type PipelineStatus =
 
 export type PipelineMode = "new" | "continue";
 
-export type ControlCmd = "pause" | "resume" | "stop" | "set_auto";
+export type ControlCmd =
+  "pause" | "resume" | "stop" | "set_auto" | "align_full";
 export type GateDecision =
   | "continue"
   | "modify"

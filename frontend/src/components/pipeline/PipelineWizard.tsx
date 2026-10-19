@@ -1,9 +1,10 @@
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, CheckCircle, Play } from "lucide-react";
+import { ArrowRight, CheckCircle, Play, ScanSearch } from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
-import SignabilityAuditView from "./SignabilityAuditView";
+import SignabilityAuditView, { StockAuditPanel } from "./SignabilityAuditView";
 import PipelineControlBar from "./PipelineControlBar";
 
 interface Props {
@@ -17,6 +18,19 @@ export default function PipelineWizard({ novelId }: Props) {
   const { t } = useTranslation();
   const { run, stage, status, gate, autoRun, start, resume, control } =
     usePipeline(novelId);
+
+  // 解析「全量对齐」触发的全本现状体检结果（存于 run.ContextJSON.stock_audit）。
+  const stockAudit = useMemo(() => {
+    if (!run?.ContextJSON) return null;
+    try {
+      const c = JSON.parse(run.ContextJSON);
+      const raw = c.stock_audit;
+      if (!raw) return null;
+      return typeof raw === "string" ? JSON.parse(raw) : raw;
+    } catch {
+      return null;
+    }
+  }, [run]);
 
   return (
     <div className="flex h-full flex-col">
@@ -113,11 +127,22 @@ export default function PipelineWizard({ novelId }: Props) {
                         <CheckCircle className="h-4 w-4" />
                         {t("pipeline.gate.finishBook")}
                       </button>
+                      <button
+                        type="button"
+                        className="inline-flex w-fit items-center gap-1 rounded border px-3 py-1.5 text-sm"
+                        title={t("pipeline.alignFullHint")}
+                        onClick={() => control("align_full")}
+                      >
+                        <ScanSearch className="h-4 w-4" />
+                        {t("pipeline.alignFull")}
+                      </button>
                     </div>
                   </div>
                 ) : null}
               </>
             )}
+
+            {stockAudit ? <StockAuditPanel data={stockAudit} /> : null}
           </div>
         ) : null}
 

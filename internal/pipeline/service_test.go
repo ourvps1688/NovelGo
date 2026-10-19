@@ -16,6 +16,7 @@ func init() {
 	emitStage = func(_ context.Context, _ StagePayload) {}
 	emitGate = func(_ context.Context, _ GatePayload) {}
 	emitControlAck = func(_ context.Context, _ ControlAckPayload) {}
+	emitStockAudit = func(_ context.Context, _ map[string]any) {}
 }
 
 func TestServiceStartAndResume(t *testing.T) {

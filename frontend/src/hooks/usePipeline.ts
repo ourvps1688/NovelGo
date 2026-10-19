@@ -46,6 +46,19 @@ export function usePipeline(novelId: number) {
     const offAck = EventsOn("pipeline:control:ack", (p: ControlAckPayload) => {
       setStatus(p.status);
     });
+    // 全量对齐体检完成后后端广播该事件，重新拉取 run 以拿到 stock_audit 结果。
+    const offStock = EventsOn(
+      "pipeline:stock_audit",
+      (p: { novel_id: number }) => {
+        if (p.novel_id !== novelId) return;
+        GetPipelineState(novelId)
+          .then((r: pipeline.PipelineRun) => {
+            setRun(r);
+            setStage(r.CurrentStage);
+          })
+          .catch(() => {});
+      },
+    );
 
     // 进入时拉取当前活跃流水线，恢复进度。
     GetPipelineState(novelId)
@@ -62,6 +75,7 @@ export function usePipeline(novelId: number) {
       offStage();
       offGate();
       offAck();
+      offStock();
     };
   }, [novelId]);
 

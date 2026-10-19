@@ -1831,6 +1831,8 @@
   "pipeline": {
     "title": "Creation Pipeline",
     "autoRun": "Auto Run",
+    "alignFull": "Full Align",
+    "alignFullHint": "Run full alignment on the imported book: build volume, backfill ledger, and run a whole-book signability audit",
     "control": {
       "pause": "Pause",
       "resume": "Resume",
@@ -1887,6 +1889,11 @@
       "issues": "Issue List",
       "noIssues": "No significant issues found.",
       "fixNote": "Fixes done; re-auditing automatically."
+    },
+    "stockAudit": {
+      "title": "Full Align · Current-state Audit",
+      "issues": "Issue List",
+      "noIssues": "No significant issues found."
     },
     "ended": {
       "finished": "Pipeline finished.",

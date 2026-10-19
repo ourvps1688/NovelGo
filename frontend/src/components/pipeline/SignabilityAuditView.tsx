@@ -4,14 +4,14 @@ import type { pipeline } from "@/lib/wailsjs/go/models";
 import type { GatePayload, GateDecision } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 
-interface AuditIssue {
+export interface AuditIssue {
   id: string;
   level: string;
   area: string;
   desc: string;
 }
 
-interface AuditData {
+export interface AuditData {
   verdict: string;
   score?: number;
   summary?: string;
@@ -150,6 +150,74 @@ export default function SignabilityAuditView({
       ) : null}
 
       {gate ? <PipelineGateCard gate={gate} onResume={onResume} /> : null}
+    </div>
+  );
+}
+
+// StockAuditPanel 以只读方式展示「全量对齐」触发的全本现状体检结果（区别于 S4 流水线体检），
+// 不挂载任何闸门按钮，仅用于让用户快速查看存量书的签约级健康度。
+export function StockAuditPanel({ data }: { data: AuditData }) {
+  const { t } = useTranslation();
+  const issues = data?.issues ?? [];
+  const passed = data?.verdict === "pass";
+  return (
+    <div className="flex flex-col gap-3 rounded border bg-card p-4">
+      <div className="flex items-center gap-2">
+        {passed ? (
+          <ShieldCheck className="h-4 w-4 text-warning-foreground" />
+        ) : (
+          <ShieldAlert className="h-4 w-4 text-danger-foreground" />
+        )}
+        <span className="text-sm font-medium">
+          {t("pipeline.stockAudit.title")}
+        </span>
+        {data?.score != null ? (
+          <span className="text-xs text-muted-foreground">
+            {t("pipeline.signability.score", { n: data.score })}
+          </span>
+        ) : null}
+      </div>
+
+      {data?.summary ? (
+        <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+          {data.summary}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t("pipeline.stockAudit.issues")}
+        </div>
+        {issues.length > 0 ? (
+          <ul className="flex flex-col gap-2">
+            {issues.map((it) => (
+              <li
+                key={it.id}
+                className="rounded border bg-card px-3 py-2 text-sm"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-xs ${
+                      it.level === "P0"
+                        ? "bg-danger text-danger-foreground"
+                        : "bg-warning text-warning-foreground"
+                    }`}
+                  >
+                    {it.level}
+                  </span>
+                  <span className="font-medium">{it.area}</span>
+                  <span className="text-muted-foreground">{it.id}</span>
+                </div>
+                <p className="mt-1 text-muted-foreground">{it.desc}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {t("pipeline.stockAudit.noIssues")}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -41,6 +41,11 @@ func (o *Orchestrator) Advance(ctx context.Context, run *PipelineRun, decision s
 	if o.svc.pausedOrAborted(ctx, run) {
 		return nil
 	}
+	// 全量对齐：后台异步执行（建卷+statesync+全本体检），不改变当前阶段。
+	if decision == "align_full" {
+		go o.svc.runFullAlign(ctx, run)
+		return nil
+	}
 
 	switch run.CurrentStage {
 	case StageS0:
@@ -62,12 +67,14 @@ func (o *Orchestrator) Advance(ctx context.Context, run *PipelineRun, decision s
 	}
 }
 
-// advanceS0 处理导入/续写对齐入口：简化实现——依据 DetermineEntryStage 完成入口选择后，
-// 把存量书汇入公共循环 S3 逐章写作。完整的对齐子流程（归卷 / 补存量章细纲 / 全量 statesync /
-// 现状体检 / 存量修复）依赖 statesync/volume API，已在入口判定阶段完成选择，此处直接汇入 S3，
-// 后续里程碑/卷边界闸照常工作。
+// advanceS0 处理导入/续写对齐入口：把存量书汇入公共循环 S3 逐章写作，并异步触发最小对齐
+// （建默认卷 + 批量 statesync 回填台账）。对齐在后台进行，用户可立即续写，完成后置 ImportAligned=true。
 func (o *Orchestrator) advanceS0(ctx context.Context, run *PipelineRun, _ string) error {
-	return o.svc.setS3Running(ctx, run)
+	if err := o.svc.setS3Running(ctx, run); err != nil {
+		return err
+	}
+	go o.svc.executeS0Align(ctx, run)
+	return nil
 }
 
 // advanceS1 孵化完成 → 进入 S2 并异步执行蓝图，最终落 G1 闸门（awaiting_gate）。

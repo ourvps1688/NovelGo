@@ -71,6 +71,9 @@ type GateContext struct {
 	EntryStage string `json:"entry_stage,omitempty"`
 	// ImportAligned 标记 S0 导入对齐子流程是否已完成（汇入公共循环后置 true）。
 	ImportAligned bool `json:"import_aligned,omitempty"`
+	// StockAudit 是「全量对齐」按钮触发的全本现状体检结果（区别于 S4 流水线体检的 Audit 字段），
+	// 只读展示，不影响流水线阶段流转。
+	StockAudit string `json:"stock_audit,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。

@@ -1792,6 +1792,8 @@
   "pipeline": {
     "title": "创作流水线",
     "autoRun": "自动运行",
+    "alignFull": "全量对齐",
+    "alignFullHint": "对存量书做全量对齐：建卷归并 + 批量回填台账 + 全本签约级体检",
     "control": {
       "pause": "暂停",
       "resume": "继续",
@@ -1848,6 +1850,11 @@
       "issues": "问题清单",
       "noIssues": "未发现明显问题。",
       "fixNote": "修复完成，正在自动复评。"
+    },
+    "stockAudit": {
+      "title": "全量对齐 · 现状体检",
+      "issues": "问题清单",
+      "noIssues": "未发现明显问题。"
     },
     "ended": {
       "finished": "流水线已完成。",

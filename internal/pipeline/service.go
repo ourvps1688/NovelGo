@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,13 @@ type Service struct {
 	// hasLedger 判断本书是否已做过台账同步/建卷（以是否存在 volumes 记录为代理标志），
 	// 供 PR5 的 DetermineEntryStage 在导入/续写时判定是否走 S0 对齐入口。可替换。
 	hasLedger func(ctx context.Context, novelID int64) (bool, error)
+	// stateSyncRunner 对单章执行后台状态同步（statesync 子 Agent）。由 app 层注入（依赖 agent.RunSubAgent）。
+	// 为 nil 时 executeS0Align 跳过 statesync（仅做建卷），测试可注入 stub。
+	stateSyncRunner func(ctx context.Context, novelID, chapterID int64) error
+	// chapterLister 返回本书全部章节 ID（用于 S0 批量 statesync）。默认走 raw gorm 查询。
+	chapterLister func(ctx context.Context, novelID int64) ([]int64, error)
+	// volumeAssigner 为存量书建默认卷并把所有未分卷章节归入该卷（修复 G3b 卷边界判定）。默认走 raw gorm。
+	volumeAssigner func(ctx context.Context, novelID int64) error
 	// orchestrator 是统一的阶段流转状态机（PR5 引入），ResumePipeline 委托它推进。
 	orchestrator *Orchestrator
 }
@@ -87,9 +95,25 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 		}
 		s.volumeBoundary = s.defaultVolumeBoundary
 		s.hasLedger = s.defaultHasLedger
+		s.chapterLister = func(ctx context.Context, novelID int64) ([]int64, error) {
+			var ids []int64
+			if err := s.store.db.WithContext(ctx).Table("chapters").Where("novel_id = ?", novelID).Order("id ASC").Pluck("id", &ids).Error; err != nil {
+				return nil, err
+			}
+			return ids, nil
+		}
+		s.volumeAssigner = s.defaultVolumeAssigner
+		// stateSyncRunner 默认 nil：依赖 app 层注入（需要 agent.RunSubAgent）。
+		// 生产环境 app/handler.go 会注入；测试可注入 stub 或保持 nil（executeS0Align 跳过 statesync）。
 	}
 	s.orchestrator = NewOrchestrator(s)
 	return s
+}
+
+// SetStateSyncRunner 注入 statesync 子 Agent 执行器（由 app 层用 agent.RunSubAgent 实现）。
+// 生产环境必须注入，否则 executeS0Align 会跳过 statesync 仅做建卷。
+func (s *Service) SetStateSyncRunner(fn func(ctx context.Context, novelID, chapterID int64) error) {
+	s.stateSyncRunner = fn
 }
 
 // StartPipeline 启动一次新流水线，并广播阶段事件。
@@ -706,6 +730,180 @@ func (s *Service) pausedOrAborted(ctx context.Context, run *PipelineRun) bool {
 	return cur.Status == StatusPaused || cur.Status == StatusAborted
 }
 
+// ── S0 存量对齐子流程（PR5 缺口补全）────────────────────────────────
+//
+// 存量书（有章节无台账/卷）导入流水线时经 S0 入口，需做最小对齐才能保证续写质量：
+//  1. 建默认卷并把所有 volume_id 为 NULL 的章节归入该卷（修复 G3b 卷边界判定）；
+//  2. 批量 statesync 回填角色/地点/弧线/时间线/读者认知台账（否则续写 AI 看不到已有设定）；
+//  3. 标记 ImportAligned=true。
+// 全部为「非阻断」：任一步失败仅记日志，不回滚已完成的步骤。
+
+// defaultVolumeAssigner 为存量书建一个默认卷「正文」并把所有未分卷章节归入该卷。
+// 目的：修复 G3b 卷边界判定（NULL volume_id 会让卷边界分支永不命中）；不破坏已有分卷。
+func (s *Service) defaultVolumeAssigner(ctx context.Context, novelID int64) error {
+	if s.store == nil || s.store.db == nil {
+		return nil
+	}
+	db := s.store.db.WithContext(ctx)
+	var vcount int64
+	if err := db.Table("volumes").Where("novel_id = ?", novelID).Count(&vcount).Error; err != nil {
+		return err
+	}
+	var volumeID int64
+	if err := db.Table("volumes").Where("novel_id = ?", novelID).Order("sort_order DESC").Limit(1).Pluck("id", &volumeID).Error; err != nil {
+		return err
+	}
+	if vcount == 0 {
+		if err := db.Table("volumes").Create(map[string]any{
+			"novel_id":   novelID,
+			"name":       "正文",
+			"sort_order": 0,
+		}).Error; err != nil {
+			return err
+		}
+		if err := db.Table("volumes").Where("novel_id = ?", novelID).Order("id DESC").Limit(1).Pluck("id", &volumeID).Error; err != nil {
+			return err
+		}
+	}
+	if volumeID > 0 {
+		if err := db.Table("chapters").Where("novel_id = ? AND volume_id IS NULL", novelID).Update("volume_id", volumeID).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// executeS0Align 在后台为存量书做最小对齐：建默认卷挂 volume_id + 批量 statesync 回填台账。
+// 非阻塞（由 advanceS0 以 goroutine 调用），完成后置 ImportAligned=true。
+func (s *Service) executeS0Align(ctx context.Context, run *PipelineRun) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("S0 对齐：panic 恢复", "panic", r)
+		}
+	}()
+	novelID := run.NovelID
+	if s.volumeAssigner != nil {
+		if err := s.volumeAssigner(ctx, novelID); err != nil {
+			s.logger.Warn("S0 对齐：建卷失败（非阻断）", "err", err, "novelID", novelID)
+		}
+	}
+	ids := []int64{}
+	if s.chapterLister != nil {
+		if lst, err := s.chapterLister(ctx, novelID); err == nil {
+			ids = lst
+		} else {
+			s.logger.Warn("S0 对齐：列举章节失败（非阻断）", "err", err)
+		}
+	}
+	for _, cid := range ids {
+		if s.pausedOrAborted(ctx, run) {
+			s.logger.Info("S0 对齐：被暂停/中止，停止", "novelID", novelID)
+			return
+		}
+		if s.stateSyncRunner != nil {
+			if err := s.stateSyncRunner(ctx, novelID, cid); err != nil {
+				s.logger.Warn("S0 对齐：单章 statesync 失败（非阻断）", "chapterID", cid, "err", err)
+			}
+		}
+	}
+	s.markImportAligned(ctx, run)
+}
+
+func (s *Service) isImportAligned(ctx context.Context, run *PipelineRun) bool {
+	cur, err := s.store.GetByRunID(ctx, run.RunID)
+	if err != nil {
+		return false
+	}
+	var ctxt GateContext
+	if cur.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(cur.ContextJSON), &ctxt)
+	}
+	return ctxt.ImportAligned
+}
+
+func (s *Service) markImportAligned(ctx context.Context, run *PipelineRun) {
+	cur, err := s.store.GetByRunID(ctx, run.RunID)
+	if err != nil {
+		return
+	}
+	var ctxt GateContext
+	if cur.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(cur.ContextJSON), &ctxt)
+	}
+	ctxt.ImportAligned = true
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		s.logger.Warn("S0 对齐：序列化上下文失败", "err", merr)
+		return
+	}
+	if err := s.store.SetStageStatus(ctx, run.RunID, cur.CurrentStage, cur.Status, string(updated)); err != nil {
+		s.logger.Warn("S0 对齐：写回 ImportAligned 失败（非阻断）", "err", err)
+	}
+}
+
+// runFullAlign 「全量对齐」按钮触发：确保对齐完成（建卷+statesync）+ 跑全本现状体检，
+// 结果存 context.StockAudit 并广播 pipeline:stock_audit 事件通知前端刷新。
+// 设计为后台异步（由 ControlPipeline 以 goroutine 调用），不阻塞控制指令返回。
+func (s *Service) runFullAlign(ctx context.Context, run *PipelineRun) {
+	bg := s.appCtx
+	novelID := run.NovelID
+	if !s.isImportAligned(bg, run) {
+		s.executeS0Align(bg, run)
+	}
+	data, err := s.runStockAudit(bg, novelID)
+	if err != nil {
+		s.logger.Error("全量对齐：体检失败", "err", err, "novelID", novelID)
+		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: novelID, Stage: run.CurrentStage, Status: run.Status, Note: "全量体检失败：" + err.Error()})
+		return
+	}
+	if err := s.storeStockAudit(bg, run, data); err != nil {
+		s.logger.Warn("全量对齐：写回体检结果失败", "err", err)
+	}
+	emitStockAudit(ctx, map[string]any{
+		"novel_id": novelID,
+		"run_id":   run.RunID,
+	})
+}
+
+func (s *Service) storeStockAudit(ctx context.Context, run *PipelineRun, data AuditData) error {
+	cur, err := s.store.GetByRunID(ctx, run.RunID)
+	if err != nil {
+		return err
+	}
+	var ctxt GateContext
+	if cur.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(cur.ContextJSON), &ctxt)
+	}
+	auditJSON, _ := json.Marshal(data)
+	ctxt.StockAudit = string(auditJSON)
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		return merr
+	}
+	return s.store.SetStageStatus(ctx, run.RunID, cur.CurrentStage, cur.Status, string(updated))
+}
+
+func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, error) {
+	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
+		NovelID:   novelID,
+		Prompt:    stockAuditPrompt(novelID),
+		MaxTurns:  14,
+		SessionID: "pipeline:stock:" + strconv.FormatInt(novelID, 10),
+	})
+	if err != nil {
+		return AuditData{Verdict: "needs_fix"}, err
+	}
+	return parseAudit(out.Text), nil
+}
+
+// stockAuditPrompt 构造「全量对齐」全本现状体检的任务提示词。
+func stockAuditPrompt(novelID int64) string {
+	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，通读所有已落库章节（至少覆盖开篇、中段、结尾各若干章），"+
+		"从签约编辑视角评估：开篇钩子与过签力、人设记忆点、节奏与爽点密度、世界观/设定自洽、完本潜力、题材契合与数据预期等维度，逐维打分并举证；"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥25/35 → pass。", novelID)
+}
+
 // auditJSONRe 提取 signability-audit 输出中的 ```json ... ``` 结构化块。
 var auditJSONRe = regexp.MustCompile("(?s)```json\\s*(.*?)```")
 
@@ -791,6 +989,10 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 			return err
 		}
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
+	case "align_full":
+		// 全量对齐：后台异步执行（建卷+statesync+全本体检），不阻塞控制指令返回。
+		go s.runFullAlign(ctx, run)
+		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
 	default:
 		return fmt.Errorf("未知控制命令 %q", cmd)
 	}
@@ -802,6 +1004,7 @@ var (
 	emitStage      = EmitStage
 	emitGate       = EmitGate
 	emitControlAck = EmitControlAck
+	emitStockAudit = EmitStockAudit
 )
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

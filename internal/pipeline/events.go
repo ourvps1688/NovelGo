@@ -12,6 +12,7 @@ const (
 	EvGate       = "pipeline:gate"        // 闸门待确认：{run_id, novel_id, stage, gate_id, summary, options}
 	EvControl    = "pipeline:control"     // 前端→后端控制指令：{run_id, cmd: start|pause|resume|stop}
 	EvControlAck = "pipeline:control:ack" // 后端→前端控制确认：{run_id, cmd, status}
+	EvStockAudit = "pipeline:stock_audit" // 全量对齐体检完成：{novel_id, run_id}
 )
 
 // StagePayload 阶段变更事件载荷。
@@ -53,4 +54,9 @@ func EmitGate(ctx context.Context, p GatePayload) {
 // EmitControlAck 广播控制指令回执。
 func EmitControlAck(ctx context.Context, p ControlAckPayload) {
 	wails.EventsEmit(ctx, EvControlAck, p)
+}
+
+// EmitStockAudit 广播「全量对齐」体检完成，通知前端刷新并展示结果。
+func EmitStockAudit(ctx context.Context, p map[string]any) {
+	wails.EventsEmit(ctx, EvStockAudit, p)
 }

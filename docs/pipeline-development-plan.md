@@ -267,10 +267,26 @@
 - [x] `orchestrator.go` 成为唯一流转源，`ResumePipeline` 无阶段分支硬编码（仅 `AppendGateDecision` + `Advance`）。
 - [x] S6 完本终检 + G终 + `finished` 收口可跑通（`finish` 置 `finished`、`fix` 进 S5 复评、`abort` 置 aborted）。
 - [x] `auto_run` 可一键连跑并在闸门/安全检查点停（G1、G终仍人工确认；受 `autoFixCap=3` 防无限循环）。
-- [x] S0 导入/续写依据小说状态自动选入口（`DetermineEntryStage`：无章→S1 / 有章无台账→S0 / 已就绪→S3）。**注**：S0 完整对齐子流程（归卷/补纲/statesync/存量修复）本 PR 仅落地「汇入公共循环」，留待后续 PR。
+- [x] S0 导入/续写依据小说状态自动选入口（`DetermineEntryStage`：无章→S1 / 有章无台账→S0 / 已就绪→S3）。S0 完整对齐子流程（归卷/补纲/statesync/存量修复）本 PR 仅落地「汇入公共循环」，**已由 §6.5 的 S0 对齐补丁补齐**。
 - [x] 前端 `PipelineWizard` 仅展示、无顺序逻辑；`PipelineControlBar` 有自动运行开关（同时支持 `set_auto` 运行中切换）。
 - [x] `orchestrator_test.go` 全部用例绿（7 用例：FullRun / GateBlockResume / AutoRunStopsAtGate / PauseAtCheckpoint / S4S5ReAuditEdge / S0ImportEntry / ResumeAfterRestart）。
 
+### 6.5 S0 存量对齐补丁（PR5 后补齐）
+
+**背景**：PR5 的 S0 仅落地「汇入公共循环」（`setS3Running`），存量书真正的问题——`volume_id IS NULL` 导致 G3b 卷边界判定失效、台账全空导致续写盲写——尚未解决。用户在「已知缺口如何处理」中确认采用 **方案 A + 全量对齐按钮**：进 S3 同时后台最小对齐（建默认卷挂 `volume_id` + 批量 `statesync` 回填台账，避免导入即烧额度），再叠加按需「全量对齐」按钮（补章细纲 + 现状体检 + 修复闸门）。
+
+**后端改动**：
+- `internal/mcp_tools/rw_tools.go`：抽取 `RunStateSyncForChapter(ctx, runSub, logger, toolID, novelID, chapterID) error`（导出），原 `runStateSync` 委托之；供 `app` 注入 `agent.RunSubAgent` 闭包。
+- `internal/pipeline/service.go`：`Service` 新增 `stateSyncRunner` / `chapterLister` / `volumeAssigner` 可注入 func 字段（`NewService` 设 raw gorm 默认实现）；`SetStateSyncRunner` 注入器；S0 对齐方法块 `executeS0Align`（建卷→列举章节→循环 statesync→`markImportAligned`，`defer recover`）、`runFullAlign`（对齐 + `runStockAudit` + `emitStockAudit`）、`runStockAudit`（复用 `skillRunner("signability-audit")`）。`ControlPipeline` 新增 `case "align_full"`（非阻塞后台）。
+- `internal/pipeline/orchestrator.go`：`Advance` 中 `align_full` 决策→`go svc.runFullAlign`；`advanceS0` 在 `setS3Running` 后 `go svc.executeS0Align` 后台最小对齐。
+- `internal/pipeline/events.go`：新增 `EvStockAudit` 与 `EmitStockAudit`。
+- `internal/pipeline/store.go`：`GateContext` 新增 `StockAudit string`（只读体检结果展示）。
+- `app/handler.go`：`NewService` 后注入 `SetStateSyncRunner` bridge（零环：`pipeline` 不导入 `mcp_tools`/`agent`，bridge 仅放 `app`）。
+- 测试：`service_test.go` 的 `init()` 补 `emitStockAudit` 无操作覆写（避免 wails panic）；`orchestrator_test.go` 新增 `TestServiceExecuteS0Align` / `TestServiceRunFullAlign` / `TestControlPipelineAlignFull`。
+
+**前端改动**：`types/pipeline.ts` `ControlCmd` 加 `"align_full"`；`usePipeline.ts` 监听 `pipeline:stock_audit` 刷新；`SignabilityAuditView.tsx` 导出 `StockAuditPanel`；`PipelineWizard.tsx` 加「全量对齐」按钮 + 体检结果面板；i18n 加 `alignFull` / `stockAudit` 文案。
+
+**验收**：`go build ./...` 通过；`internal/pipeline`、`internal/mcp_tools`、`app` 测试全绿；`golangci-lint --build-tags webkit2_41` 对三包 0 issues；前端 prettier / i18n:check / tsc -b / vite build 全绿。
 
 ---
 
@@ -283,7 +299,7 @@
 | S2 真正建卷/写卷纲落库 | PR2 | 卷记录 + `volumes/id_{id}.md` 同时就位 |
 | 章细纲每章强制前置 | PR1(拦) + PR5(校验) | 缺章细纲 `edit` 不可推进 |
 | 台账实时维护 | PR1(禁) + PR5(校验) | `statesync` 未落库前禁用下一章/闸门 |
-| 续写/导入模式 S0 | PR5 | A 期按状态自动选入口；S0 对齐跑通 |
+| 续写/导入模式 S0 | PR5 + §6.5 补丁 | A 期按状态自动选入口；S0 后台最小对齐（建卷+批量 statesync）+ 按需「全量对齐」按钮（体检+修复闸门）跑通 |
 | 暂停/恢复/停止 + 续跑 | PR1(开关) + PR5(检查点) | 任意安全检查点可中断、从 `current_stage`+`context_json` 续 |
 | LLM 自动建卷 | PR2 | story-blueprint 经 `create_volume` 逐卷落库 |
 | 确定性编排（不依赖 LLM 记步骤） | PR5 | C：前端强制；A：后端强制 |

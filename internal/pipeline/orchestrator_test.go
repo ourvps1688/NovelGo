@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -258,4 +260,88 @@ func TestOrchestratorResumeAfterRestart(t *testing.T) {
 	require.NoError(t, svc.ResumePipeline(ctx, recovered.RunID, "continue", ""))
 	got, _ := svc.store.GetByRunID(ctx, recovered.RunID)
 	require.Equal(t, StageS3, got.CurrentStage)
+}
+
+// TestServiceExecuteS0Align 验证存量书最小对齐：建卷 + 批量 statesync + 置 ImportAligned。
+func TestServiceExecuteS0Align(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	var volumeAssigned bool
+	var synced []int64
+	svc.chapterLister = func(_ context.Context, _ int64) ([]int64, error) { return []int64{11, 12, 13}, nil }
+	svc.volumeAssigner = func(_ context.Context, _ int64) error { volumeAssigned = true; return nil }
+	svc.stateSyncRunner = func(_ context.Context, _ int64, cid int64) error { synced = append(synced, cid); return nil }
+
+	run := &PipelineRun{NovelID: 9100, RunID: "run-s0align", Mode: "new", CurrentStage: StageS0, Status: StatusRunning}
+	require.NoError(t, svc.store.Create(ctx, run))
+
+	svc.executeS0Align(ctx, run)
+
+	require.True(t, volumeAssigned, "应执行建卷")
+	require.Equal(t, []int64{11, 12, 13}, synced, "应对每章跑一次 statesync")
+
+	got, err := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, err)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.True(t, ctxt.ImportAligned, "对齐完成应置 ImportAligned=true")
+}
+
+// TestServiceRunFullAlign 验证「全量对齐」按钮：跑全本体检并将结果写入 ContextJSON.stock_audit。
+func TestServiceRunFullAlign(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{Text: "```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"存量书存在开篇过签力不足等问题\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"开篇钩子\",\"desc\":\"前三章缺乏强冲突\"}]}\n```"}, nil
+	}
+
+	run := &PipelineRun{
+		NovelID:      9200,
+		RunID:        "run-fullalign",
+		Mode:         "new",
+		CurrentStage: StageS3,
+		Status:       StatusRunning,
+		ContextJSON:  `{"import_aligned":true}`,
+	}
+	require.NoError(t, svc.store.Create(ctx, run))
+
+	svc.runFullAlign(ctx, run)
+
+	got, err := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, err)
+	require.Contains(t, got.ContextJSON, "stock_audit", "全本体检结果应写入 stock_audit")
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Contains(t, ctxt.StockAudit, "needs_fix")
+	require.Contains(t, ctxt.StockAudit, "开篇钩子")
+}
+
+// TestControlPipelineAlignFull 验证 align_full 控制指令可被接受且不阻塞返回（实际对齐在后台 goroutine 执行）。
+func TestControlPipelineAlignFull(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{Text: "```json\n{\"verdict\":\"pass\",\"score\":30,\"summary\":\"ok\",\"issues\":[]}\n```"}, nil
+	}
+	run := &PipelineRun{NovelID: 9300, RunID: "run-ctrlalign", Mode: "new", CurrentStage: StageS3, Status: StatusRunning, ContextJSON: `{"import_aligned":true}`}
+	require.NoError(t, svc.store.Create(ctx, run))
+
+	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "align_full"))
+	// 等待后台对齐 goroutine 落库 stock_audit（最多 2s）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, _ := svc.store.GetByRunID(ctx, run.RunID)
+		if got != nil && strings.Contains(got.ContextJSON, "stock_audit") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	got, err := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, err)
+	require.Contains(t, got.ContextJSON, "stock_audit", "align_full 后台应完成全本体检并落库")
 }
