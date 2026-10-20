@@ -72,13 +72,14 @@ export function usePipeline(novelId: number) {
           .catch(() => {});
       },
     );
-    // S5 修复开始（每批一次）：携带本批 issue 清单 + 分批进度 + 此前已修复问题 ID，
+    // S5 修复开始（每批一次）：携带本批 issue 清单 + 全量问题状态清单 + 分批进度，
     // 清空上一批活动流。
     const offFixStart = EventsOn(
       "pipeline:fix_start",
       (p: {
         novel_id: number;
         issues?: FixProgressState["issues"];
+        all_issues?: FixProgressState["issues"];
         summary?: string;
         batch_index?: number;
         batch_total?: number;
@@ -91,6 +92,7 @@ export function usePipeline(novelId: number) {
           ok: null,
           summary: p.summary,
           issues: p.issues ?? [],
+          allIssues: p.all_issues ?? [],
           batchIndex: p.batch_index,
           batchTotal: p.batch_total,
           doneIds: p.done_ids ?? [],

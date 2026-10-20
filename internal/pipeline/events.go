@@ -64,11 +64,14 @@ func EmitStockAudit(ctx context.Context, p map[string]any) {
 }
 
 // FixIssuePayload 是 S5 修复开始事件里的一条修复项（来自体检 issue 清单）。
+// Status 是该问题的修复状态：pending（待修复）/ fixing（正在修复）/ fixed（已修复），
+// 供前端在修复清单中逐项标注，让用户知道 LLM 做到哪了。
 type FixIssuePayload struct {
-	ID    string `json:"id"`
-	Level string `json:"level"`
-	Area  string `json:"area"`
-	Desc  string `json:"desc"`
+	ID     string `json:"id"`
+	Level  string `json:"level"`
+	Area   string `json:"area"`
+	Desc   string `json:"desc"`
+	Status string `json:"status,omitempty"`
 }
 
 // EmitFixStart 广播 S5 修复开始，携带本轮要修复的 issue 清单，

@@ -82,6 +82,7 @@ export default function PipelineWizard({ novelId }: Props) {
                 status={status}
                 gate={gate}
                 onResume={resume}
+                activity={fixActivity}
               />
             ) : stage === "S4" ||
               stage === "S4b" ||

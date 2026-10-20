@@ -1884,6 +1884,7 @@
       "title": "Signability Audit",
       "finalTitle": "Final Audit",
       "auditing": "Running signability audit…",
+      "finalAuditing": "Running final audit…",
       "fixing": "Fixing issues from audit…",
       "score": "Score {{n}}/35",
       "issues": "Issue List",
@@ -1891,16 +1892,23 @@
       "fixNote": "Fixes done; re-auditing automatically."
     },
     "fixProgress": {
-      "issues": "Fix checklist (this batch)",
-      "activity": "Live fix activity",
       "idle": "Waiting for the fix to start…",
       "batch": "Batch {{index}}/{{total}}",
-      "fixedCount": "{{count}} issue(s) fixed (verified together at re-audit)",
+      "checklist": "Fix checklist ({{fixed}}/{{total}} fixed)",
       "resumeHint": "Fix interrupted: click Resume to continue with the remaining issues (completed ones are kept).",
       "done": "Fix completed, re-auditing automatically…",
       "failed": "Fix failed",
-      "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
-      "waitingActivity": "Starting fix agent, waiting for the first actions…"
+      "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly."
+    },
+    "fixStatus": {
+      "pending": "Pending",
+      "fixing": "Fixing",
+      "fixed": "Fixed"
+    },
+    "stageActivity": {
+      "title": "Live activity",
+      "hint": "Live agent activity for the current stage (newest first).",
+      "waiting": "Starting agent, waiting for actions…"
     },
     "stockAudit": {
       "title": "Full Align · Current-state Audit",

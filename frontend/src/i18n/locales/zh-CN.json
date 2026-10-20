@@ -1845,6 +1845,7 @@
       "title": "签约体检",
       "finalTitle": "完本终检",
       "auditing": "签约体检中……",
+      "finalAuditing": "完本终检中……",
       "fixing": "按体检问题修复中……",
       "score": "总分 {{n}}/35",
       "issues": "问题清单",
@@ -1852,16 +1853,23 @@
       "fixNote": "修复完成，正在自动复评。"
     },
     "fixProgress": {
-      "issues": "本批修复清单",
-      "activity": "修复实时动态",
       "idle": "等待修复启动……",
       "batch": "第 {{index}}/{{total}} 批",
-      "fixedCount": "已修复 {{count}} 项（复评时一并验证）",
+      "checklist": "修复清单（已修复 {{fixed}} / 共 {{total}} 项）",
       "resumeHint": "修复已中断：点击「恢复」将从剩余未修复问题继续（已完成项保留）。",
       "done": "修复完成，正在自动复评……",
       "failed": "修复失败",
-      "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
-      "waitingActivity": "正在启动修复 agent，等待第一批修复动作……"
+      "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。"
+    },
+    "fixStatus": {
+      "pending": "待修复",
+      "fixing": "正在修复",
+      "fixed": "已修复"
+    },
+    "stageActivity": {
+      "title": "实时动态",
+      "hint": "以下为当前环节 agent 的实时工作动态（最新在上）。",
+      "waiting": "正在启动 agent，等待执行动作……"
     },
     "stockAudit": {
       "title": "全量对齐 · 现状体检",

@@ -41,11 +41,13 @@ export interface ControlAckPayload {
 }
 
 // S5 修复开始事件（pipeline:fix_start）里的一条修复项，与后端 FixIssuePayload 对应。
+// status 是该问题的修复状态：pending（待修复）/ fixing（正在修复）/ fixed（已修复）。
 export interface FixIssuePayload {
   id: string;
   level: string;
   area: string;
   desc: string;
+  status?: "pending" | "fixing" | "fixed";
 }
 
 // S5 修复进度状态（由 pipeline:fix_start / pipeline:fix_done 维护）。
@@ -55,6 +57,8 @@ export interface FixProgressState {
   error?: string;
   summary?: string;
   issues: FixIssuePayload[];
+  // 全量问题清单（含逐项 status）：修复清单按它渲染，每个问题带状态徽章。
+  allIssues?: FixIssuePayload[];
   // 分批修复：当前批次序号（1 起）/ 总批数；此前批次已修复的问题 ID 列表。
   batchIndex?: number;
   batchTotal?: number;

@@ -653,14 +653,36 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			return
 		}
 
+		batchIDs := make(map[string]bool, len(batch))
+		for _, it := range batch {
+			batchIDs[it.ID] = true
+		}
 		batchIssues := make([]FixIssuePayload, 0, len(batch))
 		for _, it := range batch {
-			batchIssues = append(batchIssues, FixIssuePayload(it))
+			batchIssues = append(batchIssues, FixIssuePayload{
+				ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc, Status: "fixing",
+			})
+		}
+		// 全量问题清单（含逐项状态）：前端在修复清单里给每个问题标注
+		// 待修复 / 正在修复 / 已修复，用户不用猜 LLM 做到哪了。
+		allIssues := make([]FixIssuePayload, 0, len(auditData.Issues))
+		for _, it := range auditData.Issues {
+			p := FixIssuePayload{ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc}
+			switch {
+			case isFixed[it.ID]:
+				p.Status = "fixed"
+			case batchIDs[it.ID]:
+				p.Status = "fixing"
+			default:
+				p.Status = "pending"
+			}
+			allIssues = append(allIssues, p)
 		}
 		emitFixStart(ctx, map[string]any{
 			"run_id":      runID,
 			"novel_id":    novelID,
 			"issues":      batchIssues,
+			"all_issues":  allIssues,
 			"summary":     auditData.Summary,
 			"batch_index": i + 1,
 			"batch_total": len(batches),
