@@ -74,6 +74,10 @@ type GateContext struct {
 	// StockAudit 是「全量对齐」按钮触发的全本现状体检结果（区别于 S4 流水线体检的 Audit 字段），
 	// 只读展示，不影响流水线阶段流转。
 	StockAudit string `json:"stock_audit,omitempty"`
+	// Interrupted 标记该运行是否因应用重启被启动恢复机制暂停（执行 goroutine 已随旧进程消亡，
+	// DB 状态却停留在 running）。恢复（ControlPipeline resume）时据此按当前阶段重新派发
+	// 执行体（体检/修复），派发后清除该标记，避免正常暂停的运行被重复派发。
+	Interrupted bool `json:"interrupted,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。
@@ -126,6 +130,15 @@ func (s *Store) GetByRunID(ctx context.Context, runID string) (*PipelineRun, err
 		return nil, err
 	}
 	return &run, nil
+}
+
+// ListByStatus 列出处于指定状态的全部流水线运行（供启动恢复扫描僵尸运行）。
+func (s *Store) ListByStatus(ctx context.Context, status string) ([]*PipelineRun, error) {
+	var runs []*PipelineRun
+	if err := s.db.WithContext(ctx).Where("status = ?", status).Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	return runs, nil
 }
 
 // SetStatus 仅更新状态与上下文（不改变阶段）。

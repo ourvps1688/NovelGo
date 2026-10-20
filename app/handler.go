@@ -397,6 +397,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
 		}, a.logger, "pipeline-s0-align", novelID, chapterID)
 	})
+	// 启动恢复：把上次进程遗留的「running 僵尸运行」（执行 goroutine 已消亡）统一置为
+	// paused 并打中断标记，用户点「恢复」时按阶段重新派发执行体。见 RecoverInterruptedRuns。
+	a.pipeline.RecoverInterruptedRuns()
 
 	// 11. 异步初始化向量存储和搜索服务（不阻塞 UI）
 	go func() {

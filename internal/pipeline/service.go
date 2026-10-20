@@ -999,6 +999,9 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 			return err
 		}
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: StatusRunning})
+		// 启动恢复机制暂停的中断运行：执行 goroutine 已随旧进程消亡，恢复时按当前阶段
+		// 重新派发执行体（体检/修复是幂等重入的），否则状态回到 running 却无人执行。
+		s.redispatchInterrupted(ctx, run)
 	case "stop":
 		if err := s.store.SetStatus(ctx, runID, StatusAborted, run.ContextJSON); err != nil {
 			return err
@@ -1019,6 +1022,76 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 		return fmt.Errorf("未知控制命令 %q", cmd)
 	}
 	return nil
+}
+
+// RecoverInterruptedRuns 应用启动时调用：扫描 status=running 的「僵尸运行」。
+// 流水线的执行体是内存 goroutine，随进程退出而消亡，但 DB 状态仍停留在 running——
+// 重启后用户会看到「修复中/体检中」却永远没有进展（也不报错）。此处统一置为 paused，
+// 并在 ContextJSON 打上 interrupted 标记；用户点「恢复」时按阶段重新派发执行体。
+// 已打过标记的运行跳过，保证幂等（OnStartup / RetryStartup 可能多次调用）。
+func (s *Service) RecoverInterruptedRuns() {
+	ctx := s.appCtx
+	runs, err := s.store.ListByStatus(ctx, StatusRunning)
+	if err != nil {
+		s.logger.Error("启动恢复：扫描运行中流水线失败", "err", err)
+		return
+	}
+	for _, run := range runs {
+		var ctxt GateContext
+		if run.ContextJSON != "" {
+			_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+		}
+		if ctxt.Interrupted {
+			continue
+		}
+		ctxt.Interrupted = true
+		updated, merr := json.Marshal(ctxt)
+		if merr != nil {
+			s.logger.Error("启动恢复：序列化上下文失败", "run_id", run.RunID, "err", merr)
+			continue
+		}
+		if err := s.store.SetStatus(ctx, run.RunID, StatusPaused, string(updated)); err != nil {
+			s.logger.Error("启动恢复：置暂停失败", "run_id", run.RunID, "err", err)
+			continue
+		}
+		s.logger.Info("启动恢复：上次进程遗留的运行中流水线已暂停，恢复后将重新执行当前阶段",
+			"run_id", run.RunID, "stage", run.CurrentStage)
+		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: run.CurrentStage,
+			Status: StatusPaused, Note: "应用重启导致流程中断，已暂停；点击恢复将从当前阶段重新执行"})
+	}
+}
+
+// redispatchInterrupted 对带 interrupted 标记的已暂停运行，在恢复（resume）时按当前阶段
+// 重新派发执行体，并清除标记。体检（executeAudit）与修复（executeFix）均为幂等重入设计：
+// 它们从 DB 重新加载状态、末尾有「状态未变更」守卫，重复派发不会产生双写。
+func (s *Service) redispatchInterrupted(ctx context.Context, run *PipelineRun) {
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	if !ctxt.Interrupted {
+		return
+	}
+	ctxt.Interrupted = false
+	if updated, merr := json.Marshal(ctxt); merr == nil {
+		if err := s.store.SetStatus(ctx, run.RunID, StatusRunning, string(updated)); err != nil {
+			s.logger.Warn("恢复：清除中断标记失败（非阻断）", "run_id", run.RunID, "err", err)
+		}
+	}
+	switch run.CurrentStage {
+	case StageS4, StageS4b:
+		s.logger.Info("恢复：重新派发签约体检", "run_id", run.RunID, "stage", run.CurrentStage)
+		go s.executeAudit(run.RunID, run.NovelID)
+	case StageS5:
+		s.logger.Info("恢复：重新派发 S5 修复", "run_id", run.RunID)
+		go s.executeFix(run.RunID, run.NovelID)
+	case StageS6:
+		s.logger.Info("恢复：重新派发完本终检", "run_id", run.RunID)
+		go s.executeFinalAudit(run.RunID, run.NovelID)
+	default:
+		// S0/S1/S2/S3：由用户交互或既有入口驱动（写作/蓝图均由前端操作触发），无需自动派发。
+		s.logger.Info("恢复：当前阶段由交互驱动，不自动派发执行体", "run_id", run.RunID, "stage", run.CurrentStage)
+	}
 }
 
 // 可替换的事件发射器，便于测试注入无操作实现。

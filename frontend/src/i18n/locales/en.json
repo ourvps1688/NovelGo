@@ -1893,6 +1893,7 @@
     "fixProgress": {
       "issues": "Fix checklist (issues being fixed this round)",
       "activity": "Live fix activity",
+      "idle": "Waiting for the fix to start…",
       "done": "Fix completed, re-auditing automatically…",
       "failed": "Fix failed",
       "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",

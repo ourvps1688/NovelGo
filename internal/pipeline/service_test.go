@@ -216,6 +216,63 @@ func TestServiceAuditContinueMarksAudited(t *testing.T) {
 
 // TestServiceAuditFixLoopReAudit 验证：G4 选 fix 后进入 S5 修复闭环，
 // 修复完成后自动回到 S4 复评，复评结果（pass）重写 ContextJSON.Audit。
+// TestServiceRecoverInterruptedAndResume 验证启动恢复闭环：
+// 1) status=running 的僵尸运行被 RecoverInterruptedRuns 置为 paused 并打 interrupted 标记（幂等）；
+// 2) resume 后按阶段重新派发执行体（S5 → executeFix → emitFixStart），最终回到 S4 闸门。
+func TestServiceRecoverInterruptedAndResume(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	var fixStarts int
+	origFixStart := emitFixStart
+	emitFixStart = func(_ context.Context, _ map[string]any) { fixStarts++ }
+	t.Cleanup(func() { emitFixStart = origFixStart })
+
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-fix":
+			return SkillOutput{Text: "已按 issue 修复：强化开篇钩子"}, nil
+		case "signability-audit":
+			return SkillOutput{Text: "复评：\n```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"仍有问题\",\"issues\":[]}\n```"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
+	require.NoError(t, err)
+	// 模拟僵尸运行：S5 running（执行体已随旧进程消亡），带 audit 与 audit_stage 供复评回家。
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning,
+		`{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4"}`))
+
+	// 启动恢复：running → paused + interrupted 标记。
+	svc.RecoverInterruptedRuns()
+	got, err := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, err)
+	require.Equal(t, StatusPaused, got.Status)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.True(t, ctxt.Interrupted, "应打上中断标记")
+
+	// 幂等：再次恢复不应改变状态。
+	svc.RecoverInterruptedRuns()
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StatusPaused, got.Status)
+
+	// 用户点恢复：回 running + 按阶段重新派发（S5 → executeFix）。
+	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "resume"))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS4, got.CurrentStage, "复评应回到 audit_stage=S4 闸门")
+	require.Equal(t, 1, fixStarts, "恢复应重新派发一次修复（emitFixStart）")
+
+	// 恢复后 interrupted 标记应被清除。
+	var ctxt2 GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt2))
+	require.False(t, ctxt2.Interrupted, "派发后应清除中断标记")
+}
+
 func TestServiceAuditFixLoopReAudit(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())

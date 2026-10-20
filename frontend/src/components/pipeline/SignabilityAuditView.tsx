@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
+  Hourglass,
   Loader2,
   ShieldAlert,
   ShieldCheck,
@@ -253,7 +254,10 @@ function FixProgressView({
   fixActivity: FixActivityItem[];
 }) {
   const { t } = useTranslation();
-  const running = fixProgress?.running ?? true;
+  // 注意初始态（running=false, ok=null）必须视为「未开始」而非「已完成」：
+  // 应用重启后事件状态丢失，若把初始态渲染成 done 会给用户"修复完成在复评"的假象。
+  const running = fixProgress?.running ?? false;
+  const idle = !running && fixProgress?.ok == null;
   const issues = fixProgress?.issues ?? [];
   const activity = [...fixActivity].reverse();
 
@@ -264,6 +268,8 @@ function FixProgressView({
           <XCircle className="h-4 w-4 text-danger-foreground" />
         ) : running ? (
           <Loader2 className="h-4 w-4 animate-spin" />
+        ) : idle ? (
+          <Hourglass className="h-4 w-4 text-muted-foreground" />
         ) : (
           <CheckCircle2 className="h-4 w-4 text-warning-foreground" />
         )}
@@ -272,7 +278,9 @@ function FixProgressView({
             ? t("pipeline.fixProgress.failed")
             : running
               ? t("pipeline.signability.fixing")
-              : t("pipeline.fixProgress.done")}
+              : idle
+                ? t("pipeline.fixProgress.idle")
+                : t("pipeline.fixProgress.done")}
         </span>
       </div>
 
@@ -282,7 +290,7 @@ function FixProgressView({
         </p>
       ) : null}
 
-      {!running && fixProgress?.ok !== false ? (
+      {!running && !idle && fixProgress?.ok !== false ? (
         <p className="flex items-center gap-1 text-muted-foreground text-xs">
           <Wrench className="h-3 w-3" />
           {t("pipeline.fixProgress.reAuditing")}
@@ -320,32 +328,34 @@ function FixProgressView({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-2">
-        <div className="text-xs font-medium text-muted-foreground">
-          {t("pipeline.fixProgress.activity")}
+      {!idle ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t("pipeline.fixProgress.activity")}
+          </div>
+          {activity.length > 0 ? (
+            <ul className="flex max-h-64 flex-col gap-1 overflow-auto rounded border bg-card px-3 py-2">
+              {activity.map((it, i) => (
+                <li
+                  key={`${it.seq}-${i}`}
+                  className="flex items-center gap-2 text-muted-foreground text-xs"
+                >
+                  {it.failed ? (
+                    <XCircle className="h-3 w-3 shrink-0 text-danger-foreground" />
+                  ) : (
+                    <CheckCircle2 className="h-3 w-3 shrink-0 text-success-foreground" />
+                  )}
+                  <span>{it.text}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-muted-foreground text-xs">
+              {t("pipeline.fixProgress.waitingActivity")}
+            </p>
+          )}
         </div>
-        {activity.length > 0 ? (
-          <ul className="flex max-h-64 flex-col gap-1 overflow-auto rounded border bg-card px-3 py-2">
-            {activity.map((it, i) => (
-              <li
-                key={`${it.seq}-${i}`}
-                className="flex items-center gap-2 text-muted-foreground text-xs"
-              >
-                {it.failed ? (
-                  <XCircle className="h-3 w-3 shrink-0 text-danger-foreground" />
-                ) : (
-                  <CheckCircle2 className="h-3 w-3 shrink-0 text-success-foreground" />
-                )}
-                <span>{it.text}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground text-xs">
-            {t("pipeline.fixProgress.waitingActivity")}
-          </p>
-        )}
-      </div>
+      ) : null}
     </div>
   );
 }
