@@ -502,10 +502,14 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	auditJSON, _ := json.Marshal(audit)
 
 	// ctxt 已在函数顶部解析；按 AuditKind 把体检结果写回对应字段（蓝图 → BlueprintAudit，签约 → Audit）。
+	// 签约类体检同步重算「回流 S3 重写回路」的正文级问题清单（每次体检反映最新结果）；
+	// 蓝图体检不产生正文级问题，置空避免污染。
 	if ctxt.AuditKind == "blueprint" {
 		ctxt.BlueprintAudit = string(auditJSON)
+		ctxt.RewriteBacklog = nil
 	} else {
 		ctxt.Audit = string(auditJSON)
+		ctxt.RewriteBacklog = bodyIssuesOf(audit)
 	}
 	// 新一轮体检结果落地即视为全新问题清单：清除上一轮的修复断点（FixStates）。
 	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），executeFix 会把
@@ -601,6 +605,11 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 	// G3：S5 修复后的蓝图巡检结论随闸门带给用户（非阻断，仅供参考）。
 	if bc.DriftReport != "" {
 		summary += "；" + bc.DriftReport
+	}
+	// 正文级问题已回流 S3 重写回路：在闸门 summary 显式提示用户哪些章节需回到 S3 重写，
+	// 闭合修复链路（否则这些问题既不在 S5 修复范围内，也无出口，修复链不完整）。
+	if len(bc.RewriteBacklog) > 0 {
+		summary += "；" + rewriteBacklogSummary(bc.RewriteBacklog)
 	}
 	gateID := GateG4
 	options := []string{"continue", "fix", "abort"}
@@ -699,30 +708,66 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	}
 	auditData := parseAudit(auditJSON)
 
-	// 断点续修：跳过已修复/已跳过问题（此前批次完成并落库的），只修剩余部分。
+	// 断点续修：跳过已修复/已跳过/已路由重写（rewrite）问题（此前批次完成并落库的），只修剩余部分。
 	// 注意：旧断点与新体检清单 ID 撞车的问题由 executeAudit 落新体检结果时重置
 	// FixStates 解决（新一轮问题就是新问题），这里「全部命中断点」只可能是修复
 	// 完成后、复评前的中断恢复，直接进入复评是正确语义。
+	if ctxt.FixStates == nil {
+		ctxt.FixStates = map[string]string{}
+	}
 	fixedIDs := make([]string, 0, len(ctxt.FixStates))
 	isFixed := make(map[string]bool, len(ctxt.FixStates))
-	isSkipped := make(map[string]bool, len(ctxt.FixStates))
+	isResolved := make(map[string]bool, len(ctxt.FixStates)) // fixed/skipped/rewrite 均不再进修复批次
 	for id, st := range ctxt.FixStates {
 		switch st {
 		case "fixed":
 			isFixed[id] = true
 			fixedIDs = append(fixedIDs, id)
-		case "skipped":
-			isSkipped[id] = true
+			isResolved[id] = true
+		case "skipped", "rewrite":
+			isResolved[id] = true
 		}
 	}
+
+	// 析出正文级（fix_type=body）问题：S5 不尝试 edit 修补这类「必重写」项，
+	// 否则会对修不动的问题反复重试（空转）或上报 skipped 永久丢弃（修复链断裂）。
+	// 改为显式路由到 S3 章节重写回路——标记 FixStates=rewrite 并沉淀到 RewriteBacklog。
+	backlog := ctxt.RewriteBacklog
+	if backlog == nil {
+		backlog = []RewriteItem{}
+	}
+	for _, it := range auditData.Issues {
+		if it.FixType != FixTypeBody || isResolved[it.ID] {
+			continue
+		}
+		backlog = upsertRewriteItem(backlog, RewriteItem{
+			ID:       it.ID,
+			Level:    it.Level,
+			Area:     it.Area,
+			Desc:     it.Desc,
+			Chapters: parseChapterRefs(it.Area, it.Desc),
+		})
+		ctxt.FixStates[it.ID] = "rewrite"
+	}
+	ctxt.RewriteBacklog = backlog
+	// 正文级路由落库：标记 rewrite + 沉淀重写清单（即便没有台账级问题待修也需持久化，供 G4 展示）。
+	if updated, merr := json.Marshal(ctxt); merr == nil {
+		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(updated)); serr != nil {
+			s.logger.Error("S5 修复：落库正文级重写标记失败", "err", serr)
+		}
+	}
+	if len(backlog) > 0 {
+		s.emitRewriteBacklog(ctx, runID, novelID, backlog)
+	}
+
 	pending := make([]AuditIssue, 0, len(auditData.Issues))
 	for _, it := range auditData.Issues {
-		if !isFixed[it.ID] && !isSkipped[it.ID] {
+		if !isResolved[it.ID] && it.FixType != FixTypeBody {
 			pending = append(pending, it)
 		}
 	}
 	if len(pending) == 0 {
-		// 全部问题已修复/已跳过（如复评前中断后恢复）：直接进入复评。
+		// 全部问题已修复/已跳过/已路由重写（如复评前中断后恢复）：直接进入复评。
 		s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
 		return
 	}
@@ -757,8 +802,10 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			switch {
 			case isFixed[it.ID]:
 				p.Status = "fixed"
-			case isSkipped[it.ID]:
+			case ctxt.FixStates[it.ID] == "skipped":
 				p.Status = "skipped"
+			case ctxt.FixStates[it.ID] == "rewrite":
+				p.Status = "rewrite"
 			case batchIDs[it.ID]:
 				p.Status = "fixing"
 			default:
@@ -991,7 +1038,8 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 // finalAuditPrompt 构造 S6 完本级终检的任务提示词。
 func finalAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
-		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
+		"fix_type 必填：body=正文级需章节重写（将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID)
 }
 
@@ -1225,7 +1273,8 @@ func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, 
 func stockAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，**逐章通读所有已落库章节**（不得抽样跳章），"+
 		"从签约编辑视角评估：开篇钩子与过签力、人设记忆点、节奏与爽点密度、世界观/设定自洽、完本潜力、题材契合与数据预期等维度，逐维打分并举证；"+
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
+		"fix_type 必填：body=正文级需章节重写（将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
 }
 
@@ -1323,11 +1372,100 @@ func parseAudit(text string) AuditData {
 	return data
 }
 
+// bodyIssuesOf 从体检结果中析出所有正文级（fix_type=body）问题，构造回流 S3 重写回路的清单。
+func bodyIssuesOf(audit AuditData) []RewriteItem {
+	items := make([]RewriteItem, 0, len(audit.Issues))
+	for _, it := range audit.Issues {
+		if it.FixType != FixTypeBody {
+			continue
+		}
+		items = append(items, RewriteItem{
+			ID:       it.ID,
+			Level:    it.Level,
+			Area:     it.Area,
+			Desc:     it.Desc,
+			Chapters: parseChapterRefs(it.Area, it.Desc),
+		})
+	}
+	return items
+}
+
+// upsertRewriteItem 按 ID 去重写入/更新重写清单项（复评后同 ID 问题刷新内容）。
+func upsertRewriteItem(list []RewriteItem, item RewriteItem) []RewriteItem {
+	for i, it := range list {
+		if it.ID == item.ID {
+			list[i] = item
+			return list
+		}
+	}
+	return append(list, item)
+}
+
+// parseChapterRefs 尽力从 area/desc 文本解析涉及的章节号，供 S3 写作回路定位待重写章节。
+// 识别「第 N 章」「第 N-M 章」区间与「#N」两种写法；解析失败或越界（≤0）忽略。
+var (
+	chapterRangeRe = regexp.MustCompile(`第\s*(\d+)\s*(?:[-~到至]\s*(\d+))?\s*章`)
+	chapterHashRe  = regexp.MustCompile(`#\s*(\d+)`)
+)
+
+func parseChapterRefs(area, desc string) []int64 {
+	text := area + " " + desc
+	seen := map[int64]bool{}
+	var refs []int64
+	add := func(n int64) {
+		if n > 0 && !seen[n] {
+			seen[n] = true
+			refs = append(refs, n)
+		}
+	}
+	for _, m := range chapterRangeRe.FindAllStringSubmatch(text, -1) {
+		if a, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			add(a)
+			if m[2] != "" {
+				if b, err := strconv.ParseInt(m[2], 10, 64); err == nil && b >= a {
+					for n := a + 1; n <= b; n++ {
+						add(n)
+					}
+				}
+			}
+		}
+	}
+	for _, m := range chapterHashRe.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+			add(n)
+		}
+	}
+	return refs
+}
+
+// rewriteBacklogSummary 生成 G4 闸门 summary 的正文级重写提示文案。
+func rewriteBacklogSummary(items []RewriteItem) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "另有 %d 项正文级问题已回流 S3 重写回路（需在写作中重写对应章节）", len(items))
+	for i, it := range items {
+		if i >= 3 {
+			sb.WriteString("等")
+			break
+		}
+		if i > 0 {
+			sb.WriteString("；")
+		}
+		sb.WriteString(it.Area + "：" + it.Desc)
+	}
+	return sb.String()
+}
+
+// emitRewriteBacklog 广播「正文级问题回流 S3 重写回路」事件，通知前端刷新并展示重写清单。
+func (s *Service) emitRewriteBacklog(ctx context.Context, runID string, novelID int64, items []RewriteItem) {
+	emitRewriteBacklog(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "items": items})
+}
+
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。
 func signabilityPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
+		"fix_type 必填：body=正文级需章节重写（S5 修不动，将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
 }
 
@@ -1348,7 +1486,8 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) stri
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
 		"{\"fixed\":[\"I..\"],\"skipped\":[{\"id\":\"I..\",\"reason\":\"无法在卷纲层修复的原因\"}]}——"+
-		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
+		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。"+
+		"（注：蓝图级问题均为卷纲/设定层，不涉及正文章节重写，无需考虑 fix_type=body 的回流。）",
 		novelID, len(issues), b)
 }
 
@@ -1358,7 +1497,9 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) stri
 func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
 	data := AuditData{Verdict: "needs_fix", Summary: summary, Issues: issues}
 	b, _ := json.Marshal(data)
-	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复项），请逐条修复：\n%s\n\n"+
+	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复的**台账/卷纲级（fix_type=ledger）**项）。"+
+		"注意：**正文级（fix_type=body）问题已由流水线路由到 S3 章节重写回路，不会出现在本批清单中，你无需处理，也不要自作主张去重写整章**。"+
+		"请仅对以下 ledger 级问题逐条修复：\n%s\n\n"+
 		"按 signability-fix 方法论：P0 优先于 P1，用 edit/update_chapter_plan/create_volume/台账写工具修复，"+
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
@@ -1500,12 +1641,13 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 
 // 可替换的事件发射器，便于测试注入无操作实现。
 var (
-	emitStage      = EmitStage
-	emitGate       = EmitGate
-	emitControlAck = EmitControlAck
-	emitStockAudit = EmitStockAudit
-	emitFixStart   = EmitFixStart
-	emitFixDone    = EmitFixDone
+	emitStage          = EmitStage
+	emitGate           = EmitGate
+	emitControlAck     = EmitControlAck
+	emitStockAudit     = EmitStockAudit
+	emitFixStart       = EmitFixStart
+	emitFixDone        = EmitFixDone
+	emitRewriteBacklog = EmitRewriteBacklog
 )
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

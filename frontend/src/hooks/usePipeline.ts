@@ -72,6 +72,19 @@ export function usePipeline(novelId: number) {
           .catch(() => {});
       },
     );
+    // 正文级问题回流 S3 重写回路：后端沉淀重写清单后广播该事件，重新拉取 run 以拿到 rewrite_backlog。
+    const offRewrite = EventsOn(
+      "pipeline:rewrite_backlog",
+      (p: { novel_id: number }) => {
+        if (p.novel_id !== novelId) return;
+        GetPipelineState(novelId)
+          .then((r: pipeline.PipelineRun) => {
+            setRun(r);
+            setStage(r.CurrentStage);
+          })
+          .catch(() => {});
+      },
+    );
     // S5 修复开始（每批一次）：携带本批 issue 清单 + 全量问题状态清单 + 分批进度，
     // 清空上一批活动流。
     const offFixStart = EventsOn(
@@ -148,6 +161,7 @@ export function usePipeline(novelId: number) {
       offGate();
       offAck();
       offStock();
+      offRewrite();
       offFixStart();
       offFixDone();
       offAgentActivity();

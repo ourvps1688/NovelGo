@@ -42,13 +42,24 @@ export interface ControlAckPayload {
 
 // S5 修复开始事件（pipeline:fix_start）里的一条修复项，与后端 FixIssuePayload 对应。
 // status 是该问题的修复状态：pending（待修复）/ fixing（正在修复）/ fixed（已修复）/
-// skipped（agent 上报无法修复，已跳过并记录原因，不再重试）。
+// skipped（agent 上报无法修复，已跳过并记录原因，不再重试）/
+// rewrite（正文级，已路由到 S3 章节重写回路，S5 不再处理）。
 export interface FixIssuePayload {
   id: string;
   level: string;
   area: string;
   desc: string;
-  status?: "pending" | "fixing" | "fixed" | "skipped";
+  status?: "pending" | "fixing" | "fixed" | "skipped" | "rewrite";
+}
+
+// 回流到 S3 章节重写回路的正文级问题（pipeline:rewrite_backlog / run.ContextJSON.rewrite_backlog），
+// 与后端 RewriteItem 对应。
+export interface RewriteItem {
+  id: string;
+  level: string;
+  area: string;
+  desc: string;
+  chapters?: number[];
 }
 
 // S5 修复进度状态（由 pipeline:fix_start / pipeline:fix_done 维护）。

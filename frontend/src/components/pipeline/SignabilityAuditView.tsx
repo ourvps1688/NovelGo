@@ -5,6 +5,7 @@ import {
   Clock,
   Hourglass,
   Loader2,
+  PenLine,
   ShieldAlert,
   ShieldCheck,
   Wrench,
@@ -17,6 +18,7 @@ import type {
   FixProgressState,
   FixActivityItem,
   FixIssuePayload,
+  RewriteItem,
 } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import StageActivityPanel from "./StageActivityPanel";
@@ -134,6 +136,12 @@ export default function SignabilityAuditView({
             : "pipeline.signability.score"
         }
       />
+      {/* 正文级问题回流 S3 重写回路清单：仅签约类体检（非蓝图）有此出口。 */}
+      {auditKind === "signability" &&
+      ctx?.rewrite_backlog &&
+      (ctx.rewrite_backlog as RewriteItem[]).length > 0 ? (
+        <RewriteBacklogPanel items={ctx.rewrite_backlog as RewriteItem[]} />
+      ) : null}
       {isFix && status !== "running" ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <Wrench className="h-3 w-3" />
@@ -220,6 +228,53 @@ export function AuditResultView({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+// RewriteBacklogPanel 展示回流到 S3 章节重写回路的正文级问题清单（与后端 RewriteBacklog 对应）。
+// 这些问题无法靠 S5 台账/单章补丁修好，已被显式路由到写作回路，须由用户在 S3 重写对应章节，
+// 闭合「审计→修台账→复评→正文重写→复评」的完整修复链。
+function RewriteBacklogPanel({ items }: { items: RewriteItem[] }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-2 rounded border border-dashed border-warning/50 bg-warning/5 p-4">
+      <div className="flex items-center gap-2">
+        <PenLine className="h-4 w-4 text-warning-foreground" />
+        <span className="text-sm font-medium">
+          {t("pipeline.rewriteBacklog.title")}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t("pipeline.rewriteBacklog.hint")}
+      </p>
+      <ul className="flex flex-col gap-2">
+        {items.map((it) => (
+          <li key={it.id} className="rounded border bg-card px-3 py-2 text-sm">
+            <div className="flex items-center gap-2">
+              <span
+                className={`rounded px-1.5 py-0.5 text-xs ${
+                  it.level === "P0"
+                    ? "bg-danger text-danger-foreground"
+                    : "bg-warning text-warning-foreground"
+                }`}
+              >
+                {it.level}
+              </span>
+              <span className="font-medium">{it.area}</span>
+              <span className="text-muted-foreground">{it.id}</span>
+            </div>
+            <p className="mt-1 text-muted-foreground">{it.desc}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {it.chapters && it.chapters.length > 0
+                ? t("pipeline.rewriteBacklog.chapters", {
+                    chapters: it.chapters.join("、"),
+                  })
+                : t("pipeline.rewriteBacklog.noChapters")}
+            </p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -331,6 +386,14 @@ function FixIssueStatusBadge({
       <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-warning/10 px-1.5 py-0.5 text-warning-foreground text-xs">
         <CircleSlash2 className="h-3 w-3" />
         {t("pipeline.fixStatus.skipped")}
+      </span>
+    );
+  }
+  if (status === "rewrite") {
+    return (
+      <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
+        <PenLine className="h-3 w-3" />
+        {t("pipeline.fixStatus.rewrite")}
       </span>
     );
   }

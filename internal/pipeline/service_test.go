@@ -20,6 +20,7 @@ func init() {
 	emitStockAudit = func(_ context.Context, _ map[string]any) {}
 	emitFixStart = func(_ context.Context, _ map[string]any) {}
 	emitFixDone = func(_ context.Context, _ map[string]any) {}
+	emitRewriteBacklog = func(_ context.Context, _ map[string]any) {}
 }
 
 func TestServiceStartAndResume(t *testing.T) {
@@ -351,6 +352,83 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	// 批次断点正确性已由上方调用序列验证：恢复后首批重试 I1、已修项不重复修复。
 	require.Empty(t, finalCtxt.FixStates, "复评落地后旧修复断点应被重置")
 	require.Equal(t, 1, finalCtxt.FixRounds, "一次完整 sweep 递增一轮")
+}
+
+// TestServiceBodyIssuesRoutedToRewriteBacklog 验证正文级（fix_type=body）问题被显式路由到
+// S3 重写回路：不进修复批次（修复 agent 看不到）、标记 FixStates=rewrite、沉淀进 RewriteBacklog，
+// 从而消除 S5 对修不动问题的空转，闭合修复链。
+func TestServiceBodyIssuesRoutedToRewriteBacklog(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 初检：I1 正文级（需章节重写），I2 台账级（S5 可修）。
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger"}]}`
+	// 复评：I2 已修（不在清单），I1 正文问题仍在（仍未重写）。
+	secondAudit := `{"verdict":"needs_fix","score":20,"summary":"修复后仍有正文问题","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"}]}`
+
+	var fixPrompts []string
+	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-audit":
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "signability-fix":
+			fixPrompts = append(fixPrompts, input.Prompt)
+			return SkillOutput{Text: "已修复"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 406, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	// 正文级 I1 必须沉淀进重写清单（复评后仍在该清单，因复评仍报出它）。
+	require.Len(t, finalCtxt.RewriteBacklog, 1, "正文级问题应流入 RewriteBacklog")
+	require.Equal(t, "I1", finalCtxt.RewriteBacklog[0].ID)
+	// 复评阶段 FixStates 被重置——此处只断言重写清单出口正确；修复 agent 是否触及 I1 由下方断言。
+	require.Len(t, fixPrompts, 1, "仅台账级 I2 应进入一次修复批次，正文级 I1 不应进批次")
+	require.Contains(t, fixPrompts[0], "I2", "修复批次应包含台账级 I2")
+	require.NotContains(t, fixPrompts[0], "I1", "修复批次不应包含正文级 I1（已路由到 S3 重写）")
+}
+
+// TestParseAuditFixType 验证 parseAudit 正确解析 fix_type 字段。
+func TestParseAuditFixType(t *testing.T) {
+	text := "结论\n```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"x\",\"issues\":[" +
+		"{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"a\",\"desc\":\"d\",\"fix_type\":\"body\"}," +
+		"{\"id\":\"I2\",\"level\":\"P1\",\"area\":\"b\",\"desc\":\"e\"}]}\n```"
+	a := parseAudit(text)
+	require.Len(t, a.Issues, 2)
+	require.Equal(t, FixTypeBody, a.Issues[0].FixType, "显式 fix_type=body 应被解析")
+	require.Equal(t, "", a.Issues[1].FixType, "缺省 fix_type 应为空（按 ledger 处理）")
+}
+
+// TestBodyIssuesOf 验证 bodyIssuesOf 仅析出正文级项，并尽力解析涉及章节号。
+func TestBodyIssuesOf(t *testing.T) {
+	audit := AuditData{Issues: []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇过签力", Desc: "前三章未立人设", FixType: FixTypeBody},
+		{ID: "I2", Level: "P1", Area: "长线牵引", Desc: "timeline#42 伏笔未回收", FixType: "ledger"},
+		{ID: "I3", Level: "P1", Area: "节奏爽点", Desc: "第6-8章爽点断档", FixType: FixTypeBody},
+	}}
+	items := bodyIssuesOf(audit)
+	require.Len(t, items, 2, "只析出 body 项")
+	require.Equal(t, "I1", items[0].ID)
+	require.Empty(t, items[0].Chapters, "I1 未带章节号则章节列表为空")
+	require.Equal(t, []int64{6, 7, 8}, items[1].Chapters, "第6-8章区间应解析为 [6,7,8]")
 }
 
 // TestServiceFixAllFixedSkipsToReaudit 验证断点续修边界：全部问题已修复但复评未跑

@@ -62,5 +62,7 @@ useWhen:
 }
 ```
 
+- 蓝图体检的 issue 均为**卷纲/设定层**，不涉及正文章节重写；`fix_type` 字段可省略（或置 `"blueprint"`），流水线不会将其路由到 S3 重写回路。
+
 - `verdict` 判定：存在任意 P0 致命伤 → `"needs_fix"`；无 P0 且总分 ≥24/30 → `"pass"`。
 - 你没有任何 `create_*`/`update_*`/`edit`/`upsert_preference`/`run_subagent` 权限；不要尝试写数据或派子 agent，只需产出 JSON。

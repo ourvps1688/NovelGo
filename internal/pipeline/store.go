@@ -93,17 +93,37 @@ type GateContext struct {
 	// 会在批次/阶段边界感知状态变化并继续）与「无人执行」（需重新派发）。进程重启后
 	// 该标记失真（goroutine 必然已消亡），由 RecoverInterruptedRuns 统一清除。
 	Dispatching bool `json:"dispatching,omitempty"`
-	// FixStates 记录 S5 修复各问题的完成状态（issueID → "fixed"）。分批修复每完成一批
-	// 即落库，作为断点续修依据：修复失败暂停后恢复时跳过已修复问题，只修剩余部分。
+	// FixStates 记录 S5 修复各问题的完成状态（issueID → "fixed"/"skipped"/"rewrite"）。
+	// 分批修复每完成一批即落库，作为断点续修依据：修复失败暂停后恢复时跳过已完成问题；
+	// rewrite 标记正文级问题已被路由到 S3 重写回路，S5 不再重试（消除对修不动问题的空转）。
 	FixStates map[string]string `json:"fix_states,omitempty"`
+	// RewriteBacklog 是回流到 S3 章节重写回路的正文级问题清单（fix_type=body 的 issue），
+	// 每次体检（executeAudit，签约类）重新计算以反映最新体检结果。S5 不处理这些项，
+	// 而是显式通知写作回路优先重写其涉及章节，闭合「审计→修台账→复评→正文重写→复评」链路。
+	RewriteBacklog []RewriteItem `json:"rewrite_backlog,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。
 type AuditIssue struct {
-	ID    string `json:"id"`    // 问题编号，如 I1
-	Level string `json:"level"` // P0（阻断签约）/ P1（提升竞争力）
-	Area  string `json:"area"`  // 维度，如 开篇过签力 / 节奏爽点
-	Desc  string `json:"desc"`  // 问题描述
+	ID      string `json:"id"`                 // 问题编号，如 I1
+	Level   string `json:"level"`              // P0（阻断签约）/ P1（提升竞争力）
+	Area    string `json:"area"`               // 维度，如 开篇过签力 / 节奏爽点
+	Desc    string `json:"desc"`               // 问题描述
+	FixType string `json:"fix_type,omitempty"` // 修复类型：body（正文级，需章节重写）/ ledger（台账/卷纲/可 edit 修补）；缺省按 ledger
+}
+
+// FixTypeBody 标记该 issue 为「正文级」——无法靠 S5 台账/单章 edit 修补解决，
+// 必须回流到 S3 章节重写回路重写对应章节正文。
+const FixTypeBody = "body"
+
+// RewriteItem 是回流到 S3 章节重写回路的一条正文级问题（来自体检 issue 的 body 类）。
+// 持久化于 GateContext.RewriteBacklog，供 G4 闸门展示与 S3 写作回路消费（优先重写被标记章节）。
+type RewriteItem struct {
+	ID       string  `json:"id"`
+	Level    string  `json:"level"`
+	Area     string  `json:"area"`
+	Desc     string  `json:"desc"`
+	Chapters []int64 `json:"chapters,omitempty"` // 从 area/desc 解析出的涉及章节号（用于写作回路定位）
 }
 
 // AuditData 是 S4 签约体检的结构化结果，序列化进 GateContext.Audit。

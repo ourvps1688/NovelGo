@@ -8,13 +8,14 @@ import (
 
 // 流水线全局事件名（前端经 EventsOn 订阅）。
 const (
-	EvStage      = "pipeline:stage"       // 阶段变更：{run_id, novel_id, stage, status, note}
-	EvGate       = "pipeline:gate"        // 闸门待确认：{run_id, novel_id, stage, gate_id, summary, options}
-	EvControl    = "pipeline:control"     // 前端→后端控制指令：{run_id, cmd: start|pause|resume|stop}
-	EvControlAck = "pipeline:control:ack" // 后端→前端控制确认：{run_id, cmd, status}
-	EvStockAudit = "pipeline:stock_audit" // 全量对齐体检完成：{novel_id, run_id}
-	EvFixStart   = "pipeline:fix_start"   // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
-	EvFixDone    = "pipeline:fix_done"    // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
+	EvStage          = "pipeline:stage"           // 阶段变更：{run_id, novel_id, stage, status, note}
+	EvGate           = "pipeline:gate"            // 闸门待确认：{run_id, novel_id, stage, gate_id, summary, options}
+	EvControl        = "pipeline:control"         // 前端→后端控制指令：{run_id, cmd: start|pause|resume|stop}
+	EvControlAck     = "pipeline:control:ack"     // 后端→前端控制确认：{run_id, cmd, status}
+	EvStockAudit     = "pipeline:stock_audit"     // 全量对齐体检完成：{novel_id, run_id}
+	EvFixStart       = "pipeline:fix_start"       // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
+	EvFixDone        = "pipeline:fix_done"        // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
+	EvRewriteBacklog = "pipeline:rewrite_backlog" // 正文级问题回流 S3 重写回路：{run_id, novel_id, items}（前端展示重写清单）
 )
 
 // StagePayload 阶段变更事件载荷。
@@ -83,4 +84,9 @@ func EmitFixStart(ctx context.Context, p map[string]any) {
 // EmitFixDone 广播 S5 修复结束（ok=false 时带 error），前端展示修复结果。
 func EmitFixDone(ctx context.Context, p map[string]any) {
 	wails.EventsEmit(ctx, EvFixDone, p)
+}
+
+// EmitRewriteBacklog 广播「正文级问题回流 S3 重写回路」，通知前端刷新并展示重写清单。
+func EmitRewriteBacklog(ctx context.Context, p map[string]any) {
+	wails.EventsEmit(ctx, EvRewriteBacklog, p)
 }
