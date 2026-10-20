@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -242,9 +243,9 @@ func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 
 	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
 	require.NoError(t, err)
-	// 模拟僵尸运行：S5 running（执行体已随旧进程消亡），带 audit 与 audit_stage 供复评回家。
+	// 模拟僵尸运行：S5 running（执行体已随旧进程消亡），带 audit（含待修问题）与 audit_stage 供复评回家。
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning,
-		`{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4"}`))
+		`{"audit":"{\"verdict\":\"needs_fix\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"总体\",\"desc\":\"开场灌水\"}]}","audit_stage":"S4"}`))
 
 	// 启动恢复：running → paused + interrupted 标记。
 	svc.RecoverInterruptedRuns()
@@ -271,6 +272,120 @@ func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	var ctxt2 GateContext
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt2))
 	require.False(t, ctxt2.Interrupted, "派发后应清除中断标记")
+}
+
+// TestServiceFixBatchingAndResume 验证 S5 分批修复 + 失败恢复：
+// 3 个问题（1 P0 + 2 P1）→ P0 独占一批、P1 两条一批；首批失败落地为 paused（断点保留），
+// 恢复后从剩余问题继续（跳过已修复项），最终复评通过落 G4 闸门。
+func TestServiceFixBatchingAndResume(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"三处待修","issues":[` +
+		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文"},` +
+		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失"}]}`
+	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
+	var fixPrompts []string
+	var fixSessions []string
+	var auditCalls int
+	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-audit":
+			// 初检结果由测试直接注入 ctxt.Audit，桩里的 audit 调用均为修复后的复评。
+			auditCalls++
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "signability-fix":
+			fixPrompts = append(fixPrompts, input.Prompt)
+			fixSessions = append(fixSessions, input.SessionID)
+			if len(fixPrompts) == 1 {
+				// 首批（I1）模拟 MaxTurns 耗尽失败。
+				return SkillOutput{}, fmt.Errorf("skill \"signability-fix\" 执行失败: 已达最大轮数，对话结束")
+			}
+			return SkillOutput{Text: "已修复"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	// fix → S5：首批失败应落地 paused（而非停在 running 无人执行）
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS5, got.CurrentStage, "失败后应停在 S5")
+	var pausedCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &pausedCtxt))
+	require.Empty(t, pausedCtxt.FixStates, "首批失败，尚无已完成问题")
+	require.False(t, pausedCtxt.Dispatching, "执行体已退出，标记应清除")
+
+	// 恢复：从剩余问题继续（首批重试 + 第二批），最终复评通过
+	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "resume"))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS4, got.CurrentStage, "复评后应在 S4 闸门")
+	require.Equal(t, 1, auditCalls, "修复后应跑一次体检做复评（初检由测试直接注入）")
+	require.Len(t, fixPrompts, 3, "首批失败重试 + 第二批 = 3 次修复调用")
+	require.Contains(t, fixPrompts[0], "I1")
+	require.NotContains(t, fixPrompts[0], "I2", "P0 应独占一批")
+	require.Contains(t, fixPrompts[1], "I1", "恢复后首批应重试未完成的 I1")
+	require.Contains(t, fixPrompts[2], "I2")
+	require.Contains(t, fixPrompts[2], "I3")
+	require.NotContains(t, fixPrompts[2], "I1", "已修复项不应重复修复")
+	for i, sid := range fixSessions {
+		for j := i + 1; j < len(fixSessions); j++ {
+			require.NotEqual(t, sid, fixSessions[j], "每批应使用独立会话，避免历史挤占轮数")
+		}
+	}
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+	require.Equal(t, "fixed", finalCtxt.FixStates["I1"])
+	require.Equal(t, "fixed", finalCtxt.FixStates["I2"])
+	require.Equal(t, "fixed", finalCtxt.FixStates["I3"])
+	require.Equal(t, 1, finalCtxt.FixRounds, "一次完整 sweep 递增一轮")
+}
+
+// TestServiceFixAllFixedSkipsToReaudit 验证断点续修边界：全部问题已修复但复评未跑
+// （如复评前中断后恢复）时，executeFix 应直接进入复评，不再调用修复 skill。
+func TestServiceFixAllFixedSkipsToReaudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	var fixCalls int
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[{"id":"I1","level":"P0","area":"成稿质量","desc":"x"}]}`
+	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-audit":
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "signability-fix":
+			fixCalls++
+			return SkillOutput{Text: "已修复"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 404, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4,
+		FixStates: map[string]string{"I1": "fixed"}}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	require.Equal(t, 0, fixCalls, "全部已修复时应跳过修复直接复评")
 }
 
 func TestServiceAuditFixLoopReAudit(t *testing.T) {

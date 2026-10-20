@@ -259,7 +259,10 @@ function FixProgressView({
   const running = fixProgress?.running ?? false;
   const idle = !running && fixProgress?.ok == null;
   const issues = fixProgress?.issues ?? [];
+  const doneIds = fixProgress?.doneIds ?? [];
   const activity = [...fixActivity].reverse();
+  const batchTotal = fixProgress?.batchTotal ?? 0;
+  const batchIndex = fixProgress?.batchIndex ?? 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -277,7 +280,9 @@ function FixProgressView({
           {fixProgress?.ok === false
             ? t("pipeline.fixProgress.failed")
             : running
-              ? t("pipeline.signability.fixing")
+              ? batchTotal > 1
+                ? `${t("pipeline.signability.fixing")} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
+                : t("pipeline.signability.fixing")
               : idle
                 ? t("pipeline.fixProgress.idle")
                 : t("pipeline.fixProgress.done")}
@@ -290,11 +295,37 @@ function FixProgressView({
         </p>
       ) : null}
 
+      {fixProgress?.ok === false ? (
+        <p className="flex items-center gap-1 text-muted-foreground text-xs">
+          <Wrench className="h-3 w-3" />
+          {t("pipeline.fixProgress.resumeHint")}
+        </p>
+      ) : null}
+
       {!running && !idle && fixProgress?.ok !== false ? (
         <p className="flex items-center gap-1 text-muted-foreground text-xs">
           <Wrench className="h-3 w-3" />
           {t("pipeline.fixProgress.reAuditing")}
         </p>
+      ) : null}
+
+      {doneIds.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t("pipeline.fixProgress.fixedCount", { count: doneIds.length })}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {doneIds.map((id) => (
+              <span
+                key={id}
+                className="flex items-center gap-1 rounded bg-success/10 px-1.5 py-0.5 text-success-foreground text-xs"
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                {id}
+              </span>
+            ))}
+          </div>
+        </div>
       ) : null}
 
       {issues.length > 0 ? (

@@ -78,6 +78,14 @@ type GateContext struct {
 	// DB 状态却停留在 running）。恢复（ControlPipeline resume）时据此按当前阶段重新派发
 	// 执行体（体检/修复），派发后清除该标记，避免正常暂停的运行被重复派发。
 	Interrupted bool `json:"interrupted,omitempty"`
+	// Dispatching 标记当前阶段的执行体（体检/修复 agent goroutine）是否存活。
+	// 派发时置 true、退出时置 false；恢复（resume）据此区分「软暂停」（执行体仍在，
+	// 会在批次/阶段边界感知状态变化并继续）与「无人执行」（需重新派发）。进程重启后
+	// 该标记失真（goroutine 必然已消亡），由 RecoverInterruptedRuns 统一清除。
+	Dispatching bool `json:"dispatching,omitempty"`
+	// FixStates 记录 S5 修复各问题的完成状态（issueID → "fixed"）。分批修复每完成一批
+	// 即落库，作为断点续修依据：修复失败暂停后恢复时跳过已修复问题，只修剩余部分。
+	FixStates map[string]string `json:"fix_states,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。

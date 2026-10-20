@@ -1891,9 +1891,12 @@
       "fixNote": "Fixes done; re-auditing automatically."
     },
     "fixProgress": {
-      "issues": "Fix checklist (issues being fixed this round)",
+      "issues": "Fix checklist (this batch)",
       "activity": "Live fix activity",
       "idle": "Waiting for the fix to start…",
+      "batch": "Batch {{index}}/{{total}}",
+      "fixedCount": "{{count}} issue(s) fixed (verified together at re-audit)",
+      "resumeHint": "Fix interrupted: click Resume to continue with the remaining issues (completed ones are kept).",
       "done": "Fix completed, re-auditing automatically…",
       "failed": "Fix failed",
       "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",

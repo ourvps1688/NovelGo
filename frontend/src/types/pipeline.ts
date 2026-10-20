@@ -55,6 +55,10 @@ export interface FixProgressState {
   error?: string;
   summary?: string;
   issues: FixIssuePayload[];
+  // 分批修复：当前批次序号（1 起）/ 总批数；此前批次已修复的问题 ID 列表。
+  batchIndex?: number;
+  batchTotal?: number;
+  doneIds?: string[];
 }
 
 // S5 修复实时活动流的一条记录（来自 pipeline-agent:1 的 AgentEvent 工具事件）。

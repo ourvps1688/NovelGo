@@ -72,13 +72,17 @@ export function usePipeline(novelId: number) {
           .catch(() => {});
       },
     );
-    // S5 修复开始：携带本轮要修复的 issue 清单（问题 + 涉及元素），清空上一轮活动流。
+    // S5 修复开始（每批一次）：携带本批 issue 清单 + 分批进度 + 此前已修复问题 ID，
+    // 清空上一批活动流。
     const offFixStart = EventsOn(
       "pipeline:fix_start",
       (p: {
         novel_id: number;
         issues?: FixProgressState["issues"];
         summary?: string;
+        batch_index?: number;
+        batch_total?: number;
+        done_ids?: string[];
       }) => {
         if (p.novel_id !== novelId) return;
         setFixActivity([]);
@@ -87,10 +91,13 @@ export function usePipeline(novelId: number) {
           ok: null,
           summary: p.summary,
           issues: p.issues ?? [],
+          batchIndex: p.batch_index,
+          batchTotal: p.batch_total,
+          doneIds: p.done_ids ?? [],
         });
       },
     );
-    // S5 修复结束：展示结果（修复完成 → 自动复评；失败 → 展示错误）。
+    // S5 修复结束：展示结果（修复完成 → 自动复评；失败 → 展示错误 + 恢复提示）。
     const offFixDone = EventsOn(
       "pipeline:fix_done",
       (p: { novel_id: number; ok?: boolean; error?: string }) => {
