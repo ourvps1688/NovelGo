@@ -548,3 +548,127 @@ func TestServiceMilestoneResetsLastAuditChapter(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
 	require.Equal(t, 8, ctxt.LastAuditChapter, "复评后应把 last_audit_chapter 推进到当前章数")
 }
+
+// TestServiceBlueprintAuditPass 验证 A 方案蓝图体检闭环（通过支）：
+// S1→S2 生成后立即进入蓝图体检（blueprint-audit），通过应落 G1 确认闸（continue/modify/abort），
+// ContextJSON 写入 AuditKind=blueprint 与 BlueprintAudit（pass）；G1 选 continue 进入 S3 写作。
+func TestServiceBlueprintAuditPass(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	captured := withCapturedGates(t)
+
+	auditJSON := `{"verdict":"pass","score":26,"summary":"蓝图结构清晰","issues":[]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "blueprint-audit" {
+			return SkillOutput{Text: "体检：\n```json\n" + auditJSON + "\n```"}, nil
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	run, err := svc.StartPipeline(ctx, 600, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2 生成+体检
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS2, got.CurrentStage, "蓝图体检宿主阶段应为 S2")
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Equal(t, "blueprint", ctxt.AuditKind, "应为蓝图体检种类")
+	require.Contains(t, ctxt.BlueprintAudit, "pass", "蓝图体检结果应写入 BlueprintAudit 字段")
+
+	// 蓝图体检通过应落 G1（continue/modify/abort），而非 G1b 修复闸。
+	require.NotEmpty(t, *captured, "应弹出蓝图体检闸门")
+	last := (*captured)[len(*captured)-1]
+	require.Equal(t, GateG1, last.GateID, "蓝图体检通过应落 G1 确认闸")
+	require.ElementsMatch(t, []string{"continue", "modify", "abort"}, last.Options)
+
+	// G1 选 continue → 进入 S3 写作。
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", ""))
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS3, got.CurrentStage, "G1 确认后应进入 S3 写作")
+}
+
+// TestServiceBlueprintAuditFixLoop 验证 A 方案蓝图体检闭环（修复支）：
+// 蓝图体检不通过（needs_fix）落 G1b 修复闸；G1b 选 fix 进入 S5 蓝图修复（blueprint-fix），
+// 修复完成后自动回到蓝图复评（blueprint-audit，pass），复评结果重写 BlueprintAudit 并落 G1。
+func TestServiceBlueprintAuditFixLoop(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	var auditCount, fixCalls int
+	firstAudit := `{"verdict":"needs_fix","score":15,"summary":"卷纲待修","issues":[{"id":"B1","level":"P0","area":"卷纲","desc":"第一卷与第三卷冲突"}]}`
+	secondAudit := `{"verdict":"pass","score":27,"summary":"修复后通过","issues":[]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "blueprint-audit":
+			auditCount++
+			if auditCount == 1 {
+				return SkillOutput{Text: "体检：\n```json\n" + firstAudit + "\n```"}, nil
+			}
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "blueprint-fix":
+			fixCalls++
+			return SkillOutput{Text: "已修复卷纲冲突"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 601, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2 生成+首检
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS2, got.CurrentStage)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Equal(t, "blueprint", ctxt.AuditKind)
+	require.Contains(t, ctxt.BlueprintAudit, "needs_fix", "首检不通过应写入 BlueprintAudit")
+
+	// G1b 选 fix → 进入 S5 蓝图修复闭环，修复完成自动复评（pass）→ 落 G1。
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate) // 复评后再次落闸（G1）
+
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS2, got.CurrentStage, "复评仍在 S2 宿主阶段内")
+	var ctxt2 GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt2))
+	require.Contains(t, ctxt2.BlueprintAudit, "pass", "复评应反映修复后的 pass 结论")
+	require.Equal(t, 1, fixCalls, "蓝图修复应调用一次 blueprint-fix")
+	require.Equal(t, 2, auditCount, "首检 + 复评共两次 blueprint-audit")
+}
+
+// TestServiceBlueprintAuditAutoRunSkipped 验证：即便开启 auto_run，蓝图体检也绝不被自动裁决，
+// 必须停在 S2 等人工确认（与 G1 原语义一致，避免自动改写卷纲）。不通过应落 G1b 而非被自动推进到 S5。
+func TestServiceBlueprintAuditAutoRunSkipped(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	captured := withCapturedGates(t)
+
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"卷纲逻辑断裂","issues":[{"id":"B1","level":"P0","area":"卷纲","desc":"第一卷与第三卷冲突"}]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "blueprint-audit" {
+			return SkillOutput{Text: "体检：\n```json\n" + auditJSON + "\n```"}, nil
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	run, err := svc.StartPipeline(ctx, 602, "new", nil, true) // autoRun=true
+	require.NoError(t, err)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StageS2, got.CurrentStage, "蓝图体检即使用 autoRun 也必须停 S2 等人工确认")
+	require.NotEqual(t, StageS5, got.CurrentStage, "蓝图体检不得被 auto_run 自动推进到 S5 修复")
+
+	require.NotEmpty(t, *captured)
+	last := (*captured)[len(*captured)-1]
+	require.Equal(t, GateG1b, last.GateID, "蓝图体检不通过应落 G1b 修复闸")
+	require.ElementsMatch(t, []string{"fix", "continue", "abort"}, last.Options)
+}

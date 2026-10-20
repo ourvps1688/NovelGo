@@ -1839,7 +1839,12 @@
       "generating": "蓝图生成中……",
       "title": "全书卷结构",
       "volumeCount": "共 {{n}} 卷",
-      "empty": "尚未生成卷结构，可点击「继续」跳过。"
+      "empty": "尚未生成卷结构，可点击「继续」跳过。",
+      "auditing": "蓝图体检中……",
+      "auditTitle": "蓝图体检",
+      "fixing": "按蓝图问题修复中……",
+      "fixNote": "蓝图修复完成，正在自动复评。",
+      "score": "总分 {{n}}/30"
     },
     "signability": {
       "title": "签约体检",

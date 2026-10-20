@@ -4,13 +4,14 @@ package agentcfg
 type AgentType int
 
 const (
-	MainAgent        AgentType = iota // 主创作助手
-	ReviewAgent                       // 章节审稿人
-	MemoryAgent                       // 记忆检索分析员
-	StateSyncAgent                    // 状态同步员（写章后自动回填台账）
-	BlueprintAgent                    // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
-	SignabilityAgent                  // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
-	FixAgent                          // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
+	MainAgent         AgentType = iota // 主创作助手
+	ReviewAgent                        // 章节审稿人
+	MemoryAgent                        // 记忆检索分析员
+	StateSyncAgent                     // 状态同步员（写章后自动回填台账）
+	BlueprintAgent                     // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
+	SignabilityAgent                   // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
+	FixAgent                           // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
+	BlueprintFixAgent                  // 蓝图修复员（S2 蓝图体检不通过时：限权改卷纲 / 补卷，不碰章节正文、不碰其他台账写）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -121,14 +122,33 @@ var fixAgentTools = []string{
 	"create_reader_perspective_entry", "update_reader_perspective_entry",
 }
 
+// blueprintFixAgentTools：蓝图修复员（S2 蓝图体检不通过时）白名单——限权，**只改卷纲 / 补卷**，
+// 不碰章节正文（edit 仅用于 volumes/，绝不在 chapters/ 上调用）、不碰角色/地点/弧线/时间线/读者认知的
+// 写工具（结构性跨台账改动由 S5 签约修复的 FixAgent 承接）。保留全部只读上下文工具以便定位卷纲问题。
+var blueprintFixAgentTools = []string{
+	"read",
+	"list_volumes",
+	"get_chapter_list",
+	"get_characters",
+	"get_character_relations",
+	"get_locations",
+	"get_timeline",
+	"get_story_arcs",
+	"get_reader_perspective",
+	"search_story_memory",
+	"edit",          // 仅用于写 volumes/id_{id}.md 卷纲，不在 chapters/ 上调用
+	"create_volume", // 补卷
+}
+
 var (
-	mainAgentAllowlist        map[string]bool
-	reviewAgentAllowlist      map[string]bool
-	memoryAgentAllowlist      map[string]bool
-	stateSyncAgentAllowlist   map[string]bool
-	blueprintAgentAllowlist   map[string]bool
-	signabilityAgentAllowlist map[string]bool
-	fixAgentAllowlist         map[string]bool
+	mainAgentAllowlist         map[string]bool
+	reviewAgentAllowlist       map[string]bool
+	memoryAgentAllowlist       map[string]bool
+	stateSyncAgentAllowlist    map[string]bool
+	blueprintAgentAllowlist    map[string]bool
+	signabilityAgentAllowlist  map[string]bool
+	fixAgentAllowlist          map[string]bool
+	blueprintFixAgentAllowlist map[string]bool
 )
 
 func init() {
@@ -139,6 +159,7 @@ func init() {
 	blueprintAgentAllowlist = toSet(blueprintAgentTools)
 	signabilityAgentAllowlist = toSet(signabilityAgentTools)
 	fixAgentAllowlist = toSet(fixAgentTools)
+	blueprintFixAgentAllowlist = toSet(blueprintFixAgentTools)
 }
 
 func toSet(tools []string) map[string]bool {
@@ -166,6 +187,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return signabilityAgentAllowlist
 	case FixAgent:
 		return fixAgentAllowlist
+	case BlueprintFixAgent:
+		return blueprintFixAgentAllowlist
 	default:
 		return nil
 	}
@@ -192,6 +215,8 @@ func AgentIdentity(t AgentType) string {
 		return signabilityAgentSystem1
 	case FixAgent:
 		return fixAgentSystem1
+	case BlueprintFixAgent:
+		return blueprintFixAgentSystem1
 	default:
 		return ""
 	}
@@ -499,3 +524,25 @@ const fixAgentSystem1 = `你是 novelgo 小说创作系统的修复执行员（F
 - **不删数据**：白名单无 delete_record，绝不删除任何台账条目。
 - **幂等**：同一 issue 多次修复结果一致，先查后改，不重复造已有条目。
 - 修复以「提升签约力」为目标，不擅自大改已通过体检的部分。`
+
+const blueprintFixAgentSystem1 = `你是 novelgo 小说创作系统的蓝图修复员（Blueprint Fix Agent）。你的唯一职责是在流水线 S2 蓝图体检不通过时，依据 blueprint-audit 产出的 issue 清单，对**卷纲结构**做针对性修复，使蓝图更接近「可立项 / 可签约」状态。
+
+## 可用工具（白名单，仅下列）
+- 读上下文：read、list_volumes、get_chapter_list、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
+- 改卷纲：edit（仅用于 volumes/id_{id}.md，绝不在 chapters/ 上调用）
+- 补卷：create_volume
+
+## 工作流
+1. **读 issue 清单**：从本次任务的 system 提示（含 blueprint-audit 产出的 JSON）中提取 issues，按 level（P0 优先于 P1）排序。
+2. **逐条修复（只动卷纲 / 卷结构）**：
+   - 卷纲节奏 / 主题 / 起止节点问题 → 用 edit 改对应 volumes/id_{id}.md 卷纲（保持卷纲简明，细节留给 S3 逐章写作）。
+   - 缺卷 / 卷序错乱 → create_volume 补卷或调整。
+   - 角色 / 弧线 / 时间线等**结构性跨台账**问题 → **不在本 Agent 处理**：在修复摘要中明确标注「需由签约修复（S5）处理」，交下游 FixAgent 承接。
+3. **修复后复述**：一份简短摘要，逐条说明「Ix → 改了哪个卷纲 / 补了哪卷」，不超过 15 行。
+
+## 硬性约束
+- **绝不写章节正文**：白名单无 chapters/ 的写权限，也不要尝试。
+- **不派发子 Agent**（白名单不含 run_subagent）。
+- **不删数据**：白名单无 delete_record，绝不删除任何台账条目。
+- **幂等**：同一 issue 多次修复结果一致，先 list_volumes 查重再写。
+- 修复以「提升蓝图质量」为目标，不擅自大改已通过体检的卷纲部分。`

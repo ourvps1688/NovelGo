@@ -87,9 +87,30 @@ func (o *Orchestrator) advanceS1(ctx context.Context, run *PipelineRun, _ string
 	return nil
 }
 
-// advanceS2 蓝图确认通过（G1 闸门 continue）→ 进入 S3 逐章写作。
-func (o *Orchestrator) advanceS2(ctx context.Context, run *PipelineRun, _ string) error {
-	return o.svc.setS3Running(ctx, run)
+// advanceS2 蓝图宿主阶段：统一处理蓝图「生成完成 → 体检 → 修复」的闸门决策。
+//   - fix → 进入 S5 蓝图修复（蓝图修复技能由 ctxt.AuditKind 驱动，复用 S5 执行体）
+//   - continue → 进入 S3 写作（从 G1 通过 或 G1b 接受已知问题，均进入写作）
+//   - modify → 重新执行蓝图生成 + 复体检
+//   - abort 由 Advance 顶部统一处理，不在此分支
+func (o *Orchestrator) advanceS2(ctx context.Context, run *PipelineRun, decision string) error {
+	switch decision {
+	case "fix":
+		o.svc.enterFix(ctx, run)
+		return nil
+	case "continue":
+		return o.svc.setS3Running(ctx, run)
+	case "modify":
+		// 重新生成蓝图：回到 S2 running 并异步重新执行蓝图技能 + 复体检。
+		if err := o.svc.store.SetStageStatus(ctx, run.RunID, StageS2, StatusRunning, run.ContextJSON); err != nil {
+			return err
+		}
+		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS2, Status: StatusRunning})
+		go o.svc.executeBlueprint(run.RunID, run.NovelID)
+		return nil
+	default:
+		// 未知决策回落到写作，避免卡死。
+		return o.svc.setS3Running(ctx, run)
+	}
 }
 
 // advanceS3 逐章写作阶段：处理完本终检入口、黄金三章首检、里程碑闸、普通逐章闸。

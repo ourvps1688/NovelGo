@@ -16,9 +16,11 @@ import (
 const agentTypeBlueprint = "blueprint"
 
 // agentTypeSignability / agentTypeFix 分别是签约体检 / 修复执行 Agent 的 AgentType 字符串。
+// agentTypeBlueprintFix 是蓝图修复 Agent 的 AgentType 字符串（限权：只改卷纲 / 补卷）。
 const (
-	agentTypeSignability = "signability"
-	agentTypeFix         = "fix"
+	agentTypeSignability  = "signability"
+	agentTypeFix          = "fix"
+	agentTypeBlueprintFix = "blueprintfix"
 )
 
 // skillAgentType 按 skill 名返回其在 agent.Run 中使用的 AgentType。
@@ -30,6 +32,10 @@ func skillAgentType(name string) agentcfg.AgentType {
 		return agentcfg.SignabilityAgent
 	case "signability-fix":
 		return agentcfg.FixAgent
+	case "blueprint-audit":
+		return agentcfg.SignabilityAgent // 复用只读白名单
+	case "blueprint-fix":
+		return agentcfg.BlueprintFixAgent // 限权：只改卷纲 / 补卷
 	case "story-blueprint":
 		return agentcfg.BlueprintAgent
 	default:
@@ -44,6 +50,10 @@ func skillAgentTypeString(name string) string {
 		return agentTypeSignability
 	case "signability-fix":
 		return agentTypeFix
+	case "blueprint-audit":
+		return agentTypeSignability // 复用签约体检 AgentType 字符串（同属只读体检）
+	case "blueprint-fix":
+		return agentTypeBlueprintFix
 	case "story-blueprint":
 		return agentTypeBlueprint
 	default:

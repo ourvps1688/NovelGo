@@ -236,18 +236,41 @@ func (s *Service) executeBlueprint(runID string, novelID int64) {
 		return
 	}
 
-	if err := s.store.SetStageStatus(ctx, runID, StageS2, StatusAwaitingGate, string(updated)); err != nil {
-		s.logger.Error("S2 蓝图：落库闸门状态失败", "err", err)
+	// 蓝图生成完成：先把卷结构概览（Blueprint）落库，再进入蓝图体检（A 方案）。
+	if err := s.store.SetStageStatus(ctx, runID, StageS2, StatusRunning, string(updated)); err != nil {
+		s.logger.Error("S2 蓝图：落库蓝图状态失败", "err", err)
 		return
 	}
-	emitGate(ctx, GatePayload{
-		RunID:   runID,
-		NovelID: novelID,
-		Stage:   StageS2,
-		GateID:  GateG1,
-		Summary: out.Text,
-		Options: []string{"continue", "modify", "abort"},
-	})
+	// 用含 Blueprint 的最新上下文进入蓝图体检，避免 enterBlueprintAudit 重新解析到旧上下文而丢失 Blueprint 字段。
+	run.ContextJSON = string(updated)
+	// 进入蓝图体检：异步跑 blueprint-audit，通过后落 G1 确认闸，不通过落 G1b 修复闸，
+	// 修复闭环复用 S5 执行体（由 ctxt.AuditKind 分流）。
+	s.enterBlueprintAudit(ctx, run)
+}
+
+// enterBlueprintAudit 在蓝图生成（executeBlueprint）完成后进入蓝图体检：置 AuditKind=blueprint、
+// AuditStage=S2、清空 BlueprintAudit，置 S2 running 并异步跑 blueprint-audit（只读体检）。
+// 体检结果写回 ctxt.BlueprintAudit，随后由 executeAudit 落 G1/G1b 闸门。
+func (s *Service) enterBlueprintAudit(ctx context.Context, run *PipelineRun) {
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	ctxt.AuditKind = "blueprint"
+	ctxt.AuditStage = StageS2
+	ctxt.BlueprintAudit = ""
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		s.logger.Warn("蓝图体检：序列化上下文失败", "err", merr)
+		updated = []byte(run.ContextJSON)
+	}
+	if err := s.store.SetStageStatus(ctx, run.RunID, StageS2, StatusRunning, string(updated)); err != nil {
+		s.logger.Error("蓝图体检：进入失败", "err", err)
+		return
+	}
+	run.ContextJSON = string(updated)
+	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS2, Status: StatusRunning})
+	go s.executeAudit(run.RunID, run.NovelID)
 }
 
 // summarizeVolumes 读取本书全部卷（create_volume 已落库），拼为前端可渲染的卷结构概览 JSON。
@@ -441,12 +464,24 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		s.logger.Error("S4 体检：加载流水线失败", "run_id", runID, "err", err)
 		return
 	}
-	auditStage := run.CurrentStage // S4 或 S4b
+	auditStage := run.CurrentStage // S4 / S4b / S6 / S2（蓝图体检）
 	s.setDispatching(ctx, runID, true)
 
-	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
+	// 提前解析上下文，按 AuditKind 选择体检技能与提示词（蓝图走 blueprint-audit，其余走 signability-audit）。
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	auditSkill := "signability-audit"
+	auditPrompt := signabilityPrompt(novelID)
+	if ctxt.AuditKind == "blueprint" {
+		auditSkill = "blueprint-audit"
+		auditPrompt = blueprintAuditPrompt(novelID)
+	}
+
+	out, err := s.skillRunner(ctx, auditSkill, SkillInput{
 		NovelID:   novelID,
-		Prompt:    signabilityPrompt(novelID),
+		Prompt:    auditPrompt,
 		MaxTurns:  12,
 		SessionID: "pipeline:" + runID + ":audit",
 	})
@@ -465,11 +500,12 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	audit := parseAudit(out.Text)
 	auditJSON, _ := json.Marshal(audit)
 
-	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	// ctxt 已在函数顶部解析；按 AuditKind 把体检结果写回对应字段（蓝图 → BlueprintAudit，签约 → Audit）。
+	if ctxt.AuditKind == "blueprint" {
+		ctxt.BlueprintAudit = string(auditJSON)
+	} else {
+		ctxt.Audit = string(auditJSON)
 	}
-	ctxt.Audit = string(auditJSON)
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
@@ -487,7 +523,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 
 	// auto_run 自动裁决：仅对普通签约体检（S4/S4b）生效；完本终检（S6）必须人工确认 finish。
 	// 通过 → continue 回 S3；不通过 → fix 进 S5，但受修复轮数上限约束，避免无限循环。
-	if run.AutoRun && auditStage != StageS6 {
+	if run.AutoRun && auditStage != StageS6 && ctxt.AuditKind != "blueprint" {
 		if audit.Verdict == "pass" {
 			if err := s.orchestrator.Advance(ctx, run, "continue"); err != nil {
 				s.logger.Error("S4 体检：自动继续推进失败", "err", err)
@@ -519,6 +555,31 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 // emitGateDecision 依据体检阶段广播对应的体检闸门：S4/S4b 用 G4（continue/fix/abort），
 // 完本终检 S6 用 G终（finish/fix/abort），避免误把完本按钮当成「继续写作」。
 func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID int64, auditStage string, audit AuditData) {
+	// 蓝图体检走独立闸门：通过 → G1 确认（continue/modify/abort）；不通过 → G1b 修复闸（fix/continue/abort）。
+	// 蓝图体检必须人工确认（与 G1 原语义一致），不走 auto_run 自动修复。
+	var bc GateContext
+	if run, rerr := s.store.GetByRunID(ctx, runID); rerr == nil && run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &bc)
+	}
+	if bc.AuditKind == "blueprint" {
+		summary := audit.Summary
+		if summary == "" {
+			if audit.Verdict == "pass" {
+				summary = "蓝图体检通过，请确认是否进入写作或重生成。"
+			} else {
+				summary = "蓝图体检发现问题，建议进入修复闭环后再确认。"
+			}
+		}
+		if audit.Verdict == "pass" {
+			emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: auditStage, GateID: GateG1,
+				Summary: summary, Options: []string{"continue", "modify", "abort"}})
+		} else {
+			emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: auditStage, GateID: GateG1b,
+				Summary: summary, Options: []string{"fix", "continue", "abort"}})
+		}
+		return
+	}
+
 	summary := audit.Summary
 	if summary == "" {
 		if auditStage == StageS6 {
@@ -617,8 +678,12 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	}
 
 	// 广播修复清单：让用户看到本轮在修复哪些问题（含涉及元素 area）。
-	// issues 来自体检结果 ContextJSON.Audit；解析失败退化为单条总体项。
-	auditData := parseAudit(ctxt.Audit)
+	// issues 来自体检结果（蓝图走 BlueprintAudit，签约走 Audit）；解析失败退化为单条总体项。
+	auditJSON := ctxt.Audit
+	if ctxt.AuditKind == "blueprint" {
+		auditJSON = ctxt.BlueprintAudit
+	}
+	auditData := parseAudit(auditJSON)
 
 	// 断点续修：跳过已修复问题（此前批次完成并落库的），只修剩余部分。
 	fixedIDs := make([]string, 0, len(ctxt.FixStates))
@@ -690,9 +755,15 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		})
 
 		// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
-		out, err := s.skillRunner(ctx, "signability-fix", SkillInput{
+		fixSkill := "signability-fix"
+		fixPromptText := fixPrompt(novelID, batch, auditData.Summary)
+		if ctxt.AuditKind == "blueprint" {
+			fixSkill = "blueprint-fix"
+			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
+		}
+		out, err := s.skillRunner(ctx, fixSkill, SkillInput{
 			NovelID:   novelID,
-			Prompt:    fixPrompt(novelID, batch, auditData.Summary),
+			Prompt:    fixPromptText,
 			MaxTurns:  12,
 			SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
 		})
@@ -1127,6 +1198,23 @@ func signabilityPrompt(novelID int64) string {
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥25/35 → pass。", novelID)
 }
 
+// blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。
+func blueprintAuditPrompt(novelID int64) string {
+	return fmt.Sprintf("本书 novel_id=%d。请基于 blueprint-audit 方法论，对本书**蓝图（卷纲结构）**做签约级体检："+
+		"用 list_volumes / get_chapter_list / get_story_arcs / get_characters / get_reader_perspective 读取蓝图与已落设定，"+
+		"逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥24/30 → pass。", novelID)
+}
+
+// blueprintFixPrompt 构造 S2 蓝图修复阶段的任务提示词，内嵌蓝图体检产出的 issue 清单 JSON。
+func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) string {
+	data := AuditData{Verdict: "needs_fix", Summary: summary, Issues: issues}
+	b, _ := json.Marshal(data)
+	return fmt.Sprintf("本书 novel_id=%d。以下是蓝图体检本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复项），请逐条修复卷纲：\n%s\n\n"+
+		"按 blueprint-fix 方法论：P0 优先于 P1，用 edit（仅 volumes/id_{id}.md 卷纲）/create_volume 修复，"+
+		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。", novelID, len(issues), b)
+}
+
 // fixPrompt 构造 S5 修复阶段的任务提示词，内嵌 S4 产出的 issue 清单 JSON。
 // fixPrompt 构造一批待修问题的修复提示词：只传本批问题子集（均为未修复项），
 // 保证 agent 在有限轮数内聚焦逐条修复到位。
@@ -1257,8 +1345,13 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 	case StageS6:
 		s.logger.Info("恢复：重新派发完本终检", "run_id", run.RunID)
 		go s.executeFinalAudit(run.RunID, run.NovelID)
+	case StageS2:
+		if ctxt.AuditKind == "blueprint" {
+			s.logger.Info("恢复：重新派发蓝图体检", "run_id", run.RunID)
+			go s.executeAudit(run.RunID, run.NovelID)
+		}
 	default:
-		// S0/S1/S2/S3：由用户交互或既有入口驱动（写作/蓝图均由前端操作触发），无需自动派发。
+		// S0/S1/S2(生成)/S3：由用户交互或既有入口驱动（写作/蓝图生成由前端操作触发），无需自动派发。
 		s.logger.Info("恢复：当前阶段由交互驱动，不自动派发执行体", "run_id", run.RunID, "stage", run.CurrentStage)
 	}
 }

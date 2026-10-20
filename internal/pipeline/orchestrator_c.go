@@ -5,8 +5,9 @@ package pipeline
 const (
 	StageS0  = "S0"   // 导入/续写对齐入口（PR5：存量书归卷/补章细纲/台账后汇入公共循环）
 	StageS1  = "S1"   // 孵化（book-pitch）
-	GateG1   = "G1"   // 蓝图确认闸
-	StageS2  = "S2"   // 蓝图（PR2 落库）
+	GateG1   = "G1"   // 蓝图确认闸（蓝图体检通过后停留，用户决定 continue/modify/abort）
+	GateG1b  = "G1b"  // 蓝图体检修复闸（蓝图体检不通过时停留，用户决定 fix/continue/abort）
+	StageS2  = "S2"   // 蓝图（PR2 落库；A 方案复用为「生成 → 蓝图体检 → 蓝图修复」宿主阶段）
 	StageS3  = "S3"   // 逐章写作（含评分门禁 + statesync）
 	GateG3b  = "G3b"  // 里程碑闸（PR4 启用，每 5 章 / 卷边界）
 	StageS4  = "S4"   // 签约体检（signability-audit，只读体检 + issue 清单）

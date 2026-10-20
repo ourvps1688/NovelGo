@@ -67,6 +67,10 @@ export default function SignabilityAuditView({
 
   const isFix = stage === "S5";
   const isFinal = stage === "S6";
+  // 读取本次体检/修复种类（蓝图 or 签约），用于切换标题与文案。
+  const ctx = run?.ContextJSON ? parseCtx(run.ContextJSON) : null;
+  const auditKind: "blueprint" | "signability" =
+    ctx?.audit_kind === "blueprint" ? "blueprint" : "signability";
 
   // 生成中 / 修复中：对应阶段 running 且无闸门。
   // 与 S5 修复视图保持同一界面语言：spinner + 正在干什么 + 实时动态面板。
@@ -74,7 +78,11 @@ export default function SignabilityAuditView({
     if (isFix) {
       // S5 修复进度视图：修复清单（什么问题、涉及哪些元素）+ 实时活动流 + 结果。
       return (
-        <FixProgressView fixProgress={fixProgress} fixActivity={fixActivity} />
+        <FixProgressView
+          fixProgress={fixProgress}
+          fixActivity={fixActivity}
+          fixKind={auditKind}
+        />
       );
     }
     return (
@@ -110,9 +118,51 @@ export default function SignabilityAuditView({
     }
   }
 
+  return (
+    <div className="flex flex-col gap-4">
+      <AuditResultView
+        audit={audit}
+        titleKey={
+          isFinal
+            ? "pipeline.signability.finalTitle"
+            : "pipeline.signability.title"
+        }
+        scoreKey={
+          auditKind === "blueprint"
+            ? "pipeline.blueprint.score"
+            : "pipeline.signability.score"
+        }
+      />
+      {isFix && status !== "running" ? (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Wrench className="h-3 w-3" />
+          {t(
+            auditKind === "blueprint"
+              ? "pipeline.blueprint.fixNote"
+              : "pipeline.signability.fixNote",
+          )}
+        </p>
+      ) : null}
+      {gate ? <PipelineGateCard gate={gate} onResume={onResume} /> : null}
+    </div>
+  );
+}
+
+// AuditResultView 是体检结果（verdict + score + issue 清单）的共享渲染组件，
+// S4/S4b/S6 签约体检与 S2 蓝图体检（G1b）共用，保证界面语言一致。
+// 通过 titleKey / scoreKey 区分签约与蓝图的标题与分数分母（/35 vs /30）。
+export function AuditResultView({
+  audit,
+  titleKey = "pipeline.signability.title",
+  scoreKey = "pipeline.signability.score",
+}: {
+  audit: AuditData | null;
+  titleKey?: string;
+  scoreKey?: string;
+}) {
+  const { t } = useTranslation();
   const passed = audit?.verdict === "pass";
   const issues = audit?.issues ?? [];
-
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
@@ -121,16 +171,10 @@ export default function SignabilityAuditView({
         ) : (
           <ShieldAlert className="h-4 w-4 text-danger-foreground" />
         )}
-        <span className="text-sm font-medium">
-          {t(
-            isFinal
-              ? "pipeline.signability.finalTitle"
-              : "pipeline.signability.title",
-          )}
-        </span>
+        <span className="text-sm font-medium">{t(titleKey)}</span>
         {audit?.score != null ? (
           <span className="text-xs text-muted-foreground">
-            {t("pipeline.signability.score", { n: audit.score })}
+            {t(scoreKey, { n: audit.score })}
           </span>
         ) : null}
       </div>
@@ -175,17 +219,18 @@ export default function SignabilityAuditView({
           </p>
         )}
       </div>
-
-      {isFix && status !== "running" ? (
-        <p className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Wrench className="h-3 w-3" />
-          {t("pipeline.signability.fixNote")}
-        </p>
-      ) : null}
-
-      {gate ? <PipelineGateCard gate={gate} onResume={onResume} /> : null}
     </div>
   );
+}
+
+// parseCtx 安全解析 run.ContextJSON 为对象（解析失败返回 null），避免单次 JSON 错误中断渲染。
+export function parseCtx(raw?: string): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 // StockAuditPanel 以只读方式展示「全量对齐」触发的全本现状体检结果（区别于 S4 流水线体检），
@@ -296,11 +341,14 @@ function FixIssueStatusBadge({
 function FixProgressView({
   fixProgress,
   fixActivity,
+  fixKind = "signability",
 }: {
   fixProgress?: FixProgressState;
   fixActivity: FixActivityItem[];
+  fixKind?: "signability" | "blueprint";
 }) {
   const { t } = useTranslation();
+  const fixingLabel = t(`pipeline.${fixKind}.fixing`);
   // 注意初始态（running=false, ok=null）必须视为「未开始」而非「已完成」：
   // 应用重启后事件状态丢失，若把初始态渲染成 done 会给用户"修复完成在复评"的假象。
   const running = fixProgress?.running ?? false;
@@ -331,8 +379,8 @@ function FixProgressView({
             ? t("pipeline.fixProgress.failed")
             : running
               ? batchTotal > 1
-                ? `${t("pipeline.signability.fixing")} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
-                : t("pipeline.signability.fixing")
+                ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
+                : fixingLabel
               : idle
                 ? t("pipeline.fixProgress.idle")
                 : t("pipeline.fixProgress.done")}

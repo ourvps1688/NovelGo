@@ -1878,7 +1878,12 @@
       "generating": "Generating blueprint…",
       "title": "Book Volume Structure",
       "volumeCount": "{{n}} volumes",
-      "empty": "No volume structure generated yet; click Continue to skip."
+      "empty": "No volume structure generated yet; click Continue to skip.",
+      "auditing": "Running blueprint audit…",
+      "auditTitle": "Blueprint Audit",
+      "fixing": "Fixing blueprint issues…",
+      "fixNote": "Blueprint fixes done; re-auditing automatically.",
+      "score": "Score {{n}}/30"
     },
     "signability": {
       "title": "Signability Audit",

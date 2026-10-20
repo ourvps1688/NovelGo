@@ -63,8 +63,14 @@ type GateContext struct {
 	LastAuditChapter int `json:"last_audit_chapter,omitempty"`
 	// AuditReason 记录上次进入体检的触发原因：golden3（黄金三章首检）| milestone（章节里程碑）| volume（卷边界）| final（完本终检）。
 	AuditReason string `json:"audit_reason,omitempty"`
-	// AuditStage 记录上次体检所处的阶段（S4 首检 / S4b 卷边界复评 / S6 完本终检），供修复后复评回到同阶段。
+	// AuditStage 记录上次体检所处的阶段（S4 首检 / S4b 卷边界复评 / S6 完本终检 / S2 蓝图体检），供修复后复评回到同阶段。
 	AuditStage string `json:"audit_stage,omitempty"`
+	// AuditKind 标记当前体检/修复的种类："blueprint" 走蓝图技能（蓝图体检/修复闭环），
+	// ""（默认）走签约技能。S4/S4b/S6 与 S2 蓝图共享 S5 修复执行体，靠此字段分流技能与 issue 来源。
+	AuditKind string `json:"audit_kind,omitempty"`
+	// BlueprintAudit 是蓝图体检（blueprint-audit）产出的结构化结果 JSON，与签约 Audit 分字段存放，
+	// 避免互相覆盖；供前端蓝图 G1b 闸门渲染 issue 清单，也供 S5 蓝图修复 agent 作为修复依据。
+	BlueprintAudit string `json:"blueprint_audit,omitempty"`
 	// FixRounds 记录 S5 自动修复已发生的轮数，供 auto_run 模式判断是否达到上限改交人工。
 	FixRounds int `json:"fix_rounds,omitempty"`
 	// EntryStage 记录本书启动流水线时由 DetermineEntryStage 选定的入口阶段（S0/S1/S3），用于追溯。
