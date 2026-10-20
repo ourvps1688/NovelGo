@@ -36,6 +36,8 @@ func skillAgentType(name string) agentcfg.AgentType {
 		return agentcfg.SignabilityAgent // 复用只读白名单
 	case "blueprint-fix":
 		return agentcfg.BlueprintFixAgent // 限权：只改卷纲 / 补卷
+	case "blueprint-drift-check":
+		return agentcfg.SignabilityAgent // 复用只读白名单（G3 蓝图漂移巡检）
 	case "story-blueprint":
 		return agentcfg.BlueprintAgent
 	default:
@@ -54,6 +56,8 @@ func skillAgentTypeString(name string) string {
 		return agentTypeSignability // 复用签约体检 AgentType 字符串（同属只读体检）
 	case "blueprint-fix":
 		return agentTypeBlueprintFix
+	case "blueprint-drift-check":
+		return agentTypeSignability // 复用只读体检 AgentType（G3 蓝图漂移巡检）
 	case "story-blueprint":
 		return agentTypeBlueprint
 	default:

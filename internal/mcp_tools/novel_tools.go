@@ -89,7 +89,13 @@ func formatChapterList(chapters []chapter.Chapter, volumeNames map[int64]string)
 			}
 			previousVolumeID = ch.VolumeID
 		}
-		fmt.Fprintf(&sb, "- 第%d章《%s》 [chapter_id:%d] · %d 字\n", ch.ReadingNumber, ch.Title, ch.ID, ch.WordCount)
+		entry := fmt.Sprintf("- 第%d章《%s》 [chapter_id:%d] · %d 字", ch.ReadingNumber, ch.Title, ch.ID, ch.WordCount)
+		// 质检标注（G2）：评分门禁已落库的章节带 quality_score 展示，供体检类 agent
+		// 扫描「重试耗尽后低分放行」的章节并升级为体检 issue，避免静默漏过。
+		if ch.QualityScore != nil {
+			entry += fmt.Sprintf(" · 质检 %d", *ch.QualityScore)
+		}
+		fmt.Fprintf(&sb, "%s\n", entry)
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
 }

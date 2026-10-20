@@ -71,6 +71,10 @@ type GateContext struct {
 	// BlueprintAudit 是蓝图体检（blueprint-audit）产出的结构化结果 JSON，与签约 Audit 分字段存放，
 	// 避免互相覆盖；供前端蓝图 G1b 闸门渲染 issue 清单，也供 S5 蓝图修复 agent 作为修复依据。
 	BlueprintAudit string `json:"blueprint_audit,omitempty"`
+	// DriftReport 是 G3 蓝图一致性巡检的人类可读结论（S5 修复完成后自动触发一次，只读非阻断）：
+	// 空串=未巡检或无章节可巡；非空时由 emitGateDecision 追加到复评闸门 summary，
+	// 提示用户哪些章节与当前卷纲冲突、是否需要重读。
+	DriftReport string `json:"drift_report,omitempty"`
 	// FixRounds 记录 S5 自动修复已发生的轮数，供 auto_run 模式判断是否达到上限改交人工。
 	FixRounds int `json:"fix_rounds,omitempty"`
 	// EntryStage 记录本书启动流水线时由 DetermineEntryStage 选定的入口阶段（S0/S1/S3），用于追溯。

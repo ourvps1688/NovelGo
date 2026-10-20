@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -570,6 +571,10 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 				summary = "蓝图体检发现问题，建议进入修复闭环后再确认。"
 			}
 		}
+		// G3：S5 修复后的蓝图巡检结论随闸门带给用户（非阻断，仅供参考）。
+		if bc.DriftReport != "" {
+			summary += "；" + bc.DriftReport
+		}
 		if audit.Verdict == "pass" {
 			emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: auditStage, GateID: GateG1,
 				Summary: summary, Options: []string{"continue", "modify", "abort"}})
@@ -587,6 +592,10 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 		} else {
 			summary = "签约体检已完成，请确认是否继续或进入修复闭环。"
 		}
+	}
+	// G3：S5 修复后的蓝图巡检结论随闸门带给用户（非阻断，仅供参考）。
+	if bc.DriftReport != "" {
+		summary += "；" + bc.DriftReport
 	}
 	gateID := GateG4
 	options := []string{"continue", "fix", "abort"}
@@ -818,6 +827,13 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 	// 广播修复完成：前端收尾活动流，提示进入复评。
 	emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": true})
 
+	// G3 蓝图漂移巡检：S5 修复可能改动了设计台账（卷纲/弧线/时间线），已写章节可能与当前蓝图
+	// 产生新的不一致。修复完成后触发一次「轻量蓝图一致性巡检」（只读、非阻断），结论存入
+	// ctxt.DriftReport，由复评闸门 summary 带给用户。无已写章节（纯蓝图阶段）时跳过。
+	if n, cerr := s.chapterCount(ctx, novelID); cerr == nil && n > 0 {
+		ctxt.DriftReport = s.runBlueprintDriftPatrol(ctx, runID, novelID)
+	}
+
 	// 复位到对应体检阶段 running 是为了让 executeAudit 的「状态未变更」守卫判定通过，
 	// 否则守卫会因当前为 S5 而放弃落 G4 闸门，导致复评结果无家可归（见测试 TestServiceAuditFixLoopReAudit）。
 	auditStage := ctxt.AuditStage
@@ -833,6 +849,49 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 	}
 	s.setDispatching(ctx, runID, false)
 	s.executeAudit(runID, novelID)
+}
+
+// runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：
+// 跑 blueprint-drift-check 技能比对「当前卷纲」与「已写章节」，返回人类可读结论；
+// 巡检失败只记日志并返回空串（不落库、不阻断复评主流程）。
+func (s *Service) runBlueprintDriftPatrol(ctx context.Context, runID string, novelID int64) string {
+	out, err := s.skillRunner(ctx, "blueprint-drift-check", SkillInput{
+		NovelID:   novelID,
+		Prompt:    driftPatrolPrompt(novelID),
+		MaxTurns:  8,
+		SessionID: "pipeline:" + runID + ":drift",
+	})
+	if err != nil {
+		s.logger.Warn("G3 蓝图巡检执行失败（非阻断，跳过）", "run_id", runID, "err", err)
+		return ""
+	}
+	audit := parseAudit(out.Text)
+	if audit.Verdict == "pass" || len(audit.Issues) == 0 {
+		return "蓝图巡检：未发现与当前卷纲冲突的章节。"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "蓝图巡检：%d 章与当前卷纲冲突，建议重读：", len(audit.Issues))
+	for i, iss := range audit.Issues {
+		if i >= 5 {
+			sb.WriteString("等。")
+			break
+		}
+		if i > 0 {
+			sb.WriteString("；")
+		}
+		fmt.Fprintf(&sb, "%s %s", iss.Area, iss.Desc)
+	}
+	return sb.String()
+}
+
+// driftPatrolPrompt 构造 G3 蓝图漂移巡检的任务提示词（只读、轻量、非评分）。
+func driftPatrolPrompt(novelID int64) string {
+	return fmt.Sprintf("本书 novel_id=%d。请基于 blueprint-drift-check 方法论做一次**轻量蓝图一致性巡检**："+
+		"逐卷 read 当前卷纲（volumes/id_{卷id}.md），对照已写章节的细纲与关键正文段落，"+
+		"只标出与当前卷纲冲突的章节（剧情矛盾/卷纲承诺未兑现/顺序错位），不评分、不修稿；"+
+		"若没有任何已写章节，直接输出空冲突清单。最终回复末尾**必须**附一个 ```json 代码块，格式："+
+		"{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"D1\",\"level\":\"P1\",\"area\":\"章节#12\",\"desc\":\"...\"}]}。"+
+		"无冲突 → verdict=pass；有冲突 → needs_fix。", novelID)
 }
 
 // autoFixCap 是 auto_run 模式下「不通过→自动修复」的最大轮数上限，超过则交人工决策，避免无限循环。
@@ -925,7 +984,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 // finalAuditPrompt 构造 S6 完本级终检的任务提示词。
 func finalAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
-		"通读所有成稿章节，逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID)
 }
 
@@ -1157,7 +1216,7 @@ func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, 
 
 // stockAuditPrompt 构造「全量对齐」全本现状体检的任务提示词。
 func stockAuditPrompt(novelID int64) string {
-	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，通读所有已落库章节（至少覆盖开篇、中段、结尾各若干章），"+
+	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，**逐章通读所有已落库章节**（不得抽样跳章），"+
 		"从签约编辑视角评估：开篇钩子与过签力、人设记忆点、节奏与爽点密度、世界观/设定自洽、完本潜力、题材契合与数据预期等维度，逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
@@ -1193,7 +1252,7 @@ func parseAudit(text string) AuditData {
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。
 func signabilityPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
-		"用 get_chapter_list 列出章节，抽样通读前三章（黄金三章）+ 最新章 + 任意中段章，逐维打分并举证；"+
+		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
 }

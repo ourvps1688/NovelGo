@@ -66,3 +66,9 @@
 - `service.go` 三处提示词阈值对齐：`signabilityPrompt`/`stockAuditPrompt` `25/35`→`29/40`、`finalAuditPrompt` `30/35`→`34/40`（保持终检更严）；`store.go` `AuditData.Score` 注释同步 /40。注：Go 不硬编码分母，`emitGateDecision` 用 LLM 的 `verdict` 字段裁决，门槛由技能文本自述。
 - `service_test.go` 新增 `TestParseAuditEightDimensions`（验证 8 维/40 审计 JSON 正确落库）。全量 pipeline 测试 + golangci-lint + prettier/i18n/eslint + 前端 build 均绿。
 - 前端 `pipeline.signability.score` i18n 分母 /35→/40（zh-CN/en）。因 audit `area` 为 LLM 自由文本，无独立维度标签枚举，故未新增维度 i18n 键。
+
+## §9 三软缺口 G1-G3 落地（2026-10-21，独立 commit）
+- **G1 消除抽样**：`signability-audit.md`（version 2）工作流改「全本逐章通读」（黄金三章精读，其余 3-5 章一批，不得抽样跳章）；`signabilityPrompt`/`stockAuditPrompt`/`finalAuditPrompt` 同步逐章措辞。**代价**：体检 LLM 成本随章节数线性上升，为确定性主动选择。
+- **G2 评分放弃路径收敛**：`get_chapter_list`（`novel_tools.go formatChapterList`）对已落库 `quality_score` 章节追加「质检 N」标注；`signability-audit.md` 一致性核查新增「低分放行章节核查→必产 P1 issue」，评分门禁重试耗尽放行的章节不再静默漏过。`AutoScoreEnabled` 默认本就 true，无需改。
+- **G3 蓝图漂移巡检**：新只读技能 `blueprint-drift-check.md`（复用 SignabilityAgent 白名单，skillrun 双映射已加）；`finishFixAndReaudit` 修复完成后调 `runBlueprintDriftPatrol`（MaxTurns=8，非阻断，失败仅记日志），结论写 `GateContext.DriftReport`（store.go 新字段）并追加到复评闸门 summary；`chapterCount==0`（纯蓝图阶段）自动跳过。
+- **测试**：`TestServiceDriftPatrolAfterFix`/`TestServiceDriftPatrolSkippedWhenNoChapters`/映射断言扩展。前端零改动（巡检结论经既有闸门 summary 展示）。计划文档 §9.1 已记落地状态。

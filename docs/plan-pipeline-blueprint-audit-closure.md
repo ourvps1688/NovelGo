@@ -270,3 +270,13 @@ A+B 落地后，流水线在**你提出的诉求范围（五台账能真正协�
 **G1 的取舍说明**：B 方案把审计从「纯抽样」推进到「抽样 + 全台账一致性全扫」，已是性价比最高的收敛点。要彻底消除抽样不确定性，需把章节正文审计也改全本逐章，成本与延迟显著上升——故建议作为独立增强项，不在 A+B 内一并做。
 
 **与核心诉求的关系**：G1/G2/G3 都不影响「五台账能协调」这一 A+B 已解决的目标——它们关乎**覆盖度与自愈性**，而非**机制缺失**。A+B 先把机制补完，G1–G3 按成本优先级后续迭代即可。
+
+### 9.1 落地状态（2026-10-21，三个软缺口已全部实现）
+
+| # | 落地内容 | 关键改动 |
+|---|---|---|
+| G1 | **签约审计消除抽样**：`signability-audit.md` 工作流改为「全本逐章通读」——黄金三章逐字精读，其余章节按 3–5 章一批依次读完，**不得抽样跳章**；「全台账一致性核查」措辞同步。Go 侧 `signabilityPrompt` / `stockAuditPrompt` / `finalAuditPrompt` 提示词同步改为逐章通读。**代价**：体检 LLM 成本随章节数线性上升（此前 3–4 章封顶），为消除不确定性的主动选择。 | `internal/skill/builtin/signability-audit.md`（version 2）、`internal/pipeline/service.go` 三处提示词 |
+| G2 | **评分放弃路径收敛**：① `get_chapter_list` 输出对已落库 `quality_score` 的章节追加「质检 N」标注；② `signability-audit.md` 一致性核查新增「低分放行章节核查」——凡质检评分偏低（如 <60）或带低分放行报告的章节**必产一条 P1 issue**，评分门禁重试耗尽放行的章节不再静默漏过，下一次 S4/S6 体检必然暴露。`AutoScoreEnabled` 默认开启（`writingconfig` 默认值已为 true，无需改动）。 | `internal/mcp_tools/novel_tools.go`、`internal/skill/builtin/signability-audit.md` |
+| G3 | **蓝图漂移轻量巡检**：S5 修复（签约/蓝图均适用）完成后自动触发一次 `blueprint-drift-check`（新只读技能，复用 SignabilityAgent 白名单，MaxTurns=8）：逐卷读当前卷纲，对照已写章节细纲与关键正文，标出剧情矛盾/承诺未兑现/顺序错位的章节；结论写入 `GateContext.DriftReport` 并追加到复评闸门 summary（非阻断、不评分；失败仅记日志）。无已写章节（纯蓝图阶段）自动跳过，节省调用。 | `internal/skill/builtin/blueprint-drift-check.md`（新增）、`internal/pipeline/{service,store,skillrun}.go` |
+
+**测试**：`TestServiceDriftPatrolAfterFix`（修复→巡检→DriftReport 落库→闸门 summary 携带巡检结论）、`TestServiceDriftPatrolSkippedWhenNoChapters`（无章节跳过巡检）、`TestSkillAgentTypeBlueprintMappings`（drift-check 映射断言）。

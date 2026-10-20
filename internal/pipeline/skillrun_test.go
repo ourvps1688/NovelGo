@@ -140,4 +140,9 @@ func TestSkillAgentTypeBlueprintMappings(t *testing.T) {
 		"蓝图体检 AgentType 字符串应复用 signability（同属只读体检）")
 	require.Equal(t, agentTypeBlueprintFix, skillAgentTypeString("blueprint-fix"),
 		"蓝图修复 AgentType 字符串应为 blueprintfix")
+	// G3 蓝图漂移巡检：只读巡检复用签约体检只读白名单。
+	require.Equal(t, agentcfg.SignabilityAgent, skillAgentType("blueprint-drift-check"),
+		"蓝图巡检应复用签约体检只读白名单")
+	require.Equal(t, agentTypeSignability, skillAgentTypeString("blueprint-drift-check"),
+		"蓝图巡检 AgentType 字符串应复用 signability（同属只读体检）")
 }

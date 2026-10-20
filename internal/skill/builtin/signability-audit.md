@@ -4,7 +4,7 @@ description: 从平台编辑/市场视角对已成稿章节做签约级体检：
 category: 评估
 mode: manual
 author: builtin
-version: 1
+version: 2
 useWhen:
   - intent: "评估签约潜力 / 编辑审稿视角"
     cues:
@@ -53,15 +53,16 @@ useWhen:
 - 触碰平台禁区
 - 核心悬念被提前剧透、读者认知与叙事脱节、误解线无回收
 
-## 全台账一致性核查（消除「仅抽样」的不确定性）
-除抽样通读章节外，**额外全量扫描设计台账**，把「仅看正文」升级为「正文 + 五大台账」双轨体检，产出**指向具体 entry ID** 的 issue（而非泛泛而谈）：
+## 全台账一致性核查（消除不确定性）
+除逐章通读正文外，**额外全量扫描设计台账**，把「仅看正文」升级为「正文 + 五大台账」双轨体检，产出**指向具体 entry ID** 的 issue（而非泛泛而谈）：
 - `get_timeline`：逐条 entry 检查 `planted` 之后是否有 `resolved`？有无悬空伏笔（只埋不收）或提前泄露的 reveal？→ 不一致则产 issue 如 `{"id":"I9","level":"P1","area":"长线牵引","desc":"timeline#42 伏笔未回收"}`。
 - `get_story_arcs`：每条 arc 的 `status` 是否 `completed/in_progress/dropped` 自洽？arc 的 node 是否连贯、有无断点？→ `{"id":"I10","level":"P1","area":"长线牵引","desc":"story_arc#7 节点断裂，中段无推进"}`。
 - `get_reader_perspective`：每条 entry 的 `resolved` 是否闭合？是否存在「埋了悬念但从未 reveal」的死线？→ `{"id":"I11","level":"P1","area":"读者视角","desc":"reader_perspective#15 误解线无回收"}`。
-- 控制成本：逐条扫描时只标记**具体不一致**，不重复读同一资源；扫描台账**不**替代章节抽样，二者互补。
+- 低分放行章节核查：`get_chapter_list` 输出中带「质检」标注的章节（quality_score 已落库），凡评分偏低（如 <60）或质检报告显示「多次重写仍不达标后放行」的，必须核对其正文与问题并**必产一条 P1 issue**（评分门禁重试耗尽放行的章节不得静默放过）。
+- 控制成本：逐条扫描时只标记**具体不一致**，不重复读同一资源；扫描台账**不**替代逐章正文审读，二者互补。
 
 ## 工作流（只读，禁止写库/子 Agent）
-1. **一次性抽样通读**：用 `get_chapter_list` 列出章节，用 `read` 通读**前三章（黄金三章）+ 最新章 + 任意中段章**。最多读 3–4 章即可，不要逐章全读。
+1. **全本逐章通读**：用 `get_chapter_list` 列出全部章节，用 `read` **逐章通读全部已成稿章节**——前三章（黄金三章）逐字精读，其余章节按 3–5 章一批依次读完，**不得抽样跳章**。章节很多时也要分批评完，这是体检结论确定性的底线。
 2. **按需补读台账**：若需验证设定/人物/卷纲，可调用一次 `list_volumes`、`get_characters`、`get_character_relations`、`get_locations`、`get_timeline`、`get_story_arcs`、`get_reader_perspective` 或 `search_story_memory`。禁止反复查询同一资源。
 3. **直接输出结构化结果**：收集到足够证据后，**立即**逐维打分，并在最终回复末尾给出 JSON 代码块。
 4. **不要陷入只读循环**：如果你发现自己在连续多轮只调用 `read`/`get_*`，说明信息已足够，应停止查询、直接输出评分与 JSON。orchestrator 会按你的 JSON 驱动后续 S5 修复。

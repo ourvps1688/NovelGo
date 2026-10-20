@@ -697,3 +697,95 @@ func TestParseAuditEightDimensions(t *testing.T) {
 	require.Len(t, data.Issues, 9)
 	require.Equal(t, "timeline#42 未回收", data.Issues[2].Desc)
 }
+
+// TestServiceDriftPatrolAfterFix 验证 G3：S5 修复完成后自动触发一次蓝图一致性巡检
+// （blueprint-drift-check，只读非阻断），结论写入 ctxt.DriftReport，并随复评闸门
+// summary 带给用户（标出与当前卷纲冲突的章节）。
+func TestServiceDriftPatrolAfterFix(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 8, nil } // 有已写章节才巡检
+	captured := withCapturedGates(t)
+
+	var driftCalls int
+	secondAudit := `{"verdict":"pass","score":33,"summary":"修复后通过","issues":[]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-audit":
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "signability-fix":
+			return SkillOutput{Text: "已按 issue 修复台账"}, nil
+		case "blueprint-drift-check":
+			driftCalls++
+			return SkillOutput{Text: "巡检：\n```json\n{\"verdict\":\"needs_fix\",\"score\":0," +
+				"\"summary\":\"发现 2 章与卷纲冲突\",\"issues\":[" +
+				"{\"id\":\"D1\",\"level\":\"P1\",\"area\":\"章节#12\",\"desc\":\"卷纲承诺的反转未出现\"}," +
+				"{\"id\":\"D2\",\"level\":\"P1\",\"area\":\"章节#15\",\"desc\":\"时间顺序与卷纲错位\"}]}\n```"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 603, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
+		`{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4"}`))
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	require.Equal(t, 1, driftCalls, "修复完成后应恰好触发一次蓝图巡检")
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Contains(t, ctxt.DriftReport, "蓝图巡检", "巡检结论应落库 DriftReport")
+	require.Contains(t, ctxt.DriftReport, "章节#12", "巡检结论应包含冲突章节")
+
+	last := (*captured)[len(*captured)-1]
+	require.Equal(t, GateG4, last.GateID, "复评仍落 G4 闸")
+	require.Contains(t, last.Summary, "蓝图巡检", "巡检结论应随复评闸门 summary 带给用户")
+}
+
+// TestServiceDriftPatrolSkippedWhenNoChapters 验证 G3：无已写章节（纯蓝图阶段的蓝图修复）
+// 时跳过巡检，不浪费一次 LLM 调用，DriftReport 保持为空。
+func TestServiceDriftPatrolSkippedWhenNoChapters(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 0, nil }
+
+	var driftCalls, auditCount int
+	firstAudit := `{"verdict":"needs_fix","score":15,"summary":"卷纲待修","issues":[{"id":"B1","level":"P0","area":"卷纲","desc":"第一卷与第三卷冲突"}]}`
+	secondAudit := `{"verdict":"pass","score":27,"summary":"修复后通过","issues":[]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "blueprint-audit":
+			auditCount++
+			if auditCount == 1 {
+				return SkillOutput{Text: "体检：\n```json\n" + firstAudit + "\n```"}, nil
+			}
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		case "blueprint-fix":
+			return SkillOutput{Text: "已修复卷纲"}, nil
+		case "blueprint-drift-check":
+			driftCalls++
+			return SkillOutput{Text: "ok"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	run, err := svc.StartPipeline(ctx, 604, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2 生成+首检（不通过）
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", "")) // G1b→S5 蓝图修复→复评
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	require.Equal(t, 0, driftCalls, "无章节时不应触发蓝图巡检")
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.Empty(t, ctxt.DriftReport, "无章节时 DriftReport 应为空")
+}
