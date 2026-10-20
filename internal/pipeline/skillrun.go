@@ -112,6 +112,9 @@ func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llm
 		ProviderName: providerName,
 		AgentType:    skillAgentTypeString(name),
 		MaxTurns:     input.MaxTurns,
+		// pipeline 会话事件走独立前缀（pipeline-agent:1），前端流水线视图监听它展示
+		// S5 修复等阶段的活动流；主聊天仍用默认 "agent:"，互不干扰。
+		EventPrefix: "pipeline-agent:",
 	}
 	if opts.MaxTurns <= 0 {
 		opts.MaxTurns = 12

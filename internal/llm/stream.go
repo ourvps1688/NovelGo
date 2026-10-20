@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -62,6 +63,81 @@ func (c *Client) Reload(providers map[string]Provider) {
 	c.providers = providers
 }
 
+// streamIdleTimeout 是 SSE 流式响应「chunk 间最大空闲时长」：
+// 超过该时长未从响应 body 读到任何字节，即判定流已静默断开
+// （服务端挂起 / 网络设备静默丢流，无 FIN/RST），主动取消请求。
+// 必须远大于思考模型相邻 chunk 的正常间隔（思考 delta 通常秒级到达），
+// 又要明显短于「永远卡死」。ResponseHeaderTimeout 只覆盖首字节前的等待，
+// body 读取阶段此前没有任何超时，是 S5 修复等长任务卡死的根因。
+const streamIdleTimeout = 3 * time.Minute
+
+// idleTimeoutError 标记由空闲 watchdog 触发的中断，供 parseSSE 生成可读错误文案。
+type idleTimeoutError struct{ timeout time.Duration }
+
+func (e *idleTimeoutError) Error() string {
+	return fmt.Sprintf("流式响应空闲超时（%s 内无任何数据）", e.timeout)
+}
+
+// idleWatchdog 监视 SSE body 读取活动：每收到字节就刷新 lastActivity，
+// 监视 goroutine 每 5s 轮询一次，发现空闲超过 streamIdleTimeout 即 cancel(ctx)。
+// 相比 time.Timer.Reset 轮询方案无竞态（CAS/双检查都不需要），代价可忽略。
+type idleWatchdog struct {
+	last    atomic.Int64 // 最近一次收到字节的 UnixNano
+	fired   atomic.Bool
+	timeout time.Duration
+	cancel  context.CancelFunc
+	logger  *slog.Logger
+}
+
+func newIdleWatchdog(cancel context.CancelFunc, logger *slog.Logger) *idleWatchdog {
+	wd := &idleWatchdog{timeout: streamIdleTimeout, cancel: cancel, logger: logger}
+	wd.last.Store(time.Now().UnixNano())
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if wd.fired.Load() {
+				return
+			}
+			last := time.Unix(0, wd.last.Load())
+			if time.Since(last) > wd.timeout {
+				if wd.fired.CompareAndSwap(false, true) {
+					if wd.logger != nil {
+						wd.logger.Warn("llm stream idle watchdog fired, canceling request",
+							"idle", time.Since(last).String(), "timeout", wd.timeout.String())
+					}
+					wd.cancel()
+				}
+				return
+			}
+		}
+	}()
+	return wd
+}
+
+// wrapBody 把 resp.Body 包一层「读到字节即刷新活动时间」的 reader；
+// 读取报错且 watchdog 已触发时，返回 idleTimeoutError 供上层识别。
+// 注意：包装层不实现 Close，底层 body 的 Close 由 ChatStream 的 defer 负责。
+func (wd *idleWatchdog) wrapBody(r io.Reader) io.Reader {
+	return &kickReader{r: r, wd: wd}
+}
+
+type kickReader struct {
+	r  io.Reader
+	wd *idleWatchdog
+}
+
+func (k *kickReader) Read(p []byte) (int, error) {
+	n, err := k.r.Read(p)
+	if n > 0 {
+		k.wd.last.Store(time.Now().UnixNano())
+	}
+	if err != nil && k.wd.fired.Load() {
+		return n, &idleTimeoutError{timeout: k.wd.timeout}
+	}
+	return n, err
+}
+
 // HTTPClient 返回底层共享的 HTTP 客户端，供非流式请求（如图像生成）复用。
 func (c *Client) HTTPClient() *http.Client { return c.http }
 
@@ -101,7 +177,12 @@ func (c *Client) ChatStream(
 			return
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.ChatURL, bytes.NewReader(body))
+		// 空闲 watchdog：派生可取消 ctx，body 读取空闲超过 streamIdleTimeout 即取消请求，
+		// 防止 SSE 流静默断开时 streamLoop 永久阻塞（调用方 ctx 在长任务中永不取消）。
+		streamCtx, cancelStream := context.WithCancel(ctx)
+		defer cancelStream()
+
+		req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, p.ChatURL, bytes.NewReader(body))
 		if err != nil {
 			ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("failed to create HTTP request: %w", err)}
 			return
@@ -182,7 +263,10 @@ func (c *Client) ChatStream(
 			return
 		}
 
-		// SSE 逐行解析
+		// SSE 逐行解析（body 空闲超过 streamIdleTimeout 时 watchdog 取消请求 → 读报错 → EventError）。
+		// 把 resp.Body 换成带活动刷新的包装 reader；defer 关闭的是包装前捕获的原始 body。
+		wd := newIdleWatchdog(cancelStream, c.logger)
+		resp.Body = io.NopCloser(wd.wrapBody(resp.Body))
 		c.parseSSE(ch, resp)
 	}()
 
@@ -467,10 +551,16 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 	}
 
 	if err := scanner.Err(); err != nil {
+		msg := fmt.Sprintf("SSE stream read error: %s", err)
+		var idleErr *idleTimeoutError
+		if errors.As(err, &idleErr) {
+			msg = fmt.Sprintf("流式响应空闲超时：%s 内未收到任何数据，疑似网络中断或服务端挂起，已自动中断待重试",
+				idleErr.timeout.String())
+		}
 		c.logger.Warn("sse stream interrupted", "err", err)
 		ch <- StreamEvent{Type: EventError, Error: &APIError{
 			StatusCode: 0,
-			Message:    fmt.Sprintf("SSE stream read error: %s", err),
+			Message:    msg,
 			Retryable:  true,
 		}}
 		// 流异常中断：不再做 tool call 收尾，避免与 invalidToolErrors 分支叠加

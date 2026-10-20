@@ -1,7 +1,19 @@
 import { useTranslation } from "react-i18next";
-import { Loader2, ShieldAlert, ShieldCheck, Wrench } from "lucide-react";
+import {
+  CheckCircle2,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
+  Wrench,
+  XCircle,
+} from "lucide-react";
 import type { pipeline } from "@/lib/wailsjs/go/models";
-import type { GatePayload, GateDecision } from "@/types/pipeline";
+import type {
+  GatePayload,
+  GateDecision,
+  FixProgressState,
+  FixActivityItem,
+} from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 
 export interface AuditIssue {
@@ -24,6 +36,9 @@ interface Props {
   status: string;
   gate: GatePayload | null;
   onResume: (decision: GateDecision, feedback?: string) => void;
+  // S5 修复进度（可选）：修复清单 + 实时活动流，由 usePipeline 订阅事件维护。
+  fixProgress?: FixProgressState;
+  fixActivity?: FixActivityItem[];
 }
 
 // S4 签约体检 / S5 修复闭环 / S6 完本终检视图：
@@ -38,6 +53,8 @@ export default function SignabilityAuditView({
   status,
   gate,
   onResume,
+  fixProgress,
+  fixActivity = [],
 }: Props) {
   const { t } = useTranslation();
 
@@ -49,16 +66,16 @@ export default function SignabilityAuditView({
 
   // 生成中 / 修复中：对应阶段 running 且无闸门。
   if (status === "running" && !gate) {
+    if (isFix) {
+      // S5 修复进度视图：修复清单（什么问题、涉及哪些元素）+ 实时活动流 + 结果。
+      return (
+        <FixProgressView fixProgress={fixProgress} fixActivity={fixActivity} />
+      );
+    }
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
-        <p className="text-sm">
-          {t(
-            isFix
-              ? "pipeline.signability.fixing"
-              : "pipeline.signability.auditing",
-          )}
-        </p>
+        <p className="text-sm">{t("pipeline.signability.auditing")}</p>
       </div>
     );
   }
@@ -215,6 +232,117 @@ export function StockAuditPanel({ data }: { data: AuditData }) {
         ) : (
           <p className="text-sm text-muted-foreground">
             {t("pipeline.stockAudit.noIssues")}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// FixProgressView 是 S5「按体检问题修复中」的进度视图：
+// - 顶部：spinner + 状态文案（修复中 / 修复完成待复评 / 修复失败）；
+// - 修复清单：本轮要修的 issue（编号 + 等级 + 涉及元素 area + 问题描述），
+//   让用户知道「在修复什么、涉及角色/地点/弧线/读者视角中的哪些元素」；
+// - 实时活动流：pipeline-agent 事件的工具 display_text（如「编辑 第24章 对质」「更新角色」），
+//   最新在上，上限 40 条；事件尚未到达时显示占位提示。
+function FixProgressView({
+  fixProgress,
+  fixActivity,
+}: {
+  fixProgress?: FixProgressState;
+  fixActivity: FixActivityItem[];
+}) {
+  const { t } = useTranslation();
+  const running = fixProgress?.running ?? true;
+  const issues = fixProgress?.issues ?? [];
+  const activity = [...fixActivity].reverse();
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        {fixProgress?.ok === false ? (
+          <XCircle className="h-4 w-4 text-danger-foreground" />
+        ) : running ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <CheckCircle2 className="h-4 w-4 text-warning-foreground" />
+        )}
+        <span className="text-sm font-medium">
+          {fixProgress?.ok === false
+            ? t("pipeline.fixProgress.failed")
+            : running
+              ? t("pipeline.signability.fixing")
+              : t("pipeline.fixProgress.done")}
+        </span>
+      </div>
+
+      {fixProgress?.ok === false && fixProgress?.error ? (
+        <p className="rounded border border-danger bg-danger/10 px-3 py-2 text-danger-foreground text-sm">
+          {fixProgress.error}
+        </p>
+      ) : null}
+
+      {!running && fixProgress?.ok !== false ? (
+        <p className="flex items-center gap-1 text-muted-foreground text-xs">
+          <Wrench className="h-3 w-3" />
+          {t("pipeline.fixProgress.reAuditing")}
+        </p>
+      ) : null}
+
+      {issues.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t("pipeline.fixProgress.issues")}
+          </div>
+          <ul className="flex flex-col gap-2">
+            {issues.map((it) => (
+              <li
+                key={it.id}
+                className="rounded border bg-card px-3 py-2 text-sm"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-xs ${
+                      it.level === "P0"
+                        ? "bg-danger text-danger-foreground"
+                        : "bg-warning text-warning-foreground"
+                    }`}
+                  >
+                    {it.level}
+                  </span>
+                  <span className="font-medium">{it.area}</span>
+                  <span className="text-muted-foreground">{it.id}</span>
+                </div>
+                <p className="mt-1 text-muted-foreground">{it.desc}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t("pipeline.fixProgress.activity")}
+        </div>
+        {activity.length > 0 ? (
+          <ul className="flex max-h-64 flex-col gap-1 overflow-auto rounded border bg-card px-3 py-2">
+            {activity.map((it, i) => (
+              <li
+                key={`${it.seq}-${i}`}
+                className="flex items-center gap-2 text-muted-foreground text-xs"
+              >
+                {it.failed ? (
+                  <XCircle className="h-3 w-3 shrink-0 text-danger-foreground" />
+                ) : (
+                  <CheckCircle2 className="h-3 w-3 shrink-0 text-success-foreground" />
+                )}
+                <span>{it.text}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground text-xs">
+            {t("pipeline.fixProgress.waitingActivity")}
           </p>
         )}
       </div>

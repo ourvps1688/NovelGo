@@ -13,7 +13,13 @@ import type {
   ControlAckPayload,
   ControlCmd,
   GateDecision,
+  FixProgressState,
+  FixActivityItem,
 } from "@/types/pipeline";
+import type { AgentEvent } from "@/components/chat/types";
+import { AgentEventType } from "@/components/chat/types";
+
+const FIX_ACTIVITY_MAX = 40;
 
 // 订阅后端 pipeline 事件并暴露控制方法给 UI。
 // C 期：状态推进由用户在前端显式点「继续/修改/终止」驱动，后端只负责
@@ -23,6 +29,13 @@ export function usePipeline(novelId: number) {
   const [stage, setStage] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [gate, setGate] = useState<GatePayload | null>(null);
+  // S5 修复进度：修复清单（fix_start 携带）+ 实时活动流（pipeline-agent:1 工具事件）。
+  const [fixProgress, setFixProgress] = useState<FixProgressState>({
+    running: false,
+    ok: null,
+    issues: [],
+  });
+  const [fixActivity, setFixActivity] = useState<FixActivityItem[]>([]);
 
   useEffect(() => {
     const offStage = EventsOn("pipeline:stage", (p: StagePayload) => {
@@ -59,6 +72,56 @@ export function usePipeline(novelId: number) {
           .catch(() => {});
       },
     );
+    // S5 修复开始：携带本轮要修复的 issue 清单（问题 + 涉及元素），清空上一轮活动流。
+    const offFixStart = EventsOn(
+      "pipeline:fix_start",
+      (p: {
+        novel_id: number;
+        issues?: FixProgressState["issues"];
+        summary?: string;
+      }) => {
+        if (p.novel_id !== novelId) return;
+        setFixActivity([]);
+        setFixProgress({
+          running: true,
+          ok: null,
+          summary: p.summary,
+          issues: p.issues ?? [],
+        });
+      },
+    );
+    // S5 修复结束：展示结果（修复完成 → 自动复评；失败 → 展示错误）。
+    const offFixDone = EventsOn(
+      "pipeline:fix_done",
+      (p: { novel_id: number; ok?: boolean; error?: string }) => {
+        if (p.novel_id !== novelId) return;
+        setFixProgress((prev) => ({
+          ...prev,
+          running: false,
+          ok: p.ok ?? false,
+          error: p.error,
+        }));
+      },
+    );
+    // pipeline 会话的 agent 活动流（工具调用完成/失败），驱动 S5 修复实时进度。
+    const offAgentActivity = EventsOn("pipeline-agent:1", (ev: AgentEvent) => {
+      if (ev.type !== AgentEventType.ToolCall) return;
+      // 只记录「执行完成 / 失败」两个终态，跳过 selected/executing 预告，避免刷屏。
+      if (ev.phase !== "completed" && ev.phase !== "failed") return;
+      if (!ev.display_text) return;
+      setFixActivity((prev) => {
+        const next = [
+          ...prev,
+          {
+            seq: ev.seq ?? 0,
+            text: ev.display_text ?? "",
+            ok: ev.success ?? true,
+            failed: ev.phase === "failed",
+          },
+        ];
+        return next.slice(-FIX_ACTIVITY_MAX);
+      });
+    });
 
     // 进入时拉取当前活跃流水线，恢复进度。
     GetPipelineState(novelId)
@@ -76,6 +139,9 @@ export function usePipeline(novelId: number) {
       offGate();
       offAck();
       offStock();
+      offFixStart();
+      offFixDone();
+      offAgentActivity();
     };
   }, [novelId]);
 
@@ -125,5 +191,16 @@ export function usePipeline(novelId: number) {
 
   const autoRun = run?.AutoRun ?? false;
 
-  return { run, stage, status, gate, autoRun, start, resume, control };
+  return {
+    run,
+    stage,
+    status,
+    gate,
+    autoRun,
+    fixProgress,
+    fixActivity,
+    start,
+    resume,
+    control,
+  };
 }

@@ -16,8 +16,18 @@ interface Props {
 // 实际创作（孵化 / 逐章写作）仍走现有 UI，向导只负责可见进度与「仅点继续」的闭环。
 export default function PipelineWizard({ novelId }: Props) {
   const { t } = useTranslation();
-  const { run, stage, status, gate, autoRun, start, resume, control } =
-    usePipeline(novelId);
+  const {
+    run,
+    stage,
+    status,
+    gate,
+    autoRun,
+    fixProgress,
+    fixActivity,
+    start,
+    resume,
+    control,
+  } = usePipeline(novelId);
 
   // 解析「全量对齐」触发的全本现状体检结果（存于 run.ContextJSON.stock_audit）。
   const stockAudit = useMemo(() => {
@@ -83,6 +93,8 @@ export default function PipelineWizard({ novelId }: Props) {
                 status={status}
                 gate={gate}
                 onResume={resume}
+                fixProgress={fixProgress}
+                fixActivity={fixActivity}
               />
             ) : (
               <>

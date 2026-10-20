@@ -55,6 +55,7 @@ type RunOptions struct {
 	AgentType       string
 	SubTaskID       string // 子 Agent 事件路由 ID
 	EventSeq        *int   // 共享事件序号，nil 时自建（主Agent）；子Agent传入父的指针
+	EventPrefix     string // 事件名前缀（默认 "agent:"）；pipeline 等独立会话用独立前缀避免与主聊天混淆
 	MaxTurns        int
 	ReasoningEffort string // 用户选择的推理等级
 	// RunningTokens 由调用方预计算的 token 预算（来自持久化的 token_count 累加）。
@@ -123,6 +124,7 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		AgentType:       req.AgentType,
 		SubTaskID:       req.ToolID,
 		EventSeq:        parentOpts.EventSeq,
+		EventPrefix:     parentOpts.EventPrefix,
 		MaxTurns:        100,
 		Model:           parentOpts.Model,
 		ProviderName:    parentOpts.ProviderName,
@@ -185,7 +187,11 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		runningTokens = a.InitRunningTokens(opts.Messages)
 	}
 	tools := a.registry.OpenAI(opts.AllowedTools)
-	agentEventName := "agent:" + strconv.Itoa(opts.TurnID)
+	emitPrefix := opts.EventPrefix
+	if emitPrefix == "" {
+		emitPrefix = "agent:"
+	}
+	agentEventName := emitPrefix + strconv.Itoa(opts.TurnID)
 	eventSeq := opts.EventSeq
 	if eventSeq == nil {
 		seq := 0

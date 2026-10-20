@@ -1890,6 +1890,14 @@
       "noIssues": "No significant issues found.",
       "fixNote": "Fixes done; re-auditing automatically."
     },
+    "fixProgress": {
+      "issues": "Fix checklist (issues being fixed this round)",
+      "activity": "Live fix activity",
+      "done": "Fix completed, re-auditing automatically…",
+      "failed": "Fix failed",
+      "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
+      "waitingActivity": "Starting fix agent, waiting for the first actions…"
+    },
     "stockAudit": {
       "title": "Full Align · Current-state Audit",
       "issues": "Issue List",

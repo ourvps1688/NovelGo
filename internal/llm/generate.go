@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,7 +40,12 @@ func (c *Client) GenerateText(
 		return "", fmt.Errorf("failed to marshal request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.ChatURL, bytes.NewReader(body))
+	// 空闲 watchdog：非流式请求同样可能因服务端挂起/网络静默断流而永久阻塞，
+	// 派生可取消 ctx，body 读取空闲超过 streamIdleTimeout 即取消。
+	genCtx, cancelGen := context.WithCancel(ctx)
+	defer cancelGen()
+
+	req, err := http.NewRequestWithContext(genCtx, http.MethodPost, p.ChatURL, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
@@ -61,8 +67,13 @@ func (c *Client) GenerateText(
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	wd := newIdleWatchdog(cancelGen, c.logger)
+	respBody, err := io.ReadAll(wd.wrapBody(resp.Body))
 	if err != nil {
+		var idleErr *idleTimeoutError
+		if errors.As(err, &idleErr) {
+			return "", &APIError{StatusCode: 0, Message: "响应空闲超时：" + idleErr.Error() + "，疑似网络中断或服务端挂起", Retryable: true}
+		}
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 

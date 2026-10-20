@@ -544,6 +544,24 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		return
 	}
 
+	// 广播修复清单：让用户看到本轮在修复哪些问题（含涉及元素 area）。
+	// issues 来自体检结果 ContextJSON.Audit；解析失败退化为单条总体项。
+	var ctxt0 GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt0)
+	}
+	auditData := parseAudit(ctxt0.Audit)
+	fixIssues := make([]FixIssuePayload, 0, len(auditData.Issues))
+	for _, it := range auditData.Issues {
+		fixIssues = append(fixIssues, FixIssuePayload(it))
+	}
+	emitFixStart(ctx, map[string]any{
+		"run_id":   runID,
+		"novel_id": novelID,
+		"issues":   fixIssues,
+		"summary":  auditData.Summary,
+	})
+
 	out, err := s.skillRunner(ctx, "signability-fix", SkillInput{
 		NovelID:   novelID,
 		Prompt:    fixPrompt(novelID, run.ContextJSON),
@@ -552,6 +570,7 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	})
 	if err != nil {
 		s.logger.Error("S5 修复执行失败", "run_id", runID, "err", err)
+		emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": false, "error": err.Error()})
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5, Status: StatusRunning, Note: "修复失败：" + err.Error()})
 		return
 	}
@@ -563,6 +582,9 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		s.logger.Info("S5 修复：状态已变更，放弃复评", "stage", cur.CurrentStage, "status", cur.Status)
 		return
 	}
+
+	// 广播修复完成：前端收尾活动流，提示进入复评。
+	emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": true})
 
 	// 修复完成 → 复位为原体检阶段（S4 / S4b / S6）并自动复评（仍异步）。
 	// 复位到对应体检阶段 running 是为了让 executeAudit 的「状态未变更」守卫判定通过，
@@ -1005,6 +1027,8 @@ var (
 	emitGate       = EmitGate
 	emitControlAck = EmitControlAck
 	emitStockAudit = EmitStockAudit
+	emitFixStart   = EmitFixStart
+	emitFixDone    = EmitFixDone
 )
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

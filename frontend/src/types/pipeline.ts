@@ -40,6 +40,31 @@ export interface ControlAckPayload {
   status: string;
 }
 
+// S5 修复开始事件（pipeline:fix_start）里的一条修复项，与后端 FixIssuePayload 对应。
+export interface FixIssuePayload {
+  id: string;
+  level: string;
+  area: string;
+  desc: string;
+}
+
+// S5 修复进度状态（由 pipeline:fix_start / pipeline:fix_done 维护）。
+export interface FixProgressState {
+  running: boolean;
+  ok: boolean | null;
+  error?: string;
+  summary?: string;
+  issues: FixIssuePayload[];
+}
+
+// S5 修复实时活动流的一条记录（来自 pipeline-agent:1 的 AgentEvent 工具事件）。
+export interface FixActivityItem {
+  seq: number;
+  text: string;
+  ok: boolean;
+  failed: boolean;
+}
+
 // 线性阶段顺序。S0 = 导入/续写对齐入口；S4 = 签约体检（signability-audit，只读体检 + issue 清单）；
 // S5 = 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）；S6 = 完本终检；
 // GEnd = 完本终检闸门（确认 finish / 修复 fix / 终止 abort）。

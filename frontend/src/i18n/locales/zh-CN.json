@@ -1851,6 +1851,14 @@
       "noIssues": "未发现明显问题。",
       "fixNote": "修复完成，正在自动复评。"
     },
+    "fixProgress": {
+      "issues": "修复清单（本轮按体检问题逐项修复）",
+      "activity": "修复实时动态",
+      "done": "修复完成，正在自动复评……",
+      "failed": "修复失败",
+      "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
+      "waitingActivity": "正在启动修复 agent，等待第一批修复动作……"
+    },
     "stockAudit": {
       "title": "全量对齐 · 现状体检",
       "issues": "问题清单",
