@@ -672,3 +672,28 @@ func TestServiceBlueprintAuditAutoRunSkipped(t *testing.T) {
 	require.Equal(t, GateG1b, last.GateID, "蓝图体检不通过应落 G1b 修复闸")
 	require.ElementsMatch(t, []string{"fix", "continue", "abort"}, last.Options)
 }
+
+// TestParseAuditEightDimensions 验证 parseAudit 能正确解析升 8 维/40 后的签约体检结果：
+// score=32（满分 40）、9 条 issue（含全台账一致性 issue，如 timeline#42 / reader_perspective#15），
+// verdict/score/summary/issues 正确落库，证明 B 方案 8 维量表可被流水线消费。
+func TestParseAuditEightDimensions(t *testing.T) {
+	text := "结论：勉强能签。\n```json\n" +
+		"{\"verdict\":\"needs_fix\",\"score\":32,\"summary\":\"勉强：读者视角分层不清\"," +
+		"\"issues\":[" +
+		"{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"开篇过签力\",\"desc\":\"前三章代入弱\"}," +
+		"{\"id\":\"I2\",\"level\":\"P1\",\"area\":\"读者视角\",\"desc\":\"reveal 提前\"}," +
+		"{\"id\":\"I3\",\"level\":\"P1\",\"area\":\"长线牵引\",\"desc\":\"timeline#42 未回收\"}," +
+		"{\"id\":\"I4\",\"level\":\"P1\",\"area\":\"节奏爽点\",\"desc\":\"中段拖沓\"}," +
+		"{\"id\":\"I5\",\"level\":\"P1\",\"area\":\"题材契合\",\"desc\":\"赛道模糊\"}," +
+		"{\"id\":\"I6\",\"level\":\"P1\",\"area\":\"人设卖点\",\"desc\":\"主角无标签\"}," +
+		"{\"id\":\"I7\",\"level\":\"P1\",\"area\":\"设定自洽\",\"desc\":\"战力略崩\"}," +
+		"{\"id\":\"I8\",\"level\":\"P1\",\"area\":\"平台合规\",\"desc\":\"擦边禁忌\"}," +
+		"{\"id\":\"I9\",\"level\":\"P1\",\"area\":\"读者视角\",\"desc\":\"reader_perspective#15 无回收\"}" +
+		"]}\n```"
+	data := parseAudit(text)
+	require.Equal(t, "needs_fix", data.Verdict)
+	require.Equal(t, 32, data.Score, "8 维满分 40，score 应正确解析")
+	require.Equal(t, "勉强：读者视角分层不清", data.Summary)
+	require.Len(t, data.Issues, 9)
+	require.Equal(t, "timeline#42 未回收", data.Issues[2].Desc)
+}

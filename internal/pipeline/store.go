@@ -105,7 +105,7 @@ type AuditIssue struct {
 // AuditData 是 S4 签约体检的结构化结果，序列化进 GateContext.Audit。
 type AuditData struct {
 	Verdict string       `json:"verdict"` // pass | needs_fix
-	Score   int          `json:"score"`   // 总分（/35）
+	Score   int          `json:"score"`   // 总分（/40，8 维 ×5）
 	Summary string       `json:"summary"` // 一句话结论
 	Issues  []AuditIssue `json:"issues"`  // issue 清单
 }

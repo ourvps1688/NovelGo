@@ -1891,7 +1891,7 @@
       "auditing": "Running signability audit…",
       "finalAuditing": "Running final audit…",
       "fixing": "Fixing issues from audit…",
-      "score": "Score {{n}}/35",
+      "score": "Score {{n}}/40",
       "issues": "Issue List",
       "noIssues": "No significant issues found.",
       "fixNote": "Fixes done; re-auditing automatically."

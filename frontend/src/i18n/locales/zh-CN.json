@@ -1852,7 +1852,7 @@
       "auditing": "签约体检中……",
       "finalAuditing": "完本终检中……",
       "fixing": "按体检问题修复中……",
-      "score": "总分 {{n}}/35",
+      "score": "总分 {{n}}/40",
       "issues": "问题清单",
       "noIssues": "未发现明显问题。",
       "fixNote": "修复完成，正在自动复评。"

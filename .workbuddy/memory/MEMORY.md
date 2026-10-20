@@ -47,3 +47,22 @@
 - S0 入口自动判定已接入 `StartPipeline`（无章→S1 / 有章无台账→S0 / 已就绪→S3）。**S0 对齐补丁（2026-10-20，commit 待推送）**：采用「方案 A + 全量对齐按钮」——进 S3 同时后台 `executeS0Align`（建默认卷挂 `volume_id` + 批量 `statesync` 回填台账，避免导入即烧额度），并叠加按需「全量对齐」按钮（`ControlPipeline("align_full")` → `runFullAlign`：对齐 + `runStockAudit` 现状体检 + `emitStockAudit`）。`pipeline` 与 `mcp_tools`/`agent` 零环，`SetStateSyncRunner` bridge 由 `app/handler.go` 注入（`agent.RunSubAgent` 闭包）。详见 plan §6.5。
 - **启动恢复机制（2026-10-20）**：pipeline 执行体是内存 goroutine + DB 状态，应用重启会产生「DB=running 但无人执行」的僵尸运行。`RecoverInterruptedRuns()`（OnStartup 调用，幂等）把 running 僵尸置 paused + `GateContext.Interrupted` 标记；`ControlPipeline("resume")` 检测到标记后按阶段重派发执行体（S4/S4b→executeAudit、S5→executeFix、S6→executeFinalAudit，均幂等重入有状态守卫），派发后清标记。`set_auto` 只翻 DB 标志、永不派发执行体——不要指望一键连跑能救活僵尸运行。S5 前端 `FixProgressView` 初始态为 idle（「等待修复启动」），不是 done。
 - **S5 分批修复 + Dispatching（2026-10-20，fbebe631）**：`executeFix` 按 `planFixBatches` 分批（P0 每批 1 条、P1 每批 2 条），每批独立会话 + 独立 12 turns 预算（防止 MaxTurns 耗尽整轮失败）；每批成功落 `GateContext.FixStates[issueID]="fixed"` 断点，恢复/续跑跳过已修项，全部完成后 `finishFixAndReaudit` 复评（复评才是修复到位的裁决）。体检/修复/终检失败一律落 paused（不再停 running）；`GateContext.Dispatching` 标记执行体存活，resume → `redispatchIfNeeded` 据此区分软暂停与需重派发；用户暂停在批次边界守卫生效。fix_start 事件带 batch_index/batch_total/done_ids，前端显示批次进度 + 已修复徽章 + 恢复提示。
+
+## A 方案：蓝图体检/修复闭环（2026-10-21，commit e2e5cab3）
+- **定位**：在 S2 阶段补「生成→蓝图体检→修复」闭环，使 S2 成为蓝图生成与蓝图体检/修复的宿主阶段；蓝图体检 pass 后才落 G1 确认闸进 S3，不通过落 G1b 修复闸，修复复用 S5 执行体（按 `AuditKind` 分流）。
+- **流转**：`executeBlueprint` 生成卷后改调 `enterBlueprintAudit`（置 `AuditKind="blueprint"`、S2 running、go `executeAudit`）→ `executeAudit` 按 `AuditKind` 选 `blueprint-audit`/`signability-audit` 技能与提示词 → `emitGateDecision` 按 `AuditKind` 落 G1(pass) 或 G1b(待修) → `advanceS2` 按决策分流（fix→`enterFix` / continue→S3 / modify→重跑蓝图生成）→ `executeFix` 按 `AuditKind` 取 `ctxt.BlueprintAudit`/`ctxt.Audit` 并选 `blueprint-fix`/`signability-fix` → 复评。
+- **新增闸门**：`GateG1b`（蓝图待修）；`GateG1` 现仅用于蓝图体检 pass 后的确认。`GateContext` 新增 `AuditKind string` 与 `BlueprintAudit string`（签约体检结果仍存 `Audit` 字段）。
+- **新增 Agent**：`BlueprintFixAgent`（`agentcfg/identity.go`），限权白名单 `blueprintFixAgentTools`（只读上下文 + `edit`卷纲 + `create_volume`；**不含**章节写、角色/弧线/时间线写、`run_subagent`、`delete_record`）。蓝图体检 AgentType 复用 `SignabilityAgent`（只读体检）。
+- **新增技能（manual）**：`internal/skill/builtin/blueprint-audit.md`（6 维/30，pass 阈值 ≥24/30，只读白名单，JSON 契约同 signability-audit）；`blueprint-fix.md`（限权只改卷纲/补卷，结构性跨台账问题标注交 S5 签约修复）。
+- **前端**：`SignabilityAuditView` 抽取共享 `AuditResultView`/`parseCtx`；`FixProgressView` 加 `fixKind` prop；`BlueprintWorkflowView` 新增 G1b 闸门分支（`safeParseAudit` + `AuditResultView` + `PipelineGateCard`），S2 running 按 `auditKind` 显示「蓝图体检中」/「蓝图生成中」。i18n zh-CN/en 加 `blueprint.auditing/auditTitle/fixing/fixNote/score` 子键。
+- **附带修的真实 bug**：`executeBlueprint` 落库蓝图概览后误用旧 `run.ContextJSON` 进入体检，导致 `Blueprint` 字段被覆盖丢失——改为用已含 `Blueprint` 的 `updated` 上下文进入 `enterBlueprintAudit`。
+- **测试**：`service_test.go` 加蓝图体检 pass/修复闭环/auto_run 跳过 3 项；`skillrun_test.go` 加 blueprint 映射 + `BlueprintFixAgent` 限权断言；`TestExecuteBlueprintPersistsAndGates` 适配异步体检流程。全量 pipeline 测试 + golangci-lint + prettier/i18n/eslint 均绿。
+- **与 B 方案关系**：A 先行独立 commit（便于回滚）；B 方案将签约体检升 8 维/40，已落地（2026-10-21，独立 commit）。§9 三软缺口（G1 抽样非确定/G2 S3 评分有放弃路径/G3 蓝图漂移不自动回灌）仍属覆盖度/自愈性增强，不阻塞 A+B，留待后续。
+
+## B 方案：签约体检升 8 维/40（2026-10-21，独立 commit）
+- **改动范围**：只动签约侧，不动蓝图侧（蓝图/签约在 `service.go` 的 `AuditKind` 分流处交汇，回滚任一半不影响另一半）。
+- `signability-audit.md`：新增第 8 维「读者视角（已知/悬念/误解）」；新增「全台账一致性核查」章节（扫描 timeline/arcs/reader_perspective，产出带 entry ID 的 issue，消除仅抽样不确定性）；评分分母 /35→/40，verdict 阈值 `≥25/35`→`≥29/40`（保持 ~71% 通过线）。
+- `signability-fix.md`：新增「蓝图驱动修复」方法论——结构性 issue（世界/卷纲/弧线/角色）先改设计台账再传播到章节，症状性 issue 直接 `edit`；强调五大台账同步收敛。
+- `service.go` 三处提示词阈值对齐：`signabilityPrompt`/`stockAuditPrompt` `25/35`→`29/40`、`finalAuditPrompt` `30/35`→`34/40`（保持终检更严）；`store.go` `AuditData.Score` 注释同步 /40。注：Go 不硬编码分母，`emitGateDecision` 用 LLM 的 `verdict` 字段裁决，门槛由技能文本自述。
+- `service_test.go` 新增 `TestParseAuditEightDimensions`（验证 8 维/40 审计 JSON 正确落库）。全量 pipeline 测试 + golangci-lint + prettier/i18n/eslint + 前端 build 均绿。
+- 前端 `pipeline.signability.score` i18n 分母 /35→/40（zh-CN/en）。因 audit `area` 为 LLM 自由文本，无独立维度标签枚举，故未新增维度 i18n 键。
