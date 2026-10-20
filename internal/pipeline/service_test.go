@@ -347,9 +347,9 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	}
 	var finalCtxt GateContext
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-	require.Equal(t, "fixed", finalCtxt.FixStates["I1"])
-	require.Equal(t, "fixed", finalCtxt.FixStates["I2"])
-	require.Equal(t, "fixed", finalCtxt.FixStates["I3"])
+	// 复评落地时 executeAudit 会重置 FixStates（新一轮体检 = 全新问题清单，旧断点作废）。
+	// 批次断点正确性已由上方调用序列验证：恢复后首批重试 I1、已修项不重复修复。
+	require.Empty(t, finalCtxt.FixStates, "复评落地后旧修复断点应被重置")
 	require.Equal(t, 1, finalCtxt.FixRounds, "一次完整 sweep 递增一轮")
 }
 
@@ -386,6 +386,87 @@ func TestServiceFixAllFixedSkipsToReaudit(t *testing.T) {
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
 	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
 	require.Equal(t, 0, fixCalls, "全部已修复时应跳过修复直接复评")
+}
+
+// TestParseFixReceipt 验证修复回执解析：围栏 JSON（含嵌套 skipped）、纯文本包围、缺失回执。
+func TestParseFixReceipt(t *testing.T) {
+	// 围栏 + 嵌套 skipped 对象（非贪婪正则会截断，必须用流式解码）。
+	text := "修复完成。\n```json\n{\"fixed\":[\"I1\",\"I2\"],\"skipped\":[{\"id\":\"I3\",\"reason\":\"正文级问题需章节重写\"}]}\n```\n以上。"
+	fixed, skips, found := parseFixReceipt(text)
+	require.True(t, found)
+	require.True(t, fixed["I1"] && fixed["I2"])
+	require.False(t, fixed["I3"])
+	require.Equal(t, "正文级问题需章节重写", skips["I3"])
+
+	// 无围栏、多个 JSON 块时应取含 fixed/skipped 的那个。
+	fixed2, skips2, found2 := parseFixReceipt(`概况 {"verdict":"pass"} 尾部 {"fixed":["I9"],"skipped":[]}`)
+	require.True(t, found2)
+	require.True(t, fixed2["I9"])
+	require.Empty(t, skips2)
+
+	// 缺失回执：found=false，调用方走整批已修复的兼容回退。
+	_, _, found3 := parseFixReceipt("我修好了所有问题，没有 JSON。")
+	require.False(t, found3)
+}
+
+// TestApplyFixReceipt 验证回执落账：fixed/skipped/未提及三种去向；缺回执时整批兜底。
+func TestApplyFixReceipt(t *testing.T) {
+	batch := []AuditIssue{
+		{ID: "I1", Level: "P1", Area: "节奏", Desc: "a"},
+		{ID: "I2", Level: "P1", Area: "人设", Desc: "b"},
+		{ID: "I3", Level: "P1", Area: "合规", Desc: "c"},
+	}
+	out := "摘要…\n```json\n{\"fixed\":[\"I1\"],\"skipped\":[{\"id\":\"I2\",\"reason\":\"需正文重写\"}]}\n```"
+
+	var ctxt GateContext
+	fixedNow := applyFixReceipt(&ctxt, batch, out, slog.Default())
+	require.Equal(t, []string{"I1"}, fixedNow, "只有回执确认的才算本批已修复")
+	require.Equal(t, "fixed", ctxt.FixStates["I1"])
+	require.Equal(t, "skipped", ctxt.FixStates["I2"], "skipped 记录断点，不再重试")
+	require.Empty(t, ctxt.FixStates["I3"], "回执未提及的不落断点，后续轮次重试")
+
+	// 缺回执：整批兜底为 fixed（兼容旧行为，不卡死流水线）。
+	var ctxt2 GateContext
+	fixedNow2 := applyFixReceipt(&ctxt2, batch, "没有 JSON 的输出", slog.Default())
+	require.Len(t, fixedNow2, 3)
+	for _, it := range batch {
+		require.Equal(t, "fixed", ctxt2.FixStates[it.ID])
+	}
+}
+
+// TestServiceAuditResetsFixStatesOnNewAudit 回归测试：新一轮体检落地时必须重置旧修复
+// 断点。否则复评 issue 与旧断点 ID 撞车（LLM 惯性编号 I1..In），再次点修复会被误判为
+// 「全部已修复」而静默跳过——表现为提示「修复完成，正在自动复评」却一个问题都没修。
+func TestServiceAuditResetsFixStatesOnNewAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	newAudit := `{"verdict":"needs_fix","score":20,"summary":"复评仍有问题","issues":[{"id":"I1","level":"P1","area":"节奏","desc":"复评新发现"}]}`
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "signability-audit" {
+			return SkillOutput{Text: "复评：\n```json\n" + newAudit + "\n```"}, nil
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	run, err := svc.StartPipeline(ctx, 405, "new", nil, false)
+	require.NoError(t, err)
+	// 旧断点与复评 issue 同 ID（I1），模拟撞车现场。
+	ctxt := GateContext{Audit: `{"verdict":"needs_fix","issues":[]}`, AuditStage: StageS4,
+		FixStates: map[string]string{"I1": "fixed"}}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	svc.executeAudit(run.RunID, run.NovelID)
+
+	got, err := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, err)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+	require.Empty(t, finalCtxt.FixStates, "新体检落地后旧修复断点必须重置，否则修复闭环空转")
+	require.Contains(t, finalCtxt.Audit, "复评仍有问题", "新体检结果应已落库")
 }
 
 func TestServiceAuditFixLoopReAudit(t *testing.T) {

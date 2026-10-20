@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
+  CircleSlash2,
   Clock,
   Hourglass,
   Loader2,
@@ -302,7 +303,7 @@ export function StockAuditPanel({ data }: { data: AuditData }) {
 }
 
 // FixIssueStatusBadge 是修复清单里单个问题的状态徽章：
-// 待修复（灰） / 正在修复（主色，spinner） / 已修复（绿）。
+// 待修复（灰） / 正在修复（主色，spinner） / 已修复（绿） / 已跳过（灰黄，agent 上报无法修复）。
 function FixIssueStatusBadge({
   status,
 }: {
@@ -322,6 +323,14 @@ function FixIssueStatusBadge({
       <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
         <Loader2 className="h-3 w-3 animate-spin" />
         {t("pipeline.fixStatus.fixing")}
+      </span>
+    );
+  }
+  if (status === "skipped") {
+    return (
+      <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-warning/10 px-1.5 py-0.5 text-warning-foreground text-xs">
+        <CircleSlash2 className="h-3 w-3" />
+        {t("pipeline.fixStatus.skipped")}
       </span>
     );
   }

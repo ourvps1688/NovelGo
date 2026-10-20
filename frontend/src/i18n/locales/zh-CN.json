@@ -1869,7 +1869,8 @@
     "fixStatus": {
       "pending": "待修复",
       "fixing": "正在修复",
-      "fixed": "已修复"
+      "fixed": "已修复",
+      "skipped": "已跳过"
     },
     "stageActivity": {
       "title": "实时动态",

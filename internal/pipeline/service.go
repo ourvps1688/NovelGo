@@ -507,6 +507,11 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	} else {
 		ctxt.Audit = string(auditJSON)
 	}
+	// 新一轮体检结果落地即视为全新问题清单：清除上一轮的修复断点（FixStates）。
+	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），executeFix 会把
+	// 全部问题误判为「已修复」而静默跳过修复直接复评——表现为提示「修复完成，正在自动
+	// 复评」，实际上一个问题都没修（auto_run 下还会空转到 FixRounds 上限）。
+	ctxt.FixStates = nil
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
@@ -694,23 +699,30 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	}
 	auditData := parseAudit(auditJSON)
 
-	// 断点续修：跳过已修复问题（此前批次完成并落库的），只修剩余部分。
+	// 断点续修：跳过已修复/已跳过问题（此前批次完成并落库的），只修剩余部分。
+	// 注意：旧断点与新体检清单 ID 撞车的问题由 executeAudit 落新体检结果时重置
+	// FixStates 解决（新一轮问题就是新问题），这里「全部命中断点」只可能是修复
+	// 完成后、复评前的中断恢复，直接进入复评是正确语义。
 	fixedIDs := make([]string, 0, len(ctxt.FixStates))
 	isFixed := make(map[string]bool, len(ctxt.FixStates))
+	isSkipped := make(map[string]bool, len(ctxt.FixStates))
 	for id, st := range ctxt.FixStates {
-		if st == "fixed" {
+		switch st {
+		case "fixed":
 			isFixed[id] = true
 			fixedIDs = append(fixedIDs, id)
+		case "skipped":
+			isSkipped[id] = true
 		}
 	}
 	pending := make([]AuditIssue, 0, len(auditData.Issues))
 	for _, it := range auditData.Issues {
-		if !isFixed[it.ID] {
+		if !isFixed[it.ID] && !isSkipped[it.ID] {
 			pending = append(pending, it)
 		}
 	}
 	if len(pending) == 0 {
-		// 全部问题已修复（如复评前中断后恢复）：直接进入复评。
+		// 全部问题已修复/已跳过（如复评前中断后恢复）：直接进入复评。
 		s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
 		return
 	}
@@ -745,6 +757,8 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			switch {
 			case isFixed[it.ID]:
 				p.Status = "fixed"
+			case isSkipped[it.ID]:
+				p.Status = "skipped"
 			case batchIDs[it.ID]:
 				p.Status = "fixing"
 			default:
@@ -794,16 +808,9 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			}
 			return
 		}
-		_ = out
-
-		// 本批完成：落库断点（仍 S5/running），供失败恢复与重启续修。
-		if ctxt.FixStates == nil {
-			ctxt.FixStates = map[string]string{}
-		}
-		for _, it := range batch {
-			ctxt.FixStates[it.ID] = "fixed"
-			fixedIDs = append(fixedIDs, it.ID)
-		}
+		// 本批完成：解析修复回执并落库断点（仍 S5/running），供失败恢复与重启续修。
+		fixedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
+		fixedIDs = append(fixedIDs, fixedNow...)
 		if ctxtJSON, merr := json.Marshal(ctxt); merr == nil {
 			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(ctxtJSON)); serr != nil {
 				s.logger.Error("S5 修复：批次断点落库失败", "err", serr)
@@ -1226,6 +1233,73 @@ func stockAuditPrompt(novelID int64) string {
 var auditJSONRe = regexp.MustCompile("(?s)```json\\s*(.*?)```")
 
 // parseAudit 从 skill 输出文本解析结构化体检结果；失败则退化为单条 P0 issue。
+// fixReceipt 是修复 agent 在输出末尾上报的修复回执契约（由 fixPrompt/blueprintFixPrompt 要求）。
+type fixReceipt struct {
+	Fixed   []string `json:"fixed"`
+	Skipped []struct {
+		ID     string `json:"id"`
+		Reason string `json:"reason"`
+	} `json:"skipped"`
+}
+
+// applyFixReceipt 解析修复输出回执并把本批问题的断点状态写入 ctxt.FixStates：
+// 回执 fixed → "fixed"；skipped → "skipped"（记录原因，不再重试）；未提及 → 不落断点
+// （后续轮次重试）。输出缺少回执 JSON 时退化为旧行为（整批 "fixed"），保证兼容不卡死
+// 流水线。返回本批新标记为 fixed 的 id 列表（供前端 done_ids 累积）。
+func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log *slog.Logger) []string {
+	fixedSet, skipReasons, found := parseFixReceipt(outText)
+	if !found {
+		log.Warn("S5 修复：本批修复输出缺少回执 JSON，按整批已修复处理（兼容回退）",
+			"batch_size", len(batch))
+	}
+	if ctxt.FixStates == nil {
+		ctxt.FixStates = map[string]string{}
+	}
+	fixedNow := make([]string, 0, len(batch))
+	for _, it := range batch {
+		switch {
+		case !found || fixedSet[it.ID]:
+			ctxt.FixStates[it.ID] = "fixed"
+			fixedNow = append(fixedNow, it.ID)
+		case skipReasons[it.ID] != "":
+			ctxt.FixStates[it.ID] = "skipped"
+			log.Info("S5 修复：agent 上报无法修复，标记跳过",
+				"issue", it.ID, "reason", skipReasons[it.ID])
+		default:
+			// 回执未提及：不落断点，后续轮次重试。
+		}
+	}
+	return fixedNow
+}
+
+// parseFixReceipt 从修复 agent 输出解析修复回执：{"fixed":["I1"],"skipped":[{"id":"I2","reason":"..."}]}。
+// 回执可能在 ```json 围栏或纯文本中，且 skipped 含嵌套对象——从每个 '{' 起用 json.Decoder
+// 流式解码（容忍尾部文本），取最后一个合法且非空的回执。found=false 表示输出中没有回执，
+// 调用方退化为「整批已修复」的旧行为。
+func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string]string, found bool) {
+	for i := strings.LastIndex(text, "{"); i >= 0; i = strings.LastIndex(text[:i], "{") {
+		var r fixReceipt
+		if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&r); err != nil {
+			continue
+		}
+		if len(r.Fixed) == 0 && len(r.Skipped) == 0 {
+			continue
+		}
+		fixed = make(map[string]bool, len(r.Fixed))
+		for _, id := range r.Fixed {
+			fixed[id] = true
+		}
+		skipReasons = make(map[string]string, len(r.Skipped))
+		for _, sk := range r.Skipped {
+			if sk.ID != "" {
+				skipReasons[sk.ID] = sk.Reason
+			}
+		}
+		return fixed, skipReasons, true
+	}
+	return nil, nil, false
+}
+
 func parseAudit(text string) AuditData {
 	data := AuditData{Verdict: "needs_fix"}
 	m := auditJSONRe.FindStringSubmatch(text)
@@ -1271,7 +1345,11 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) stri
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是蓝图体检本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复项），请逐条修复卷纲：\n%s\n\n"+
 		"按 blueprint-fix 方法论：P0 优先于 P1，用 edit（仅 volumes/id_{id}.md 卷纲）/create_volume 修复，"+
-		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。", novelID, len(issues), b)
+		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
+		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
+		"{\"fixed\":[\"I..\"],\"skipped\":[{\"id\":\"I..\",\"reason\":\"无法在卷纲层修复的原因\"}]}——"+
+		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
+		novelID, len(issues), b)
 }
 
 // fixPrompt 构造 S5 修复阶段的任务提示词，内嵌 S4 产出的 issue 清单 JSON。
@@ -1282,7 +1360,12 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复项），请逐条修复：\n%s\n\n"+
 		"按 signability-fix 方法论：P0 优先于 P1，用 edit/update_chapter_plan/create_volume/台账写工具修复，"+
-		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。", novelID, len(issues), b)
+		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
+		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
+		"{\"fixed\":[\"I..\"],\"skipped\":[{\"id\":\"I..\",\"reason\":\"无法修复的原因\"}]}——"+
+		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）；"+
+		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
+		novelID, len(issues), b)
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。

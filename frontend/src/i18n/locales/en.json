@@ -1908,7 +1908,8 @@
     "fixStatus": {
       "pending": "Pending",
       "fixing": "Fixing",
-      "fixed": "Fixed"
+      "fixed": "Fixed",
+      "skipped": "Skipped"
     },
     "stageActivity": {
       "title": "Live activity",

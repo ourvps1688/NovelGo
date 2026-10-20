@@ -72,3 +72,11 @@
 - **G2 评分放弃路径收敛**：`get_chapter_list`（`novel_tools.go formatChapterList`）对已落库 `quality_score` 章节追加「质检 N」标注；`signability-audit.md` 一致性核查新增「低分放行章节核查→必产 P1 issue」，评分门禁重试耗尽放行的章节不再静默漏过。`AutoScoreEnabled` 默认本就 true，无需改。
 - **G3 蓝图漂移巡检**：新只读技能 `blueprint-drift-check.md`（复用 SignabilityAgent 白名单，skillrun 双映射已加）；`finishFixAndReaudit` 修复完成后调 `runBlueprintDriftPatrol`（MaxTurns=8，非阻断，失败仅记日志），结论写 `GateContext.DriftReport`（store.go 新字段）并追加到复评闸门 summary；`chapterCount==0`（纯蓝图阶段）自动跳过。
 - **测试**：`TestServiceDriftPatrolAfterFix`/`TestServiceDriftPatrolSkippedWhenNoChapters`/映射断言扩展。前端零改动（巡检结论经既有闸门 summary 展示）。计划文档 §9.1 已记落地状态。
+
+## S5 修复闭环空转 bug 修复（2026-10-21 深夜，用户实测反馈）
+- **根因**：`FixStates` 从不重置——首轮修复把 I1..I9 落 fixed 断点后，复评产出新一轮 audit（LLM 惯性仍编号 I1..I9），再点修复时 `executeFix` 把全部新问题误判「已修复」→ pending 空 → 直接 `finishFixAndReaudit`，闭环静默空转（auto_run 下循环到 FixRounds≥3）。表现：提示「修复完成，正在自动复评」但 0 个问题标记已修复。
+- **修复**：`executeAudit` 落新体检结果时重置 `ctxt.FixStates`（新一轮问题=全新清单）。**注意**：`executeFix` 的「全部命中断点→直接复评」是修复后复评前中断恢复的合法路径，不要加撞车兜底（会误伤该场景）。
+- **修复回执机制**：`fixPrompt`/`blueprintFixPrompt` 要求末尾附 `{"fixed":["I.."],"skipped":[{"id":"I..","reason":"..."}]}` 回执（示例 ID 用 "I.." 占位，避免与测试 issue ID 子串断言撞车）；`parseFixReceipt`（json.Decoder 从每个 '{' 流式解码，容忍围栏/尾部文本/嵌套 skipped，取最后一个合法回执）+ `applyFixReceipt`（fixed→断点、skipped→"skipped" 不再重试、未提及→不落断点下轮重试；缺回执退化为整批 fixed 兼容回退）。`FixStates` 新增 "skipped" 值。
+- 前端：`FixIssueStatusBadge` 加「已跳过」徽章；`FixIssuePayload.status` 加 "skipped"；i18n `pipeline.fixStatus.skipped`。
+- **能力边界**（用户质疑「修复能力是否本质上不具备」）：agent 有真实台账修复能力（日志证实 update_character/timeline/arc/reader_perspective 均有具体内容），但正文级 issue（节奏/开篇/卷末）台账修复改不了→复评必然复报；此类应走章节重写，fixPrompt 已引导 agent 对正文级问题如实 skipped 上报。
+- **LLM 供应商挂起现象**：`build/bin/novelgo.log` 中 `llm stream idle watchdog fired`（挂 3 分钟取消）成片出现 = 供应商流式挂起，复评在挂起-取消-重试循环，非应用 bug。
