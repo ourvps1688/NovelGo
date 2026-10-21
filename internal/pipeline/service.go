@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/agent"
+	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/volume"
@@ -47,6 +48,9 @@ type Service struct {
 	// stateSyncRunner 对单章执行后台状态同步（statesync 子 Agent）。由 app 层注入（依赖 agent.RunSubAgent）。
 	// 为 nil 时 executeS0Align 跳过 statesync（仅做建卷），测试可注入 stub。
 	stateSyncRunner func(ctx context.Context, novelID, chapterID int64) error
+	// chapterStore 用于「回流 S3 重写回路」把 issue 里的章节阅读序号映射回真实 chapter_id。
+	// 默认从 s.store.db 构造；测试可注入或用 nil（nil 时重写回路降级为手动交回）。
+	chapterStore *chapter.Store
 	// chapterLister 返回本书全部章节 ID（用于 S0 批量 statesync）。默认走 raw gorm 查询。
 	chapterLister func(ctx context.Context, novelID int64) ([]int64, error)
 	// volumeAssigner 为存量书建默认卷并把所有未分卷章节归入该卷（修复 G3b 卷边界判定）。默认走 raw gorm。
@@ -104,6 +108,7 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 			return ids, nil
 		}
 		s.volumeAssigner = s.defaultVolumeAssigner
+		s.chapterStore = chapter.NewStore(s.store.db, s.logger)
 		// stateSyncRunner 默认 nil：依赖 app 层注入（需要 agent.RunSubAgent）。
 		// 生产环境 app/handler.go 会注入；测试可注入 stub 或保持 nil（executeS0Align 跳过 statesync）。
 	}
@@ -637,6 +642,11 @@ const (
 	fixBatchP1 = 2
 )
 
+// autoRewriteCap 是自动章节重写回路的单次运行最大轮数：达到上限后不再自动重写，
+// 改为交回用户手动处理（避免「重写→复评→再重写」无限循环）。每轮 finishFixHandoffRewrite
+// 自动重写后 +1，复评若仍报出同一批正文问题会再次进入重写，最多 autoRewriteCap 轮。
+const autoRewriteCap = 2
+
 // planFixBatches 把待修问题按优先级分批（保持原有顺序）：P0 每批 fixBatchP0 条，
 // P1 每批 fixBatchP1 条。
 func planFixBatches(issues []AuditIssue) [][]AuditIssue {
@@ -913,10 +923,15 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 }
 
 // finishFixHandoffRewrite 处理「本轮无台账级问题可修、但存在正文级重写清单」的情况：
-// 这些问题必须回 S3 重写章节才能解决，S5 用补丁改不动。若谎报「修复完成」并立刻复评，
-// 复评必复报同一批问题，形成「完成但零修复」死循环。故明确交回用户、停在当前阶段（paused），
-// 并广播带 rewrite_handoff 标记的 fix_done，前端据此展示「已转交章节重写」而非「修复完成」。
-// 用户需在写作页重写相关章节后，再重新进入修复/复评。
+// 这些问题必须回 S3 重写章节才能解决，S5 用补丁改不动。为闭合修复链，本函数默认**自动
+// 派发章节重写 agent** 把被标记章节整章重写（用户选择全自动模式），重写后自动回到 S4 复评；
+// 复评若仍报出同一批正文问题会再次进入本函数，由 autoRewriteCap 上限收敛（达到上限改交人工）。
+//
+// 两种「交回用户」的出口（明确暂停 + 广播 rewrite_handoff，前端展示「已转交章节重写」而非「修复完成」）：
+//  1. 重写轮数已达 autoRewriteCap —— 自动重写多次仍无效，交回人工决策；
+//  2. 重写清单涉及章节无法在本书定位（chapters 为空或缺章）——无法自动重写，只能手动。
+//
+// 其余情况一律走自动重写 + 复评闭环，绝不谎报「修复完成」后立刻复评形成死循环。
 func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
 	// 守卫：若异步期间状态已变更（如用户中止），不重复处理。
 	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
@@ -924,28 +939,168 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 		s.setDispatching(ctx, runID, false)
 		return
 	}
+
+	// 出口 1：重写轮数已达上限 → 交回人工。
+	if ctxt.RewriteRounds >= autoRewriteCap {
+		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
+		return
+	}
+
+	// 把重写清单涉及章节的阅读序号映射回真实 chapter_id；剔除无法定位的章节。
+	chaptersByReading, err := s.resolveRewriteChapters(ctx, novelID, ctxt.RewriteBacklog)
+	if err != nil {
+		s.logger.Warn("S5 重写：章节定位失败，降级交回用户", "run_id", runID, "err", err)
+		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
+		return
+	}
+	if len(chaptersByReading) == 0 {
+		// 出口 2：清单未指向任何可定位章节（如无 chapters 标注或章节已删）→ 手动重写。
+		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
+		return
+	}
+
+	// 自动重写：逐章派发章节重写 agent（每章独立会话，充足轮数预算）。
+	s.setDispatching(ctx, runID, true)
+	total := 0
+	for _, item := range ctxt.RewriteBacklog {
+		total += len(chaptersByReading[item.ID])
+	}
+	index := 0
+	for _, item := range ctxt.RewriteBacklog {
+		chaps := chaptersByReading[item.ID]
+		for _, ch := range chaps {
+			index++
+			emitRewriteProgress(ctx, map[string]any{
+				"run_id": runID, "novel_id": novelID, "phase": "starting",
+				"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber,
+			})
+			if rerr := s.executeChapterRewrite(ctx, runID, novelID, item, ch); rerr != nil {
+				s.logger.Error("S5 重写：章节重写失败", "run_id", runID, "chapter_id", ch.ID, "err", rerr)
+				emitRewriteProgress(ctx, map[string]any{
+					"run_id": runID, "novel_id": novelID, "phase": "failed",
+					"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber, "error": rerr.Error(),
+				})
+				// 单章失败不阻断其余章节；失败章节仍留在重写清单，由复评与重试上限约束。
+				continue
+			}
+			emitRewriteProgress(ctx, map[string]any{
+				"run_id": runID, "novel_id": novelID, "phase": "done",
+				"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber,
+			})
+		}
+	}
+
+	// 重写轮数 +1，持久化后自动回到 S4 复评（复评会重算重写清单：解决则出清单，仍无效则再进本函数）。
+	ctxt.RewriteRounds++
+	ctxtJSON, merr := json.Marshal(ctxt)
+	if merr == nil {
+		// 保持 S5/running，使下方复评前的守卫通过；复评函数会自行复位到体检阶段。
+		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(ctxtJSON)); serr != nil {
+			s.logger.Error("S5 重写：落库重写轮数失败", "err", serr)
+		}
+	}
+	s.setDispatching(ctx, runID, false)
+	s.logger.Info("S5 重写：自动重写完成，回到复评", "run_id", runID, "round", ctxt.RewriteRounds, "total", total)
+	s.executeAudit(runID, novelID)
+}
+
+// handoffRewriteToUser 把正文级重写清单交回用户手动处理：明确暂停当前阶段、广播带
+// rewrite_handoff 标记的 fix_done（前端展示「已转交章节重写」而非「修复完成」），绝不谎报完成。
+func (s *Service) handoffRewriteToUser(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
 	n := len(ctxt.RewriteBacklog)
-	msg := fmt.Sprintf(
-		"本轮无台账级问题可修；%d 个正文级问题已转交 S3 章节重写回路，请在写作页重写相关章节后重新进入修复/复评",
-		n,
-	)
+	var msg string
+	if ctxt.RewriteRounds >= autoRewriteCap {
+		msg = fmt.Sprintf(
+			"自动章节重写已尝试 %d 轮仍未解决；%d 个正文级问题转交你手动在写作页重写相关章节后，再重新进入修复/复评",
+			autoRewriteCap, n,
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"本轮无台账级问题可修；%d 个正文级问题已转交 S3 章节重写回路，请在写作页重写相关章节后重新进入修复/复评",
+			n,
+		)
+	}
 	emitFixDone(ctx, map[string]any{
 		"run_id":          runID,
 		"novel_id":        novelID,
 		"ok":              true,
 		"rewrite_handoff": true,
 		"rewrite_count":   n,
+		"rewrite_rounds":  ctxt.RewriteRounds,
 		"error":           msg,
 	})
 	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
 		cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
 		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
-			s.logger.Error("S5 修复：重写交回落暂停失败", "err", serr)
+			s.logger.Error("S5 重写：交回落暂停失败", "err", serr)
 		}
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
 			Status: StatusPaused, Note: msg})
 	}
 	s.setDispatching(ctx, runID, false)
+}
+
+// resolveRewriteChapters 把重写清单里每个 issue 涉及的章节阅读序号，映射回本书真实章节
+// （chapter_id + 标题 + 阅读序号），供章节重写 agent 精确定位。返回 issueID → 章节列表；
+// 无法定位的章节（序号越界 / 章节已删）被丢弃；chaptersStore 为 nil 时返回空（降级手动）。
+func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, items []RewriteItem) (map[string][]chapter.Chapter, error) {
+	if s.chapterStore == nil {
+		return map[string][]chapter.Chapter{}, nil
+	}
+	chapters, err := s.chapterStore.ListAllByNovel(ctx, nil, novelID)
+	if err != nil {
+		return nil, err
+	}
+	// 阅读序号（1 起）→ 章节。
+	byReading := make(map[int64]chapter.Chapter, len(chapters))
+	for _, ch := range chapters {
+		byReading[int64(ch.ReadingNumber)] = ch
+	}
+	out := make(map[string][]chapter.Chapter, len(items))
+	for _, item := range items {
+		if len(item.Chapters) == 0 {
+			continue
+		}
+		var resolved []chapter.Chapter
+		for _, rn := range item.Chapters {
+			if ch, ok := byReading[rn]; ok {
+				resolved = append(resolved, ch)
+			} else {
+				s.logger.Warn("S5 重写：章节阅读序号无法定位，跳过", "novel_id", novelID, "item", item.ID, "reading_number", rn)
+			}
+		}
+		if len(resolved) > 0 {
+			out[item.ID] = resolved
+		}
+	}
+	return out, nil
+}
+
+// executeChapterRewrite 对单章派发章节重写 agent（chapter-rewrite 技能），按 body issue 整章重写。
+func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter) error {
+	prompt := chapterRewritePrompt(novelID, item, ch)
+	_, err := s.skillRunner(ctx, "chapter-rewrite", SkillInput{
+		NovelID:   novelID,
+		Prompt:    prompt,
+		MaxTurns:  18,
+		SessionID: "pipeline:" + runID + ":rewrite:" + uuid.NewString(),
+	})
+	if err != nil {
+		return fmt.Errorf("章节重写（chapter_id=%d）失败: %w", ch.ID, err)
+	}
+	return nil
+}
+
+// chapterRewritePrompt 构造单章重写的任务提示：注入章节定位信息与要解决的正文级 issue。
+func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter) string {
+	return fmt.Sprintf(
+		"本书 novel_id=%d。请整章重写以下章节以解决正文级签约体检问题：\n"+
+			"- 第 %d 章（chapter_id=%d，标题：%s）— 问题 %s[%s] %s：%s\n\n"+
+			"要求：用 edit 工具传 full_replace=true 把该章**整章正文**替换为重写后的版本，真正解决上述问题"+
+			"（如立人设 / 补爽点 / 修节奏 / 兑现伏笔），保持与前后章节及台账（角色/弧线/时间线/读者认知）一致；"+
+			"正文格式遵守规范：无破折号「——」、无序号段落分隔符、无 AI 味硬伤，正文只含叙事不含章节号/标题/章末标记。",
+		novelID, ch.ReadingNumber, ch.ID, ch.Title, item.ID, item.Level, item.Area, item.Desc,
+	)
 }
 
 // runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：
@@ -1684,13 +1839,14 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 
 // 可替换的事件发射器，便于测试注入无操作实现。
 var (
-	emitStage          = EmitStage
-	emitGate           = EmitGate
-	emitControlAck     = EmitControlAck
-	emitStockAudit     = EmitStockAudit
-	emitFixStart       = EmitFixStart
-	emitFixDone        = EmitFixDone
-	emitRewriteBacklog = EmitRewriteBacklog
+	emitStage           = EmitStage
+	emitGate            = EmitGate
+	emitControlAck      = EmitControlAck
+	emitStockAudit      = EmitStockAudit
+	emitFixStart        = EmitFixStart
+	emitFixDone         = EmitFixDone
+	emitRewriteBacklog  = EmitRewriteBacklog
+	emitRewriteProgress = EmitRewriteProgress
 )
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

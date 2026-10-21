@@ -15,6 +15,7 @@ import type {
   GateDecision,
   FixProgressState,
   FixActivityItem,
+  RewriteProgressState,
 } from "@/types/pipeline";
 import type { AgentEvent } from "@/components/chat/types";
 import { AgentEventType } from "@/components/chat/types";
@@ -36,6 +37,14 @@ export function usePipeline(novelId: number) {
     issues: [],
   });
   const [fixActivity, setFixActivity] = useState<FixActivityItem[]>([]);
+  // 自动章节重写回路进度：重写清单指向可定位章节时，后端全自动派发重写 agent，
+  // 该状态展示「正在自动重写第 X/Y 章」与每章结果。
+  const [rewriteProgress, setRewriteProgress] = useState<RewriteProgressState>({
+    running: false,
+    index: 0,
+    total: 0,
+    items: [],
+  });
 
   useEffect(() => {
     const offStage = EventsOn("pipeline:stage", (p: StagePayload) => {
@@ -100,6 +109,8 @@ export function usePipeline(novelId: number) {
       }) => {
         if (p.novel_id !== novelId) return;
         setFixActivity([]);
+        // 新一轮修复批次开始：清除上一轮自动重写的残留进度。
+        setRewriteProgress({ running: false, index: 0, total: 0, items: [] });
         setFixProgress({
           running: true,
           ok: null,
@@ -152,6 +163,66 @@ export function usePipeline(novelId: number) {
         return next.slice(-FIX_ACTIVITY_MAX);
       });
     });
+    // 自动章节重写回路的逐章进度（starting/done/failed），展示「正在自动重写第 X/Y 章」。
+    const offRewriteProgress = EventsOn(
+      "pipeline:rewrite_progress",
+      (p: {
+        novel_id: number;
+        phase: "starting" | "done" | "failed";
+        index: number;
+        total: number;
+        chapter_id: number;
+        reading_number: number;
+        error?: string;
+      }) => {
+        if (p.novel_id !== novelId) return;
+        setRewriteProgress((prev) => {
+          const items = [...prev.items];
+          const idx = items.findIndex((it) => it.chapterId === p.chapter_id);
+          if (p.phase === "starting") {
+            if (idx < 0) {
+              items.push({
+                chapterId: p.chapter_id,
+                readingNumber: p.reading_number,
+                phase: "starting",
+              });
+            } else {
+              items[idx] = { ...items[idx], phase: "starting" };
+            }
+            return {
+              running: true,
+              index: p.index,
+              total: p.total,
+              items,
+            };
+          }
+          // done / failed：更新对应章节终态；全部终态后停止 running。
+          if (idx >= 0) {
+            items[idx] = {
+              ...items[idx],
+              phase: p.phase,
+              error: p.error,
+            };
+          } else {
+            items.push({
+              chapterId: p.chapter_id,
+              readingNumber: p.reading_number,
+              phase: p.phase,
+              error: p.error,
+            });
+          }
+          const allSettled = items.every(
+            (it) => it.phase === "done" || it.phase === "failed",
+          );
+          return {
+            running: !allSettled,
+            index: p.index,
+            total: p.total,
+            items,
+          };
+        });
+      },
+    );
 
     // 进入时拉取当前活跃流水线，恢复进度。
     GetPipelineState(novelId)
@@ -173,6 +244,7 @@ export function usePipeline(novelId: number) {
       offFixStart();
       offFixDone();
       offAgentActivity();
+      offRewriteProgress();
     };
   }, [novelId]);
 
@@ -230,6 +302,7 @@ export function usePipeline(novelId: number) {
     autoRun,
     fixProgress,
     fixActivity,
+    rewriteProgress,
     start,
     resume,
     control,

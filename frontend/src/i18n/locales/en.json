@@ -1904,7 +1904,16 @@
       "done": "Fix completed, re-auditing automatically…",
       "failed": "Fix failed",
       "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
-      "rewriteHandoff": "Handed off to chapter rewrite ({{count}} items); please rewrite the related chapters in the writing view, then re-audit."
+      "rewriteHandoff": "Handed off to chapter rewrite ({{count}} items); please rewrite the related chapters in the writing view, then re-audit.",
+      "rewriteProgress": {
+        "rewriting": "Auto-rewriting chapter {{index}}/{{total}}…",
+        "done": "Auto-rewrote {{done}}/{{total}} chapters; returning to re-audit.",
+        "hint": "The rewrite loop auto-dispatched a chapter-rewrite agent: it rewrites the flagged chapters in full, then returns to the audit for verification.",
+        "chapter": "Chapter {{number}}",
+        "chapterStarting": "rewriting",
+        "chapterDone": "rewritten",
+        "chapterFailed": "failed"
+      }
     },
     "fixStatus": {
       "pending": "Pending",

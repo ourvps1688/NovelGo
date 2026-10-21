@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/stretchr/testify/require"
 )
 
@@ -456,6 +460,99 @@ func TestServiceFixHandoffRewriteWhenOnlyBodyIssues(t *testing.T) {
 	require.NotNil(t, fixDonePayload, "应广播 fix_done")
 	require.Equal(t, true, fixDonePayload["rewrite_handoff"], "fix_done 应带 rewrite_handoff 标记")
 	require.Equal(t, int(2), fixDonePayload["rewrite_count"], "rewrite_count 应为 2")
+}
+
+// TestServiceAutoRewriteDispatch 验证：当重写清单指向可定位章节时，finishFixHandoffRewrite
+// 全自动派发 chapter-rewrite agent 重写对应章节（而非仅仅暂停交回），重写后自动回到复评，
+// 且 RewriteRounds 递增；复评若仍报出正文问题则停在闸门等人工（不无限循环）。
+func TestServiceAutoRewriteDispatch(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 测试库默认只迁移 pipeline_runs，自动重写回路需要 chapters 表（查询会 JOIN volumes），单独迁移。
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
+
+	// 种入 5 章（无卷，sort_order 即阅读序号 1..5），供重写回路定位 chapter_id。
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, db.Create(&chapter.Chapter{
+			NovelID: 421, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
+		}).Error)
+	}
+	// 读取阅读序号→章节，确认第 3 章的 chapter_id。
+	seeded, err := svc.chapterStore.ListAllByNovel(ctx, nil, 421)
+	require.NoError(t, err)
+	readingToID := map[int]int64{}
+	for _, ch := range seeded {
+		readingToID[ch.ReadingNumber] = ch.ID
+	}
+	require.Contains(t, readingToID, 3, "应能通过阅读序号定位第 3 章")
+
+	// 正文级问题指向第 3 章：S5 改不动，必须自动整章重写。
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"正文问题","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"第3章未立人设，代入感弱","fix_type":"body"}]}`
+
+	var rewriteCalled bool
+	var rewriteChapterID int64
+	var auditCalled bool
+	var progress []string
+	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
+		switch name {
+		case "chapter-rewrite":
+			rewriteCalled = true
+			// 从提示词里抽取被重写的 chapter_id 校验。
+			rewriteChapterID = extractChapterIDFromPrompt(t, input.Prompt)
+			return SkillOutput{Text: "已整章重写"}, nil
+		case "signability-audit":
+			auditCalled = true
+			// 复评仍报出同一正文问题（模拟未一次解决），停在闸门等人工。
+			return SkillOutput{Text: "复评：\n```json\n" +
+				`{"verdict":"needs_fix","score":16,"summary":"重写后仍偏弱","issues":[` +
+				`{"id":"I1","level":"P0","area":"开篇过签力","desc":"第3章未立人设，代入感弱","fix_type":"body"}]}` +
+				"\n```"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	oldProg := emitRewriteProgress
+	emitRewriteProgress = func(_ context.Context, p map[string]any) { progress = append(progress, fmt.Sprint(p["phase"])) }
+	defer func() { emitRewriteProgress = oldProg }()
+
+	run, err := svc.StartPipeline(ctx, 421, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.True(t, rewriteCalled, "重写清单指向可定位章节，应自动派发 chapter-rewrite")
+	require.Equal(t, readingToID[3], rewriteChapterID, "应重写第 3 章（即 chapter_id 对应阅读序号 3）")
+	require.True(t, auditCalled, "重写后应自动回到复评")
+	require.Equal(t, 1, finalCtxt.RewriteRounds, "重写轮数应 +1")
+	require.Contains(t, progress, "starting", "应广播重写开始进度")
+	require.Contains(t, progress, "done", "应广播重写完成进度")
+	require.Len(t, finalCtxt.RewriteBacklog, 1, "复评仍报正文问题，重写清单应保留 1 项")
+}
+
+// extractChapterIDFromPrompt 从 chapterRewritePrompt 生成的内容中解析 chapter_id=NNN。
+func extractChapterIDFromPrompt(t *testing.T, prompt string) int64 {
+	t.Helper()
+	re := regexp.MustCompile(`chapter_id=(\d+)`)
+	m := re.FindStringSubmatch(prompt)
+	if len(m) < 2 {
+		return 0
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	require.NoError(t, err)
+	return n
 }
 
 // TestParseAuditFixType 验证 parseAudit 正确解析 fix_type 字段。

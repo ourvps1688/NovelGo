@@ -89,6 +89,24 @@ export interface FixActivityItem {
   failed: boolean;
 }
 
+// 自动章节重写回路的逐章进度（由 pipeline:rewrite_progress 维护）。
+// 重写是「交回 S3 重写」环节全自动派发章节重写 agent 的过程：先逐章重写，再回到复评；
+// 该状态让前端展示「正在自动重写第 X/Y 章」与每章结果，避免用户误以为流水线卡死。
+export interface RewriteProgressState {
+  running: boolean;
+  index: number;
+  total: number;
+  items: RewriteProgressChapter[];
+}
+
+// 单章重写结果。
+export interface RewriteProgressChapter {
+  chapterId: number;
+  readingNumber: number;
+  phase: "starting" | "done" | "failed";
+  error?: string;
+}
+
 // 线性阶段顺序。S0 = 导入/续写对齐入口；S4 = 签约体检（signability-audit，只读体检 + issue 清单）；
 // S5 = 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）；S6 = 完本终检；
 // GEnd = 完本终检闸门（确认 finish / 修复 fix / 终止 abort）。

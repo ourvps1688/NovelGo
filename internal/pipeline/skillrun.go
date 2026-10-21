@@ -17,10 +17,12 @@ const agentTypeBlueprint = "blueprint"
 
 // agentTypeSignability / agentTypeFix 分别是签约体检 / 修复执行 Agent 的 AgentType 字符串。
 // agentTypeBlueprintFix 是蓝图修复 Agent 的 AgentType 字符串（限权：只改卷纲 / 补卷）。
+// agentTypeRewrite 是章节重写 Agent 的 AgentType 字符串（回流 S3 重写回路：整章重写）。
 const (
 	agentTypeSignability  = "signability"
 	agentTypeFix          = "fix"
 	agentTypeBlueprintFix = "blueprintfix"
+	agentTypeRewrite      = "rewrite"
 )
 
 // skillAgentType 按 skill 名返回其在 agent.Run 中使用的 AgentType。
@@ -36,6 +38,8 @@ func skillAgentType(name string) agentcfg.AgentType {
 		return agentcfg.SignabilityAgent // 复用只读白名单
 	case "blueprint-fix":
 		return agentcfg.BlueprintFixAgent // 限权：只改卷纲 / 补卷
+	case "chapter-rewrite":
+		return agentcfg.ChapterRewriteAgent // 回流 S3 重写回路：整章重写（授权 full_replace）
 	case "blueprint-drift-check":
 		return agentcfg.SignabilityAgent // 复用只读白名单（G3 蓝图漂移巡检）
 	case "story-blueprint":
@@ -56,6 +60,8 @@ func skillAgentTypeString(name string) string {
 		return agentTypeSignability // 复用签约体检 AgentType 字符串（同属只读体检）
 	case "blueprint-fix":
 		return agentTypeBlueprintFix
+	case "chapter-rewrite":
+		return agentTypeRewrite
 	case "blueprint-drift-check":
 		return agentTypeSignability // 复用只读体检 AgentType（G3 蓝图漂移巡检）
 	case "story-blueprint":

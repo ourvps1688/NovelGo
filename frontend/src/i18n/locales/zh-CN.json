@@ -1865,7 +1865,16 @@
       "done": "修复完成，正在自动复评……",
       "failed": "修复失败",
       "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
-      "rewriteHandoff": "已转交章节重写（{{count}} 项），请在写作页重写相关章节后重新复评。"
+      "rewriteHandoff": "已转交章节重写（{{count}} 项），请在写作页重写相关章节后重新复评。",
+      "rewriteProgress": {
+        "rewriting": "正在自动重写第 {{index}}/{{total}} 章……",
+        "done": "已自动重写 {{done}}/{{total}} 章，正在回到复评。",
+        "hint": "重写回路已自动派发章节重写 agent：先整章重写被标记的章节，再回到体检复评验证是否解决。",
+        "chapter": "第 {{number}} 章",
+        "chapterStarting": "重写中",
+        "chapterDone": "已重写",
+        "chapterFailed": "重写失败"
+      }
     },
     "fixStatus": {
       "pending": "待修复",

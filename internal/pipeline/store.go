@@ -101,6 +101,9 @@ type GateContext struct {
 	// 每次体检（executeAudit，签约类）重新计算以反映最新体检结果。S5 不处理这些项，
 	// 而是显式通知写作回路优先重写其涉及章节，闭合「审计→修台账→复评→正文重写→复评」链路。
 	RewriteBacklog []RewriteItem `json:"rewrite_backlog,omitempty"`
+	// RewriteRounds 记录自动章节重写回路已发生的轮数（finishFixHandoffRewrite 每次自动重写后 +1），
+	// 供 auto/全自动重写模式下判断是否达到上限改交人工，避免「重写→复评→再重写」无限循环。
+	RewriteRounds int `json:"rewrite_rounds,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。

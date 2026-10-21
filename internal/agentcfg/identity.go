@@ -4,14 +4,15 @@ package agentcfg
 type AgentType int
 
 const (
-	MainAgent         AgentType = iota // 主创作助手
-	ReviewAgent                        // 章节审稿人
-	MemoryAgent                        // 记忆检索分析员
-	StateSyncAgent                     // 状态同步员（写章后自动回填台账）
-	BlueprintAgent                     // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
-	SignabilityAgent                   // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
-	FixAgent                           // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
-	BlueprintFixAgent                  // 蓝图修复员（S2 蓝图体检不通过时：限权改卷纲 / 补卷，不碰章节正文、不碰其他台账写）
+	MainAgent           AgentType = iota // 主创作助手
+	ReviewAgent                          // 章节审稿人
+	MemoryAgent                          // 记忆检索分析员
+	StateSyncAgent                       // 状态同步员（写章后自动回填台账）
+	BlueprintAgent                       // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
+	SignabilityAgent                     // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
+	FixAgent                             // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
+	BlueprintFixAgent                    // 蓝图修复员（S2 蓝图体检不通过时：限权改卷纲 / 补卷，不碰章节正文、不碰其他台账写）
+	ChapterRewriteAgent                  // 章节重写员（回流 S3 重写回路：依据正文级 issue 整章重写，授权 full_replace）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -189,6 +190,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return fixAgentAllowlist
 	case BlueprintFixAgent:
 		return blueprintFixAgentAllowlist
+	case ChapterRewriteAgent:
+		return fixAgentAllowlist // 章节重写复用修复员工具白名单（edit 整章覆写 + 台账写 + 只读上下文）
 	default:
 		return nil
 	}
@@ -217,6 +220,8 @@ func AgentIdentity(t AgentType) string {
 		return fixAgentSystem1
 	case BlueprintFixAgent:
 		return blueprintFixAgentSystem1
+	case ChapterRewriteAgent:
+		return fixAgentSystem1 // 身份同修复员（可改稿 + 同步台账）；具体「整章重写」方法论由 chapter-rewrite 技能注入
 	default:
 		return ""
 	}
