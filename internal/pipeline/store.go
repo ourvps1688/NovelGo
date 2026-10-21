@@ -14,23 +14,33 @@ const (
 	StatusRunning      = "running"
 	StatusPaused       = "paused"
 	StatusAwaitingGate = "awaiting_gate"
-	StatusFinished     = "finished"
-	StatusAborted      = "aborted"
+	// StatusWaiting 标记 book-run 正在等待其卷级 scoped sub-run（体检/修复）收口。
+	// scoped run 完成后唤醒回 S3 running；不由恢复机制误判为僵尸（恢复只扫 running）。
+	StatusWaiting  = "waiting"
+	StatusFinished = "finished"
+	StatusAborted  = "aborted"
 )
 
 // PipelineRun 记录一次创作流水线的运行状态，支持重启续跑。
+// 卷级作用域（G1 scoped sub-run）：book-run（VolumeID 为空）挂卷级 scoped sub-run
+// （VolumeID 非空、ParentRunID 指向 book-run），体检/修复仅作用于该卷。
 type PipelineRun struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement"`
-	NovelID      int64     `gorm:"column:novel_id;index;not null"`
-	RunID        string    `gorm:"column:run_id;uniqueIndex;not null"`
-	Mode         string    `gorm:"column:mode;not null;default:new"` // new | continue
-	StartChapter *int      `gorm:"column:start_chapter"`             // 续写模式起始章号
-	CurrentStage string    `gorm:"column:current_stage;not null"`
-	Status       string    `gorm:"column:status;not null"`
-	AutoRun      bool      `gorm:"column:auto_run;not null;default:false"`
-	ContextJSON  string    `gorm:"column:context_json;type:text"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at"`
+	ID           int64  `gorm:"primaryKey;autoIncrement"`
+	NovelID      int64  `gorm:"column:novel_id;index;not null"`
+	RunID        string `gorm:"column:run_id;uniqueIndex;not null"`
+	Mode         string `gorm:"column:mode;not null;default:new"` // new | continue
+	StartChapter *int   `gorm:"column:start_chapter"`             // 续写模式起始章号
+	CurrentStage string `gorm:"column:current_stage;not null"`
+	Status       string `gorm:"column:status;not null"`
+	AutoRun      bool   `gorm:"column:auto_run;not null;default:false"`
+	ContextJSON  string `gorm:"column:context_json;type:text"`
+	// VolumeID 是本 run 的卷作用域：非空=卷级 scoped sub-run，S4/S5 仅作用于该卷；
+	// 空=book-run（全书）。旧数据均为 NULL，即全书 book-run（向后兼容）。
+	VolumeID *int64 `gorm:"column:volume_id;index"`
+	// ParentRunID 挂接层级：卷级 scoped sub-run 记录其父 book-run 的 RunID；空=book-run。
+	ParentRunID string    `gorm:"column:parent_run_id;index"`
+	CreatedAt   time.Time `gorm:"column:created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at"`
 }
 
 // TableName 指定物理表名。
@@ -176,6 +186,48 @@ func (s *Store) GetByRunID(ctx context.Context, runID string) (*PipelineRun, err
 		return nil, err
 	}
 	return &run, nil
+}
+
+// GetActiveVolumeRun 取该小说某卷当前活跃（未结束/未中止）的卷级 scoped sub-run。
+// 供 enterAudit 复用既有 scoped run，避免同卷重复派生。无则返回 gorm.ErrNotFound。
+func (s *Store) GetActiveVolumeRun(ctx context.Context, novelID, volumeID int64) (*PipelineRun, error) {
+	var run PipelineRun
+	err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND volume_id = ? AND status NOT IN ?", novelID, volumeID,
+			[]string{StatusFinished, StatusAborted}).
+		Order("id DESC").First(&run).Error
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+// HasActiveScopedChild 判断指定 book-run 是否仍有活跃（未结束/未中止）的卷级 scoped sub-run。
+// 供启动恢复自愈：waiting 的 book-run 若无活跃子 run，说明子 run 已收口而唤醒前崩溃，需唤醒。
+func (s *Store) HasActiveScopedChild(ctx context.Context, parentRunID string) (bool, error) {
+	var c int64
+	err := s.db.WithContext(ctx).Model(&PipelineRun{}).
+		Where("parent_run_id = ? AND status NOT IN ?", parentRunID,
+			[]string{StatusFinished, StatusAborted}).
+		Count(&c).Error
+	if err != nil {
+		return false, err
+	}
+	return c > 0, nil
+}
+
+// ListActiveScopedChildren 列出指定 book-run 下全部活跃（未结束/未中止）的卷级 scoped sub-run。
+// 供 book-run 终止时联动清理孤儿子 run。
+func (s *Store) ListActiveScopedChildren(ctx context.Context, parentRunID string) ([]*PipelineRun, error) {
+	var runs []*PipelineRun
+	err := s.db.WithContext(ctx).
+		Where("parent_run_id = ? AND status NOT IN ?", parentRunID,
+			[]string{StatusFinished, StatusAborted}).
+		Order("id DESC").Find(&runs).Error
+	if err != nil {
+		return nil, err
+	}
+	return runs, nil
 }
 
 // ListByStatus 列出处于指定状态的全部流水线运行（供启动恢复扫描僵尸运行）。

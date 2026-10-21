@@ -2574,6 +2574,8 @@ export namespace pipeline {
 	    Status: string;
 	    AutoRun: boolean;
 	    ContextJSON: string;
+	    VolumeID?: number;
+	    ParentRunID: string;
 	    // Go type: time
 	    CreatedAt: any;
 	    // Go type: time
@@ -2594,6 +2596,8 @@ export namespace pipeline {
 	        this.Status = source["Status"];
 	        this.AutoRun = source["AutoRun"];
 	        this.ContextJSON = source["ContextJSON"];
+	        this.VolumeID = source["VolumeID"];
+	        this.ParentRunID = source["ParentRunID"];
 	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
 	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
 	    }

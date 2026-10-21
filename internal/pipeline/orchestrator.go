@@ -193,6 +193,10 @@ func (o *Orchestrator) advanceS4(ctx context.Context, run *PipelineRun, decision
 	// continue（通过或强制继续）：标记已体检，回到 S3 写作（不再自动弹体检）。
 	n, _ := o.svc.chapterCount(ctx, run.NovelID)
 	updated := o.svc.markAuditedJSON(run.ContextJSON, n)
+	// 卷级 scoped sub-run 收口（G1）：体检结论回写父 book-run 并唤醒回 S3 写作。
+	if run.ParentRunID != "" {
+		return o.svc.finishVolumeScopedRun(ctx, run, updated, n)
+	}
 	if err := o.svc.store.SetStageStatus(ctx, run.RunID, StageS3, StatusRunning, updated); err != nil {
 		return err
 	}

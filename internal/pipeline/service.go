@@ -175,11 +175,8 @@ func (s *Service) ResumePipeline(ctx context.Context, runID, decision, feedback 
 		return fmt.Errorf("流水线已 %s，无法推进", run.Status)
 	}
 	if decision == "abort" {
-		if err := s.store.SetStatus(ctx, runID, StatusAborted, run.ContextJSON); err != nil {
-			return err
-		}
-		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: run.CurrentStage, Status: StatusAborted})
-		return nil
+		// 统一走 abortRun：内含同族联动终止（book-run ↔ 卷级 scoped sub-run，G1）。
+		return s.abortRun(ctx, run)
 	}
 
 	if err := s.store.AppendGateDecision(ctx, runID, run.CurrentStage, decision, feedback); err != nil {
@@ -315,11 +312,13 @@ func blueprintPrompt(novelID int64) string {
 // ── S4 签约体检 / S5 修复闭环（PR3）────────────────────────────────
 
 // abortRun 终止流水线并广播终止事件（供特殊阶段处理复用）。
+// 联动 book-run ↔ scoped sub-run 的同族终止（G1），避免一侧终止后另一侧永久等待/孤儿。
 func (s *Service) abortRun(ctx context.Context, run *PipelineRun) error {
 	if err := s.store.SetStatus(ctx, run.RunID, StatusAborted, run.ContextJSON); err != nil {
 		return err
 	}
 	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: run.CurrentStage, Status: StatusAborted})
+	s.abortRelatives(ctx, run)
 	return nil
 }
 
@@ -421,33 +420,178 @@ func milestoneSummary(n, sinceLast int, crossed bool) string {
 	return fmt.Sprintf("已写 %d 章，距上次签约体检已过 %d 章（每 5 章触发一次）。建议进入签约体检与修复闭环，或继续写作。", n, sinceLast)
 }
 
+// currentVolumeScope 返回「当前卷」——本书最新写就章节所属的卷 id。
+// 未分卷书 / 最新章未归卷时返回 nil（走全书旧路径，向后兼容）。
+func (s *Service) currentVolumeScope(ctx context.Context, novelID int64) *int64 {
+	if s.store == nil || s.store.db == nil {
+		return nil
+	}
+	type row struct{ VolumeID *int64 }
+	var r row
+	if err := s.store.db.WithContext(ctx).Table("chapters").
+		Select("volume_id").
+		Where("novel_id = ?", novelID).
+		Order("id DESC").Limit(1).Scan(&r).Error; err != nil {
+		s.logger.Warn("卷级作用域：查询当前卷失败", "err", err)
+		return nil
+	}
+	return r.VolumeID
+}
+
+// delegateVolumeAudit 把 book-run 的卷级体检委托给「当前卷」的 scoped sub-run（G1）：
+// 复用或创建该卷的 scoped run，并把 book-run 置 waiting（阶段保持 S3，收口后唤醒）。
+// 当前卷不可定界（未分卷书 / 最新章未归卷）时返回 nil，调用方走 book-run 全书旧路径。
+func (s *Service) delegateVolumeAudit(ctx context.Context, bookRun *PipelineRun, stage string) *PipelineRun {
+	scope := s.currentVolumeScope(ctx, bookRun.NovelID)
+	if scope == nil {
+		return nil
+	}
+	scoped, err := s.store.GetActiveVolumeRun(ctx, bookRun.NovelID, *scope)
+	if err != nil {
+		scoped = &PipelineRun{
+			NovelID:      bookRun.NovelID,
+			RunID:        uuid.NewString(),
+			Mode:         bookRun.Mode,
+			CurrentStage: stage,
+			Status:       StatusRunning,
+			AutoRun:      bookRun.AutoRun,
+			VolumeID:     scope,
+			ParentRunID:  bookRun.RunID,
+		}
+		if cerr := s.store.Create(ctx, scoped); cerr != nil {
+			s.logger.Error("卷级 scoped run 创建失败", "novel_id", bookRun.NovelID, "volume_id", *scope, "err", cerr)
+			return nil
+		}
+	}
+	if werr := s.store.SetStatus(ctx, bookRun.RunID, StatusWaiting, bookRun.ContextJSON); werr != nil {
+		s.logger.Error("book-run 置等待失败", "run_id", bookRun.RunID, "err", werr)
+		return nil
+	}
+	return scoped
+}
+
+// wakeBookRun 唤醒等待中的 book-run 回 S3 写作。merge 非空时先把卷级体检结论并入
+// book-run 上下文（S4Audited / Audit 等），再置 S3 running 并广播，供向导与阶段条同步。
+func (s *Service) wakeBookRun(ctx context.Context, bookRun *PipelineRun, merge func(*GateContext)) {
+	var ctxt GateContext
+	if bookRun.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(bookRun.ContextJSON), &ctxt)
+	}
+	if merge != nil {
+		merge(&ctxt)
+	}
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		s.logger.Warn("唤醒 book-run：序列化上下文失败", "err", merr)
+		updated = []byte(bookRun.ContextJSON)
+	}
+	if err := s.store.SetStageStatus(ctx, bookRun.RunID, StageS3, StatusRunning, string(updated)); err != nil {
+		s.logger.Error("唤醒 book-run 失败", "run_id", bookRun.RunID, "err", err)
+		return
+	}
+	emitStage(ctx, StagePayload{RunID: bookRun.RunID, NovelID: bookRun.NovelID, Stage: StageS3, Status: StatusRunning})
+}
+
+// finishVolumeScopedRun 卷级 scoped sub-run 收口（G4 选 continue：体检通过 / 接受已知问题）：
+// 先把体检结论回写父 book-run 并唤醒回 S3，再静默终结 scoped run（不广播终态事件，
+// 避免前端阶段条被 finished 误隐）。先唤醒后终结，任一步崩溃都可自愈：
+// 唤醒先行则 scoped 可重入收口；孤儿 waiting 由启动恢复自愈兜底。
+func (s *Service) finishVolumeScopedRun(ctx context.Context, scoped *PipelineRun, scopedCtxtJSON string, chapterTotal int) error {
+	bookRun, err := s.store.GetByRunID(ctx, scoped.ParentRunID)
+	if err != nil {
+		s.logger.Error("卷级收口：找不到父 book-run", "run_id", scoped.RunID, "parent", scoped.ParentRunID, "err", err)
+		return err
+	}
+	var scopedCtxt GateContext
+	if scopedCtxtJSON != "" {
+		_ = json.Unmarshal([]byte(scopedCtxtJSON), &scopedCtxt)
+	}
+	s.wakeBookRun(ctx, bookRun, func(bc *GateContext) {
+		// 体检结论回写 book-run：供 S3 里程碑判定（S4Audited/LastAuditChapter）
+		// 与体检视图（Audit/DriftReport/RewriteBacklog）在 GetByNovel 切回 book-run 后仍可见。
+		bc.S4Audited = true
+		bc.LastAuditChapter = chapterTotal
+		bc.Audit = scopedCtxt.Audit
+		bc.AuditReason = scopedCtxt.AuditReason
+		bc.AuditStage = scopedCtxt.AuditStage
+		bc.DriftReport = scopedCtxt.DriftReport
+		bc.RewriteBacklog = scopedCtxt.RewriteBacklog
+	})
+	// 静默终结 scoped run（终态不广播事件，见函数注释）。
+	if err := s.store.SetStageStatus(ctx, scoped.RunID, scoped.CurrentStage, StatusFinished, scopedCtxtJSON); err != nil {
+		s.logger.Error("卷级收口：scoped run 终结失败", "run_id", scoped.RunID, "err", err)
+		return err
+	}
+	return nil
+}
+
+// abortRelatives 终止联动（G1）：scoped sub-run 终止 → 父 book-run 一并终止（「终止」语义
+// 覆盖整条流水线）；book-run 终止 → 其活跃 scoped sub-run 一并终止，避免孤儿子 run。
+func (s *Service) abortRelatives(ctx context.Context, run *PipelineRun) {
+	if run.ParentRunID != "" {
+		if parent, err := s.store.GetByRunID(ctx, run.ParentRunID); err == nil &&
+			parent.Status != StatusFinished && parent.Status != StatusAborted {
+			if aerr := s.store.SetStatus(ctx, parent.RunID, StatusAborted, parent.ContextJSON); aerr != nil {
+				s.logger.Error("联动终止父 book-run 失败", "run_id", parent.RunID, "err", aerr)
+			} else {
+				emitStage(ctx, StagePayload{RunID: parent.RunID, NovelID: parent.NovelID,
+					Stage: parent.CurrentStage, Status: StatusAborted, Note: "卷级体检已终止，整条流水线一并终止"})
+			}
+		}
+	}
+	if children, err := s.store.ListActiveScopedChildren(ctx, run.RunID); err == nil {
+		for _, child := range children {
+			if cerr := s.store.SetStatus(ctx, child.RunID, StatusAborted, child.ContextJSON); cerr != nil {
+				s.logger.Error("联动终止卷级子 run 失败", "run_id", child.RunID, "err", cerr)
+				continue
+			}
+			emitStage(ctx, StagePayload{RunID: child.RunID, NovelID: child.NovelID,
+				Stage: child.CurrentStage, Status: StatusAborted, Note: "父流水线已终止，本卷体检一并终止"})
+		}
+	}
+}
+
 // enterAudit 置体检阶段 running 并异步执行 signability-audit。
 // reason 决定进入的阶段：golden3 → S4（首检）；milestone / volume → S4b（卷边界复评）。
 // 同时把触发原因与体检阶段写回 ContextJSON，供修复后复评回到同阶段。
+//
+// 卷级作用域（G1）：book-run 的 golden3/milestone/volume 体检委托给「当前卷」的 scoped
+// sub-run 执行（S4 只扫当前卷）；未分卷项目（当前卷不可定界）、已在 scoped run 上的复评、
+// 以及完本终检（reason=final，恒为全书）走原路径，行为不变。
 func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason string) {
 	stage := StageS4
 	if reason != "golden3" {
 		stage = StageS4b
 	}
+	target := run
+	if run.ParentRunID == "" && reason != "final" {
+		if scoped := s.delegateVolumeAudit(ctx, run, stage); scoped != nil {
+			target = scoped
+		}
+	}
 	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	if target.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(target.ContextJSON), &ctxt)
 	}
 	ctxt.AuditReason = reason
 	ctxt.AuditStage = stage
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 进入：序列化上下文失败", "err", merr)
-		updated = []byte(run.ContextJSON)
+		updated = []byte(target.ContextJSON)
 	}
-	if err := s.store.SetStageStatus(ctx, run.RunID, stage, StatusRunning, string(updated)); err != nil {
+	if err := s.store.SetStageStatus(ctx, target.RunID, stage, StatusRunning, string(updated)); err != nil {
 		s.logger.Error("S4 进入失败", "err", err)
+		// 委托已把 book-run 置 waiting：派发失败必须唤醒回写作，避免永久等待。
+		if target != run {
+			s.wakeBookRun(ctx, run, nil)
+		}
 		return
 	}
-	run.CurrentStage = stage
-	run.ContextJSON = string(updated)
-	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: stage, Status: StatusRunning})
-	go s.executeAudit(run.RunID, run.NovelID)
+	target.CurrentStage = stage
+	target.ContextJSON = string(updated)
+	emitStage(ctx, StagePayload{RunID: target.RunID, NovelID: target.NovelID, Stage: stage, Status: StatusRunning})
+	go s.executeAudit(target.RunID, target.NovelID)
 }
 
 // enterFix 置 S5 running 并异步执行 signability-fix 修复循环。
@@ -490,7 +634,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
 	}
 	auditSkill := "signability-audit"
-	auditPrompt := signabilityPrompt(novelID)
+	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID))
 	if ctxt.AuditKind == "blueprint" {
 		auditSkill = "blueprint-audit"
 		auditPrompt = blueprintAuditPrompt(novelID)
@@ -1761,13 +1905,30 @@ func (s *Service) emitRewriteBacklog(ctx context.Context, runID string, novelID 
 	emitRewriteBacklog(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "items": items})
 }
 
-// signabilityPrompt 构造 S4 签约体检阶段的任务提示词。
-func signabilityPrompt(novelID int64) string {
-	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
+// volumeScopeText 生成 S4 体检提示词的卷级作用域说明（G1：S4 只扫当前卷）。
+// volumeID 为空（book-run 全书路径）返回空串，提示词与旧行为逐字一致。
+func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *int64) string {
+	if volumeID == nil {
+		return ""
+	}
+	label := fmt.Sprintf("volume_id=%d", *volumeID)
+	if v, err := volume.NewStore(s.store.db, s.logger).GetByID(ctx, nil, novelID, *volumeID); err == nil && v != nil && v.Name != "" {
+		label = fmt.Sprintf("《%s》（volume_id=%d）", v.Name, *volumeID)
+	}
+	return fmt.Sprintf("本次体检作用域=%s（卷级 scoped 体检）：**只审属于该卷的章节**"+
+		"（以 get_chapter_list 返回的 volume_id 归属为准，只审 volume_id=%d 的章节），"+
+		"其它卷的章节仅作背景参照，不逐章审读、不评分不举证，也不要在 issues 里报其它卷自身的问题；"+
+		"若本卷与前卷（已定稿）设定有冲突，在 issues 中照常报告，但修复方向应为「改本卷适配前卷」而非改动前卷；",
+		label, *volumeID)
+}
+
+// signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
+func signabilityPrompt(novelID int64, scopeText string) string {
+	return fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
 		"fix_type 必填：body=正文级需章节重写（S5 修不动，将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
-		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText)
 }
 
 // blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。
@@ -1856,6 +2017,8 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 		// 而工作区向导重新拉取后已切到其它 run，两侧信息不一致。
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: run.CurrentStage,
 			Status: StatusAborted, Note: "流水线已终止"})
+		// 联动终止同族 run（book-run ↔ 卷级 scoped sub-run），避免孤儿子 run / 永久等待。
+		s.abortRelatives(ctx, run)
 	case "set_auto":
 		// 运行中切换 auto_run：翻转 AutoRun 字段。开启后，自动化的阶段（S2/S4/S5）
 		// 在闸门点自动裁决连跑；关闭则恢复为人工逐闸确认。
@@ -1908,6 +2071,20 @@ func (s *Service) RecoverInterruptedRuns() {
 			"run_id", run.RunID, "stage", run.CurrentStage)
 		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: run.CurrentStage,
 			Status: StatusPaused, Note: "应用重启导致流程中断，已暂停；点击恢复将从当前阶段重新执行"})
+	}
+	// 自愈（G1）：waiting 的 book-run 若其卷级 scoped sub-run 已全部收口（崩溃发生在
+	// 收口与唤醒之间），直接唤醒回 S3 写作并置 S4Audited，避免永久等待或唤醒后重复首检。
+	if waiting, werr := s.store.ListByStatus(ctx, StatusWaiting); werr == nil {
+		for _, run := range waiting {
+			if run.ParentRunID != "" {
+				continue
+			}
+			if active, aerr := s.store.HasActiveScopedChild(ctx, run.RunID); aerr == nil && active {
+				continue
+			}
+			s.wakeBookRun(ctx, run, func(bc *GateContext) { bc.S4Audited = true })
+			s.logger.Info("启动恢复：waiting book-run 的卷级子 run 已收口，已唤醒回写作", "run_id", run.RunID)
+		}
 	}
 }
 
