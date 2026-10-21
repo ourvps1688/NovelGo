@@ -50,6 +50,11 @@ export interface FixIssuePayload {
   area: string;
   desc: string;
   status?: "pending" | "fixing" | "fixed" | "skipped" | "rewrite";
+  // issue 三枚举（卷级作用域，可缺省）：target_scope=落点卷作用域 / dimension=四维归属 /
+  // direction=修复方向。与后端 FixIssuePayload 对应（json omitempty）。
+  target_scope?: string;
+  dimension?: string;
+  direction?: string;
 }
 
 // 回流到 S3 章节重写回路的正文级问题（pipeline:rewrite_backlog / run.ContextJSON.rewrite_backlog），
@@ -60,6 +65,10 @@ export interface RewriteItem {
   area: string;
   desc: string;
   chapters?: number[];
+  // 与源 issue 一致的作用域三枚举（可缺省），供重写派发的冻结卷写保护判路与前端标签展示。
+  target_scope?: string;
+  dimension?: string;
+  direction?: string;
 }
 
 // S5 修复进度状态（由 pipeline:fix_start / pipeline:fix_done 维护）。

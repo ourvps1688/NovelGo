@@ -14,7 +14,7 @@
 | 字段 | 类型 | 枚举 | 说明 |
 |------|------|------|------|
 | `target_scope` | enum | `active_volume` / `frozen_volume` / `none` | issue 指向哪一卷；`none`=全书级/不涉具体卷 |
-| `dimension` | enum | `character` / `locus_arc` / `timeline` / `reader_pov` | 归属哪一维 |
+| `dimension` | enum | `character` / `locus_arc` / `timeline` / `reader_pov` / `none` | 归属哪一维；`none`=不属四维的纯质量问题（节奏/爽点/文笔等） |
 | `direction` | enum | `forward_fix` / `retcon_candidate` | 默认 `forward_fix`，硬矛盾才 `retcon_candidate` |
 
 ### 0.2 series bible 四维结构化字段
@@ -94,7 +94,7 @@
 | `AuditIssue` | +target_scope, dimension, direction | area 降为展示标签（D4） |
 
 **枚举冻结**
-`target_scope`: active_volume|frozen_volume|none · `dimension`: character|locus_arc|timeline|reader_pov · `direction`: forward_fix|retcon_candidate · `relation_kind`: mentor|rival|lover|kin|other · `location.state`: intact|destroyed|blocked · `chronology.anchor_type`: era|date|age|season|gap · `pov mode`: limited|omniscient · `history.source`: auto|author|retcon · `reader type`: known|suspense|misconception（已存在）
+`target_scope`: active_volume|frozen_volume|none · `dimension`: character|locus_arc|timeline|reader_pov|none（末位 none=纯质量问题逃生口，2026-07 阶段 1 增补） · `direction`: forward_fix|retcon_candidate · `relation_kind`: mentor|rival|lover|kin|other · `location.state`: intact|destroyed|blocked · `chronology.anchor_type`: era|date|age|season|gap · `pov mode`: limited|omniscient · `history.source`: auto|author|retcon · `reader type`: known|suspense|misconception（已存在）
 
 **Phase 0 出口 gate 达成**：四维封闭字段定义 ✅、存储形态（扩 GORM/SQLite + 新表）✅、快照模型（volume_id + snapshot_version + committed_at）✅。**可进入阶段 1。**
 

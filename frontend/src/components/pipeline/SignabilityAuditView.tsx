@@ -30,6 +30,12 @@ export interface AuditIssue {
   level: string;
   area: string;
   desc: string;
+  // issue 三枚举（卷级作用域）：target_scope=落点卷作用域（active_volume|frozen_volume|none）、
+  // dimension=四维机器归属（character|locus_arc|timeline|reader_pov|none）、
+  // direction=修复方向（forward_fix|retcon_candidate）。旧版体检数据可能缺省。
+  target_scope?: string;
+  dimension?: string;
+  direction?: string;
 }
 
 export interface AuditData {

@@ -288,9 +288,9 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	ctx := context.Background()
 
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"三处待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger"},` +
-		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失","fix_type":"ledger"}]}`
+		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
+		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失","fix_type":"ledger","target_scope":"active_volume","dimension":"character","direction":"forward_fix"}]}`
 	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
 	var fixPrompts []string
 	var fixSessions []string
@@ -313,6 +313,16 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 			return SkillOutput{Text: "ok"}, nil
 		}
 	}
+
+	// 捕获 fix_start 载荷，断言 FixIssuePayload 携带作用域三字段（供前端标签/写保护判路）。
+	var firstFixStart map[string]any
+	origFixStart := emitFixStart
+	emitFixStart = func(_ context.Context, p map[string]any) {
+		if firstFixStart == nil {
+			firstFixStart = p
+		}
+	}
+	t.Cleanup(func() { emitFixStart = origFixStart })
 
 	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
 	require.NoError(t, err)
@@ -356,6 +366,19 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	// 批次断点正确性已由上方调用序列验证：恢复后首批重试 I1、已修项不重复修复。
 	require.Empty(t, finalCtxt.FixStates, "复评落地后旧修复断点应被重置")
 	require.Equal(t, 1, finalCtxt.FixRounds, "一次完整 sweep 递增一轮")
+
+	// fix_start 载荷应携带作用域三字段（batchIssues/allIssues 两处构造点均拷贝）。
+	require.NotNil(t, firstFixStart, "应广播 fix_start")
+	all0, ok := firstFixStart["all_issues"].([]FixIssuePayload)
+	require.True(t, ok, "all_issues 应为 []FixIssuePayload")
+	require.NotEmpty(t, all0)
+	require.Equal(t, TargetScopeActiveVolume, all0[0].TargetScope, "FixIssuePayload 应携带 target_scope")
+	require.Equal(t, "none", all0[0].Dimension, "FixIssuePayload 应携带 dimension")
+	require.Equal(t, DirectionForwardFix, all0[0].Direction, "FixIssuePayload 应携带 direction")
+	batch0, ok := firstFixStart["issues"].([]FixIssuePayload)
+	require.True(t, ok, "issues 应为 []FixIssuePayload")
+	require.NotEmpty(t, batch0)
+	require.Equal(t, TargetScopeActiveVolume, batch0[0].TargetScope, "批次清单也应携带 target_scope")
 }
 
 // TestServiceBodyIssuesRoutedToRewriteBacklog 验证正文级（fix_type=body）问题被显式路由到
@@ -368,8 +391,8 @@ func TestServiceBodyIssuesRoutedToRewriteBacklog(t *testing.T) {
 
 	// 初检：I1 正文级（需章节重写），I2 台账级（S5 可修）。
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger"}]}`
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
 	// 复评：I2 已修（不在清单），I1 正文问题仍在（仍未重写）。
 	secondAudit := `{"verdict":"needs_fix","score":20,"summary":"修复后仍有正文问题","issues":[` +
 		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"}]}`
@@ -420,8 +443,8 @@ func TestServiceFixHandoffRewriteWhenOnlyBodyIssues(t *testing.T) {
 
 	// 全部为正文级问题：S5 改不动，必须回流 S3 重写。
 	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"正文问题","issues":[` +
-		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"中段节奏拖沓","fix_type":"body"}]}`
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"中段节奏拖沓","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
 
 	var fixCalled, auditCalled bool
 	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
@@ -511,6 +534,58 @@ func TestServiceFixRejectsStaleAuditWithoutFixType(t *testing.T) {
 	require.Equal(t, false, fixDonePayload["ok"], "陈旧体检应 ok=false")
 	require.Equal(t, true, fixDonePayload["stale_audit"], "fix_done 应带 stale_audit 标记")
 	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "fix_type", "错误提示应说明缺 fix_type 字段")
+}
+
+// TestServiceFixRejectsStaleAuditWithoutScopeFields 验证陈旧 run 守卫 2：卷级作用域特性
+// 落地前的体检结果缺 target_scope/dimension/direction 字段，无法做冻结卷写保护与前向默认
+// 路由。executeFix 应拒绝派发、明确交回用户重跑体检（stale_audit=true、暂停），而非带盲区派发。
+// 蓝图体检豁免（不涉卷作用域）由既有蓝图修复测试保障不回归。
+func TestServiceFixRejectsStaleAuditWithoutScopeFields(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 旧版 audit：带 fix_type（过守卫 1）但两条 issue 均无作用域三字段（应触发守卫 2）。
+	auditJSON := `{"verdict":"needs_fix","score":20,"summary":"旧版体检","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"中段节奏拖沓","fix_type":"ledger"}]}`
+
+	var fixCalled, auditCalled bool
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "signability-fix" {
+			fixCalled = true
+		}
+		if name == "signability-audit" {
+			auditCalled = true
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	var fixDonePayload map[string]any
+	oldEmit := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
+	defer func() { emitFixDone = oldEmit }()
+
+	run, err := svc.StartPipeline(ctx, 409, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.False(t, fixCalled, "缺作用域字段的体检不应派发修复 agent（避免带盲区派发）")
+	require.False(t, auditCalled, "陈旧体检不应触发复评")
+	require.NotNil(t, fixDonePayload, "应广播 fix_done")
+	require.Equal(t, false, fixDonePayload["ok"], "陈旧体检应 ok=false")
+	require.Equal(t, true, fixDonePayload["stale_audit"], "fix_done 应带 stale_audit 标记")
+	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "target_scope", "错误提示应说明缺作用域字段")
 }
 
 // TestServiceAutoRewriteDispatch 验证：当重写清单指向可定位章节时，finishFixHandoffRewrite
@@ -617,10 +692,28 @@ func TestParseAuditFixType(t *testing.T) {
 	require.Equal(t, "", a.Issues[1].FixType, "缺省 fix_type 应为空（按 ledger 处理）")
 }
 
+// TestParseAuditScopeFields 验证 parseAudit 正确解析作用域三字段
+// （target_scope/dimension/direction）。parseAudit 不做归一化：缺省保留为空，
+// 由守卫识别旧数据、由使用点按安全缺省（active_volume/forward_fix）处理。
+func TestParseAuditScopeFields(t *testing.T) {
+	text := "结论\n```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"x\",\"issues\":[" +
+		"{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"a\",\"desc\":\"d\",\"fix_type\":\"ledger\",\"target_scope\":\"frozen_volume\",\"dimension\":\"character\",\"direction\":\"retcon_candidate\"}," +
+		"{\"id\":\"I2\",\"level\":\"P1\",\"area\":\"b\",\"desc\":\"e\",\"fix_type\":\"ledger\"}]}\n```"
+	a := parseAudit(text)
+	require.Len(t, a.Issues, 2)
+	require.Equal(t, TargetScopeFrozenVolume, a.Issues[0].TargetScope, "显式 target_scope 应被解析")
+	require.Equal(t, "character", a.Issues[0].Dimension, "显式 dimension 应被解析")
+	require.Equal(t, DirectionRetconCandidate, a.Issues[0].Direction, "显式 direction 应被解析")
+	require.Equal(t, "", a.Issues[1].TargetScope, "缺省 target_scope 应保留为空（不归一化）")
+	require.Equal(t, "", a.Issues[1].Dimension, "缺省 dimension 应保留为空（不归一化）")
+	require.Equal(t, "", a.Issues[1].Direction, "缺省 direction 应保留为空（不归一化）")
+}
+
 // TestBodyIssuesOf 验证 bodyIssuesOf 仅析出正文级项，并尽力解析涉及章节号。
 func TestBodyIssuesOf(t *testing.T) {
 	audit := AuditData{Issues: []AuditIssue{
-		{ID: "I1", Level: "P0", Area: "开篇过签力", Desc: "前三章未立人设", FixType: FixTypeBody},
+		{ID: "I1", Level: "P0", Area: "开篇过签力", Desc: "前三章未立人设", FixType: FixTypeBody,
+			TargetScope: TargetScopeFrozenVolume, Dimension: "character", Direction: DirectionRetconCandidate},
 		{ID: "I2", Level: "P1", Area: "长线牵引", Desc: "timeline#42 伏笔未回收", FixType: "ledger"},
 		{ID: "I3", Level: "P1", Area: "节奏爽点", Desc: "第6-8章爽点断档", FixType: FixTypeBody},
 	}}
@@ -629,6 +722,9 @@ func TestBodyIssuesOf(t *testing.T) {
 	require.Equal(t, "I1", items[0].ID)
 	require.Empty(t, items[0].Chapters, "I1 未带章节号则章节列表为空")
 	require.Equal(t, []int64{6, 7, 8}, items[1].Chapters, "第6-8章区间应解析为 [6,7,8]")
+	require.Equal(t, TargetScopeFrozenVolume, items[0].TargetScope, "RewriteItem 应携带源 issue 的 target_scope")
+	require.Equal(t, "character", items[0].Dimension, "RewriteItem 应携带源 issue 的 dimension")
+	require.Equal(t, DirectionRetconCandidate, items[0].Direction, "RewriteItem 应携带源 issue 的 direction")
 }
 
 // TestServiceFixAllFixedSkipsToReaudit 验证断点续修边界：全部问题已修复但复评未跑

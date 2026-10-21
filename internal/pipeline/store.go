@@ -122,12 +122,29 @@ type GateContext struct {
 }
 
 // AuditIssue 是签约体检发现的一条问题。
+// issue 三枚举（卷级作用域，§0.4 冻结）：target_scope / dimension / direction。
+const (
+	TargetScopeActiveVolume  = "active_volume"    // 当前活跃卷，可自动修（缺省安全值）
+	TargetScopeFrozenVolume  = "frozen_volume"    // 已冻结定稿卷，禁止自动回改
+	TargetScopeNone          = "none"             // 全书级 / 不涉具体卷
+	DirectionForwardFix      = "forward_fix"      // 前向适配：改活跃卷适配已定稿前卷（默认）
+	DirectionRetconCandidate = "retcon_candidate" // 硬矛盾且无法前向消解，需作者审批
+	DimensionNone            = "none"             // 不属四维的纯质量问题（节奏/爽点等）
+)
+
 type AuditIssue struct {
 	ID      string `json:"id"`                 // 问题编号，如 I1
 	Level   string `json:"level"`              // P0（阻断签约）/ P1（提升竞争力）
-	Area    string `json:"area"`               // 维度，如 开篇过签力 / 节奏爽点
+	Area    string `json:"area"`               // 展示标签（D4 降级）：如 开篇过签力 / 节奏爽点
 	Desc    string `json:"desc"`               // 问题描述
 	FixType string `json:"fix_type,omitempty"` // 修复类型：body（正文级，需章节重写）/ ledger（台账/卷纲/可 edit 修补）；缺省按 ledger
+	// TargetScope 问题指向的卷作用域：active_volume / frozen_volume / none（枚举见上方常量）。
+	TargetScope string `json:"target_scope,omitempty"`
+	// Dimension 机器归属维度（四维 series bible，路由用）：character / locus_arc / timeline /
+	// reader_pov；不属四维的纯质量问题填 none。
+	Dimension string `json:"dimension,omitempty"`
+	// Direction 修复方向：forward_fix（默认）/ retcon_candidate。
+	Direction string `json:"direction,omitempty"`
 }
 
 // FixTypeBody 标记该 issue 为「正文级」——无法靠 S5 台账/单章 edit 修补解决，
@@ -136,12 +153,16 @@ const FixTypeBody = "body"
 
 // RewriteItem 是回流到 S3 章节重写回路的一条正文级问题（来自体检 issue 的 body 类）。
 // 持久化于 GateContext.RewriteBacklog，供 G4 闸门展示与 S3 写作回路消费（优先重写被标记章节）。
+// TargetScope/Direction 与源 issue 一致，供重写派发的冻结卷写保护（G_freeze）判路。
 type RewriteItem struct {
-	ID       string  `json:"id"`
-	Level    string  `json:"level"`
-	Area     string  `json:"area"`
-	Desc     string  `json:"desc"`
-	Chapters []int64 `json:"chapters,omitempty"` // 从 area/desc 解析出的涉及章节号（用于写作回路定位）
+	ID          string  `json:"id"`
+	Level       string  `json:"level"`
+	Area        string  `json:"area"`
+	Desc        string  `json:"desc"`
+	Chapters    []int64 `json:"chapters,omitempty"` // 从 area/desc 解析出的涉及章节号（用于写作回路定位）
+	TargetScope string  `json:"target_scope,omitempty"`
+	Dimension   string  `json:"dimension,omitempty"`
+	Direction   string  `json:"direction,omitempty"`
 }
 
 // AuditData 是 S4 签约体检的结构化结果，序列化进 GateContext.Audit。

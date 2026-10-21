@@ -909,6 +909,32 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		}
 		return
 	}
+	// 陈旧 run 守卫 2（仅签约体检）：体检结果缺作用域三字段（target_scope/dimension/direction，
+	// 卷级作用域特性落地前的旧版数据）。缺字段无法做冻结卷写保护与前向默认路由，宁可交回用户
+	// 重跑体检，也不带盲区派发。蓝图体检不涉卷作用域（卷纲层、无冻结卷），豁免。
+	// 阈值 >=2 与守卫 1 一致，避免解析失败的单条兜底 issue 误判。
+	if ctxt.AuditKind != "blueprint" && len(auditData.Issues) >= 2 && !auditHasScopeFields(auditData) {
+		s.logger.Warn("S5 修复：检测到陈旧体检（缺作用域字段），拒绝派发",
+			"run_id", runID, "issues", len(auditData.Issues))
+		s.setDispatching(ctx, runID, false)
+		emitFixDone(ctx, map[string]any{
+			"run_id":      runID,
+			"novel_id":    novelID,
+			"ok":          false,
+			"stale_audit": true,
+			"error":       "体检结果缺少 target_scope/dimension/direction 字段（旧版数据不兼容卷级作用域路由）；请重新发起体检/流水线以启用冻结卷写保护与前向适配。",
+		})
+		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+			cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
+			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
+				s.logger.Error("S5 修复：陈旧体检落暂停失败", "err", serr)
+			}
+			emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+				Status: StatusPaused,
+				Note:   "体检结果缺少 target_scope/dimension/direction 字段（旧版数据不兼容卷级作用域路由），请重新发起体检/流水线。"})
+		}
+		return
+	}
 
 	// 断点续修：跳过已修复/已跳过/已路由重写（rewrite）问题（此前批次完成并落库的），只修剩余部分。
 	// 注意：旧断点与新体检清单 ID 撞车的问题由 executeAudit 落新体检结果时重置
@@ -1001,13 +1027,15 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		for _, it := range batch {
 			batchIssues = append(batchIssues, FixIssuePayload{
 				ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc, Status: "fixing",
+				TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction,
 			})
 		}
 		// 全量问题清单（含逐项状态）：前端在修复清单里给每个问题标注
 		// 待修复 / 正在修复 / 已修复，用户不用猜 LLM 做到哪了。
 		allIssues := make([]FixIssuePayload, 0, len(auditData.Issues))
 		for _, it := range auditData.Issues {
-			p := FixIssuePayload{ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc}
+			p := FixIssuePayload{ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
+				TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction}
 			switch {
 			case isFixed[it.ID]:
 				p.Status = "fixed"
@@ -1471,8 +1499,11 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 // finalAuditPrompt 构造 S6 完本级终检的任务提示词。
 func finalAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
-		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
+		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\",\"target_scope\":\"active_volume|frozen_volume|none\",\"dimension\":\"character|locus_arc|timeline|reader_pov|none\",\"direction\":\"forward_fix|retcon_candidate\"}]}——"+
 		"fix_type 必填：body=正文级需章节重写（将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
+		"target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"+
+		"dimension 必填：character=角色 | locus_arc=地点·弧线 | timeline=时间线 | reader_pov=读者视角（series bible 四维）；不属四维的纯质量问题（节奏/爽点/文笔等）填 none。"+
+		"direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID)
 }
 
@@ -1706,8 +1737,11 @@ func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, 
 func stockAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，**逐章通读所有已落库章节**（不得抽样跳章），"+
 		"从签约编辑视角评估：开篇钩子与过签力、人设记忆点、节奏与爽点密度、世界观/设定自洽、完本潜力、题材契合与数据预期等维度，逐维打分并举证；"+
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\",\"target_scope\":\"active_volume|frozen_volume|none\",\"dimension\":\"character|locus_arc|timeline|reader_pov|none\",\"direction\":\"forward_fix|retcon_candidate\"}]}——"+
 		"fix_type 必填：body=正文级需章节重写（将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
+		"target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"+
+		"dimension 必填：character=角色 | locus_arc=地点·弧线 | timeline=时间线 | reader_pov=读者视角（series bible 四维）；不属四维的纯质量问题（节奏/爽点/文笔等）填 none。"+
+		"direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
 }
 
@@ -1817,6 +1851,18 @@ func auditHasFixType(audit AuditData) bool {
 	return false
 }
 
+// auditHasScopeFields 判断体检结果是否已携带作用域三字段（target_scope/dimension/direction）。
+// 卷级作用域特性落地前的旧版 audit 全部缺省，无法做冻结卷写保护与前向默认路由——
+// 供 executeFix 的陈旧 run 守卫使用（与 auditHasFixType 同一先例，阈值语义一致）。
+func auditHasScopeFields(audit AuditData) bool {
+	for _, it := range audit.Issues {
+		if it.TargetScope != "" || it.Dimension != "" || it.Direction != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // bodyIssuesOf 从体检结果中析出所有正文级（fix_type=body）问题，构造回流 S3 重写回路的清单。
 func bodyIssuesOf(audit AuditData) []RewriteItem {
 	items := make([]RewriteItem, 0, len(audit.Issues))
@@ -1825,11 +1871,14 @@ func bodyIssuesOf(audit AuditData) []RewriteItem {
 			continue
 		}
 		items = append(items, RewriteItem{
-			ID:       it.ID,
-			Level:    it.Level,
-			Area:     it.Area,
-			Desc:     it.Desc,
-			Chapters: parseChapterRefs(it.Area, it.Desc),
+			ID:          it.ID,
+			Level:       it.Level,
+			Area:        it.Area,
+			Desc:        it.Desc,
+			Chapters:    parseChapterRefs(it.Area, it.Desc),
+			TargetScope: it.TargetScope,
+			Dimension:   it.Dimension,
+			Direction:   it.Direction,
 		})
 	}
 	return items
@@ -1926,8 +1975,11 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 func signabilityPrompt(novelID int64, scopeText string) string {
 	return fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\"}]}——"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\",\"target_scope\":\"active_volume|frozen_volume|none\",\"dimension\":\"character|locus_arc|timeline|reader_pov|none\",\"direction\":\"forward_fix|retcon_candidate\"}]}——"+
 		"fix_type 必填：body=正文级需章节重写（S5 修不动，将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
+		"target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"+
+		"dimension 必填：character=角色 | locus_arc=地点·弧线 | timeline=时间线 | reader_pov=读者视角（series bible 四维）；不属四维的纯质量问题（节奏/爽点/文笔等）填 none。"+
+		"direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText)
 }
 
