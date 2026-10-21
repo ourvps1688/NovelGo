@@ -79,6 +79,9 @@ export interface FixProgressState {
   // 前端据此展示「已转交章节重写」而非「修复完成」，避免「完成但零修复」的误导。
   rewriteHandoff?: boolean;
   rewriteCount?: number;
+  // 陈旧体检：本 run 的体检结果缺 fix_type 字段（旧版数据不兼容自动重写路由），
+  // 后端拒绝派发并交回用户重跑体检。前端据此展示专门提示，避免与普通修复失败混淆。
+  stale?: boolean;
 }
 
 // S5 修复实时活动流的一条记录（来自 pipeline-agent:1 的 AgentEvent 工具事件）。

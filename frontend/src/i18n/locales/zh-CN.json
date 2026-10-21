@@ -1866,6 +1866,8 @@
       "failed": "修复失败",
       "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
       "rewriteHandoff": "已转交章节重写（{{count}} 项），请在写作页重写相关章节后重新复评。",
+      "stale": "体检数据不兼容，已暂停",
+      "staleHint": "本次运行的体检结果缺少 fix_type 字段（旧版数据），自动重写路由无法启用；请勿点击「恢复」，请重新发起体检/流水线。",
       "rewriteProgress": {
         "rewriting": "正在自动重写第 {{index}}/{{total}} 章……",
         "done": "已自动重写 {{done}}/{{total}} 章，正在回到复评。",

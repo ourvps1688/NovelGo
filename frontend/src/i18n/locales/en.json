@@ -1905,6 +1905,8 @@
       "failed": "Fix failed",
       "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
       "rewriteHandoff": "Handed off to chapter rewrite ({{count}} items); please rewrite the related chapters in the writing view, then re-audit.",
+      "stale": "Audit data incompatible, paused",
+      "staleHint": "This run's audit result is missing the fix_type field (legacy data); the auto-rewrite route cannot engage. Do NOT click Resume — re-run the audit/pipeline instead.",
       "rewriteProgress": {
         "rewriting": "Auto-rewriting chapter {{index}}/{{total}}…",
         "done": "Auto-rewrote {{done}}/{{total}} chapters; returning to re-audit.",

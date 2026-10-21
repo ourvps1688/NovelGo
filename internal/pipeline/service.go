@@ -718,6 +718,33 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	}
 	auditData := parseAudit(auditJSON)
 
+	// 陈旧 run 守卫：本 run 的体检结果缺 fix_type 字段（fix_type 特性落地前创建的旧版数据）。
+	// 旧 audit 的 issue 全部缺省该字段，会被当成 ledger 一路派发修复、耗尽 18 轮预算后失败，
+	// 且正文级回流/自动重写路由永不触发。检测到此类「陈旧体检」应明确交回用户重跑体检，
+	// 而非默默当 ledger 跑、把轮数吃光。阈值 >=2 避免与解析失败的单条兜底 issue 误判。
+	if len(auditData.Issues) >= 2 && !auditHasFixType(auditData) {
+		s.logger.Warn("S5 修复：检测到陈旧体检（缺 fix_type），拒绝派发",
+			"run_id", runID, "issues", len(auditData.Issues))
+		s.setDispatching(ctx, runID, false)
+		emitFixDone(ctx, map[string]any{
+			"run_id":      runID,
+			"novel_id":    novelID,
+			"ok":          false,
+			"stale_audit": true,
+			"error":       "体检结果缺少 fix_type 字段（旧版数据不兼容自动重写路由）；请重新发起体检/流水线以启用正文级回流与自动重写。",
+		})
+		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+			cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
+			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
+				s.logger.Error("S5 修复：陈旧体检落暂停失败", "err", serr)
+			}
+			emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+				Status: StatusPaused,
+				Note:   "体检结果缺少 fix_type 字段（旧版数据不兼容自动重写路由），请重新发起体检/流水线。"})
+		}
+		return
+	}
+
 	// 断点续修：跳过已修复/已跳过/已路由重写（rewrite）问题（此前批次完成并落库的），只修剩余部分。
 	// 注意：旧断点与新体检清单 ID 撞车的问题由 executeAudit 落新体检结果时重置
 	// FixStates 解决（新一轮问题就是新问题），这里「全部命中断点」只可能是修复
@@ -857,8 +884,18 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		if err != nil {
 			s.logger.Error("S5 修复执行失败", "run_id", runID, "batch", i+1, "err", err)
 			s.setDispatching(ctx, runID, false)
+			// 透出供应商健康度：若近期频发流式空闲超时，提示用户这是 Provider 挂起而非代码问题，
+			// 避免误判为「修复功能坏了」。idle 超时由 llm 层空闲看门狗记录。
+			idleCount := llm.RecentIdleTimeouts(15 * time.Minute)
+			idleNote := ""
+			if idleCount > 0 {
+				idleNote = fmt.Sprintf("；近 15 分钟 LLM 流式空闲超时 %d 次（疑似供应商挂起，建议检查 Provider 或稍后重跑）", idleCount)
+			}
 			emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": false,
-				"error": err.Error(), "batch_index": i + 1, "batch_total": len(batches)})
+				"error":                  err.Error() + idleNote,
+				"batch_index":            i + 1,
+				"batch_total":            len(batches),
+				"provider_idle_timeouts": idleCount})
 			// 失败落地为 paused（保留已完成批次的断点），恢复时从剩余问题继续。
 			if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
 				cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
@@ -867,8 +904,8 @@ func (s *Service) executeFix(runID string, novelID int64) {
 				}
 				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
 					Status: StatusPaused,
-					Note: fmt.Sprintf("第 %d/%d 批修复失败：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）",
-						i+1, len(batches), err.Error(), len(fixedIDs))})
+					Note: fmt.Sprintf("第 %d/%d 批修复失败：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）%s",
+						i+1, len(batches), err.Error(), len(fixedIDs), idleNote)})
 			}
 			return
 		}
@@ -1568,6 +1605,18 @@ func parseAudit(text string) AuditData {
 		data.Issues = []AuditIssue{}
 	}
 	return data
+}
+
+// auditHasFixType 判断体检结果是否已携带 fix_type 字段。
+// 旧版流水线产生的 audit（fix_type 特性落地前）其 issue 全部缺省该字段，
+// 若直接按 ledger 派发修复会耗尽轮数失败且正文级回流永不触发——供 executeFix 的陈旧 run 守卫使用。
+func auditHasFixType(audit AuditData) bool {
+	for _, it := range audit.Issues {
+		if it.FixType != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // bodyIssuesOf 从体检结果中析出所有正文级（fix_type=body）问题，构造回流 S3 重写回路的清单。

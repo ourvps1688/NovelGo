@@ -22,5 +22,10 @@
 
 ## S5「完成但零修复」死循环修复（2026-10-21）
 - 根因：当体检问题全部为 body 级时，`executeFix` 路由到 RewriteBacklog 后 pending 空 → 误入 `finishFixAndReaudit` → 广播 `ok:true`（"修复完成"）+ 复评 → 复评复报同一批 body 问题 → 死循环。用户看到"修复完成"却无有效修复。另：台账批次曾因 MaxTurns=12 在 LLM 供应商流式挂起（idle watchdog 取消）时耗尽而失败。
-- 修复：新增 `finishFixHandoffRewrite`——pending 空且存在 RewriteBacklog 时，广播带 `rewrite_handoff` 标记的 fix_done、将 S5 置 paused 并提示"已转交章节重写，请在写作页重写后重新复评"，**不再复评**；fix MaxTurns 12→18。前端 FixProgressView 新增"已转交章节重写(N)"状态 + RewriteBacklogPanel，i18n 加 `fixProgress.rewriteHandoff`。测试 `TestServiceFixHandoffRewriteWhenOnlyBodyIssues`。
+- 修复（手动交接版 commit c878cc6b）：新增 `finishFixHandoffRewrite`——pending 空且存在 RewriteBacklog 时，广播带 `rewrite_handoff` 标记的 fix_done、将 S5 置 paused 并提示"已转交章节重写，请在写作页重写后重新复评"，**不再复评**；fix MaxTurns 12→18。前端 FixProgressView 新增"已转交章节重写(N)"状态 + RewriteBacklogPanel，i18n 加 `fixProgress.rewriteHandoff`。测试 `TestServiceFixHandoffRewriteWhenOnlyBodyIssues`。
+
+## 自动 S3 章节重写回路（2026-10-21，commit cce0973b）
+- 在手动交接基础上，把"转交 S3"升级为**流水线自动执行**：S5 交回时自动派发重写 agent 逐章重改，再自动复评闭环（达标自动出清单）。
+- 新增 `RewriteAgent` 类型（复用 FixAgent 白名单：整章覆写 `edit` + statesync 写工具）；内置技能 `internal/skill/builtin/chapter-rewrite.md`（整章 `full_replace`，过 `maybeScoreChapter` 质量门禁）。`GateContext.RewriteRounds` 限制重写→复评循环（上限 `autoRewriteCap=2`）。`EvRewriteProgress` 逐章广播进度。
+- `finishFixHandoffRewrite` 现在：pending 空且有 RewriteBacklog → 串行派发重写 agent、广播 progress、成功/无定位章节/达上限则自动重跑 `executeAudit` 闭合「重写→复评」；达上限或章节不可定位则回落手动交接（paused + rewrite_handoff）作安全阀。前端 `RewriteProgressView` 展示逐章进度，i18n 加 `rewriteProgress.*`。测试 `TestServiceAutoRewriteDispatch`。
 - 已知环境限制：LLM 供应商流式偶发挂起（`llm stream idle watchdog fired` 刷屏）属供应商问题非应用 bug；并发 statesync 子 Agent 可能长时间运行（"日志 LLM 仍在跑"常因此），非阻断。

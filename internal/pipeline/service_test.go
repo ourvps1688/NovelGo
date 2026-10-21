@@ -288,9 +288,9 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	ctx := context.Background()
 
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"三处待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文"},` +
-		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失"}]}`
+		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger"},` +
+		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失","fix_type":"ledger"}]}`
 	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
 	var fixPrompts []string
 	var fixSessions []string
@@ -460,6 +460,57 @@ func TestServiceFixHandoffRewriteWhenOnlyBodyIssues(t *testing.T) {
 	require.NotNil(t, fixDonePayload, "应广播 fix_done")
 	require.Equal(t, true, fixDonePayload["rewrite_handoff"], "fix_done 应带 rewrite_handoff 标记")
 	require.Equal(t, int(2), fixDonePayload["rewrite_count"], "rewrite_count 应为 2")
+}
+
+// TestServiceFixRejectsStaleAuditWithoutFixType 验证陈旧 run 守卫：fix_type 特性落地前创建的
+// 旧版体检结果其 issue 全部缺省 fix_type 字段，若直接按 ledger 派发会耗尽轮数失败且正文回流
+// 永不触发。executeFix 应拒绝派发、明确交回用户重跑体检（stale_audit=true、暂停），而非默默跑空。
+func TestServiceFixRejectsStaleAuditWithoutFixType(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 旧版 audit：两条 issue 均无 fix_type（新代码应判定为陈旧、拒绝派发）。
+	auditJSON := `{"verdict":"needs_fix","score":20,"summary":"旧版体检","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"中段节奏拖沓"}]}`
+
+	var fixCalled, auditCalled bool
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "signability-fix" {
+			fixCalled = true
+		}
+		if name == "signability-audit" {
+			auditCalled = true
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	var fixDonePayload map[string]any
+	oldEmit := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
+	defer func() { emitFixDone = oldEmit }()
+
+	run, err := svc.StartPipeline(ctx, 408, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.False(t, fixCalled, "陈旧体检不应派发修复 agent（避免耗尽轮数空跑）")
+	require.False(t, auditCalled, "陈旧体检不应触发复评")
+	require.NotNil(t, fixDonePayload, "应广播 fix_done")
+	require.Equal(t, false, fixDonePayload["ok"], "陈旧体检应 ok=false")
+	require.Equal(t, true, fixDonePayload["stale_audit"], "fix_done 应带 stale_audit 标记")
+	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "fix_type", "错误提示应说明缺 fix_type 字段")
 }
 
 // TestServiceAutoRewriteDispatch 验证：当重写清单指向可定位章节时，finishFixHandoffRewrite

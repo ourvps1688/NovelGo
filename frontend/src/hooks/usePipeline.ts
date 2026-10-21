@@ -132,6 +132,7 @@ export function usePipeline(novelId: number) {
         error?: string;
         rewrite_handoff?: boolean;
         rewrite_count?: number;
+        stale_audit?: boolean;
       }) => {
         if (p.novel_id !== novelId) return;
         setFixProgress((prev) => ({
@@ -141,6 +142,7 @@ export function usePipeline(novelId: number) {
           error: p.error,
           rewriteHandoff: p.rewrite_handoff ?? false,
           rewriteCount: p.rewrite_count ?? 0,
+          stale: p.stale_audit ?? false,
         }));
       },
     );

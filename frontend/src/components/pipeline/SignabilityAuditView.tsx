@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import {
+  AlertTriangle,
   CheckCircle2,
   CircleSlash2,
   Clock,
@@ -447,7 +448,9 @@ function FixProgressView({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        {fixProgress?.rewriteHandoff ? (
+        {fixProgress?.stale ? (
+          <AlertTriangle className="h-4 w-4 text-warning-foreground" />
+        ) : fixProgress?.rewriteHandoff ? (
           <PenLine className="h-4 w-4 text-warning-foreground" />
         ) : fixProgress?.ok === false ? (
           <XCircle className="h-4 w-4 text-danger-foreground" />
@@ -459,19 +462,21 @@ function FixProgressView({
           <CheckCircle2 className="h-4 w-4 text-warning-foreground" />
         )}
         <span className="text-sm font-medium">
-          {fixProgress?.rewriteHandoff
-            ? t("pipeline.fixProgress.rewriteHandoff", {
-                count: fixProgress?.rewriteCount ?? 0,
-              })
-            : fixProgress?.ok === false
-              ? t("pipeline.fixProgress.failed")
-              : running
-                ? batchTotal > 1
-                  ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
-                  : fixingLabel
-                : idle
-                  ? t("pipeline.fixProgress.idle")
-                  : t("pipeline.fixProgress.done")}
+          {fixProgress?.stale
+            ? t("pipeline.fixProgress.stale")
+            : fixProgress?.rewriteHandoff
+              ? t("pipeline.fixProgress.rewriteHandoff", {
+                  count: fixProgress?.rewriteCount ?? 0,
+                })
+              : fixProgress?.ok === false
+                ? t("pipeline.fixProgress.failed")
+                : running
+                  ? batchTotal > 1
+                    ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
+                    : fixingLabel
+                  : idle
+                    ? t("pipeline.fixProgress.idle")
+                    : t("pipeline.fixProgress.done")}
         </span>
       </div>
 
@@ -481,7 +486,12 @@ function FixProgressView({
         </p>
       ) : null}
 
-      {fixProgress?.ok === false ? (
+      {fixProgress?.stale ? (
+        <p className="flex items-center gap-1 text-muted-foreground text-xs">
+          <AlertTriangle className="h-3 w-3" />
+          {t("pipeline.fixProgress.staleHint")}
+        </p>
+      ) : fixProgress?.ok === false ? (
         <p className="flex items-center gap-1 text-muted-foreground text-xs">
           <Wrench className="h-3 w-3" />
           {t("pipeline.fixProgress.resumeHint")}

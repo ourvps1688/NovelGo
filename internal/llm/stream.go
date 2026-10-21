@@ -106,6 +106,7 @@ func newIdleWatchdog(cancel context.CancelFunc, logger *slog.Logger) *idleWatchd
 						wd.logger.Warn("llm stream idle watchdog fired, canceling request",
 							"idle", time.Since(last).String(), "timeout", wd.timeout.String())
 					}
+					recordIdleFire()
 					wd.cancel()
 				}
 				return
@@ -754,4 +755,43 @@ func clampMaxTokens(maxTokens, contextWindow, promptTokens int) int {
 		return available
 	}
 	return maxTokens
+}
+
+// idleFireLog 记录近期「流式空闲超时（idle watchdog 触发）」的发生时刻，用于向上层
+// 暴露 Provider 健康度——长时间挂起会让修复/写作/重写等长任务反复失败。仅保留最近
+// maxIdleFires 条，避免长时间运行的进程内存膨胀。
+type idleFireLog struct {
+	mu    sync.Mutex
+	times []time.Time
+}
+
+const maxIdleFires = 200
+
+var idleFires = &idleFireLog{}
+
+func (l *idleFireLog) record() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.times = append(l.times, time.Now())
+	if len(l.times) > maxIdleFires {
+		l.times = l.times[len(l.times)-maxIdleFires:]
+	}
+}
+
+// recordIdleFire 由 idle watchdog 在超时触发时调用，记录一次 Provider 疑似挂起事件。
+func recordIdleFire() { idleFires.record() }
+
+// RecentIdleTimeouts 返回最近 window 内发生的空闲超时次数（Provider 疑似挂起的信号）。
+// 上层（如 S5 修复失败）可用它判断失败是否由供应商挂起而非代码逻辑导致，并据此给出提示。
+func RecentIdleTimeouts(window time.Duration) int {
+	idleFires.mu.Lock()
+	defer idleFires.mu.Unlock()
+	cutoff := time.Now().Add(-window)
+	count := 0
+	for _, t := range idleFires.times {
+		if t.After(cutoff) {
+			count++
+		}
+	}
+	return count
 }
