@@ -1903,7 +1903,8 @@
       "resumeHint": "Fix interrupted: click Resume to continue with the remaining issues (completed ones are kept).",
       "done": "Fix completed, re-auditing automatically…",
       "failed": "Fix failed",
-      "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly."
+      "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
+      "rewriteHandoff": "Handed off to chapter rewrite ({{count}} items); please rewrite the related chapters in the writing view, then re-audit."
     },
     "fixStatus": {
       "pending": "Pending",

@@ -406,6 +406,58 @@ func TestServiceBodyIssuesRoutedToRewriteBacklog(t *testing.T) {
 	require.NotContains(t, fixPrompts[0], "I1", "修复批次不应包含正文级 I1（已路由到 S3 重写）")
 }
 
+// TestServiceFixHandoffRewriteWhenOnlyBodyIssues 验证：当体检问题全部为正文级（fix_type=body）、
+// 无可修台账项时，executeFix 必须「交回重写」而非谎报「修复完成」后立刻复评
+// （否则复评必复报同一批问题，形成「完成但零修复」死循环）。
+func TestServiceFixHandoffRewriteWhenOnlyBodyIssues(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 全部为正文级问题：S5 改不动，必须回流 S3 重写。
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"正文问题","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"},` +
+		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"中段节奏拖沓","fix_type":"body"}]}`
+
+	var fixCalled, auditCalled bool
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "signability-fix" {
+			fixCalled = true
+		}
+		if name == "signability-audit" {
+			auditCalled = true
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	var fixDonePayload map[string]any
+	oldEmit := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
+	defer func() { emitFixDone = oldEmit }()
+
+	run, err := svc.StartPipeline(ctx, 407, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	// 交回重写后阶段应暂停（而非进入复评闸门）。
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.False(t, fixCalled, "无台账级问题，修复 agent 不应被调用")
+	require.False(t, auditCalled, "交回重写不应触发复评（避免复报同一批问题）")
+	require.Len(t, finalCtxt.RewriteBacklog, 2, "两个正文级问题都应流入 RewriteBacklog")
+	require.NotNil(t, fixDonePayload, "应广播 fix_done")
+	require.Equal(t, true, fixDonePayload["rewrite_handoff"], "fix_done 应带 rewrite_handoff 标记")
+	require.Equal(t, int(2), fixDonePayload["rewrite_count"], "rewrite_count 应为 2")
+}
+
 // TestParseAuditFixType 验证 parseAudit 正确解析 fix_type 字段。
 func TestParseAuditFixType(t *testing.T) {
 	text := "结论\n```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"x\",\"issues\":[" +

@@ -767,7 +767,14 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		}
 	}
 	if len(pending) == 0 {
-		// 全部问题已修复/已跳过/已路由重写（如复评前中断后恢复）：直接进入复评。
+		// 无台账级问题待修。两种语义必须区分，否则会谎报「修复完成」后立刻复评，
+		// 而复评必复报同一批正文级问题，形成「完成但零修复」死循环：
+		//  (a) 存在回流 S3 重写的清单 → 这些问题 S5 改不动，明确交回用户重写，不再复评；
+		//  (b) 既无待修也无重写清单（全部此前已 fixed/skipped）→ 才进复评做最终验证。
+		if len(backlog) > 0 {
+			s.finishFixHandoffRewrite(ctx, runID, novelID, ctxt)
+			return
+		}
 		s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
 		return
 	}
@@ -834,7 +841,7 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		out, err := s.skillRunner(ctx, fixSkill, SkillInput{
 			NovelID:   novelID,
 			Prompt:    fixPromptText,
-			MaxTurns:  12,
+			MaxTurns:  18,
 			SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
 		})
 		if err != nil {
@@ -903,6 +910,42 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 	}
 	s.setDispatching(ctx, runID, false)
 	s.executeAudit(runID, novelID)
+}
+
+// finishFixHandoffRewrite 处理「本轮无台账级问题可修、但存在正文级重写清单」的情况：
+// 这些问题必须回 S3 重写章节才能解决，S5 用补丁改不动。若谎报「修复完成」并立刻复评，
+// 复评必复报同一批问题，形成「完成但零修复」死循环。故明确交回用户、停在当前阶段（paused），
+// 并广播带 rewrite_handoff 标记的 fix_done，前端据此展示「已转交章节重写」而非「修复完成」。
+// 用户需在写作页重写相关章节后，再重新进入修复/复评。
+func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
+	// 守卫：若异步期间状态已变更（如用户中止），不重复处理。
+	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+		(cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
+		s.setDispatching(ctx, runID, false)
+		return
+	}
+	n := len(ctxt.RewriteBacklog)
+	msg := fmt.Sprintf(
+		"本轮无台账级问题可修；%d 个正文级问题已转交 S3 章节重写回路，请在写作页重写相关章节后重新进入修复/复评",
+		n,
+	)
+	emitFixDone(ctx, map[string]any{
+		"run_id":          runID,
+		"novel_id":        novelID,
+		"ok":              true,
+		"rewrite_handoff": true,
+		"rewrite_count":   n,
+		"error":           msg,
+	})
+	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+		cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
+		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
+			s.logger.Error("S5 修复：重写交回落暂停失败", "err", serr)
+		}
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+			Status: StatusPaused, Note: msg})
+	}
+	s.setDispatching(ctx, runID, false)
 }
 
 // runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：

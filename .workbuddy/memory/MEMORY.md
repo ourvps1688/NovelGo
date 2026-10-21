@@ -1,82 +1,26 @@
 # NovelGo 项目长期备忘
 
 ## 项目性质
-- NovelGo = sigpanic/goink（Go 1.25 + Wails v2 + React 19 + SQLite/ONNX，AGPL-3.0 + NOTICE 附加条款）的合规派生 fork。
-- 硬性合规：必须保留 "Based on Goink by 响滩 (sigpanic) — https://github.com/sigpanic/goink" 与 "This is a modified version of Goink..." 声明（README/NOTICE/About 对话框），不得移除或暗示原作者背书。
+- NovelGo = sigpanic/goink（Go 1.25 + Wails v2 + React 19 + SQLite/ONNX，AGPL-3.0 + NOTICE）的合规派生 fork。硬性合规：README/NOTICE/About 必须保留 "Based on Goink by 响滩 (sigpanic)" 与 "This is a modified version of Goink..." 声明，不得移除或暗示原作者背书。
 
 ## 关键约定
-- 模块路径 `github.com/novelgo/novelgo`；数据目录 `~/NovelGo`；小说元数据文件 `novelgo.md`。
-- 品牌 mark：N+G 字母组合 monogram（用户指定，明确不要书的意象）；wails 生成类型名前缀 `novelgo_novelgo`。
-- skills 仓库 `ourvps1688/NovelGo-skills`、主仓库 `ourvps1688/NovelGo`（已创建并推送，master/main 分支）。
-- git 历史已 unshallow；`origin`=ourvps1688/NovelGo，`upstream`=sigpanic/goink。
+- 模块路径 `github.com/novelgo/novelgo`；数据目录 `~/NovelGo`；品牌 N+G monogram（不要书的意象）。
+- 仓库 `ourvps1688/NovelGo`（origin，SSH `git@github.com:ourvps1688/NovelGo.git`）；skills 仓 `ourvps1688/NovelGo-skills`。git 历史已 unshallow，`upstream`=sigpanic/goink。
 
-## 签约级能力缺口（评估内置 skill 后的核心结论）
-- 现有系统保证了"写得不差"（大纲先行+写后质检+状态维护+review agent+题材模板+AI味硬卡+LLM 6维评分门禁），但**完全没有任何一层保证"能签"**——全仓无 签约/编辑审稿口径/完本/追读/网文数据 概念（grep 证实 internal/ 与 frontend/src/ 均无）。
-- review agent 仅查内部一致性（角色/情节/伏笔/读者认知/弧线），无平台编辑视角；review.ScoreChapter 6 维（字数/情节推进/情绪流爽点/人设一致/去AI味/禁忌）亦无签约维度。
-- 12 内置 skill 仅承载"创作技法方法论"；题材/偏好层覆盖题材/开场抓手/商业化节奏。真正缺的三类"签约智能"：
-  1. **签约/平台审稿口径**（编辑看什么、黄金三章过审、题材契合、人设记忆点、完本潜力、数据预期）——最高优先。
-  2. **宏观故事蓝图/卷纲方法论**（立意→卷纲节奏地图→主支线编织→全局悬念→爽点地图→人物弧总览），现有仅 per-chapter 大纲，无蓝图方法论。
-  3. **世界观/金手指/力量体系设计方法论**（自洽升级体系/金手指规则/卖点化），设定仅存储无设计法。
-- 补充路径：手写"知识/方法论型"skill（pattern 蒸馏系统只能从本书正文归纳 struct/mental，**产不出外部平台知识**，故签约向 skill 必须手写）；可再用 pattern 提取器从用户提供的签约级范本蒸馏风格/套路 skill 互补。新 skill 建议 story-blueprint/worldbuilding-design 设 auto、signability-audit 设 manual，并充实空壳 `next` 让其引用蓝图+签约自检（纯内容改动）。
+## UI / 构建环境
+- 前端只做纯皮肤换肤（index.css 颜色 token），不动组件/布局/功能入口。
+- 前端硬闸门（提交前本地必跑）：`npx prettier --check "src/**/*.{ts,tsx}"` + `npm run i18n:check`（硬编码中文必须进 i18n）。eslint 限 0 error。
+- 改前端源码后必须 `npm run build` 并重启 `wails dev` 才在 webview 生效（dist 为构建产物，非 vite 实时源码）。
+- CGO 构建：PATH 含 mingw64，设 `CGO_CFLAGS=-IC:/tools/sqlite3-headers`。go 在 `C:/Program Files/Go/bin`，wails CLI v2.16.0（go.mod 锁定 v2.16.0）。
+- 推送：`GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`。PAT 在仓库根 `github_pat.txt`（.gitignore，绝不入库）。
 
-## 题材/偏好层（评估内置 skill 时易被漏看）
-- 题材预设不在 12 个内置 skill 里，而在前端偏好层：`frontend/src/components/preference/genreTemplates.ts`（30+ 经语料校准的题材文风卡，覆盖 通用/男频/女频言情/悬疑/历史脑洞/幻想科幻/种田日常 7 组；每张含 开场抓手/冲突发动机/章尾钩子/禁止漂移 + 爽点密度/情绪曲线/字数门槛）。
-- `GenreConstraintPicker.tsx` 把所选题材写为本书偏好（category=创作约束），经既有偏好注入管线每轮常驻生效，无需后端改动。
-- `internal/agentcfg/identity.go` 已内置题材感知规则（爽文≥3500字/章、悬疑≥3000、爽点密度、爽文禁虐主/有仇不过夜、情绪流）。小说 `Genre` 字段由 `novel_state.go` 注入上下文。
-- 结论：评估"签约向"覆盖度时，题材/赛道/平台调性 + 开场抓手 + 商业化节奏已由该层覆盖；12 内置 skill 仅承载"创作技法方法论"，缺的是 worldbuilding/金手指/力量体系设计 与 宏观大纲/卷纲 两套方法论 skill。
+## 流水线状态机（已落地）
+- 阶段 S0/S1/S2/S3/S4/S4b/S5/S6，闸门 G1/G1b/G3b/G4/G终；`Orchestrator.Advance` 唯一裁决。
+- S5 修复闭环：分批（P0 每批1/P1 每批2，每批独立会话 MaxTurns=18）+ 断点续修（`FixStates: fixed/skipped/rewrite`）+ 修复回执（`parseFixReceipt`/`applyFixReceipt`）+ 复评（`finishFixAndReaudit`）。
+- 正文级 issue（`fix_type=body`）不进 S5 批次，显式路由到 `RewriteBacklog`（FixStates=rewrite），须回 S3 重写。
+- 启动恢复：`RecoverInterruptedRuns` 把 running 僵尸置 paused；`ControlPipeline("resume")` 按阶段重派发。
 
-## UI 方向
-- 用户认为当前前端"丑"，但**现阶段只做纯皮肤换肤**：仅改 `frontend/src/index.css` 颜色 token，不动组件/布局/功能入口。
-- 审美参考 AI-NWA（ExplosiveCoderflome/AI-Novel-Writing-Assistant）。**已按用户提供的 AI-NWA 真实截图对版**：极简黑白灰"墨色"风（Notion/Vercel 挂）——亮色 primary 近黑 `oklch(0.24 0.005 260)`、暗色反转近白；白卡片 + 浅灰页底 + 中性细边框；**不是**彩色强调。语义色（tag/tool/danger/success）保留原样。
-- 沙箱 Bash 外网被拦；AI-NWA 视觉以用户贴图为准（微信截图_20260813220038.png）。
-
-## 环境注意
-- **前端提交前的 CI 硬闸门（本地必跑）**：`npx prettier --check "src/**/*.{ts,tsx}"` 与 `npm run i18n:check`（后者会扫描源文件硬编码中文，中文文案必须进 i18n locales）。仅跑 tsc/vite/vitest 不够——Checks #41 曾因此报红。eslint CI 不限 warnings 数（0 error 即过）。
-- **wailsjs 绑定以 wails 自动生成产物为准（convertValues 约定）**：`wails dev`/build 每次重新生成绑定；v2.16 生成器给含嵌套结构体的类（如 ChatInput、SaveAuthorAliasesInput、GetAuthorAliasesResult）加 `convertValues` 方法，**对象字面量直接传参会 TS2345**。调用点必须用 `app.X.createFrom({...})` 构造实例，且 models 导入需为值导入（非 `import type`）才能用 createFrom。手写绑定仅为临时占位，dev 拉起后以重新生成结果为准入库。
-- **沙箱已装 MinGW/gcc**：winlibs GCC 16.2.0 (UCRT,x86_64) 在 `C:/tools/mingw64/bin`；`go` 在 `C:/Program Files/Go/bin`、`wails` 在 `C:/Users/Administrator/go/bin`（均已在 PATH）。wails dev 已跑通（见每日日志）。
-- **Windows 构建前置**：CGO 编译需 `sqlite3.h` → 设 `CGO_CFLAGS=-IC:/tools/sqlite3-headers`（该目录由 mattn/go-sqlite3@v1.14.44 的 `sqlite3-binding.h` 复制而来，详 cross-platform-build.md §7）。构建命令须显式 `export PATH="/c/tools/mingw64/bin:$PATH"`（新 shell 不继承 User PATH）。
-- 本地 ONNX 向量检索为可选能力，缺 `onnxruntime.dll`+`build/bin/models/vocab.txt` 时仅该功能不可用，不影响主程序。
-- 仓库 autocrlf=true 检出为 CRLF，`gofmt -l` 会全量误报，勿据此改格式。
-- **前端改动需重建 dist 才在 webview 生效**：`wails dev` 启动时跑 `frontend:build`（npm run build → tsc -b && vite build）生成 `frontend/dist`，webview 加载的是 dist 构建产物（带 hash 的固定文件名，如 `index-*.js`），**不是** Vite 实时源码；后台 `npm run dev` 仅服务浏览器预览。故改前端源码后，必须 `npm run build` 并重启 `wails dev`（旧的 webview 不会热更到新 dist，表现为"界面没刷新/没加载"）。后台 vite 实时 HMR 只影响独立浏览器预览，不影响 wails 桌面窗口。
-- **wails 版本自动对齐**：本机 wails CLI = v2.16.0（`C:/Users/Administrator/go/bin/wails`，Sep 19 安装）。`wails dev` 启动会把 go.mod 的 wails 版本自动改写为 CLI 版本。仓库 baseline 是 v2.12.0，但工作区会不断被 dev 改回 v2.16.0——回退 2.12 无意义。**结论：正式把项目锁定到 v2.16.0**（go mod tidy 后提交 go.mod/go.sum），该升级对业务代码零影响（仅用 pkg/runtime 基础 API，v2.12→v2.16 签名未变，go build 通过）。
-- **Git 推送凭证（收口用）**：`origin` = `git@github.com:ourvps1688/NovelGo.git`（SSH）。SSH config 在 `C:\Users\Administrator\.ssh\config`（Host github.com → ssh.github.com:443，IdentityFile `id_ed25519_novel2all`，IdentitiesOnly）。PAT 在仓库根 `github_pat.txt`，**已被 .gitignore 忽略，绝不入库**。推送/拉取走 SSH 即可，命令显式 `GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`。预提交钩子含 gofmt + golangci-lint，提交前若报 gofmt 先 `gofmt -w` 对应文件再提交。
-
-## 流水线状态机（PR5 已落地 2026-10-20，commit 6ce39e7e）
-- `internal/pipeline/orchestrator.go` 为唯一流转源（`Orchestrator.Advance`）；`service.go` 的 `ResumePipeline` 已退化为薄壳（`AppendGateDecision` + `Advance`）。
-- S6 完本终检 + G终（`finish`→`finished`、`fix`→S5 复评、`abort`→aborted）已跑通；`auto_run` 一键连跑至首个闸门/安全检查点停（G1、G终仍人工确认，受 `autoFixCap=3` 防无限循环）。
-- S0 入口自动判定已接入 `StartPipeline`（无章→S1 / 有章无台账→S0 / 已就绪→S3）。**S0 对齐补丁（2026-10-20，commit 待推送）**：采用「方案 A + 全量对齐按钮」——进 S3 同时后台 `executeS0Align`（建默认卷挂 `volume_id` + 批量 `statesync` 回填台账，避免导入即烧额度），并叠加按需「全量对齐」按钮（`ControlPipeline("align_full")` → `runFullAlign`：对齐 + `runStockAudit` 现状体检 + `emitStockAudit`）。`pipeline` 与 `mcp_tools`/`agent` 零环，`SetStateSyncRunner` bridge 由 `app/handler.go` 注入（`agent.RunSubAgent` 闭包）。详见 plan §6.5。
-- **启动恢复机制（2026-10-20）**：pipeline 执行体是内存 goroutine + DB 状态，应用重启会产生「DB=running 但无人执行」的僵尸运行。`RecoverInterruptedRuns()`（OnStartup 调用，幂等）把 running 僵尸置 paused + `GateContext.Interrupted` 标记；`ControlPipeline("resume")` 检测到标记后按阶段重派发执行体（S4/S4b→executeAudit、S5→executeFix、S6→executeFinalAudit，均幂等重入有状态守卫），派发后清标记。`set_auto` 只翻 DB 标志、永不派发执行体——不要指望一键连跑能救活僵尸运行。S5 前端 `FixProgressView` 初始态为 idle（「等待修复启动」），不是 done。
-- **S5 分批修复 + Dispatching（2026-10-20，fbebe631）**：`executeFix` 按 `planFixBatches` 分批（P0 每批 1 条、P1 每批 2 条），每批独立会话 + 独立 12 turns 预算（防止 MaxTurns 耗尽整轮失败）；每批成功落 `GateContext.FixStates[issueID]="fixed"` 断点，恢复/续跑跳过已修项，全部完成后 `finishFixAndReaudit` 复评（复评才是修复到位的裁决）。体检/修复/终检失败一律落 paused（不再停 running）；`GateContext.Dispatching` 标记执行体存活，resume → `redispatchIfNeeded` 据此区分软暂停与需重派发；用户暂停在批次边界守卫生效。fix_start 事件带 batch_index/batch_total/done_ids，前端显示批次进度 + 已修复徽章 + 恢复提示。
-
-## A 方案：蓝图体检/修复闭环（2026-10-21，commit e2e5cab3）
-- **定位**：在 S2 阶段补「生成→蓝图体检→修复」闭环，使 S2 成为蓝图生成与蓝图体检/修复的宿主阶段；蓝图体检 pass 后才落 G1 确认闸进 S3，不通过落 G1b 修复闸，修复复用 S5 执行体（按 `AuditKind` 分流）。
-- **流转**：`executeBlueprint` 生成卷后改调 `enterBlueprintAudit`（置 `AuditKind="blueprint"`、S2 running、go `executeAudit`）→ `executeAudit` 按 `AuditKind` 选 `blueprint-audit`/`signability-audit` 技能与提示词 → `emitGateDecision` 按 `AuditKind` 落 G1(pass) 或 G1b(待修) → `advanceS2` 按决策分流（fix→`enterFix` / continue→S3 / modify→重跑蓝图生成）→ `executeFix` 按 `AuditKind` 取 `ctxt.BlueprintAudit`/`ctxt.Audit` 并选 `blueprint-fix`/`signability-fix` → 复评。
-- **新增闸门**：`GateG1b`（蓝图待修）；`GateG1` 现仅用于蓝图体检 pass 后的确认。`GateContext` 新增 `AuditKind string` 与 `BlueprintAudit string`（签约体检结果仍存 `Audit` 字段）。
-- **新增 Agent**：`BlueprintFixAgent`（`agentcfg/identity.go`），限权白名单 `blueprintFixAgentTools`（只读上下文 + `edit`卷纲 + `create_volume`；**不含**章节写、角色/弧线/时间线写、`run_subagent`、`delete_record`）。蓝图体检 AgentType 复用 `SignabilityAgent`（只读体检）。
-- **新增技能（manual）**：`internal/skill/builtin/blueprint-audit.md`（6 维/30，pass 阈值 ≥24/30，只读白名单，JSON 契约同 signability-audit）；`blueprint-fix.md`（限权只改卷纲/补卷，结构性跨台账问题标注交 S5 签约修复）。
-- **前端**：`SignabilityAuditView` 抽取共享 `AuditResultView`/`parseCtx`；`FixProgressView` 加 `fixKind` prop；`BlueprintWorkflowView` 新增 G1b 闸门分支（`safeParseAudit` + `AuditResultView` + `PipelineGateCard`），S2 running 按 `auditKind` 显示「蓝图体检中」/「蓝图生成中」。i18n zh-CN/en 加 `blueprint.auditing/auditTitle/fixing/fixNote/score` 子键。
-- **附带修的真实 bug**：`executeBlueprint` 落库蓝图概览后误用旧 `run.ContextJSON` 进入体检，导致 `Blueprint` 字段被覆盖丢失——改为用已含 `Blueprint` 的 `updated` 上下文进入 `enterBlueprintAudit`。
-- **测试**：`service_test.go` 加蓝图体检 pass/修复闭环/auto_run 跳过 3 项；`skillrun_test.go` 加 blueprint 映射 + `BlueprintFixAgent` 限权断言；`TestExecuteBlueprintPersistsAndGates` 适配异步体检流程。全量 pipeline 测试 + golangci-lint + prettier/i18n/eslint 均绿。
-- **与 B 方案关系**：A 先行独立 commit（便于回滚）；B 方案将签约体检升 8 维/40，已落地（2026-10-21，独立 commit）。§9 三软缺口（G1 抽样非确定/G2 S3 评分有放弃路径/G3 蓝图漂移不自动回灌）仍属覆盖度/自愈性增强，不阻塞 A+B，留待后续。
-
-## B 方案：签约体检升 8 维/40（2026-10-21，独立 commit）
-- **改动范围**：只动签约侧，不动蓝图侧（蓝图/签约在 `service.go` 的 `AuditKind` 分流处交汇，回滚任一半不影响另一半）。
-- `signability-audit.md`：新增第 8 维「读者视角（已知/悬念/误解）」；新增「全台账一致性核查」章节（扫描 timeline/arcs/reader_perspective，产出带 entry ID 的 issue，消除仅抽样不确定性）；评分分母 /35→/40，verdict 阈值 `≥25/35`→`≥29/40`（保持 ~71% 通过线）。
-- `signability-fix.md`：新增「蓝图驱动修复」方法论——结构性 issue（世界/卷纲/弧线/角色）先改设计台账再传播到章节，症状性 issue 直接 `edit`；强调五大台账同步收敛。
-- `service.go` 三处提示词阈值对齐：`signabilityPrompt`/`stockAuditPrompt` `25/35`→`29/40`、`finalAuditPrompt` `30/35`→`34/40`（保持终检更严）；`store.go` `AuditData.Score` 注释同步 /40。注：Go 不硬编码分母，`emitGateDecision` 用 LLM 的 `verdict` 字段裁决，门槛由技能文本自述。
-- `service_test.go` 新增 `TestParseAuditEightDimensions`（验证 8 维/40 审计 JSON 正确落库）。全量 pipeline 测试 + golangci-lint + prettier/i18n/eslint + 前端 build 均绿。
-- 前端 `pipeline.signability.score` i18n 分母 /35→/40（zh-CN/en）。因 audit `area` 为 LLM 自由文本，无独立维度标签枚举，故未新增维度 i18n 键。
-
-## §9 三软缺口 G1-G3 落地（2026-10-21，独立 commit）
-- **G1 消除抽样**：`signability-audit.md`（version 2）工作流改「全本逐章通读」（黄金三章精读，其余 3-5 章一批，不得抽样跳章）；`signabilityPrompt`/`stockAuditPrompt`/`finalAuditPrompt` 同步逐章措辞。**代价**：体检 LLM 成本随章节数线性上升，为确定性主动选择。
-- **G2 评分放弃路径收敛**：`get_chapter_list`（`novel_tools.go formatChapterList`）对已落库 `quality_score` 章节追加「质检 N」标注；`signability-audit.md` 一致性核查新增「低分放行章节核查→必产 P1 issue」，评分门禁重试耗尽放行的章节不再静默漏过。`AutoScoreEnabled` 默认本就 true，无需改。
-- **G3 蓝图漂移巡检**：新只读技能 `blueprint-drift-check.md`（复用 SignabilityAgent 白名单，skillrun 双映射已加）；`finishFixAndReaudit` 修复完成后调 `runBlueprintDriftPatrol`（MaxTurns=8，非阻断，失败仅记日志），结论写 `GateContext.DriftReport`（store.go 新字段）并追加到复评闸门 summary；`chapterCount==0`（纯蓝图阶段）自动跳过。
-- **测试**：`TestServiceDriftPatrolAfterFix`/`TestServiceDriftPatrolSkippedWhenNoChapters`/映射断言扩展。前端零改动（巡检结论经既有闸门 summary 展示）。计划文档 §9.1 已记落地状态。
-
-## S5 修复闭环空转 bug 修复（2026-10-21 深夜，用户实测反馈）
-- **根因**：`FixStates` 从不重置——首轮修复把 I1..I9 落 fixed 断点后，复评产出新一轮 audit（LLM 惯性仍编号 I1..I9），再点修复时 `executeFix` 把全部新问题误判「已修复」→ pending 空 → 直接 `finishFixAndReaudit`，闭环静默空转（auto_run 下循环到 FixRounds≥3）。表现：提示「修复完成，正在自动复评」但 0 个问题标记已修复。
-- **修复**：`executeAudit` 落新体检结果时重置 `ctxt.FixStates`（新一轮问题=全新清单）。**注意**：`executeFix` 的「全部命中断点→直接复评」是修复后复评前中断恢复的合法路径，不要加撞车兜底（会误伤该场景）。
-- **修复回执机制**：`fixPrompt`/`blueprintFixPrompt` 要求末尾附 `{"fixed":["I.."],"skipped":[{"id":"I..","reason":"..."}]}` 回执（示例 ID 用 "I.." 占位，避免与测试 issue ID 子串断言撞车）；`parseFixReceipt`（json.Decoder 从每个 '{' 流式解码，容忍围栏/尾部文本/嵌套 skipped，取最后一个合法回执）+ `applyFixReceipt`（fixed→断点、skipped→"skipped" 不再重试、未提及→不落断点下轮重试；缺回执退化为整批 fixed 兼容回退）。`FixStates` 新增 "skipped" 值。
-- 前端：`FixIssueStatusBadge` 加「已跳过」徽章；`FixIssuePayload.status` 加 "skipped"；i18n `pipeline.fixStatus.skipped`。
-- **能力边界**（用户质疑「修复能力是否本质上不具备」）：agent 有真实台账修复能力（日志证实 update_character/timeline/arc/reader_perspective 均有具体内容），但正文级 issue（节奏/开篇/卷末）台账修复改不了→复评必然复报；此类应走章节重写，fixPrompt 已引导 agent 对正文级问题如实 skipped 上报。
-- **LLM 供应商挂起现象**：`build/bin/novelgo.log` 中 `llm stream idle watchdog fired`（挂 3 分钟取消）成片出现 = 供应商流式挂起，复评在挂起-取消-重试循环，非应用 bug。
+## S5「完成但零修复」死循环修复（2026-10-21）
+- 根因：当体检问题全部为 body 级时，`executeFix` 路由到 RewriteBacklog 后 pending 空 → 误入 `finishFixAndReaudit` → 广播 `ok:true`（"修复完成"）+ 复评 → 复评复报同一批 body 问题 → 死循环。用户看到"修复完成"却无有效修复。另：台账批次曾因 MaxTurns=12 在 LLM 供应商流式挂起（idle watchdog 取消）时耗尽而失败。
+- 修复：新增 `finishFixHandoffRewrite`——pending 空且存在 RewriteBacklog 时，广播带 `rewrite_handoff` 标记的 fix_done、将 S5 置 paused 并提示"已转交章节重写，请在写作页重写后重新复评"，**不再复评**；fix MaxTurns 12→18。前端 FixProgressView 新增"已转交章节重写(N)"状态 + RewriteBacklogPanel，i18n 加 `fixProgress.rewriteHandoff`。测试 `TestServiceFixHandoffRewriteWhenOnlyBodyIssues`。
+- 已知环境限制：LLM 供应商流式偶发挂起（`llm stream idle watchdog fired` 刷屏）属供应商问题非应用 bug；并发 statesync 子 Agent 可能长时间运行（"日志 LLM 仍在跑"常因此），非阻断。

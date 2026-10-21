@@ -115,13 +115,21 @@ export function usePipeline(novelId: number) {
     // S5 修复结束：展示结果（修复完成 → 自动复评；失败 → 展示错误 + 恢复提示）。
     const offFixDone = EventsOn(
       "pipeline:fix_done",
-      (p: { novel_id: number; ok?: boolean; error?: string }) => {
+      (p: {
+        novel_id: number;
+        ok?: boolean;
+        error?: string;
+        rewrite_handoff?: boolean;
+        rewrite_count?: number;
+      }) => {
         if (p.novel_id !== novelId) return;
         setFixProgress((prev) => ({
           ...prev,
           running: false,
           ok: p.ok ?? false,
           error: p.error,
+          rewriteHandoff: p.rewrite_handoff ?? false,
+          rewriteCount: p.rewrite_count ?? 0,
         }));
       },
     );

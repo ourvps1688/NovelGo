@@ -85,6 +85,7 @@ export default function SignabilityAuditView({
           fixProgress={fixProgress}
           fixActivity={fixActivity}
           fixKind={auditKind}
+          rewriteItems={ctx?.rewrite_backlog as RewriteItem[] | undefined}
         />
       );
     }
@@ -414,10 +415,12 @@ function FixProgressView({
   fixProgress,
   fixActivity,
   fixKind = "signability",
+  rewriteItems,
 }: {
   fixProgress?: FixProgressState;
   fixActivity: FixActivityItem[];
   fixKind?: "signability" | "blueprint";
+  rewriteItems?: RewriteItem[];
 }) {
   const { t } = useTranslation();
   const fixingLabel = t(`pipeline.${fixKind}.fixing`);
@@ -437,7 +440,9 @@ function FixProgressView({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        {fixProgress?.ok === false ? (
+        {fixProgress?.rewriteHandoff ? (
+          <PenLine className="h-4 w-4 text-warning-foreground" />
+        ) : fixProgress?.ok === false ? (
           <XCircle className="h-4 w-4 text-danger-foreground" />
         ) : running ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -447,15 +452,19 @@ function FixProgressView({
           <CheckCircle2 className="h-4 w-4 text-warning-foreground" />
         )}
         <span className="text-sm font-medium">
-          {fixProgress?.ok === false
-            ? t("pipeline.fixProgress.failed")
-            : running
-              ? batchTotal > 1
-                ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
-                : fixingLabel
-              : idle
-                ? t("pipeline.fixProgress.idle")
-                : t("pipeline.fixProgress.done")}
+          {fixProgress?.rewriteHandoff
+            ? t("pipeline.fixProgress.rewriteHandoff", {
+                count: fixProgress?.rewriteCount ?? 0,
+              })
+            : fixProgress?.ok === false
+              ? t("pipeline.fixProgress.failed")
+              : running
+                ? batchTotal > 1
+                  ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
+                  : fixingLabel
+                : idle
+                  ? t("pipeline.fixProgress.idle")
+                  : t("pipeline.fixProgress.done")}
         </span>
       </div>
 
@@ -514,6 +523,12 @@ function FixProgressView({
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {fixProgress?.rewriteHandoff &&
+      rewriteItems &&
+      rewriteItems.length > 0 ? (
+        <RewriteBacklogPanel items={rewriteItems} />
       ) : null}
 
       {!idle ? <StageActivityPanel activity={fixActivity} /> : null}

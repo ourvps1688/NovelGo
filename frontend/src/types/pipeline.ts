@@ -75,6 +75,10 @@ export interface FixProgressState {
   batchIndex?: number;
   batchTotal?: number;
   doneIds?: string[];
+  // 重写交回：本轮无台账级问题可修、但存在正文级重写清单时置 true，
+  // 前端据此展示「已转交章节重写」而非「修复完成」，避免「完成但零修复」的误导。
+  rewriteHandoff?: boolean;
+  rewriteCount?: number;
 }
 
 // S5 修复实时活动流的一条记录（来自 pipeline-agent:1 的 AgentEvent 工具事件）。
