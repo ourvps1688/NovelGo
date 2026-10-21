@@ -1868,6 +1868,7 @@
       "failed": "修复失败",
       "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
       "rewriteHandoff": "已转交章节重写（{{count}} 项），请在写作页重写相关章节后重新复评。",
+      "retconHandoff": "已转交人工裁决（{{count}} 项命中冻结卷写保护/retcon 候选），自动修复已拦截；请优先前向适配本卷，确需回改前卷的待 retcon 审批。",
       "stale": "体检数据不兼容，已暂停",
       "staleHint": "本次运行的体检结果缺少 fix_type 字段（旧版数据），自动重写路由无法启用；请勿点击「恢复」，请重新发起体检/流水线。",
       "rewriteProgress": {
@@ -1885,7 +1886,8 @@
       "fixing": "正在修复",
       "fixed": "已修复",
       "skipped": "已跳过",
-      "rewrite": "回流重写"
+      "rewrite": "回流重写",
+      "retcon": "转人工裁决"
     },
     "rewriteBacklog": {
       "title": "需回流 S3 重写的正文问题",

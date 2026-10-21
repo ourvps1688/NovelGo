@@ -418,6 +418,14 @@ function FixIssueStatusBadge({
       </span>
     );
   }
+  if (status === "retcon") {
+    return (
+      <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-warning/10 px-1.5 py-0.5 text-warning-foreground text-xs">
+        <ShieldAlert className="h-3 w-3" />
+        {t("pipeline.fixStatus.retcon")}
+      </span>
+    );
+  }
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
       <Clock className="h-3 w-3" />
@@ -466,6 +474,8 @@ function FixProgressView({
           <AlertTriangle className="h-4 w-4 text-warning-foreground" />
         ) : fixProgress?.rewriteHandoff ? (
           <PenLine className="h-4 w-4 text-warning-foreground" />
+        ) : fixProgress?.retconHandoff ? (
+          <ShieldAlert className="h-4 w-4 text-warning-foreground" />
         ) : fixProgress?.ok === false ? (
           <XCircle className="h-4 w-4 text-danger-foreground" />
         ) : running ? (
@@ -482,15 +492,19 @@ function FixProgressView({
               ? t("pipeline.fixProgress.rewriteHandoff", {
                   count: fixProgress?.rewriteCount ?? 0,
                 })
-              : fixProgress?.ok === false
-                ? t("pipeline.fixProgress.failed")
-                : running
-                  ? batchTotal > 1
-                    ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
-                    : fixingLabel
-                  : idle
-                    ? t("pipeline.fixProgress.idle")
-                    : t("pipeline.fixProgress.done")}
+              : fixProgress?.retconHandoff
+                ? t("pipeline.fixProgress.retconHandoff", {
+                    count: fixProgress?.retconCount ?? 0,
+                  })
+                : fixProgress?.ok === false
+                  ? t("pipeline.fixProgress.failed")
+                  : running
+                    ? batchTotal > 1
+                      ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
+                      : fixingLabel
+                    : idle
+                      ? t("pipeline.fixProgress.idle")
+                      : t("pipeline.fixProgress.done")}
         </span>
       </div>
 

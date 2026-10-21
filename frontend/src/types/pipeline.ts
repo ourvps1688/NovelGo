@@ -49,7 +49,8 @@ export interface FixIssuePayload {
   level: string;
   area: string;
   desc: string;
-  status?: "pending" | "fixing" | "fixed" | "skipped" | "rewrite";
+  // retcon=命中冻结卷写保护/retcon 候选，已拦截自动修复、转人工裁决。
+  status?: "pending" | "fixing" | "fixed" | "skipped" | "rewrite" | "retcon";
   // issue 三枚举（卷级作用域，可缺省）：target_scope=落点卷作用域 / dimension=四维归属 /
   // direction=修复方向。与后端 FixIssuePayload 对应（json omitempty）。
   target_scope?: string;
@@ -88,6 +89,10 @@ export interface FixProgressState {
   // 前端据此展示「已转交章节重写」而非「修复完成」，避免「完成但零修复」的误导。
   rewriteHandoff?: boolean;
   rewriteCount?: number;
+  // retcon 交回：问题命中冻结卷写保护/retcon 候选、自动修复被拦截时置 true，
+  // 前端据此展示「已转交人工裁决」（冻结卷不自动回改）。
+  retconHandoff?: boolean;
+  retconCount?: number;
   // 陈旧体检：本 run 的体检结果缺 fix_type 字段（旧版数据不兼容自动重写路由），
   // 后端拒绝派发并交回用户重跑体检。前端据此展示专门提示，避免与普通修复失败混淆。
   stale?: boolean;

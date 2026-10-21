@@ -1907,6 +1907,7 @@
       "failed": "Fix failed",
       "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
       "rewriteHandoff": "Handed off to chapter rewrite ({{count}} items); please rewrite the related chapters in the writing view, then re-audit.",
+      "retconHandoff": "Handed off for manual decision ({{count}} items hit frozen-volume write protection / retcon candidates); auto-fix is blocked. Prefer forward adaptation of this volume; changes to earlier volumes require retcon approval.",
       "stale": "Audit data incompatible, paused",
       "staleHint": "This run's audit result is missing the fix_type field (legacy data); the auto-rewrite route cannot engage. Do NOT click Resume — re-run the audit/pipeline instead.",
       "rewriteProgress": {
@@ -1924,7 +1925,8 @@
       "fixing": "Fixing",
       "fixed": "Fixed",
       "skipped": "Skipped",
-      "rewrite": "Rewrites"
+      "rewrite": "Rewrites",
+      "retcon": "Manual review"
     },
     "rewriteBacklog": {
       "title": "Body issues routed back to S3 rewrite loop",

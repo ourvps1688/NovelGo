@@ -140,6 +140,8 @@ export function usePipeline(novelId: number) {
         error?: string;
         rewrite_handoff?: boolean;
         rewrite_count?: number;
+        retcon_handoff?: boolean;
+        retcon_count?: number;
         stale_audit?: boolean;
       }) => {
         if (p.novel_id !== novelId) return;
@@ -159,6 +161,8 @@ export function usePipeline(novelId: number) {
             error: p.error,
             rewriteHandoff: p.rewrite_handoff ?? false,
             rewriteCount: p.rewrite_count ?? 0,
+            retconHandoff: p.retcon_handoff ?? false,
+            retconCount: p.retcon_count ?? 0,
             stale: p.stale_audit ?? false,
             issues: resetFixing(prev.issues),
             allIssues: resetFixing(prev.allIssues),

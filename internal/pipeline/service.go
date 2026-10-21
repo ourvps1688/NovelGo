@@ -516,6 +516,7 @@ func (s *Service) finishVolumeScopedRun(ctx context.Context, scoped *PipelineRun
 		bc.AuditStage = scopedCtxt.AuditStage
 		bc.DriftReport = scopedCtxt.DriftReport
 		bc.RewriteBacklog = scopedCtxt.RewriteBacklog
+		bc.RetconBacklog = scopedCtxt.RetconBacklog
 	})
 	// 静默终结 scoped run（终态不广播事件，见函数注释）。
 	if err := s.store.SetStageStatus(ctx, scoped.RunID, scoped.CurrentStage, StatusFinished, scopedCtxtJSON); err != nil {
@@ -669,9 +670,11 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	if ctxt.AuditKind == "blueprint" {
 		ctxt.BlueprintAudit = string(auditJSON)
 		ctxt.RewriteBacklog = nil
+		ctxt.RetconBacklog = nil
 	} else {
 		ctxt.Audit = string(auditJSON)
 		ctxt.RewriteBacklog = bodyIssuesOf(audit)
+		ctxt.RetconBacklog = retconItemsOf(audit)
 	}
 	// 新一轮体检结果落地即视为全新问题清单：清除上一轮的修复断点（FixStates）。
 	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），executeFix 会把
@@ -952,14 +955,36 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			isFixed[id] = true
 			fixedIDs = append(fixedIDs, id)
 			isResolved[id] = true
-		case "skipped", "rewrite":
+		case "skipped", "rewrite", "retcon":
 			isResolved[id] = true
 		}
 	}
 
+	// 冻结卷写保护/retcon 候选（1.3/1.4）：target_scope=frozen_volume 或 direction=
+	// retcon_candidate 的问题一律不派发自动修复/自动重写（冻结卷正文与既定设定不得被
+	// 自动回改），标记 FixStates=retcon 并沉淀到 RetconBacklog，交回人工裁决。
+	retconBacklog := ctxt.RetconBacklog
+	if retconBacklog == nil {
+		retconBacklog = []RewriteItem{}
+	}
+	for _, it := range auditData.Issues {
+		if isResolved[it.ID] || !writeProtected(it.TargetScope, it.Direction) {
+			continue
+		}
+		retconBacklog = upsertRewriteItem(retconBacklog, RewriteItem{
+			ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
+			Chapters:    parseChapterRefs(it.Area, it.Desc),
+			TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction,
+		})
+		ctxt.FixStates[it.ID] = "retcon"
+		isResolved[it.ID] = true
+	}
+	ctxt.RetconBacklog = retconBacklog
+
 	// 析出正文级（fix_type=body）问题：S5 不尝试 edit 修补这类「必重写」项，
 	// 否则会对修不动的问题反复重试（空转）或上报 skipped 永久丢弃（修复链断裂）。
 	// 改为显式路由到 S3 章节重写回路——标记 FixStates=rewrite 并沉淀到 RewriteBacklog。
+	// （命中写保护的正文级问题已在上方路由进 RetconBacklog，不会落入本清单。）
 	backlog := ctxt.RewriteBacklog
 	if backlog == nil {
 		backlog = []RewriteItem{}
@@ -995,12 +1020,17 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		}
 	}
 	if len(pending) == 0 {
-		// 无台账级问题待修。两种语义必须区分，否则会谎报「修复完成」后立刻复评，
-		// 而复评必复报同一批正文级问题，形成「完成但零修复」死循环：
+		// 无台账级问题待修。三种语义必须区分，否则会谎报「修复完成」后立刻复评，
+		// 而复评必复报同一批问题，形成「完成但零修复」死循环：
 		//  (a) 存在回流 S3 重写的清单 → 这些问题 S5 改不动，明确交回用户重写，不再复评；
-		//  (b) 既无待修也无重写清单（全部此前已 fixed/skipped）→ 才进复评做最终验证。
+		//  (b) 存在写保护/retcon 候选清单 → 冻结卷不得自动回改，交回人工裁决，不再复评；
+		//  (c) 既无待修也无上述清单（全部此前已 fixed/skipped）→ 才进复评做最终验证。
 		if len(backlog) > 0 {
 			s.finishFixHandoffRewrite(ctx, runID, novelID, ctxt)
+			return
+		}
+		if len(retconBacklog) > 0 {
+			s.handoffRetconToUser(ctx, runID, novelID, ctxt)
 			return
 		}
 		s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
@@ -1043,6 +1073,8 @@ func (s *Service) executeFix(runID string, novelID int64) {
 				p.Status = "skipped"
 			case ctxt.FixStates[it.ID] == "rewrite":
 				p.Status = "rewrite"
+			case ctxt.FixStates[it.ID] == "retcon":
+				p.Status = "retcon"
 			case batchIDs[it.ID]:
 				p.Status = "fixing"
 			default:
@@ -1223,13 +1255,21 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 	}
 
 	// 自动重写：逐章派发章节重写 agent（每章独立会话，充足轮数预算）。
+	// 写保护防御：命中冻结卷写保护/retcon 候选的清单项绝不派发（冻结卷章节不得被自动
+	// 重写）。正常路径下 bodyIssuesOf 已把这类项分流进 RetconBacklog，此处兜底旧数据。
 	s.setDispatching(ctx, runID, true)
 	total := 0
 	for _, item := range ctxt.RewriteBacklog {
+		if writeProtected(item.TargetScope, item.Direction) {
+			continue
+		}
 		total += len(chaptersByReading[item.ID])
 	}
 	index := 0
 	for _, item := range ctxt.RewriteBacklog {
+		if writeProtected(item.TargetScope, item.Direction) {
+			continue
+		}
 		chaps := chaptersByReading[item.ID]
 		for _, ch := range chaps {
 			index++
@@ -1296,6 +1336,37 @@ func (s *Service) handoffRewriteToUser(ctx context.Context, runID string, novelI
 		cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
 		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
 			s.logger.Error("S5 重写：交回落暂停失败", "err", serr)
+		}
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+			Status: StatusPaused, Note: msg})
+	}
+	s.setDispatching(ctx, runID, false)
+}
+
+// handoffRetconToUser 把命中冻结卷写保护/retcon 候选的问题交回人工裁决：明确暂停当前
+// 阶段、广播带 retcon_handoff 标记的 fix_done（前端展示「已转交人工裁决」而非「修复完成」）。
+// 冻结卷正文与既定设定不得被自动回改（1.3），retcon 候选须作者显式拍板（阶段 3 审批闸门）；
+// 本函数是阶段 1 的安全出口，绝不带盲区派发、也绝不谎报完成。
+func (s *Service) handoffRetconToUser(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
+	n := len(ctxt.RetconBacklog)
+	msg := fmt.Sprintf(
+		"%d 项问题命中冻结卷写保护/retcon 候选（target_scope=frozen_volume 或 direction=retcon_candidate），"+
+			"已拦截自动修复与自动重写，转交人工裁决：请优先前向适配（改本卷及后续适配已定稿前卷）；"+
+			"确需回改前卷的，待 retcon 审批闸门（阶段 3）上线后受控处理",
+		n,
+	)
+	emitFixDone(ctx, map[string]any{
+		"run_id":         runID,
+		"novel_id":       novelID,
+		"ok":             true,
+		"retcon_handoff": true,
+		"retcon_count":   n,
+		"error":          msg,
+	})
+	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+		cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
+		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
+			s.logger.Error("S5 写保护：retcon 交回落暂停失败", "err", serr)
 		}
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
 			Status: StatusPaused, Note: msg})
@@ -1863,11 +1934,44 @@ func auditHasScopeFields(audit AuditData) bool {
 	return false
 }
 
-// bodyIssuesOf 从体检结果中析出所有正文级（fix_type=body）问题，构造回流 S3 重写回路的清单。
+// writeProtected 判断问题是否命中冻结卷写保护/retcon 候选（1.3/1.4）：
+// target_scope=frozen_volume（落点在已冻结定稿卷，改它=破坏定稿）或
+// direction=retcon_candidate（硬矛盾需回改前卷，须作者审批）。这类问题一律
+// 不派发自动修复、不派发自动章节重写，交回人工裁决。
+func writeProtected(targetScope, direction string) bool {
+	return targetScope == TargetScopeFrozenVolume || direction == DirectionRetconCandidate
+}
+
+// bodyIssuesOf 从体检结果中析出可自动重写的正文级（fix_type=body）问题，构造回流 S3
+// 重写回路的清单。命中写保护（writeProtected）的正文级问题不进本清单（冻结卷章节
+// 不得被自动重写），改由 retconItemsOf 析出到 RetconBacklog。
 func bodyIssuesOf(audit AuditData) []RewriteItem {
 	items := make([]RewriteItem, 0, len(audit.Issues))
 	for _, it := range audit.Issues {
-		if it.FixType != FixTypeBody {
+		if it.FixType != FixTypeBody || writeProtected(it.TargetScope, it.Direction) {
+			continue
+		}
+		items = append(items, RewriteItem{
+			ID:          it.ID,
+			Level:       it.Level,
+			Area:        it.Area,
+			Desc:        it.Desc,
+			Chapters:    parseChapterRefs(it.Area, it.Desc),
+			TargetScope: it.TargetScope,
+			Dimension:   it.Dimension,
+			Direction:   it.Direction,
+		})
+	}
+	return items
+}
+
+// retconItemsOf 从体检结果中析出命中冻结卷写保护/retcon 候选的全部问题（不分 fix_type），
+// 构造 RetconBacklog（交回人工裁决清单）。与 bodyIssuesOf 互补：两者并集=全部 body 问题
+// ∪ 全部写保护问题，互不相交。
+func retconItemsOf(audit AuditData) []RewriteItem {
+	items := make([]RewriteItem, 0, len(audit.Issues))
+	for _, it := range audit.Issues {
+		if !writeProtected(it.TargetScope, it.Direction) {
 			continue
 		}
 		items = append(items, RewriteItem{
@@ -2013,6 +2117,8 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复的**台账/卷纲级（fix_type=ledger）**项）。"+
 		"注意：**正文级（fix_type=body）问题已由流水线路由到 S3 章节重写回路，不会出现在本批清单中，你无需处理，也不要自作主张去重写整章**。"+
+		"**冻结卷写保护（必须遵守）**：本批均为前向修复项（direction=forward_fix）——跨卷冲突一律改本卷及后续适配已定稿前卷，**不得改动已冻结卷（frozen 卷）的正文与既定设定**；"+
+		"命中 retcon 候选（direction=retcon_candidate）的问题已被流水线拦截转人工审批，不会出现在本批，你不要代为回改前卷。"+
 		"**修前评估护栏（必须遵守）**：动手修每条 issue 前，先估算它需要触碰的台账条目数与章节数；"+
 		"若预计超过 5 条台账 entry 或 2 章正文（如「整池悬念治理」「批量伏笔改挂」这类工程级问题），**不要硬修**，"+
 		"直接把该 issue 放入回执的 skipped 并注明 reason=\"scope exceeds single-batch budget（建议拆分为原子 issue 或转人工/章节重写）\"，然后继续下一条。"+

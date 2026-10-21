@@ -588,6 +588,177 @@ func TestServiceFixRejectsStaleAuditWithoutScopeFields(t *testing.T) {
 	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "target_scope", "错误提示应说明缺作用域字段")
 }
 
+// TestServiceFixWriteProtectsFrozenIssues 验证 1.3/1.4 写保护与前向默认路由：
+// target_scope=frozen_volume / direction=retcon_candidate 的问题绝不进修复批次（不派发、
+// 不出现在修复提示词里），标记 FixStates=retcon 并展示为「转人工裁决」；其余项正常修复。
+func TestServiceFixWriteProtectsFrozenIssues(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// I1 正常前向修复；I2 落点在冻结卷（写保护）；I3 硬矛盾 retcon 候选。
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"混合清单","issues":[` +
+		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
+		`{"id":"I2","level":"P1","area":"设定自洽","desc":"与前卷第3章冲突","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"forward_fix"},` +
+		`{"id":"I3","level":"P1","area":"设定自洽","desc":"硬矛盾需回改前卷","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"retcon_candidate"}]}`
+	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
+
+	var fixPrompts []string
+	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-fix":
+			fixPrompts = append(fixPrompts, input.Prompt)
+			return SkillOutput{Text: "已修复"}, nil
+		case "signability-audit":
+			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	var firstFixStart map[string]any
+	origFixStart := emitFixStart
+	emitFixStart = func(_ context.Context, p map[string]any) {
+		if firstFixStart == nil {
+			firstFixStart = p
+		}
+	}
+	t.Cleanup(func() { emitFixStart = origFixStart })
+
+	run, err := svc.StartPipeline(ctx, 410, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	// 只有 I1 进修复批次；I2/I3 绝不出现在修复提示词里（冻结卷不得被自动回改）。
+	require.Len(t, fixPrompts, 1, "应只派发一个修复批次")
+	require.Contains(t, fixPrompts[0], "I1")
+	require.NotContains(t, fixPrompts[0], "I2", "冻结卷问题不得进修复批次")
+	require.NotContains(t, fixPrompts[0], "I3", "retcon 候选不得进修复批次")
+
+	// fix_start 全量清单里写保护问题应标为 retcon 状态。
+	require.NotNil(t, firstFixStart)
+	all0, ok := firstFixStart["all_issues"].([]FixIssuePayload)
+	require.True(t, ok)
+	byID := map[string]FixIssuePayload{}
+	for _, p := range all0 {
+		byID[p.ID] = p
+	}
+	require.Equal(t, "retcon", byID["I2"].Status, "冻结卷问题应标 retcon")
+	require.Equal(t, "retcon", byID["I3"].Status, "retcon 候选应标 retcon")
+	require.Equal(t, "fixing", byID["I1"].Status, "正常问题应进批次修复")
+}
+
+// TestServiceFixRetconHandoffWhenAllProtected 验证：全部问题命中写保护时，executeFix
+// 必须「交回人工裁决」（retcon_handoff）而非复评/谎报完成（否则复评复报死循环）。
+func TestServiceFixRetconHandoffWhenAllProtected(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"全部命中写保护","issues":[` +
+		`{"id":"I1","level":"P0","area":"设定自洽","desc":"与前卷冲突","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"forward_fix"},` +
+		`{"id":"I2","level":"P1","area":"设定自洽","desc":"硬矛盾","fix_type":"ledger","target_scope":"frozen_volume","dimension":"timeline","direction":"retcon_candidate"}]}`
+
+	var fixCalled, auditCalled bool
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "signability-fix" {
+			fixCalled = true
+		}
+		if name == "signability-audit" {
+			auditCalled = true
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	var fixDonePayload map[string]any
+	oldEmit := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
+	defer func() { emitFixDone = oldEmit }()
+
+	run, err := svc.StartPipeline(ctx, 411, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.False(t, fixCalled, "写保护问题不应派发修复 agent")
+	require.False(t, auditCalled, "交回人工裁决不应触发复评（避免复报死循环）")
+	require.Len(t, finalCtxt.RetconBacklog, 2, "两项都应沉淀进 RetconBacklog")
+	require.NotNil(t, fixDonePayload)
+	require.Equal(t, true, fixDonePayload["retcon_handoff"], "fix_done 应带 retcon_handoff 标记")
+	require.Equal(t, int(2), fixDonePayload["retcon_count"], "retcon_count 应为 2")
+}
+
+// TestServiceAutoRewriteSkipsProtectedBodyItems 验证写保护覆盖自动章节重写回路：
+// 命中写保护的正文级问题绝不派发 chapter-rewrite（冻结卷章节不得被自动重写），
+// 走 retcon 交回；且不进 RewriteBacklog（bodyIssuesOf 已分流）。
+func TestServiceAutoRewriteSkipsProtectedBodyItems(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 测试库默认只迁移 pipeline_runs，重写回路需要 chapters 表，单独迁移。
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
+	for i := 1; i <= 3; i++ {
+		require.NoError(t, db.Create(&chapter.Chapter{
+			NovelID: 412, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
+		}).Error)
+	}
+
+	// 正文级问题指向第 2 章，但落点在冻结卷（写保护）：不得自动重写。
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"冻结卷正文问题","issues":[` +
+		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"第2章未立人设，代入感弱","fix_type":"body","target_scope":"frozen_volume","dimension":"none","direction":"forward_fix"}]}`
+
+	var rewriteCalled bool
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		if name == "chapter-rewrite" {
+			rewriteCalled = true
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	var fixDonePayload map[string]any
+	oldEmit := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
+	defer func() { emitFixDone = oldEmit }()
+
+	run, err := svc.StartPipeline(ctx, 412, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.False(t, rewriteCalled, "冻结卷章节不得被自动重写")
+	require.Empty(t, finalCtxt.RewriteBacklog, "写保护正文问题不进 RewriteBacklog")
+	require.Len(t, finalCtxt.RetconBacklog, 1, "应沉淀进 RetconBacklog 交回人工")
+	require.Equal(t, "I1", finalCtxt.RetconBacklog[0].ID)
+	require.Equal(t, []int64{2}, finalCtxt.RetconBacklog[0].Chapters, "章节号应解析保留，供人工定位")
+	require.NotNil(t, fixDonePayload)
+	require.Equal(t, true, fixDonePayload["retcon_handoff"], "fix_done 应带 retcon_handoff 标记")
+}
+
 // TestServiceAutoRewriteDispatch 验证：当重写清单指向可定位章节时，finishFixHandoffRewrite
 // 全自动派发 chapter-rewrite agent 重写对应章节（而非仅仅暂停交回），重写后自动回到复评，
 // 且 RewriteRounds 递增；复评若仍报出正文问题则停在闸门等人工（不无限循环）。
@@ -718,13 +889,34 @@ func TestBodyIssuesOf(t *testing.T) {
 		{ID: "I3", Level: "P1", Area: "节奏爽点", Desc: "第6-8章爽点断档", FixType: FixTypeBody},
 	}}
 	items := bodyIssuesOf(audit)
-	require.Len(t, items, 2, "只析出 body 项")
+	require.Len(t, items, 1, "只析出可自动重写的 body 项（写保护项 I1 分流进 retconItemsOf）")
+	require.Equal(t, "I3", items[0].ID)
+	require.Equal(t, []int64{6, 7, 8}, items[0].Chapters, "第6-8章区间应解析为 [6,7,8]")
+}
+
+// TestRetconItemsOf 验证 retconItemsOf 析出命中写保护的全部问题（不分 fix_type），
+// 并携带三枚举字段；bodyIssuesOf 与 retconItemsOf 对 body 问题互不相交。
+func TestRetconItemsOf(t *testing.T) {
+	audit := AuditData{Issues: []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇过签力", Desc: "第3章问题", FixType: FixTypeBody,
+			TargetScope: TargetScopeFrozenVolume, Dimension: "none", Direction: DirectionForwardFix},
+		{ID: "I2", Level: "P1", Area: "设定自洽", Desc: "硬矛盾", FixType: "ledger",
+			TargetScope: TargetScopeFrozenVolume, Dimension: "character", Direction: DirectionRetconCandidate},
+		{ID: "I3", Level: "P1", Area: "节奏爽点", Desc: "正常问题", FixType: "ledger",
+			TargetScope: TargetScopeActiveVolume, Dimension: "none", Direction: DirectionForwardFix},
+	}}
+	items := retconItemsOf(audit)
+	require.Len(t, items, 2, "冻结卷落点与 retcon 候选都应析出")
 	require.Equal(t, "I1", items[0].ID)
-	require.Empty(t, items[0].Chapters, "I1 未带章节号则章节列表为空")
-	require.Equal(t, []int64{6, 7, 8}, items[1].Chapters, "第6-8章区间应解析为 [6,7,8]")
-	require.Equal(t, TargetScopeFrozenVolume, items[0].TargetScope, "RewriteItem 应携带源 issue 的 target_scope")
-	require.Equal(t, "character", items[0].Dimension, "RewriteItem 应携带源 issue 的 dimension")
-	require.Equal(t, DirectionRetconCandidate, items[0].Direction, "RewriteItem 应携带源 issue 的 direction")
+	require.Equal(t, TargetScopeFrozenVolume, items[0].TargetScope, "应携带源 issue 的 target_scope")
+	require.Equal(t, "none", items[0].Dimension)
+	require.Equal(t, DirectionForwardFix, items[0].Direction)
+	require.Equal(t, []int64{3}, items[0].Chapters, "章节号应解析保留")
+	require.Equal(t, "I2", items[1].ID)
+	require.Equal(t, DirectionRetconCandidate, items[1].Direction)
+
+	body := bodyIssuesOf(audit)
+	require.Empty(t, body, "写保护 body 项不进 bodyIssuesOf（互不相交）")
 }
 
 // TestServiceFixAllFixedSkipsToReaudit 验证断点续修边界：全部问题已修复但复评未跑

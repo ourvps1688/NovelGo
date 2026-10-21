@@ -111,6 +111,11 @@ type GateContext struct {
 	// 每次体检（executeAudit，签约类）重新计算以反映最新体检结果。S5 不处理这些项，
 	// 而是显式通知写作回路优先重写其涉及章节，闭合「审计→修台账→复评→正文重写→复评」链路。
 	RewriteBacklog []RewriteItem `json:"rewrite_backlog,omitempty"`
+	// RetconBacklog 是命中冻结卷写保护/retcon 候选的问题清单（target_scope=frozen_volume
+	// 或 direction=retcon_candidate 的 issue，含 body 与 ledger 两类），每次体检重新计算。
+	// S5/自动重写一律不碰这些项（冻结卷正文与既定设定不得被自动回改），交回人工裁决：
+	// 前向适配调整本卷，或（阶段 3）经 retcon 审批闸门受控回改前卷。
+	RetconBacklog []RewriteItem `json:"retcon_backlog,omitempty"`
 	// RewriteRounds 记录自动章节重写回路已发生的轮数（finishFixHandoffRewrite 每次自动重写后 +1），
 	// 供 auto/全自动重写模式下判断是否达到上限改交人工，避免「重写→复评→再重写」无限循环。
 	RewriteRounds int `json:"rewrite_rounds,omitempty"`
