@@ -20,6 +20,7 @@ export default function PipelineWizard({ novelId }: Props) {
     run,
     stage,
     status,
+    stageNote,
     gate,
     autoRun,
     fixProgress,
@@ -75,6 +76,11 @@ export default function PipelineWizard({ novelId }: Props) {
             <p className="text-sm text-muted-foreground">
               {t("pipeline.currentStage", { stage })}
             </p>
+            {stageNote ? (
+              <p className="rounded border bg-muted/40 px-3 py-2 text-muted-foreground text-xs">
+                {stageNote}
+              </p>
+            ) : null}
 
             {stage === "S2" ? (
               <BlueprintWorkflowView

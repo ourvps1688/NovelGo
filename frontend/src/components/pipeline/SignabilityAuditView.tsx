@@ -82,19 +82,22 @@ export default function SignabilityAuditView({
 
   // 生成中 / 修复中：对应阶段 running 且无闸门。
   // 与 S5 修复视图保持同一界面语言：spinner + 正在干什么 + 实时动态面板。
+  // S5 在暂停态也渲染修复进度视图：陈旧体检守卫拒绝派发后会把 run 落回
+  // paused，若只在 running 渲染，stale/失败告警会一闪而过（用户感知为
+  // 「点了继续没反应」）。暂停时保留最近一次修复结果与告警 + 恢复提示。
+  if (!gate && isFix && (status === "running" || status === "paused")) {
+    // S5 修复进度视图：修复清单（什么问题、涉及哪些元素）+ 实时活动流 + 结果。
+    return (
+      <FixProgressView
+        fixProgress={fixProgress}
+        fixActivity={fixActivity}
+        fixKind={auditKind}
+        rewriteItems={ctx?.rewrite_backlog as RewriteItem[] | undefined}
+        rewriteProgress={rewriteProgress}
+      />
+    );
+  }
   if (status === "running" && !gate) {
-    if (isFix) {
-      // S5 修复进度视图：修复清单（什么问题、涉及哪些元素）+ 实时活动流 + 结果。
-      return (
-        <FixProgressView
-          fixProgress={fixProgress}
-          fixActivity={fixActivity}
-          fixKind={auditKind}
-          rewriteItems={ctx?.rewrite_backlog as RewriteItem[] | undefined}
-          rewriteProgress={rewriteProgress}
-        />
-      );
-    }
     return (
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">

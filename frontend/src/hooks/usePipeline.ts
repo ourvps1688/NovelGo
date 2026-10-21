@@ -19,6 +19,8 @@ import type {
 } from "@/types/pipeline";
 import type { AgentEvent } from "@/components/chat/types";
 import { AgentEventType } from "@/components/chat/types";
+import { toastError } from "@/utils/toast";
+import { useTranslation } from "react-i18next";
 
 const FIX_ACTIVITY_MAX = 40;
 
@@ -26,9 +28,13 @@ const FIX_ACTIVITY_MAX = 40;
 // C 期：状态推进由用户在前端显式点「继续/修改/终止」驱动，后端只负责
 // 持久化与广播；A 期（PR5）将把顺序逻辑下沉到后端 Orchestrator。
 export function usePipeline(novelId: number) {
+  const { t } = useTranslation();
   const [run, setRun] = useState<pipeline.PipelineRun | null>(null);
   const [stage, setStage] = useState<string>("");
   const [status, setStatus] = useState<string>("");
+  // 后端 stage 事件附带的说明（如「已暂停，点击继续可恢复」「当前阶段由交互推进」），
+  // 在向导「当前阶段」下方展示，避免恢复/暂停后界面语义不明。
+  const [stageNote, setStageNote] = useState<string>("");
   const [gate, setGate] = useState<GatePayload | null>(null);
   // S5 修复进度：修复清单（fix_start 携带）+ 实时活动流（pipeline-agent:1 工具事件）。
   const [fixProgress, setFixProgress] = useState<FixProgressState>({
@@ -51,11 +57,13 @@ export function usePipeline(novelId: number) {
       if (p.novel_id !== novelId) return;
       setStage(p.stage);
       setStatus(p.status);
+      setStageNote(p.note ?? "");
     });
     const offGate = EventsOn("pipeline:gate", (p: GatePayload) => {
       if (p.novel_id !== novelId) return;
       setGate(p);
       setStatus("awaiting_gate");
+      setStageNote("");
       // 闸门携带最新阶段状态；重新拉取 run 以拿到最新 ContextJSON
       // （S2 蓝图完成后 Blueprint 字段落在此处，需刷新才能渲染卷结构）。
       GetPipelineState(novelId)
@@ -232,6 +240,7 @@ export function usePipeline(novelId: number) {
         setRun(r);
         setStage(r.CurrentStage);
         setStatus(r.Status);
+        setStageNote("");
       })
       .catch(() => {
         // 无活跃流水线时不报错，等待用户点击「开始」。
@@ -271,27 +280,40 @@ export function usePipeline(novelId: number) {
   const resume = useCallback(
     (decision: GateDecision, feedback = "") => {
       if (!run) return Promise.reject(new Error("no run"));
-      return ResumePipeline(run.RunID, decision, feedback).then(() => {
-        setGate(null);
-      });
+      return ResumePipeline(run.RunID, decision, feedback)
+        .then(() => {
+          setGate(null);
+        })
+        .catch((e: unknown) => {
+          // 后端拒绝推进（如已终止/状态不允许）时必须可见，否则按钮「点了没反应」。
+          toastError(String(e));
+        });
     },
     [run],
   );
 
   const control = useCallback(
     (cmd: ControlCmd) => {
-      if (!run) return Promise.reject(new Error("no run"));
-      return ControlPipeline(run.RunID, cmd).then(() => {
-        // 控制指令（含 set_auto 切换自动运行）后重新拉取 run，确保 UI 状态与后端一致。
-        return GetPipelineState(novelId)
-          .then((r: pipeline.PipelineRun) => {
-            setRun(r);
-            setStatus(r.Status);
-          })
-          .catch(() => {});
-      });
+      if (!run) {
+        toastError(t("pipeline.control.noRun"));
+        return Promise.resolve();
+      }
+      return ControlPipeline(run.RunID, cmd)
+        .then(() => {
+          // 控制指令（含 set_auto 切换自动运行）后重新拉取 run，确保 UI 状态与后端一致。
+          return GetPipelineState(novelId)
+            .then((r: pipeline.PipelineRun) => {
+              setRun(r);
+              setStatus(r.Status);
+            })
+            .catch(() => {});
+        })
+        .catch((e: unknown) => {
+          // 后端拒绝控制指令（如「当前状态 running 无法恢复」）时必须可见。
+          toastError(String(e));
+        });
     },
-    [run, novelId],
+    [run, novelId, t],
   );
 
   const autoRun = run?.AutoRun ?? false;
@@ -300,6 +322,7 @@ export function usePipeline(novelId: number) {
     run,
     stage,
     status,
+    stageNote,
     gate,
     autoRun,
     fixProgress,

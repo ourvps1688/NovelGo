@@ -1771,6 +1771,10 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 			return err
 		}
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: StatusPaused})
+		// 同步广播 stage 事件：侧边栏阶段条只订阅 stage 事件，不广播会导致
+		// 停止/暂停后阶段条仍显示旧阶段旧状态（与工作区向导不一致）。
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: run.CurrentStage,
+			Status: StatusPaused, Note: "已手动暂停，点击继续可从当前阶段恢复"})
 	case "resume":
 		if run.Status != StatusPaused {
 			return fmt.Errorf("当前状态 %s 无法恢复", run.Status)
@@ -1779,6 +1783,8 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 			return err
 		}
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: StatusRunning})
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: run.CurrentStage,
+			Status: StatusRunning, Note: "已恢复运行"})
 		// 按需重新派发执行体：修复/体检失败落暂停的运行、以及启动恢复机制暂停的中断运行，
 		// 都在此按当前阶段重派发（体检/修复是幂等重入的），否则状态回到 running 却无人执行。
 		// 执行体仍存活（Dispatching=true，软暂停）时不重派发，等待其在批次/阶段边界继续。
@@ -1788,6 +1794,10 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 			return err
 		}
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: StatusAborted})
+		// stop 必须广播 stage 事件：否则阶段条停留在旧阶段（如「修复闭环」），
+		// 而工作区向导重新拉取后已切到其它 run，两侧信息不一致。
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: run.NovelID, Stage: run.CurrentStage,
+			Status: StatusAborted, Note: "流水线已终止"})
 	case "set_auto":
 		// 运行中切换 auto_run：翻转 AutoRun 字段。开启后，自动化的阶段（S2/S4/S5）
 		// 在闸门点自动裁决连跑；关闭则恢复为人工逐闸确认。
@@ -1883,6 +1893,11 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 	default:
 		// S0/S1/S2(生成)/S3：由用户交互或既有入口驱动（写作/蓝图生成由前端操作触发），无需自动派发。
 		s.logger.Info("恢复：当前阶段由交互驱动，不自动派发执行体", "run_id", run.RunID, "stage", run.CurrentStage)
+		// 显式告知用户：恢复成功但本阶段不会自动执行，避免界面停留在
+		// 「正在启动 agent」的假象（S2 蓝图生成/S3 写作需在对应面板交互推进）。
+		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: run.CurrentStage,
+			Status: StatusRunning,
+			Note:   "已恢复：当前阶段由你在界面中交互推进（如蓝图对话/逐章写作），流水线不会自动执行"})
 	}
 }
 

@@ -26,6 +26,11 @@ export default function PipelineStageBar({ novelId, onClick }: Props) {
 
     const offStage = EventsOn("pipeline:stage", (p: StagePayload) => {
       if (p.novel_id !== novelId) return;
+      // 终态（用户点停止 / 流程完结）：隐藏阶段条，与初始拉取逻辑保持一致。
+      if (p.status === "finished" || p.status === "aborted") {
+        setRun(null);
+        return;
+      }
       setRun((prev) =>
         prev
           ? pipeline.PipelineRun.createFrom({

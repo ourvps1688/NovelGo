@@ -1836,7 +1836,8 @@
     "control": {
       "pause": "Pause",
       "resume": "Resume",
-      "stop": "Stop"
+      "stop": "Stop",
+      "noRun": "No active pipeline. Start one or re-run the audit first."
     },
     "gate": {
       "title": "Your confirmation is required",
