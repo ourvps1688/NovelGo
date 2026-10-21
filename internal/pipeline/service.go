@@ -452,6 +452,17 @@ func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason strin
 
 // enterFix 置 S5 running 并异步执行 signability-fix 修复循环。
 func (s *Service) enterFix(ctx context.Context, run *PipelineRun) {
+	// 新一轮修复开始：清零批次连续失败计数（上一轮的失败不应累计到新一轮）。
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	if ctxt.FixBatchFailures > 0 {
+		ctxt.FixBatchFailures = 0
+		if updated, merr := json.Marshal(ctxt); merr == nil {
+			run.ContextJSON = string(updated)
+		}
+	}
 	if err := s.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, run.ContextJSON); err != nil {
 		s.logger.Error("S5 进入失败", "err", err)
 		return
@@ -642,6 +653,14 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 const (
 	fixBatchP0 = 1
 	fixBatchP1 = 2
+	// fixBatchFailureCap 是同一运行内修复批次连续失败的上限：达到后不再「暂停→恢复→
+	// 原样重派」地无限循环，改发闸门交用户裁决（继续=回复评重新评估 / 终止）。
+	// 批次成功完成即清零计数。
+	fixBatchFailureCap = 3
+	// fixProviderIdleTrip 是批次派发前的供应商熔断阈值：近 10 分钟 LLM 流式空闲超时
+	// 达到该次数说明 Provider 基本不可用（正常修复期间接近 0），此时不派发 agent
+	// 白烧 18 轮墙钟时间，直接按批次失败快速落入计数/闸门通道。
+	fixProviderIdleTrip = 10
 )
 
 // autoRewriteCap 是自动章节重写回路的单次运行最大轮数：达到上限后不再自动重写，
@@ -877,14 +896,23 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			fixSkill = "blueprint-fix"
 			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
 		}
-		out, err := s.skillRunner(ctx, fixSkill, SkillInput{
-			NovelID:   novelID,
-			Prompt:    fixPromptText,
-			MaxTurns:  18,
-			SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
-		})
-		if err != nil {
-			s.logger.Error("S5 修复执行失败", "run_id", runID, "batch", i+1, "err", err)
+		// 供应商熔断：近 10 分钟流式空闲超时达到阈值说明 Provider 基本不可用
+		// （正常修复期间接近 0），此时不派发 agent 白烧 18 轮墙钟时间（每轮都可能
+		// 白等 3 分钟被看门狗取消），直接按批次失败快速落入计数/闸门通道。
+		var out SkillOutput
+		var batchErr error
+		if n := llm.RecentIdleTimeouts(10 * time.Minute); n >= fixProviderIdleTrip {
+			batchErr = fmt.Errorf("供应商熔断：近 10 分钟 LLM 流式空闲超时 %d 次，暂不派发修复 agent", n)
+		} else {
+			out, batchErr = s.skillRunner(ctx, fixSkill, SkillInput{
+				NovelID:   novelID,
+				Prompt:    fixPromptText,
+				MaxTurns:  18,
+				SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
+			})
+		}
+		if batchErr != nil {
+			s.logger.Error("S5 修复执行失败", "run_id", runID, "batch", i+1, "err", batchErr)
 			s.setDispatching(ctx, runID, false)
 			// 透出供应商健康度：若近期频发流式空闲超时，提示用户这是 Provider 挂起而非代码问题，
 			// 避免误判为「修复功能坏了」。idle 超时由 llm 层空闲看门狗记录。
@@ -893,27 +921,51 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			if idleCount > 0 {
 				idleNote = fmt.Sprintf("；近 15 分钟 LLM 流式空闲超时 %d 次（疑似供应商挂起，建议检查 Provider 或稍后重跑）", idleCount)
 			}
+			// 失败计数：连续失败达上限不再「暂停→恢复→原样重派」无限循环，
+			// 改发闸门交用户裁决（继续=回复评重新评估剩余问题 / 终止）。
+			ctxt.FixBatchFailures++
+			ctxtUpdated, merr := json.Marshal(ctxt)
+			if merr != nil {
+				ctxtUpdated = []byte(run.ContextJSON)
+			}
 			emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": false,
-				"error":                  err.Error() + idleNote,
+				"error":                  batchErr.Error() + idleNote,
 				"batch_index":            i + 1,
 				"batch_total":            len(batches),
 				"provider_idle_timeouts": idleCount})
-			// 失败落地为 paused（保留已完成批次的断点），恢复时从剩余问题继续。
 			if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
 				cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
-				if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
-					s.logger.Error("S5 修复：失败落暂停失败", "err", serr)
+				if ctxt.FixBatchFailures >= fixBatchFailureCap {
+					// 达到失败上限：转人工裁决，等待闸门决策而非盲目重试。
+					if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusAwaitingGate, string(ctxtUpdated)); serr != nil {
+						s.logger.Error("S5 修复：失败转闸门落库失败", "err", serr)
+					}
+					emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+						Status: StatusAwaitingGate,
+						Note: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批），已转人工裁决",
+							ctxt.FixBatchFailures, i+1, len(batches))})
+					emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: StageS5, GateID: GateG4,
+						Summary: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批：%s%s）。已修复 %d 项保留。"+
+							"「继续」= 回到体检复评重新评估剩余问题（可拆分/降级难修项后再决定）；「终止」= 结束本流水线。",
+							ctxt.FixBatchFailures, i+1, len(batches), batchErr.Error(), idleNote, len(fixedIDs)),
+						Options: []string{"continue", "abort"}})
+				} else {
+					// 失败落地为 paused（保留已完成批次的断点），恢复时从剩余问题继续。
+					if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, string(ctxtUpdated)); serr != nil {
+						s.logger.Error("S5 修复：失败落暂停失败", "err", serr)
+					}
+					emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+						Status: StatusPaused,
+						Note: fmt.Sprintf("第 %d/%d 批修复失败（累计 %d/%d 次）：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）%s",
+							i+1, len(batches), ctxt.FixBatchFailures, fixBatchFailureCap, batchErr.Error(), len(fixedIDs), idleNote)})
 				}
-				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-					Status: StatusPaused,
-					Note: fmt.Sprintf("第 %d/%d 批修复失败：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）%s",
-						i+1, len(batches), err.Error(), len(fixedIDs), idleNote)})
 			}
 			return
 		}
 		// 本批完成：解析修复回执并落库断点（仍 S5/running），供失败恢复与重启续修。
 		fixedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
 		fixedIDs = append(fixedIDs, fixedNow...)
+		ctxt.FixBatchFailures = 0 // 批次成功即清零连续失败计数
 		if ctxtJSON, merr := json.Marshal(ctxt); merr == nil {
 			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(ctxtJSON)); serr != nil {
 				s.logger.Error("S5 修复：批次断点落库失败", "err", serr)
@@ -1748,6 +1800,10 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复的**台账/卷纲级（fix_type=ledger）**项）。"+
 		"注意：**正文级（fix_type=body）问题已由流水线路由到 S3 章节重写回路，不会出现在本批清单中，你无需处理，也不要自作主张去重写整章**。"+
+		"**修前评估护栏（必须遵守）**：动手修每条 issue 前，先估算它需要触碰的台账条目数与章节数；"+
+		"若预计超过 5 条台账 entry 或 2 章正文（如「整池悬念治理」「批量伏笔改挂」这类工程级问题），**不要硬修**，"+
+		"直接把该 issue 放入回执的 skipped 并注明 reason=\"scope exceeds single-batch budget（建议拆分为原子 issue 或转人工/章节重写）\"，然后继续下一条。"+
+		"宁可如实上报跳过，也不要磨到对话轮数耗尽导致整批失败、已做工作全部作废。"+
 		"请仅对以下 ledger 级问题逐条修复：\n%s\n\n"+
 		"按 signability-fix 方法论：P0 优先于 P1，用 edit/update_chapter_plan/create_volume/台账写工具修复，"+
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+

@@ -522,30 +522,40 @@ function FixProgressView({
             })}
           </div>
           <ul className="flex flex-col gap-2">
-            {issues.map((it) => (
-              <li
-                key={it.id}
-                className={`rounded border bg-card px-3 py-2 text-sm ${
-                  it.status === "fixing" ? "border-primary/40" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-xs ${
-                      it.level === "P0"
-                        ? "bg-danger text-danger-foreground"
-                        : "bg-warning text-warning-foreground"
-                    }`}
-                  >
-                    {it.level}
-                  </span>
-                  <span className="font-medium">{it.area}</span>
-                  <span className="text-muted-foreground">{it.id}</span>
-                  <FixIssueStatusBadge status={it.status} />
-                </div>
-                <p className="mt-1 text-muted-foreground">{it.desc}</p>
-              </li>
-            ))}
+            {issues.map((it) => {
+              // 视图层兜底（修复 B）：批次失败 / 非运行态下，后端可能残留
+              // status==="fixing" 的条目（修复未真正落地）。此时按 "pending"
+              // 展示，避免「修复失败」与「正在修复」徽标并存的矛盾。
+              const displayStatus =
+                (fixProgress?.ok === false || !running) &&
+                it.status === "fixing"
+                  ? "pending"
+                  : it.status;
+              return (
+                <li
+                  key={it.id}
+                  className={`rounded border bg-card px-3 py-2 text-sm ${
+                    displayStatus === "fixing" ? "border-primary/40" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-xs ${
+                        it.level === "P0"
+                          ? "bg-danger text-danger-foreground"
+                          : "bg-warning text-warning-foreground"
+                      }`}
+                    >
+                      {it.level}
+                    </span>
+                    <span className="font-medium">{it.area}</span>
+                    <span className="text-muted-foreground">{it.id}</span>
+                    <FixIssueStatusBadge status={displayStatus} />
+                  </div>
+                  <p className="mt-1 text-muted-foreground">{it.desc}</p>
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

@@ -104,6 +104,11 @@ type GateContext struct {
 	// RewriteRounds 记录自动章节重写回路已发生的轮数（finishFixHandoffRewrite 每次自动重写后 +1），
 	// 供 auto/全自动重写模式下判断是否达到上限改交人工，避免「重写→复评→再重写」无限循环。
 	RewriteRounds int `json:"rewrite_rounds,omitempty"`
+	// FixBatchFailures 记录 S5 修复批次连续失败次数（批次成功完成即清零）。
+	// 批次失败原先只会落 paused 等用户恢复后原样重派——供应商频繁挂起或单批问题
+	// 过大时会无限循环。累计达 fixBatchFailureCap 后改发闸门交用户裁决（继续=回复评
+	// 重新评估剩余问题 / 终止），封死「失败→恢复→原样重试」的死循环。
+	FixBatchFailures int `json:"fix_batch_failures,omitempty"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。

@@ -143,15 +143,27 @@ export function usePipeline(novelId: number) {
         stale_audit?: boolean;
       }) => {
         if (p.novel_id !== novelId) return;
-        setFixProgress((prev) => ({
-          ...prev,
-          running: false,
-          ok: p.ok ?? false,
-          error: p.error,
-          rewriteHandoff: p.rewrite_handoff ?? false,
-          rewriteCount: p.rewrite_count ?? 0,
-          stale: p.stale_audit ?? false,
-        }));
+        setFixProgress((prev) => {
+          // 批次失败/交回时，残留的「正在修复」徽标必须复位为「待修复」，
+          // 否则暂停态下会出现「修复失败」与「正在修复」并存的矛盾展示。
+          const resetFixing = (
+            arr?: FixProgressState["issues"],
+          ): FixProgressState["issues"] =>
+            (arr ?? []).map((it) =>
+              it.status === "fixing" ? { ...it, status: "pending" } : it,
+            );
+          return {
+            ...prev,
+            running: false,
+            ok: p.ok ?? false,
+            error: p.error,
+            rewriteHandoff: p.rewrite_handoff ?? false,
+            rewriteCount: p.rewrite_count ?? 0,
+            stale: p.stale_audit ?? false,
+            issues: resetFixing(prev.issues),
+            allIssues: resetFixing(prev.allIssues),
+          };
+        });
       },
     );
     // pipeline 会话的 agent 活动流（工具调用完成/失败），驱动 S5 修复实时进度。

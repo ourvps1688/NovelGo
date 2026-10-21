@@ -29,3 +29,14 @@
 - 新增 `RewriteAgent` 类型（复用 FixAgent 白名单：整章覆写 `edit` + statesync 写工具）；内置技能 `internal/skill/builtin/chapter-rewrite.md`（整章 `full_replace`，过 `maybeScoreChapter` 质量门禁）。`GateContext.RewriteRounds` 限制重写→复评循环（上限 `autoRewriteCap=2`）。`EvRewriteProgress` 逐章广播进度。
 - `finishFixHandoffRewrite` 现在：pending 空且有 RewriteBacklog → 串行派发重写 agent、广播 progress、成功/无定位章节/达上限则自动重跑 `executeAudit` 闭合「重写→复评」；达上限或章节不可定位则回落手动交接（paused + rewrite_handoff）作安全阀。前端 `RewriteProgressView` 展示逐章进度，i18n 加 `rewriteProgress.*`。测试 `TestServiceAutoRewriteDispatch`。
 - 已知环境限制：LLM 供应商流式偶发挂起（`llm stream idle watchdog fired` 刷屏）属供应商问题非应用 bug；并发 statesync 子 Agent 可能长时间运行（"日志 LLM 仍在跑"常因此），非阻断。
+
+## 控制指令与阶段同步约定（2026-10-21，commit acfa90d5）
+- pause/resume/stop 等 ControlPipeline 指令必须同步广播 `pipeline:stage` 事件（带 Note），否则侧栏阶段条（只订阅 stage 事件）会与工作区向导不一致。
+- S5 修复进度视图（FixProgressView）在 running 与 paused 态都渲染；控制指令失败必须 toastError 可见，禁止静默吞错。
+- 交互阶段（S0/S1/S2 生成/S3）resume 后不自动派发，后端广播「由界面交互推进」note，向导在「当前阶段」下展示。
+- 阶段条组件（Rail/Bar）收到 finished/aborted 的 stage 事件即隐藏；GetByNovel 取最新非终态 run，注意清理僵尸 run 避免旧 run 顶替。
+
+## S5 修复有界化（2026-10-21，待 push）
+- 杜绝无限重试三道闸：`GateContext.FixBatchFailures` 同 run 内批次连续失败计数，达 `fixBatchFailureCap=3` 转 `StatusAwaitingGate`（Options=[continue,abort]）交用户裁决，不再原样重派；派发前 `fixProviderIdleTrip=10`（近 10 分钟 idle 超时 ≥10）供应商熔断不派发；批次成功清零计数。
+- 体检端强制 issue 原子化（>5 台账或 >2 章必须拆分，禁 meta-issue）；修复端 `fixPrompt`/技能加「超限主动 skip」护栏。
+- 前端：fix_done(ok:false) 把残留 fixing→pending（usePipeline.ts）+ FixProgressView 视图层兜底（ok===false||!running 时 fixing 按 pending 展示）。
