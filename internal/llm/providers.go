@@ -647,7 +647,7 @@ var Builtin = map[string]Provider{
 				SupportsVision:   true,
 			},
 		},
-		BuildRequest: nil,
+		BuildRequest: mimoBuildRequest,
 	},
 	"moonshot": {
 		Name:         "Kimi",
