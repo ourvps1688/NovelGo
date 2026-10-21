@@ -40,36 +40,45 @@ export interface ControlAckPayload {
   status: string;
 }
 
-// S5 修复开始事件（pipeline:fix_start）里的一条修复项，与后端 FixIssuePayload 对应。
-// status 是该问题的修复状态：pending（待修复）/ fixing（正在修复）/ fixed（已修复）/
-// skipped（agent 上报无法修复，已跳过并记录原因，不再重试）/
-// rewrite（正文级，已路由到 S3 章节重写回路，S5 不再处理）。
-export interface FixIssuePayload {
+// 体检结果的一条 issue（与后端 pipeline.AuditIssue 对应）。
+// issue 契约单源见后端 internal/pipeline/contract.go（字段名/枚举/语义在此对齐，
+// 契约回归测试保证 struct ↔ schema ↔ skill md 三方同步）。
+export interface AuditIssue {
   id: string;
   level: string;
   area: string;
   desc: string;
-  // retcon=命中冻结卷写保护/retcon 候选，已拦截自动修复、转人工裁决。
-  status?: "pending" | "fixing" | "fixed" | "skipped" | "rewrite" | "retcon";
-  // issue 三枚举（卷级作用域，可缺省）：target_scope=落点卷作用域 / dimension=四维归属 /
-  // direction=修复方向。与后端 FixIssuePayload 对应（json omitempty）。
+  // issue 三枚举（卷级作用域，可缺省）：target_scope=落点卷作用域（active_volume|frozen_volume|none）、
+  // dimension=四维机器归属（character|locus_arc|timeline|reader_pov|none）、
+  // direction=修复方向（forward_fix|retcon_candidate）。旧版体检数据可能缺省。
   target_scope?: string;
   dimension?: string;
   direction?: string;
 }
 
+// 体检结果（与后端 pipeline.AuditData 对应）：verdict=pass|needs_fix；
+// schema_version=产出时的 issue 契约版本（旧版数据缺省）。
+export interface AuditData {
+  verdict: string;
+  score?: number;
+  summary?: string;
+  schema_version?: number;
+  issues?: AuditIssue[];
+}
+
+// S5 修复开始事件（pipeline:fix_start）里的一条修复项，与后端 FixIssuePayload 对应。
+// status 是该问题的修复状态：pending（待修复）/ fixing（正在修复）/ fixed（已修复）/
+// skipped（agent 上报无法修复，已跳过并记录原因，不再重试）/
+// rewrite（正文级，已路由到 S3 章节重写回路，S5 不再处理）。
+export interface FixIssuePayload extends AuditIssue {
+  // retcon=命中冻结卷写保护/retcon 候选，已拦截自动修复、转人工裁决。
+  status?: "pending" | "fixing" | "fixed" | "skipped" | "rewrite" | "retcon";
+}
+
 // 回流到 S3 章节重写回路的正文级问题（pipeline:rewrite_backlog / run.ContextJSON.rewrite_backlog），
-// 与后端 RewriteItem 对应。
-export interface RewriteItem {
-  id: string;
-  level: string;
-  area: string;
-  desc: string;
+// 与后端 RewriteItem 对应。作用域三枚举与源 issue 一致，供重写派发的冻结卷写保护判路与前端标签展示。
+export interface RewriteItem extends AuditIssue {
   chapters?: number[];
-  // 与源 issue 一致的作用域三枚举（可缺省），供重写派发的冻结卷写保护判路与前端标签展示。
-  target_scope?: string;
-  dimension?: string;
-  direction?: string;
 }
 
 // S5 修复进度状态（由 pipeline:fix_start / pipeline:fix_done 维护）。

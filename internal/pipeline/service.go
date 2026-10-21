@@ -661,7 +661,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		return
 	}
 
-	audit := parseAudit(out.Text)
+	audit := parseFreshAudit(out.Text)
 	auditJSON, _ := json.Marshal(audit)
 
 	// ctxt 已在函数顶部解析；按 AuditKind 把体检结果写回对应字段（蓝图 → BlueprintAudit，签约 → Audit）。
@@ -886,57 +886,35 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	}
 	auditData := parseAudit(auditJSON)
 
-	// 陈旧 run 守卫：本 run 的体检结果缺 fix_type 字段（fix_type 特性落地前创建的旧版数据）。
-	// 旧 audit 的 issue 全部缺省该字段，会被当成 ledger 一路派发修复、耗尽 18 轮预算后失败，
-	// 且正文级回流/自动重写路由永不触发。检测到此类「陈旧体检」应明确交回用户重跑体检，
-	// 而非默默当 ledger 跑、把轮数吃光。阈值 >=2 避免与解析失败的单条兜底 issue 误判。
-	if len(auditData.Issues) >= 2 && !auditHasFixType(auditData) {
-		s.logger.Warn("S5 修复：检测到陈旧体检（缺 fix_type），拒绝派发",
-			"run_id", runID, "issues", len(auditData.Issues))
-		s.setDispatching(ctx, runID, false)
-		emitFixDone(ctx, map[string]any{
-			"run_id":      runID,
-			"novel_id":    novelID,
-			"ok":          false,
-			"stale_audit": true,
-			"error":       "体检结果缺少 fix_type 字段（旧版数据不兼容自动重写路由）；请重新发起体检/流水线以启用正文级回流与自动重写。",
-		})
-		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-			cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
-			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
-				s.logger.Error("S5 修复：陈旧体检落暂停失败", "err", serr)
+	// 陈旧 run 守卫（契约单源，见 contract.go）：体检结果按 issue 契约判定陈旧——
+	// ① 字段嗅探（契约字段组缺失，旧版数据或 LLM 未按契约输出）；② schema_version 版本门
+	// （显式低于当前契约版本，字段碰巧齐全也不可信）。任一命中即拒绝派发、交回用户重跑体检，
+	// 而非默默当 ledger 跑、把轮数吃光或带盲区派发。蓝图体检只签核心字段契约
+	// （blueprint-audit，无 fix_type/作用域字段），整体豁免。阈值 >=2 避免与解析失败的
+	// 单条兜底 issue 误判。
+	if ctxt.AuditKind != "blueprint" && len(auditData.Issues) >= 2 {
+		if reason := auditStaleReason(auditData); reason != "" {
+			s.logger.Warn("S5 修复：检测到陈旧体检，拒绝派发",
+				"run_id", runID, "issues", len(auditData.Issues), "reason", reason)
+			s.setDispatching(ctx, runID, false)
+			emitFixDone(ctx, map[string]any{
+				"run_id":      runID,
+				"novel_id":    novelID,
+				"ok":          false,
+				"stale_audit": true,
+				"error":       reason,
+			})
+			if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+				cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
+				if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
+					s.logger.Error("S5 修复：陈旧体检落暂停失败", "err", serr)
+				}
+				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+					Status: StatusPaused,
+					Note:   reason})
 			}
-			emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-				Status: StatusPaused,
-				Note:   "体检结果缺少 fix_type 字段（旧版数据不兼容自动重写路由），请重新发起体检/流水线。"})
+			return
 		}
-		return
-	}
-	// 陈旧 run 守卫 2（仅签约体检）：体检结果缺作用域三字段（target_scope/dimension/direction，
-	// 卷级作用域特性落地前的旧版数据）。缺字段无法做冻结卷写保护与前向默认路由，宁可交回用户
-	// 重跑体检，也不带盲区派发。蓝图体检不涉卷作用域（卷纲层、无冻结卷），豁免。
-	// 阈值 >=2 与守卫 1 一致，避免解析失败的单条兜底 issue 误判。
-	if ctxt.AuditKind != "blueprint" && len(auditData.Issues) >= 2 && !auditHasScopeFields(auditData) {
-		s.logger.Warn("S5 修复：检测到陈旧体检（缺作用域字段），拒绝派发",
-			"run_id", runID, "issues", len(auditData.Issues))
-		s.setDispatching(ctx, runID, false)
-		emitFixDone(ctx, map[string]any{
-			"run_id":      runID,
-			"novel_id":    novelID,
-			"ok":          false,
-			"stale_audit": true,
-			"error":       "体检结果缺少 target_scope/dimension/direction 字段（旧版数据不兼容卷级作用域路由）；请重新发起体检/流水线以启用冻结卷写保护与前向适配。",
-		})
-		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-			cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
-			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
-				s.logger.Error("S5 修复：陈旧体检落暂停失败", "err", serr)
-			}
-			emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-				Status: StatusPaused,
-				Note:   "体检结果缺少 target_scope/dimension/direction 字段（旧版数据不兼容卷级作用域路由），请重新发起体检/流水线。"})
-		}
-		return
 	}
 
 	// 断点续修：跳过已修复/已跳过/已路由重写（rewrite）问题（此前批次完成并落库的），只修剩余部分。
@@ -1451,7 +1429,7 @@ func (s *Service) runBlueprintDriftPatrol(ctx context.Context, runID string, nov
 		s.logger.Warn("G3 蓝图巡检执行失败（非阻断，跳过）", "run_id", runID, "err", err)
 		return ""
 	}
-	audit := parseAudit(out.Text)
+	audit := parseFreshAudit(out.Text)
 	if audit.Verdict == "pass" || len(audit.Issues) == 0 {
 		return "蓝图巡检：未发现与当前卷纲冲突的章节。"
 	}
@@ -1476,7 +1454,7 @@ func driftPatrolPrompt(novelID int64) string {
 		"逐卷 read 当前卷纲（volumes/id_{卷id}.md），对照已写章节的细纲与关键正文段落，"+
 		"只标出与当前卷纲冲突的章节（剧情矛盾/卷纲承诺未兑现/顺序错位），不评分、不修稿；"+
 		"若没有任何已写章节，直接输出空冲突清单。最终回复末尾**必须**附一个 ```json 代码块，格式："+
-		"{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"D1\",\"level\":\"P1\",\"area\":\"章节#12\",\"desc\":\"...\"}]}。"+
+		auditFormatLine(false, issueSampleDrift)+"。"+
 		"无冲突 → verdict=pass；有冲突 → needs_fix。", novelID)
 }
 
@@ -1537,7 +1515,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 		return
 	}
 
-	audit := parseAudit(out.Text)
+	audit := parseFreshAudit(out.Text)
 	auditJSON, _ := json.Marshal(audit)
 
 	var ctxt GateContext
@@ -1567,14 +1545,11 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 	s.emitGateDecision(ctx, runID, novelID, StageS6, audit)
 }
 
-// finalAuditPrompt 构造 S6 完本级终检的任务提示词。
+// finalAuditPrompt 构造 S6 完本级终检的任务提示词。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
 func finalAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
-		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\",\"target_scope\":\"active_volume|frozen_volume|none\",\"dimension\":\"character|locus_arc|timeline|reader_pov|none\",\"direction\":\"forward_fix|retcon_candidate\"}]}——"+
-		"fix_type 必填：body=正文级需章节重写（将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
-		"target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"+
-		"dimension 必填：character=角色 | locus_arc=地点·弧线 | timeline=时间线 | reader_pov=读者视角（series bible 四维）；不属四维的纯质量问题（节奏/爽点/文笔等）填 none。"+
-		"direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"+
+		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式："+
+		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID)
 }
 
@@ -1801,18 +1776,15 @@ func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, 
 	if err != nil {
 		return AuditData{Verdict: "needs_fix"}, err
 	}
-	return parseAudit(out.Text), nil
+	return parseFreshAudit(out.Text), nil
 }
 
-// stockAuditPrompt 构造「全量对齐」全本现状体检的任务提示词。
+// stockAuditPrompt 构造「全量对齐」全本现状体检的任务提示词。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
 func stockAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，**逐章通读所有已落库章节**（不得抽样跳章），"+
 		"从签约编辑视角评估：开篇钩子与过签力、人设记忆点、节奏与爽点密度、世界观/设定自洽、完本潜力、题材契合与数据预期等维度，逐维打分并举证；"+
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\",\"target_scope\":\"active_volume|frozen_volume|none\",\"dimension\":\"character|locus_arc|timeline|reader_pov|none\",\"direction\":\"forward_fix|retcon_candidate\"}]}——"+
-		"fix_type 必填：body=正文级需章节重写（将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
-		"target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"+
-		"dimension 必填：character=角色 | locus_arc=地点·弧线 | timeline=时间线 | reader_pov=读者视角（series bible 四维）；不属四维的纯质量问题（节奏/爽点/文笔等）填 none。"+
-		"direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
+		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)
 }
 
@@ -1910,28 +1882,16 @@ func parseAudit(text string) AuditData {
 	return data
 }
 
-// auditHasFixType 判断体检结果是否已携带 fix_type 字段。
-// 旧版流水线产生的 audit（fix_type 特性落地前）其 issue 全部缺省该字段，
-// 若直接按 ledger 派发修复会耗尽轮数失败且正文级回流永不触发——供 executeFix 的陈旧 run 守卫使用。
-func auditHasFixType(audit AuditData) bool {
-	for _, it := range audit.Issues {
-		if it.FixType != "" {
-			return true
-		}
+// parseFreshAudit 解析 skill 刚产出的体检文本并补标 schema_version（见 contract.go）：
+// LLM 未 echo schema_version 时按当前契约版本补标——产出方是当前代码的提示词，语义即当前
+// 契约版本，供后续 executeFix 版本门判定新旧。已落库历史 JSON 的再解析必须走 parseAudit
+// （不补标），否则旧数据会被误标为当前版本、版本门失效。
+func parseFreshAudit(text string) AuditData {
+	a := parseAudit(text)
+	if a.SchemaVersion == 0 {
+		a.SchemaVersion = AuditSchemaVersion
 	}
-	return false
-}
-
-// auditHasScopeFields 判断体检结果是否已携带作用域三字段（target_scope/dimension/direction）。
-// 卷级作用域特性落地前的旧版 audit 全部缺省，无法做冻结卷写保护与前向默认路由——
-// 供 executeFix 的陈旧 run 守卫使用（与 auditHasFixType 同一先例，阈值语义一致）。
-func auditHasScopeFields(audit AuditData) bool {
-	for _, it := range audit.Issues {
-		if it.TargetScope != "" || it.Dimension != "" || it.Direction != "" {
-			return true
-		}
-	}
-	return false
+	return a
 }
 
 // writeProtected 判断问题是否命中冻结卷写保护/retcon 候选（1.3/1.4）：
@@ -2076,22 +2036,22 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 }
 
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
+// issue JSON 契约片段由 contract.go 单源生成（全量契约）。
 func signabilityPrompt(novelID int64, scopeText string) string {
 	return fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\",\"fix_type\":\"body|ledger\",\"target_scope\":\"active_volume|frozen_volume|none\",\"dimension\":\"character|locus_arc|timeline|reader_pov|none\",\"direction\":\"forward_fix|retcon_candidate\"}]}——"+
-		"fix_type 必填：body=正文级需章节重写（S5 修不动，将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"+
-		"target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"+
-		"dimension 必填：character=角色 | locus_arc=地点·弧线 | timeline=时间线 | reader_pov=读者视角（series bible 四维）；不属四维的纯质量问题（节奏/爽点/文笔等）填 none。"+
-		"direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"+
+		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
+		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText)
 }
 
-// blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。
+// blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。issue JSON 契约片段由 contract.go
+// 单源生成（核心契约：蓝图体检不涉 fix_type/卷作用域字段）。
 func blueprintAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 blueprint-audit 方法论，对本书**蓝图（卷纲结构）**做签约级体检："+
 		"用 list_volumes / get_chapter_list / get_story_arcs / get_characters / get_reader_perspective 读取蓝图与已落设定，"+
-		"逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式：{\"verdict\":\"pass|needs_fix\",\"score\":0,\"summary\":\"...\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0|P1\",\"area\":\"维度\",\"desc\":\"...\"}]}。"+
+		"逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式："+
+		auditFormatLine(false, issueSampleDefault)+"。"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥24/30 → pass。", novelID)
 }
 
@@ -2103,7 +2063,7 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) stri
 		"按 blueprint-fix 方法论：P0 优先于 P1，用 edit（仅 volumes/id_{id}.md 卷纲）/create_volume 修复，"+
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
-		"{\"fixed\":[\"I..\"],\"skipped\":[{\"id\":\"I..\",\"reason\":\"无法在卷纲层修复的原因\"}]}——"+
+		fixReceiptFormatLine()+"——"+
 		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。"+
 		"（注：蓝图级问题均为卷纲/设定层，不涉及正文章节重写，无需考虑 fix_type=body 的回流。）",
 		novelID, len(issues), b)
@@ -2127,7 +2087,7 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
 		"按 signability-fix 方法论：P0 优先于 P1，用 edit/update_chapter_plan/create_volume/台账写工具修复，"+
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
-		"{\"fixed\":[\"I..\"],\"skipped\":[{\"id\":\"I..\",\"reason\":\"无法修复的原因\"}]}——"+
+		fixReceiptFormatLine()+"——"+
 		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）；"+
 		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
 		novelID, len(issues), b)

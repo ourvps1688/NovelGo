@@ -21,29 +21,13 @@ import type {
   FixIssuePayload,
   RewriteItem,
   RewriteProgressState,
+  AuditData,
 } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import StageActivityPanel from "./StageActivityPanel";
 
-export interface AuditIssue {
-  id: string;
-  level: string;
-  area: string;
-  desc: string;
-  // issue 三枚举（卷级作用域）：target_scope=落点卷作用域（active_volume|frozen_volume|none）、
-  // dimension=四维机器归属（character|locus_arc|timeline|reader_pov|none）、
-  // direction=修复方向（forward_fix|retcon_candidate）。旧版体检数据可能缺省。
-  target_scope?: string;
-  dimension?: string;
-  direction?: string;
-}
-
-export interface AuditData {
-  verdict: string;
-  score?: number;
-  summary?: string;
-  issues?: AuditIssue[];
-}
+// 体检结果类型（AuditIssue / AuditData）的契约单源在 @/types/pipeline（对齐后端
+// internal/pipeline/contract.go），此处不再手写副本。
 
 interface Props {
   run: pipeline.PipelineRun | null;

@@ -5,14 +5,11 @@ import type {
   GatePayload,
   GateDecision,
   FixActivityItem,
+  AuditData,
 } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import StageActivityPanel from "./StageActivityPanel";
-import {
-  AuditResultView,
-  parseCtx,
-  type AuditData,
-} from "./SignabilityAuditView";
+import { AuditResultView, parseCtx } from "./SignabilityAuditView";
 
 interface VolumeDraft {
   id: number;

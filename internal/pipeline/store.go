@@ -152,9 +152,13 @@ type AuditIssue struct {
 	Direction string `json:"direction,omitempty"`
 }
 
-// FixTypeBody 标记该 issue 为「正文级」——无法靠 S5 台账/单章 edit 修补解决，
-// 必须回流到 S3 章节重写回路重写对应章节正文。
-const FixTypeBody = "body"
+// issue 的 fix_type 枚举（契约单源见 contract.go）：
+// FixTypeBody「正文级」——无法靠 S5 台账/单章 edit 修补解决，必须回流到 S3 章节重写回路；
+// FixTypeLedger「台账级」——台账/卷纲/可 edit 修补（缺省按 ledger 处理）。
+const (
+	FixTypeBody   = "body"
+	FixTypeLedger = "ledger"
+)
 
 // RewriteItem 是回流到 S3 章节重写回路的一条正文级问题（来自体检 issue 的 body 类）。
 // 持久化于 GateContext.RewriteBacklog，供 G4 闸门展示与 S3 写作回路消费（优先重写被标记章节）。
@@ -172,10 +176,13 @@ type RewriteItem struct {
 
 // AuditData 是 S4 签约体检的结构化结果，序列化进 GateContext.Audit。
 type AuditData struct {
-	Verdict string       `json:"verdict"` // pass | needs_fix
-	Score   int          `json:"score"`   // 总分（/40，8 维 ×5）
-	Summary string       `json:"summary"` // 一句话结论
-	Issues  []AuditIssue `json:"issues"`  // issue 清单
+	Verdict string `json:"verdict"` // pass | needs_fix
+	Score   int    `json:"score"`   // 总分（/40，8 维 ×5）
+	Summary string `json:"summary"` // 一句话结论
+	// SchemaVersion 体检产出时的 issue JSON 契约版本（contract.go 的 AuditSchemaVersion）。
+	// LLM 未标注时为 0（不触发版本门，仅靠字段嗅探兜底）；显式低于当前版本即判陈旧。
+	SchemaVersion int          `json:"schema_version,omitempty"`
+	Issues        []AuditIssue `json:"issues"` // issue 清单
 }
 
 // Store 封装 pipeline_runs 表的读写。
