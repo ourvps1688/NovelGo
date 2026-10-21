@@ -29,9 +29,22 @@ export function useLayoutState() {
   const [sidePanelWidth, setSidePanelWidthRaw] = useState(() =>
     loadNumber(SIDEPANEL_KEY, SIDEPANEL_DEFAULT, 180, 480),
   );
-  const [chatPanelWidth, setChatPanelWidthRaw] = useState(() =>
+  const [chatPanelWidthRaw, setChatPanelWidthRaw] = useState(() =>
     loadNumber(CHATPANEL_KEY, CHATPANEL_DEFAULT, 320, 1200),
   );
+  // 跟踪窗口宽度：对话面板宽度需按窗口动态封顶，否则窄窗口下
+  // 固定宽（最大 1200）的对话面板会把工作区挤扁甚至挤没。
+  const [winW, setWinW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWinW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // 预留活动栏 + 侧栏 + 工作区最小可读宽度（约 780px），其余才给对话面板；
+  // 下限仍为 320，极窄窗口时对话面板保持最小可用宽度。
+  const chatMax = Math.max(320, winW - 780);
+  const chatPanelWidth = Math.min(chatPanelWidthRaw, chatMax);
 
   // 防抖写入 localStorage，避免拖拽时频繁同步 I/O
   const sideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

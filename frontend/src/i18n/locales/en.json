@@ -1895,6 +1895,7 @@
       "score": "Score {{n}}/40",
       "issues": "Issue List",
       "noIssues": "No significant issues found.",
+      "noAudit": "No audit result yet (audit not finished or last run failed). Resume to re-run the audit.",
       "fixNote": "Fixes done; re-auditing automatically."
     },
     "fixProgress": {

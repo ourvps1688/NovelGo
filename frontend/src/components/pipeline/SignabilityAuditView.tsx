@@ -232,9 +232,14 @@ export function AuditResultView({
               </li>
             ))}
           </ul>
-        ) : (
+        ) : audit ? (
           <p className="text-sm text-muted-foreground">
             {t("pipeline.signability.noIssues")}
+          </p>
+        ) : (
+          // 无体检数据（体检失败/尚未跑完）时不得渲染「未发现明显问题」误导用户。
+          <p className="text-sm text-muted-foreground">
+            {t("pipeline.signability.noAudit")}
           </p>
         )}
       </div>

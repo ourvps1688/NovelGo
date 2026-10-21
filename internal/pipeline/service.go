@@ -486,9 +486,11 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	}
 
 	out, err := s.skillRunner(ctx, auditSkill, SkillInput{
-		NovelID:   novelID,
-		Prompt:    auditPrompt,
-		MaxTurns:  12,
+		NovelID: novelID,
+		Prompt:  auditPrompt,
+		// 只读体检需通读/抽样全书章节与台账（长篇动辄 70+ 章），12 轮在长篇上
+		// 会在读完全书前耗尽（「已达最大轮数」）。放宽到 24 轮。
+		MaxTurns:  24,
 		SessionID: "pipeline:" + runID + ":audit",
 	})
 	if err != nil {
