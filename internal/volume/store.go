@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -165,6 +166,39 @@ func (s *Store) Update(ctx context.Context, tx *gorm.DB, novelID, volumeID int64
 		}
 		return nil
 	})
+}
+
+// SetFrozen 置位/解除卷冻结态（G_freeze）。
+//   - frozen=true：置 FrozenAt=now；已是冻结态时保持原冻结时刻不变（幂等）。
+//   - frozen=false：清空 FrozenAt。
+//
+// 卷不存在或不属于该小说返回 ErrNotFound。返回最新卷状态。
+// 自动置位（卷过 S4+S5 后由流水线置冻结）属阶段 2 G_freeze 闸门任务；
+// 本方法是显式置位/解冻的唯一入口，S5 写保护读 Frozen 标记拒写。
+func (s *Store) SetFrozen(ctx context.Context, tx *gorm.DB, novelID, volumeID int64, frozen bool) (*Volume, error) {
+	db := s.pick(tx)
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		v, err := s.GetByID(ctx, tx, novelID, volumeID)
+		if err != nil {
+			return err
+		}
+		if v.Frozen == frozen {
+			return nil // 幂等：已是目标状态，不动 frozen_at
+		}
+		if frozen {
+			now := time.Now()
+			return tx.WithContext(ctx).Model(&Volume{}).
+				Where("id = ?", volumeID).
+				Updates(map[string]any{"frozen": true, "frozen_at": now}).Error
+		}
+		return tx.WithContext(ctx).Model(&Volume{}).
+			Where("id = ?", volumeID).
+			Updates(map[string]any{"frozen": false, "frozen_at": nil}).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("volume store: set frozen: %w", err)
+	}
+	return s.GetByID(ctx, tx, novelID, volumeID)
 }
 
 // Delete 删除卷。卷下仍有章节时返回 ErrHasChapters。

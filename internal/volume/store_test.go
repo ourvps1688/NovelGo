@@ -452,3 +452,51 @@ func TestAllocateUnknownVolume(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+// ── 冻结态（G_freeze）─────────────────────────────────────
+
+// SetFrozen 置位/解冻卷冻结态：冻结记 frozen_at、解冻清 frozen_at、
+// 幂等（重复冻结保持原冻结时刻）、归属校验（他书卷 ErrNotFound）。
+func TestVolumeSetFrozen(t *testing.T) {
+	db := openVolDB(t)
+	ctx := context.Background()
+	s := newTestStore(db)
+	v := mustPlace(t, db, 1, "第一卷", nil)
+
+	if v.Frozen || v.FrozenAt != nil || v.SnapshotVersion != 0 {
+		t.Errorf("new volume frozen state = %v/%v/%d, want false/nil/0", v.Frozen, v.FrozenAt, v.SnapshotVersion)
+	}
+
+	// 冻结：置位并记时刻。
+	frozen, err := s.SetFrozen(ctx, nil, 1, v.ID, true)
+	if err != nil {
+		t.Fatalf("freeze: %v", err)
+	}
+	if !frozen.Frozen || frozen.FrozenAt == nil {
+		t.Errorf("frozen state = %v/%v, want true/non-nil", frozen.Frozen, frozen.FrozenAt)
+	}
+	firstFrozenAt := *frozen.FrozenAt
+
+	// 幂等：重复冻结不改冻结时刻。
+	again, err := s.SetFrozen(ctx, nil, 1, v.ID, true)
+	if err != nil {
+		t.Fatalf("freeze again: %v", err)
+	}
+	if again.FrozenAt == nil || !again.FrozenAt.Equal(firstFrozenAt) {
+		t.Errorf("idempotent freeze changed frozen_at: %v -> %v", firstFrozenAt, again.FrozenAt)
+	}
+
+	// 解冻：清 frozen_at。
+	thawed, err := s.SetFrozen(ctx, nil, 1, v.ID, false)
+	if err != nil {
+		t.Fatalf("unfreeze: %v", err)
+	}
+	if thawed.Frozen || thawed.FrozenAt != nil {
+		t.Errorf("unfrozen state = %v/%v, want false/nil", thawed.Frozen, thawed.FrozenAt)
+	}
+
+	// 归属校验：他书卷报 ErrNotFound。
+	if _, err := s.SetFrozen(ctx, nil, 2, v.ID, true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("foreign novel err = %v, want ErrNotFound", err)
+	}
+}

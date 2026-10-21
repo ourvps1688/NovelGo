@@ -3671,6 +3671,10 @@ export namespace volume {
 	    // Go type: time
 	    updated_at: any;
 	    outline_file_path: string;
+	    frozen: boolean;
+	    // Go type: time
+	    frozen_at?: any;
+	    snapshot_version: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Volume(source);
@@ -3685,6 +3689,9 @@ export namespace volume {
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	        this.outline_file_path = source["outline_file_path"];
+	        this.frozen = source["frozen"];
+	        this.frozen_at = this.convertValues(source["frozen_at"], null);
+	        this.snapshot_version = source["snapshot_version"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

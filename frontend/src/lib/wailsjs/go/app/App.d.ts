@@ -290,6 +290,8 @@ export function SetReasoningEffort(arg1:string):Promise<void>;
 
 export function SetSelectedModel(arg1:string,arg2:string):Promise<void>;
 
+export function SetVolumeFrozen(arg1:number,arg2:number,arg3:boolean):Promise<volume.Volume>;
+
 export function StartPipeline(arg1:number,arg2:string,arg3:any,arg4:boolean):Promise<pipeline.PipelineRun>;
 
 export function TestConnection(arg1:app.TestConnectionInput):Promise<llm.TestConnectionResult>;

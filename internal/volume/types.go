@@ -21,6 +21,19 @@ type Volume struct {
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"                              json:"created_at"`
 	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime"                              json:"updated_at"`
 	OutlineFilePath string    `gorm:"-" json:"outline_file_path"`
+
+	// Frozen 卷冻结态（G_freeze，卷级作用域流水线）：true=本卷已定稿冻结——
+	// 正文与既定设定不再被自动回改，S5 写保护据此拒写（issue.target_scope=frozen_volume
+	// 不派自动修复），跨卷问题默认前向适配本卷。
+	//
+	// 置位规则：默认「本卷过 S4 体检 + S5 修复闭环后」置冻结（自动置位接入
+	// Orchestrator 属阶段 2 的 G_freeze 闸门任务；当前经 SetFrozen 显式置位/解冻）。
+	Frozen   bool       `gorm:"column:frozen;not null;default:false" json:"frozen"`
+	FrozenAt *time.Time `gorm:"column:frozen_at"                    json:"frozen_at,omitempty"`
+
+	// SnapshotVersion 卷快照版本号（阶段 2 卷快照机制用：冻结提交 committed snapshot 时递增）。
+	// 阶段 1 只落字段占位，恒为 0。
+	SnapshotVersion int `gorm:"column:snapshot_version;not null;default:0" json:"snapshot_version"`
 }
 
 // PlaceInput 描述创建或移动卷的目标位置。

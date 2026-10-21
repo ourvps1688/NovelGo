@@ -49,3 +49,14 @@ func (a *App) GetVolumes(novelID int64) ([]volume.Volume, error) {
 	}
 	return volumes, nil
 }
+
+// SetVolumeFrozen 置位/解除卷冻结态（G_freeze）：frozen=true 后该卷正文与既定设定
+// 不再被流水线自动回改（S5 写保护拒写），跨卷问题默认前向适配本卷。
+// 幂等；返回最新卷状态。解冻供作者显式撤回定稿（如需继续修订本卷）。
+func (a *App) SetVolumeFrozen(novelID, volumeID int64, frozen bool) (*volume.Volume, error) {
+	v, err := a.volume.SetFrozen(a.ctx, nil, novelID, volumeID, frozen)
+	if err != nil {
+		return nil, fmt.Errorf("set volume frozen: %w", err)
+	}
+	return v, nil
+}
