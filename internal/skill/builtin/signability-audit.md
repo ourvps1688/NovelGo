@@ -34,6 +34,12 @@ useWhen:
 
 **你是只读体检 agent**：白名单仅含 `read`、`get_chapter_list`、`list_volumes`、`get_characters`、`get_character_relations`、`get_locations`、`get_timeline`、`get_story_arcs`、`get_reader_perspective`、`search_story_memory`。你没有写库、没有 `run_subagent`，不要尝试。
 
+## 审计范围（卷级作用域优先）
+- **任务提示词带卷级作用域**（形如「本次体检作用域=《X》（卷级 scoped 体检）」）时：**只逐章审读属于该卷的章节**（以 `get_chapter_list` 返回的 volume_id 归属为准）；其它卷的章节只作背景参照，**不逐章审读、不评分、不举证**，也不要在 issues 里报其它卷自身的问题。评分、verdict 与结论只对本卷负责。
+- **前卷是既定事实**：与前卷（尤其已冻结卷）的设定冲突照常报 issue，但修复方向应为「改本卷适配前卷」——`direction` 填 `"forward_fix"`、`target_scope` 填 `"active_volume"`（问题落点在本卷）；仅当冲突**硬到改本卷无论如何都消解不了**时才标 `"retcon_candidate"`，并在 desc 写明「需回改前卷第 X 章/设定才能解决」。
+- **跨卷问题必须有归属**：涉及多卷或全书级的问题（全局悬念池、全书口径统一等），`target_scope` 不能悬空——落点在本卷填 `"active_volume"`，落点在已冻结卷填 `"frozen_volume"`，确实全书级填 `"none"`；`dimension` 同时按四维归类（不属四维填 `"none"`）。
+- **不带作用域说明**（全书体检 / 完本终检 / 存量对齐体检）时维持全书逐章通读的原行为，`target_scope` 按问题落点卷的冻结态标注（本卷/活跃卷=`"active_volume"`、已冻结定稿卷=`"frozen_volume"`、全书级=`"none"`）。
+
 ## 评分维度（每维打分 1–5 + 证据）
 1. **开篇过签力（黄金三章）**：前三章是否立人设 + 抛悬念 + 给甜头/钩子？代入感强否？是否命中题材卡「开场抓手」？
 2. **题材契合与差异化**：是否落在正确赛道？与同题材标杆的异同？有无记忆点？
@@ -62,7 +68,7 @@ useWhen:
 - 控制成本：逐条扫描时只标记**具体不一致**，不重复读同一资源；扫描台账**不**替代逐章正文审读，二者互补。
 
 ## 工作流（只读，禁止写库/子 Agent）
-1. **全本逐章通读**：用 `get_chapter_list` 列出全部章节，用 `read` **逐章通读全部已成稿章节**——前三章（黄金三章）逐字精读，其余章节按 3–5 章一批依次读完，**不得抽样跳章**。章节很多时也要分批评完，这是体检结论确定性的底线。
+1. **逐章通读（范围见「审计范围」节）**：用 `get_chapter_list` 列出章节并按作用域过滤（卷级 scoped 体检只保留本卷章节，全书体检保留全部），用 `read` **逐章通读作用域内全部已成稿章节**——全书前三章（黄金三章）逐字精读，其余章节按 3–5 章一批依次读完，**不得抽样跳章**。章节很多时也要分批评完，这是体检结论确定性的底线。
 2. **按需补读台账**：若需验证设定/人物/卷纲，可调用一次 `list_volumes`、`get_characters`、`get_character_relations`、`get_locations`、`get_timeline`、`get_story_arcs`、`get_reader_perspective` 或 `search_story_memory`。禁止反复查询同一资源。
 3. **直接输出结构化结果**：收集到足够证据后，**立即**逐维打分，并在最终回复末尾给出 JSON 代码块。
 4. **不要陷入只读循环**：如果你发现自己在连续多轮只调用 `read`/`get_*`，说明信息已足够，应停止查询、直接输出评分与 JSON。orchestrator 会按你的 JSON 驱动后续 S5 修复。
