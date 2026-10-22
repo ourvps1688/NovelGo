@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/rollback"
 	"github.com/novelgo/novelgo/internal/session"
@@ -113,6 +114,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&activity.DailyLLMUsage{},
 		&volume.Volume{},
 		&volume.VolumeSnapshot{},
+		&retcon.RetconCase{},
 		&writingconfig.WritingConfig{},
 		&personasetting.PersonaSetting{},
 		&pipeline.PipelineRun{},

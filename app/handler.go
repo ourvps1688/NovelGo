@@ -30,6 +30,7 @@ import (
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/rollback"
 	"github.com/novelgo/novelgo/internal/search"
 	"github.com/novelgo/novelgo/internal/session"
@@ -101,6 +102,7 @@ type App struct {
 	writing    *writing.Store
 	volume     *volume.Store
 	snapshots  *snapshot.Service
+	retcons    *retcon.Service
 	activity   *activity.Store
 	pipeline   *pipeline.Service
 }
@@ -340,6 +342,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.writing = writing.NewStore(db, a.logger)
 	a.volume = volume.NewStore(db, a.logger)
 	a.snapshots = snapshot.NewService(db, a.volume, a.chapter)
+	a.retcons = retcon.NewService(retcon.NewStore(db))
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, a.timeline.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, a.storyarc.ChapterDeletionBlockers),
@@ -415,6 +418,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.pipeline.SetBibleProvider(func(ctx context.Context, novelID int64) (string, error) {
 		return a.snapshots.EstablishedFactsText(ctx, novelID)
 	})
+	// 注入 retcon 审批闸门（WBS 3.1）：S5 交回的写保护/retcon 候选沉淀为持久化候选案，
+	// 作者显式审批后才允许受控回改冻结卷（3.2 接快照 diff/Restore 留痕与回滚）。
+	a.pipeline.SetRetconGate(a.retcons)
 	// 启动恢复：把上次进程遗留的「running 僵尸运行」（执行 goroutine 已消亡）统一置为
 	// paused 并打中断标记，用户点「恢复」时按阶段重新派发执行体。见 RecoverInterruptedRuns。
 	a.pipeline.RecoverInterruptedRuns()

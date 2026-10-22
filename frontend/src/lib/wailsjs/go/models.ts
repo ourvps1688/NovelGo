@@ -2807,6 +2807,116 @@ export namespace remote {
 
 }
 
+export namespace retcon {
+	
+	export class CreateInput {
+	    novel_id: number;
+	    volume_id?: number;
+	    origin?: string;
+	    issue_id?: string;
+	    target_scope?: string;
+	    dimension?: string;
+	    direction?: string;
+	    title?: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CreateInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.volume_id = source["volume_id"];
+	        this.origin = source["origin"];
+	        this.issue_id = source["issue_id"];
+	        this.target_scope = source["target_scope"];
+	        this.dimension = source["dimension"];
+	        this.direction = source["direction"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	    }
+	}
+	export class RetconCase {
+	    id: number;
+	    novel_id: number;
+	    volume_id?: number;
+	    origin: string;
+	    issue_id?: string;
+	    target_scope?: string;
+	    dimension?: string;
+	    direction?: string;
+	    title: string;
+	    description?: string;
+	    status: string;
+	    decision_note?: string;
+	    decided_by?: string;
+	    // Go type: time
+	    decided_at?: any;
+	    rollback_snapshot_id?: number;
+	    diff_summary?: string;
+	    applied_by?: string;
+	    // Go type: time
+	    applied_at?: any;
+	    rolled_back_by?: string;
+	    // Go type: time
+	    rolled_back_at?: any;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new RetconCase(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.novel_id = source["novel_id"];
+	        this.volume_id = source["volume_id"];
+	        this.origin = source["origin"];
+	        this.issue_id = source["issue_id"];
+	        this.target_scope = source["target_scope"];
+	        this.dimension = source["dimension"];
+	        this.direction = source["direction"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.status = source["status"];
+	        this.decision_note = source["decision_note"];
+	        this.decided_by = source["decided_by"];
+	        this.decided_at = this.convertValues(source["decided_at"], null);
+	        this.rollback_snapshot_id = source["rollback_snapshot_id"];
+	        this.diff_summary = source["diff_summary"];
+	        this.applied_by = source["applied_by"];
+	        this.applied_at = this.convertValues(source["applied_at"], null);
+	        this.rolled_back_by = source["rolled_back_by"];
+	        this.rolled_back_at = this.convertValues(source["rolled_back_at"], null);
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace search {
 	
 	export class Result {
@@ -3079,6 +3189,67 @@ export namespace skill {
 	        this.merged_books = source["merged_books"];
 	        this.stable_items = source["stable_items"];
 	        this.single_book_items = source["single_book_items"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace snapshot {
+	
+	export class AuditIssue {
+	    severity: string;
+	    table: string;
+	    row_id: number;
+	    code: string;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuditIssue(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.severity = source["severity"];
+	        this.table = source["table"];
+	        this.row_id = source["row_id"];
+	        this.code = source["code"];
+	        this.message = source["message"];
+	    }
+	}
+	export class AuditReport {
+	    novel_id: number;
+	    issues: AuditIssue[];
+	    error_count: number;
+	    warning_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuditReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.issues = this.convertValues(source["issues"], AuditIssue);
+	        this.error_count = source["error_count"];
+	        this.warning_count = source["warning_count"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

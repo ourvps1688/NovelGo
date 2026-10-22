@@ -16,6 +16,7 @@ import (
 	"github.com/novelgo/novelgo/internal/agent"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/volume"
 )
@@ -63,6 +64,10 @@ type Service struct {
 	// 注入 S4/S5/S6/章节重写提示词作为校验与前向修复依据。由 app 层注入
 	// internal/snapshot.Service.EstablishedFactsText；nil 或出错时降级为不注入（旧行为）。
 	bibleProvider func(ctx context.Context, novelID int64) (string, error)
+	// retconGate 是 retcon 审批闸门（WBS 3.1，internal/retcon）：S5 交回的写保护/retcon
+	// 候选沉淀为持久化候选案（状态机起点），供作者显式审批后受控回改冻结卷。
+	// 未注入时跳过沉淀（降级为只暂停交回），不影响安全出口流转。
+	retconGate *retcon.Service
 	// orchestrator 是统一的阶段流转状态机（PR5 引入），ResumePipeline 委托它推进。
 	orchestrator *Orchestrator
 }
@@ -140,6 +145,12 @@ func (s *Service) SetVolumeFreezer(fn func(ctx context.Context, novelID, volumeI
 // internal/snapshot.Service.EstablishedFactsText 实现）。未注入/出错时降级为不注入。
 func (s *Service) SetBibleProvider(fn func(ctx context.Context, novelID int64) (string, error)) {
 	s.bibleProvider = fn
+}
+
+// SetRetconGate 注入 retcon 审批闸门（WBS 3.1，由 app 层构造 internal/retcon.Service）。
+// 未注入时 S5 交回候选只暂停不沉淀（降级），闸门上线后由 app 统一注入。
+func (s *Service) SetRetconGate(gate *retcon.Service) {
+	s.retconGate = gate
 }
 
 // establishedFactsText 取「已冻结卷既定事实」注入块；未注入 / 无快照 / 出错均返回空串，
@@ -1481,14 +1492,16 @@ func (s *Service) handoffRewriteToUser(ctx context.Context, runID string, novelI
 
 // handoffRetconToUser 把命中冻结卷写保护/retcon 候选的问题交回人工裁决：明确暂停当前
 // 阶段、广播带 retcon_handoff 标记的 fix_done（前端展示「已转交人工裁决」而非「修复完成」）。
-// 冻结卷正文与既定设定不得被自动回改（1.3），retcon 候选须作者显式拍板（阶段 3 审批闸门）；
-// 本函数是阶段 1 的安全出口，绝不带盲区派发、也绝不谎报完成。
+// 冻结卷正文与既定设定不得被自动回改（1.3），retcon 候选须作者显式拍板（retcon 审批闸门，
+// WBS 3.1）；候选同时沉淀进 retcon_cases（状态机起点），供审批闸门逐项裁决。
+// 本函数是安全出口，绝不带盲区派发、也绝不谎报完成。
 func (s *Service) handoffRetconToUser(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
 	n := len(ctxt.RetconBacklog)
+	s.persistRetconCandidates(ctx, novelID, ctxt.RetconBacklog)
 	msg := fmt.Sprintf(
 		"%d 项问题命中冻结卷写保护/retcon 候选（target_scope=frozen_volume 或 direction=retcon_candidate），"+
 			"已拦截自动修复与自动重写，转交人工裁决：请优先前向适配（改本卷及后续适配已定稿前卷）；"+
-			"确需回改前卷的，待 retcon 审批闸门（阶段 3）上线后受控处理",
+			"确需回改前卷的，请经 retcon 审批闸门逐项审批后受控处理（批准后留痕编辑、可回滚）",
 		n,
 	)
 	emitFixDone(ctx, map[string]any{
@@ -1508,6 +1521,31 @@ func (s *Service) handoffRetconToUser(ctx context.Context, runID string, novelID
 			Status: StatusPaused, Note: msg})
 	}
 	s.setDispatching(ctx, runID, false)
+}
+
+// persistRetconCandidates 把 RetconBacklog 逐项沉淀为持久化 retcon 候选案（WBS 3.1
+// 状态机起点，origin=pipeline）。同一条 issue 每轮体检都会重算进 RetconBacklog，
+// 由 retcon.CreateCandidate 按（issueID, description）对未终态案件去重，重复沉淀幂等。
+// 目标卷不做机械推断（issue 三枚举只标 frozen_volume 未指明哪一卷），留作者审批时在
+// 界面确认；沉淀失败只记日志，不影响安全出口本身。
+func (s *Service) persistRetconCandidates(ctx context.Context, novelID int64, items []RewriteItem) {
+	if s.retconGate == nil || len(items) == 0 {
+		return
+	}
+	for _, it := range items {
+		in := retcon.CreateInput{
+			NovelID:     novelID,
+			Origin:      retcon.OriginPipeline,
+			IssueID:     it.ID,
+			TargetScope: it.TargetScope,
+			Dimension:   it.Dimension,
+			Direction:   it.Direction,
+			Description: it.Desc,
+		}
+		if _, err := s.retconGate.CreateCandidate(ctx, in); err != nil {
+			s.logger.Warn("retcon 闸门：候选沉淀失败", "novel_id", novelID, "issue_id", it.ID, "err", err)
+		}
+	}
 }
 
 // resolveRewriteChapters 把重写清单里每个 issue 涉及的章节阅读序号，映射回本书真实章节
