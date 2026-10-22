@@ -343,6 +343,27 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.volume = volume.NewStore(db, a.logger)
 	a.snapshots = snapshot.NewService(db, a.volume, a.chapter)
 	a.retcons = retcon.NewService(retcon.NewStore(db))
+	// retcon 受控编辑留痕（WBS 3.2）三执行体：回滚点固化=snapshot.Commit；差异摘要=
+	// snapshot.DiffAgainstCurrent + FormatDelta；回滚=snapshot.Restore（raw SQL 还原，
+	// 见 2.2）。Record/Rollback 终态前再 Commit 让既定事实注入源跟上 retcon 后 canon。
+	a.retcons.SetCommitSnapshot(func(ctx context.Context, novelID, volumeID int64) (int64, error) {
+		snap, err := a.snapshots.Commit(ctx, novelID, volumeID)
+		if err != nil {
+			return 0, err
+		}
+		return snap.ID, nil
+	})
+	a.retcons.SetDiffSummary(func(ctx context.Context, snapshotID int64) (string, error) {
+		delta, err := a.snapshots.DiffAgainstCurrent(ctx, snapshotID)
+		if err != nil {
+			return "", err
+		}
+		return snapshot.FormatDelta(delta), nil
+	})
+	a.retcons.SetRestorer(func(ctx context.Context, _, snapshotID int64) error {
+		_, err := a.snapshots.Restore(ctx, snapshotID)
+		return err
+	})
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, a.timeline.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, a.storyarc.ChapterDeletionBlockers),

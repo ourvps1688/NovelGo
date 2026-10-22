@@ -36,6 +36,8 @@ export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;
 
 export function AuditSeriesBible(arg1:number):Promise<snapshot.AuditReport>;
 
+export function BeginRetconEdit(arg1:number,arg2:number,arg3:string):Promise<retcon.RetconCase>;
+
 export function CancelChat(arg1:string):Promise<void>;
 
 export function CancelExtract(arg1:string):Promise<void>;
@@ -196,6 +198,8 @@ export function GetRemoteSkillContent(arg1:string):Promise<apperr.Result_string_
 
 export function GetRetconCase(arg1:number):Promise<retcon.RetconCase>;
 
+export function GetRetconEditDiff(arg1:number):Promise<snapshot.Delta>;
+
 export function GetSession(arg1:string):Promise<app.SessionDetail>;
 
 export function GetSessionMessages(arg1:string):Promise<Array<session.Message>>;
@@ -262,11 +266,15 @@ export function RebuildNovelIndex(arg1:number):Promise<void>;
 
 export function RecordCreativeActivity(arg1:number):Promise<void>;
 
+export function RecordRetconEdit(arg1:number,arg2:string):Promise<retcon.RetconCase>;
+
 export function RejectRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
 
 export function ResumePipeline(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RetryStartup():Promise<void>;
+
+export function RollbackRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
 
 export function SaveAuthorAliases(arg1:app.SaveAuthorAliasesInput):Promise<void>;
 

@@ -40,7 +40,7 @@ func seedVol(t *testing.T, db *gorm.DB, id, novelID int64, frozen bool) {
 	if frozen {
 		f = 1
 	}
-	if err := db.Exec("INSERT INTO volumes (id, novel_id, frozen) VALUES (?, ?, ?)", id, novelID, f).Error; err != nil {
+	if err := db.Exec("INSERT OR IGNORE INTO volumes (id, novel_id, frozen) VALUES (?, ?, ?)", id, novelID, f).Error; err != nil {
 		t.Fatalf("seed volume: %v", err)
 	}
 }

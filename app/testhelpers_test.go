@@ -25,6 +25,7 @@ import (
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/reader"
+	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/rollback"
 	"github.com/novelgo/novelgo/internal/session"
 	"github.com/novelgo/novelgo/internal/setting"
@@ -150,6 +151,26 @@ func setupTestApp(t *testing.T) *App {
 		snapshots:  snapshot.NewService(db, volumeStore, chapterStore),
 		activity:   activityStore,
 	}
+	// retcon 审批闸门（WBS 3.1/3.2）：与 handler.go 装配同形（三执行体接 snapshot 服务）。
+	app.retcons = retcon.NewService(retcon.NewStore(db))
+	app.retcons.SetCommitSnapshot(func(ctx context.Context, novelID, volumeID int64) (int64, error) {
+		snap, err := app.snapshots.Commit(ctx, novelID, volumeID)
+		if err != nil {
+			return 0, err
+		}
+		return snap.ID, nil
+	})
+	app.retcons.SetDiffSummary(func(ctx context.Context, snapshotID int64) (string, error) {
+		delta, err := app.snapshots.DiffAgainstCurrent(ctx, snapshotID)
+		if err != nil {
+			return "", err
+		}
+		return snapshot.FormatDelta(delta), nil
+	})
+	app.retcons.SetRestorer(func(ctx context.Context, _, snapshotID int64) error {
+		_, err := app.snapshots.Restore(ctx, snapshotID)
+		return err
+	})
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, timelineStore.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, storyarcStore.ChapterDeletionBlockers),

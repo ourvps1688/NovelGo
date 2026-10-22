@@ -60,6 +60,12 @@ func (s *Store) FindOpenMatch(ctx context.Context, novelID int64, issueID, descr
 	return &c, nil
 }
 
+// SetVolume 绑定目标卷（只改 volume_id，不触碰状态机字段）。
+func (s *Store) SetVolume(ctx context.Context, id, volumeID int64) error {
+	return s.db.WithContext(ctx).Model(&RetconCase{}).
+		Where("id = ?", id).Update("volume_id", volumeID).Error
+}
+
 // Advance 在单事务内完成「读取→校验迁移→改写」，把案件推进到目标状态并应用
 // apply 补丁（写裁决/编辑/回滚等伴随字段）。校验失败不落任何改动。
 func (s *Store) Advance(ctx context.Context, id int64, to string, apply func(*RetconCase)) (*RetconCase, error) {

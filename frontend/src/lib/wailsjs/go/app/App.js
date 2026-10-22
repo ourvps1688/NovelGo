@@ -14,6 +14,10 @@ export function AuditSeriesBible(arg1) {
   return window['go']['app']['App']['AuditSeriesBible'](arg1);
 }
 
+export function BeginRetconEdit(arg1, arg2, arg3) {
+  return window['go']['app']['App']['BeginRetconEdit'](arg1, arg2, arg3);
+}
+
 export function CancelChat(arg1) {
   return window['go']['app']['App']['CancelChat'](arg1);
 }
@@ -334,6 +338,10 @@ export function GetRetconCase(arg1) {
   return window['go']['app']['App']['GetRetconCase'](arg1);
 }
 
+export function GetRetconEditDiff(arg1) {
+  return window['go']['app']['App']['GetRetconEditDiff'](arg1);
+}
+
 export function GetSession(arg1) {
   return window['go']['app']['App']['GetSession'](arg1);
 }
@@ -466,6 +474,10 @@ export function RecordCreativeActivity(arg1) {
   return window['go']['app']['App']['RecordCreativeActivity'](arg1);
 }
 
+export function RecordRetconEdit(arg1, arg2) {
+  return window['go']['app']['App']['RecordRetconEdit'](arg1, arg2);
+}
+
 export function RejectRetconCase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RejectRetconCase'](arg1, arg2, arg3);
 }
@@ -476,6 +488,10 @@ export function ResumePipeline(arg1, arg2, arg3) {
 
 export function RetryStartup() {
   return window['go']['app']['App']['RetryStartup']();
+}
+
+export function RollbackRetconCase(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RollbackRetconCase'](arg1, arg2, arg3);
 }
 
 export function SaveAuthorAliases(arg1) {

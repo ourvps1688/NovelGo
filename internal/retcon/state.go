@@ -44,6 +44,14 @@ var (
 	ErrRollbackPointRequired = errors.New("retcon: 受控编辑必须先固化回滚点")
 	// ErrDiffRequired 差异摘要缺失（留痕必须记录差异摘要）。
 	ErrDiffRequired = errors.New("retcon: 留痕必须记录差异摘要")
+	// ErrNoCommitter 回滚点固化执行体未接入（3.2 接入 snapshot.Commit 前禁止开受控编辑）。
+	ErrNoCommitter = errors.New("retcon: 回滚点固化执行体未接入")
+	// ErrNoDiffer 差异摘要计算体未接入（3.2 接入 diff 前禁止自动留痕收口）。
+	ErrNoDiffer = errors.New("retcon: 差异摘要计算体未接入")
+	// ErrVolumeMismatch 目标卷与案件已绑定卷不一致。
+	ErrVolumeMismatch = errors.New("retcon: 目标卷与已绑定卷不一致")
+	// ErrNotEditable 当前状态不可绑定目标卷（editing 之后目标卷随回滚点锁定）。
+	ErrNotEditable = errors.New("retcon: 当前状态不可绑定目标卷")
 )
 
 // CanTransition 判断 from→to 是否为合法迁移。

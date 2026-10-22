@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/novelgo/novelgo/internal/retcon"
+	"github.com/novelgo/novelgo/internal/snapshot"
 )
 
 // RetconCaseInput 是发起 retcon 候选的前端输入（作者主动发起）。
@@ -55,4 +56,52 @@ func (a *App) RejectRetconCase(id int64, actor, note string) (*retcon.RetconCase
 		return nil, fmt.Errorf("reject retcon case: %w", err)
 	}
 	return c, nil
+}
+
+// BeginRetconEdit 进入受控编辑窗口（WBS 3.2，approved→editing）：绑定目标冻结卷并
+// 固化回滚点快照（编辑前状态），此后才允许在窗口内回改冻结卷（走既有台账/正文写路径，
+// 冻结卷改动自动标 source=retcon，见 2.6）。
+func (a *App) BeginRetconEdit(caseID, volumeID int64, actor string) (*retcon.RetconCase, error) {
+	c, err := a.retcons.BeginControlledEdit(a.ctx, caseID, volumeID, actor)
+	if err != nil {
+		return nil, fmt.Errorf("begin retcon edit: %w", err)
+	}
+	return c, nil
+}
+
+// RecordRetconEdit 留痕收口（editing→recorded）：自动以回滚点快照与当前台账的差异
+// 摘要固化留痕（「每次 retcon 有 diff + 回滚点」），并刷新既定事实快照。
+func (a *App) RecordRetconEdit(caseID int64, actor string) (*retcon.RetconCase, error) {
+	c, err := a.retcons.RecordWithDiff(a.ctx, caseID, actor)
+	if err != nil {
+		return nil, fmt.Errorf("record retcon edit: %w", err)
+	}
+	return c, nil
+}
+
+// RollbackRetconCase 回滚受控编辑（recorded→rolled_back）：台账整体还原到回滚点快照
+// 后落终态，并刷新既定事实快照。破坏性操作，由作者显式确认后调用。
+func (a *App) RollbackRetconCase(caseID int64, actor, note string) (*retcon.RetconCase, error) {
+	c, err := a.retcons.Rollback(a.ctx, caseID, actor, note)
+	if err != nil {
+		return nil, fmt.Errorf("rollback retcon case: %w", err)
+	}
+	return c, nil
+}
+
+// GetRetconEditDiff 查看受控编辑窗口内「回滚点 vs 当前台账」的结构化差异
+// （审批弹窗/编辑对照用，只读）。
+func (a *App) GetRetconEditDiff(caseID int64) (*snapshot.Delta, error) {
+	c, err := a.retcons.GetByID(a.ctx, caseID)
+	if err != nil {
+		return nil, fmt.Errorf("get retcon case: %w", err)
+	}
+	if c.RollbackSnapshotID == nil {
+		return nil, fmt.Errorf("get retcon edit diff: 尚未固化回滚点")
+	}
+	delta, err := a.snapshots.DiffAgainstCurrent(a.ctx, *c.RollbackSnapshotID)
+	if err != nil {
+		return nil, fmt.Errorf("get retcon edit diff: %w", err)
+	}
+	return delta, nil
 }
