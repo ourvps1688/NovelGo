@@ -71,4 +71,9 @@
 - internal/retcon 新包：retcon_cases 表 + 状态机 candidate→approved→editing→recorded→rolled_back（candidate→rejected 驳回支）；单向无环、终态封死、**迁移只能经显式 API**（retcon 必须显式审批，非循环自动，测试机械验证无环）。
 - 闸门规则：裁决（Approve/Reject）必附理由；BeginEdit 必先固化回滚点（快照 id）；Record 必附差异摘要；Rollback 必先接 RestorerFunc 且先还原后落状态；目标卷须已冻结（发起/批准守卫，含中途解冻）。
 - pipeline：handoffRetconToUser 沉淀 RetconBacklog→candidate（同 issue 未终态幂等去重）；SetRetconGate 注入，nil 降级。app API：List/Get/Create/Approve/RejectRetconCase。signability-audit.md 有 retcon_candidate 判定问句（宁前向勿 retcon）。
-- 下步：3.2 受控编辑留痕 ✅（commit 3d0b1894）：BeginControlledEdit 固化回滚点快照→editing 窗口→RecordWithDiff（回滚点 vs 当前差异摘要留痕）→Rollback（先 Restore→再固化 canon→才落终态）。**Record/Rollback 终态前各 Commit 一份 canon**，让 LatestSnapshot（既定事实注入源）跟上 retcon 后 canon（关键，勿删）。snapshot.FormatDelta 渲染留痕摘要；app：BeginRetconEdit/RecordRetconEdit/RollbackRetconCase/GetRetconEditDiff。**testhelpers 必须与 handler.go 同形装配 retcons 三钩子**（漏装=nil receiver panic）。下步：3.3 一致性巡检（张力报告 agent，只报告不改写）→ 阶段 4 前端。
+- 3.2 受控编辑留痕 ✅（commit 3d0b1894）：BeginControlledEdit 固化回滚点快照→editing 窗口→RecordWithDiff（回滚点 vs 当前差异摘要留痕）→Rollback（先 Restore→再固化 canon→才落终态）。**Record/Rollback 终态前各 Commit 一份 canon**，让 LatestSnapshot（既定事实注入源）跟上 retcon 后 canon（关键，勿删）。snapshot.FormatDelta 渲染留痕摘要；app：BeginRetconEdit/RecordRetconEdit/RollbackRetconCase/GetRetconEditDiff。**testhelpers 必须与 handler.go 同形装配 retcons 三钩子**（漏装=nil receiver panic）。
+
+## 一致性巡检（WBS 3.3 已落地，2026-10-23，commit 9c42fbec）
+- 全书「张力报告」只读 agent：新技能 consistency-patrol.md + agentcfg.ConsistencyPatrolAgent（复用 signabilityAgentTools 只读白名单，agentTypePatrol="patrol"）。pipeline/patrol.go：runConsistencyPatrol→GateContext.PatrolReport + 事件 pipeline:consistency_patrol，失败降级非阻断。触发=G_freeze 冻结成功后自动一次（freezeVolumeWithNote）+ ControlPipeline "patrol" 手动。
+- **只报告不改写是机械保证**：报告绝不进 Audit/FixStates/RewriteBacklog/RetconBacklog（patrol_test 断言零污染）；张力不自动立 retcon 案，审批另走 3.1。输出走 issue 全量契约（issueSamplePatrol=T1）。
+- 下步：阶段 4 前端（卷管理 UI、retcon 审批弹窗、巡检报告视图、前向适配提示；前端四道闸）。
