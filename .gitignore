@@ -51,3 +51,6 @@ github_pat.txt
 
 # Local scratch (extraction drafts, etc. — not source)
 .workbuddy/tmp/
+
+# Test-generated reports (written back to repo root by benchmarks)
+skill-llm-fallback-report.md
