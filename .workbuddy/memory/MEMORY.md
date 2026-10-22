@@ -76,4 +76,8 @@
 ## 一致性巡检（WBS 3.3 已落地，2026-10-23，commit 9c42fbec）
 - 全书「张力报告」只读 agent：新技能 consistency-patrol.md + agentcfg.ConsistencyPatrolAgent（复用 signabilityAgentTools 只读白名单，agentTypePatrol="patrol"）。pipeline/patrol.go：runConsistencyPatrol→GateContext.PatrolReport + 事件 pipeline:consistency_patrol，失败降级非阻断。触发=G_freeze 冻结成功后自动一次（freezeVolumeWithNote）+ ControlPipeline "patrol" 手动。
 - **只报告不改写是机械保证**：报告绝不进 Audit/FixStates/RewriteBacklog/RetconBacklog（patrol_test 断言零污染）；张力不自动立 retcon 案，审批另走 3.1。输出走 issue 全量契约（issueSamplePatrol=T1）。
-- 下步：阶段 4 前端（卷管理 UI、retcon 审批弹窗、巡检报告视图、前向适配提示；前端四道闸）。
+
+## 阶段 4 卷级前端 ✅（2026-10-23，commit 187c66b8，WBS 全部完成）
+- PipelineWizard 底部常驻三面板：VolumeManagePanel（冻结/解冻 SetVolumeFrozen+AuditSeriesBible 前置自检）、RetconPanel+RetconCaseDialog（按状态机自适应：裁决理由必填/固化回滚点/DeltaView diff/留痕收口/回滚危险确认，actor="author"）、PatrolReportPanel（patrol_report 只读+control("patrol")）。
+- 前向适配提示=IssueTags.tsx 共享标签（direction/scope/dimension），挂全部 issue 行；usePipeline 加 consistency_patrol 订阅+patrolTick，ControlCmd+"patrol"。
+- 坑：巡检失败不广播事件（降级设计勿改），pending 靠按钮可重试兜底；set-state-in-effect 告警用渲染期重置（prev 值比较）而非 effect；`cmd | tail` 掩盖退出码用 `${PIPESTATUS[0]}`。
