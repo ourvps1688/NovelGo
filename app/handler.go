@@ -410,6 +410,11 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		_, _, err := a.snapshots.Freeze(ctx, novelID, volumeID)
 		return err
 	})
+	// 注入「已冻结卷既定事实」提供者（WBS 2.3）：S4/S5/S6/章节重写提示词以冻结快照
+	// 为校验与前向修复依据（无快照时返回空串，提示词与旧行为一致）。
+	a.pipeline.SetBibleProvider(func(ctx context.Context, novelID int64) (string, error) {
+		return a.snapshots.EstablishedFactsText(ctx, novelID)
+	})
 	// 启动恢复：把上次进程遗留的「running 僵尸运行」（执行 goroutine 已消亡）统一置为
 	// paused 并打中断标记，用户点「恢复」时按阶段重新派发执行体。见 RecoverInterruptedRuns。
 	a.pipeline.RecoverInterruptedRuns()

@@ -59,6 +59,10 @@ type Service struct {
 	// committed snapshot（含 2.4 冻结前台账审计）。由 app 层注入 internal/snapshot.Service.Freeze；
 	// 测试可注入 stub。为 nil 时跳过自动冻结（仅告警），不影响收口流转。
 	volumeFreezer func(ctx context.Context, novelID, volumeID int64) error
+	// bibleProvider 返回「已冻结卷既定事实」文本块（internal/snapshot 快照渲染，WBS 2.3），
+	// 注入 S4/S5/S6/章节重写提示词作为校验与前向修复依据。由 app 层注入
+	// internal/snapshot.Service.EstablishedFactsText；nil 或出错时降级为不注入（旧行为）。
+	bibleProvider func(ctx context.Context, novelID int64) (string, error)
 	// orchestrator 是统一的阶段流转状态机（PR5 引入），ResumePipeline 委托它推进。
 	orchestrator *Orchestrator
 }
@@ -130,6 +134,26 @@ func (s *Service) SetStateSyncRunner(fn func(ctx context.Context, novelID, chapt
 // 冻结即同事务提交 committed snapshot）。未注入时自动冻结降级为跳过（告警），不影响流水线流转。
 func (s *Service) SetVolumeFreezer(fn func(ctx context.Context, novelID, volumeID int64) error) {
 	s.volumeFreezer = fn
+}
+
+// SetBibleProvider 注入「已冻结卷既定事实」文本提供者（由 app 层用
+// internal/snapshot.Service.EstablishedFactsText 实现）。未注入/出错时降级为不注入。
+func (s *Service) SetBibleProvider(fn func(ctx context.Context, novelID int64) (string, error)) {
+	s.bibleProvider = fn
+}
+
+// establishedFactsText 取「已冻结卷既定事实」注入块；未注入 / 无快照 / 出错均返回空串，
+// 提示词与未接快照时逐字一致（向后兼容）。
+func (s *Service) establishedFactsText(ctx context.Context, novelID int64) string {
+	if s.bibleProvider == nil {
+		return ""
+	}
+	text, err := s.bibleProvider(ctx, novelID)
+	if err != nil {
+		s.logger.Warn("既定事实注入：读取冻结快照失败，降级为不注入", "novel_id", novelID, "err", err)
+		return ""
+	}
+	return text
 }
 
 // StartPipeline 启动一次新流水线，并广播阶段事件。
@@ -769,7 +793,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
 	}
 	auditSkill := "signability-audit"
-	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID))
+	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID), s.establishedFactsText(ctx, novelID))
 	if ctxt.AuditKind == "blueprint" {
 		auditSkill = "blueprint-audit"
 		auditPrompt = blueprintAuditPrompt(novelID)
@@ -1207,7 +1231,7 @@ func (s *Service) executeFix(runID string, novelID int64) {
 
 		// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
 		fixSkill := "signability-fix"
-		fixPromptText := fixPrompt(novelID, batch, auditData.Summary)
+		fixPromptText := fixPrompt(novelID, batch, auditData.Summary, s.establishedFactsText(ctx, novelID))
 		if ctxt.AuditKind == "blueprint" {
 			fixSkill = "blueprint-fix"
 			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
@@ -1524,7 +1548,7 @@ func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, ite
 
 // executeChapterRewrite 对单章派发章节重写 agent（chapter-rewrite 技能），按 body issue 整章重写。
 func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter) error {
-	prompt := chapterRewritePrompt(novelID, item, ch)
+	prompt := chapterRewritePrompt(novelID, item, ch, s.establishedFactsText(ctx, novelID))
 	_, err := s.skillRunner(ctx, "chapter-rewrite", SkillInput{
 		NovelID:   novelID,
 		Prompt:    prompt,
@@ -1538,7 +1562,8 @@ func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novel
 }
 
 // chapterRewritePrompt 构造单章重写的任务提示：注入章节定位信息与要解决的正文级 issue。
-func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter) string {
+// bibleText 非空时注入「已冻结卷既定事实」块（重写须在既定事实上展开，不得写回冻结卷）。
+func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, bibleText string) string {
 	return fmt.Sprintf(
 		"本书 novel_id=%d。请整章重写以下章节以解决正文级签约体检问题：\n"+
 			"- 第 %d 章（chapter_id=%d，标题：%s）— 问题 %s[%s] %s：%s\n\n"+
@@ -1546,7 +1571,7 @@ func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter) s
 			"（如立人设 / 补爽点 / 修节奏 / 兑现伏笔），保持与前后章节及台账（角色/弧线/时间线/读者认知）一致；"+
 			"正文格式遵守规范：无破折号「——」、无序号段落分隔符、无 AI 味硬伤，正文只含叙事不含章节号/标题/章末标记。",
 		novelID, ch.ReadingNumber, ch.ID, ch.Title, item.ID, item.Level, item.Area, item.Desc,
-	)
+	) + bibleBlock(bibleText)
 }
 
 // runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：
@@ -1634,7 +1659,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 
 	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
-		Prompt:    finalAuditPrompt(novelID),
+		Prompt:    finalAuditPrompt(novelID, s.establishedFactsText(ctx, novelID)),
 		MaxTurns:  16,
 		SessionID: "pipeline:" + runID + ":final",
 	})
@@ -1680,11 +1705,11 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 }
 
 // finalAuditPrompt 构造 S6 完本级终检的任务提示词。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
-func finalAuditPrompt(novelID int64) string {
+func finalAuditPrompt(novelID int64, bibleText string) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
 		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
-		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID)
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID) + bibleBlock(bibleText)
 }
 
 // ── 入口判定与安全检查点（PR5）────────────────────────────────
@@ -2169,14 +2194,27 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 		label, *volumeID)
 }
 
+// bibleBlock 把「已冻结卷既定事实」文本拼为提示词尾部注入块（WBS 2.3）；空串返回空，
+// 提示词与未接快照时逐字一致。文本块内容由 internal/snapshot.BibleText 渲染。
+func bibleBlock(bibleText string) string {
+	if bibleText == "" {
+		return ""
+	}
+	return "\n\n【已冻结卷既定事实（系列圣经快照）】\n" + bibleText + "\n" +
+		"以上是已冻结（定稿）卷在最近一次冻结时固化的系列圣经，是本次校验/修复的**既定事实依据**：\n" +
+		"与之冲突的一律改本卷及后续来适配它（前向修复），**不得**为消解冲突回改已冻结卷；" +
+		"与之不冲突的部分以正文与台账工具读到的现状为准。"
+}
+
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
+// bibleText 非空时注入「已冻结卷既定事实」块（S4 依据前卷快照校验，WBS 2.3）。
 // issue JSON 契约片段由 contract.go 单源生成（全量契约）。
-func signabilityPrompt(novelID int64, scopeText string) string {
+func signabilityPrompt(novelID int64, scopeText, bibleText string) string {
 	return fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
-		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText)
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText) + bibleBlock(bibleText)
 }
 
 // blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。issue JSON 契约片段由 contract.go
@@ -2203,10 +2241,10 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) stri
 		novelID, len(issues), b)
 }
 
-// fixPrompt 构造 S5 修复阶段的任务提示词，内嵌 S4 产出的 issue 清单 JSON。
 // fixPrompt 构造一批待修问题的修复提示词：只传本批问题子集（均为未修复项），
-// 保证 agent 在有限轮数内聚焦逐条修复到位。
-func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
+// 保证 agent 在有限轮数内聚焦逐条修复到位。bibleText 非空时注入「已冻结卷既定事实」块
+// （S5 前向修复以快照为唯一依据，WBS 2.3）。
+func fixPrompt(novelID int64, issues []AuditIssue, summary, bibleText string) string {
 	data := AuditData{Verdict: "needs_fix", Summary: summary, Issues: issues}
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复的**台账/卷纲级（fix_type=ledger）**项）。"+
@@ -2224,7 +2262,7 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string) string {
 		fixReceiptFormatLine()+"——"+
 		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）；"+
 		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
-		novelID, len(issues), b)
+		novelID, len(issues), b) + bibleBlock(bibleText)
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。

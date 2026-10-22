@@ -232,9 +232,9 @@ func TestServiceRecoverWakesOrphanWaitingBookRun(t *testing.T) {
 
 // TestSignabilityPromptScopeText 验证卷级作用域提示词：空作用域与旧文案一致，非空时含定界句。
 func TestSignabilityPromptScopeText(t *testing.T) {
-	legacy := signabilityPrompt(7, "")
+	legacy := signabilityPrompt(7, "", "")
 	require.True(t, strings.HasPrefix(legacy, "本书 novel_id=7。请基于 signability-audit"), "空作用域应保持旧文案")
-	scoped := signabilityPrompt(7, "本次体检作用域=《第二卷》（volume_id=2）：只审；")
+	scoped := signabilityPrompt(7, "本次体检作用域=《第二卷》（volume_id=2）：只审；", "")
 	require.Contains(t, scoped, "本次体检作用域")
 	require.Contains(t, scoped, "请基于 signability-audit")
 }

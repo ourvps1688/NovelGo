@@ -178,8 +178,8 @@ func TestParseFreshAuditStampsSchemaVersion(t *testing.T) {
 func TestPromptSchemaSingleSource(t *testing.T) {
 	rules := issueFieldRules()
 	for name, p := range map[string]string{
-		"signabilityPrompt": signabilityPrompt(1, ""),
-		"finalAuditPrompt":  finalAuditPrompt(1),
+		"signabilityPrompt": signabilityPrompt(1, "", ""),
+		"finalAuditPrompt":  finalAuditPrompt(1, ""),
 		"stockAuditPrompt":  stockAuditPrompt(1),
 	} {
 		require.Contains(t, p, auditFormatLine(true, issueSampleDefault), "%s 应引用全量契约 schema 片段", name)
@@ -195,7 +195,7 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 	}
 	require.Contains(t, driftPatrolPrompt(1), `"id":"D1"`, "巡检提示词应使用巡检示例值")
 	for name, p := range map[string]string{
-		"fixPrompt":          fixPrompt(1, nil, ""),
+		"fixPrompt":          fixPrompt(1, nil, "", ""),
 		"blueprintFixPrompt": blueprintFixPrompt(1, nil, ""),
 	} {
 		require.Contains(t, p, fixReceiptFormatLine(), "%s 应引用契约修复回执格式串", name)
