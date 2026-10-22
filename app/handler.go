@@ -318,6 +318,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	if err := storage.RegisterOplogHooks(db); err != nil {
 		a.logger.Error("注册操作日志钩子失败，回滚功能将不可用", "err", err)
 	}
+	// 5b. 注册台账 temporal/history 写路径钩子（WBS 2.6，失败降级：履历缺失，写入照常）
+	if err := storage.RegisterLedgerTemporalHooks(db); err != nil {
+		a.logger.Error("注册台账 temporal 钩子失败，变更履历将不可用", "err", err)
+	}
 
 	// 6. 创建所有领域 store
 	a.novel = novel.NewStore(db, a.logger)

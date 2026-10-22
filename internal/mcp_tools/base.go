@@ -312,6 +312,10 @@ func (r *Registry) Execute(ctx context.Context, name string, rawArgs json.RawMes
 		activity.NewStore(tc.DB, tc.LoggerOrDefault()).AddActivity(ctx, activity.ActivityDelta{ToolCalls: 1})
 	}
 
+	// 台账履历 source 标注（WBS 2.6）：工具写入=AI/流水线自动写入。
+	// 全部工具统一经此入口，单点标注即可；前端 CRUD 不走此处，fallback 判为 author。
+	ctx = storage.WithLedgerSource(ctx, storage.HistorySourceAuto)
+
 	t0 := time.Now()
 	var result *ToolResult
 	var execErr error

@@ -205,6 +205,11 @@ func (a *App) DeleteNovel(novelID int64) error {
 			{"reader_perspectives", func(tx *gorm.DB) error {
 				return tx.Where("novel_id = ?", novelID).Delete(&reader.ReaderPerspective{}).Error
 			}},
+			// 台账变更履历随条目一起清（append-only 的审计数据随被审对象消亡；
+			// 不清会留下无主履历，污染后续一致性巡检）
+			{"ledger_change_history", func(tx *gorm.DB) error {
+				return tx.Where("novel_id = ?", novelID).Delete(&storage.LedgerChangeHistory{}).Error
+			}},
 			{"sessions", func(tx *gorm.DB) error { return tx.Where("novel_id = ?", novelID).Delete(&session.Session{}).Error }},
 		} {
 			if err := op.fn(tx); err != nil {
