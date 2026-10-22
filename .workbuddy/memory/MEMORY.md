@@ -71,4 +71,4 @@
 - internal/retcon 新包：retcon_cases 表 + 状态机 candidate→approved→editing→recorded→rolled_back（candidate→rejected 驳回支）；单向无环、终态封死、**迁移只能经显式 API**（retcon 必须显式审批，非循环自动，测试机械验证无环）。
 - 闸门规则：裁决（Approve/Reject）必附理由；BeginEdit 必先固化回滚点（快照 id）；Record 必附差异摘要；Rollback 必先接 RestorerFunc 且先还原后落状态；目标卷须已冻结（发起/批准守卫，含中途解冻）。
 - pipeline：handoffRetconToUser 沉淀 RetconBacklog→candidate（同 issue 未终态幂等去重）；SetRetconGate 注入，nil 降级。app API：List/Get/Create/Approve/RejectRetconCase。signability-audit.md 有 retcon_candidate 判定问句（宁前向勿 retcon）。
-- 下步：3.2 受控编辑留痕（Commit 回滚点/Diff 留痕/Restore 回滚接 BeginControlledEdit+RecordWithDiff+Rollback；注意 Record/Rollback 终态后要再 Commit 让 LatestSnapshot（=既定事实注入源）跟上 retcon 后的 canon）→ 3.3 一致性巡检 → 阶段 4。
+- 下步：3.2 受控编辑留痕 ✅（commit 3d0b1894）：BeginControlledEdit 固化回滚点快照→editing 窗口→RecordWithDiff（回滚点 vs 当前差异摘要留痕）→Rollback（先 Restore→再固化 canon→才落终态）。**Record/Rollback 终态前各 Commit 一份 canon**，让 LatestSnapshot（既定事实注入源）跟上 retcon 后 canon（关键，勿删）。snapshot.FormatDelta 渲染留痕摘要；app：BeginRetconEdit/RecordRetconEdit/RollbackRetconCase/GetRetconEditDiff。**testhelpers 必须与 handler.go 同形装配 retcons 三钩子**（漏装=nil receiver panic）。下步：3.3 一致性巡检（张力报告 agent，只报告不改写）→ 阶段 4 前端。
