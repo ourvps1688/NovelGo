@@ -50,3 +50,14 @@
 - diff_ref=`base:<snapshot_id>` 对象键（基准=同卷上一版本，diff 运行时算，不物化文件）；版本=max(volumes.snapshot_version, 行最大版本)+1，uk_volume_snapshot 冲突重试 3 次。
 - **restore 必须 raw SQL Exec**：2.6 temporal 回调与 oplog 回调是全局 gorm callback，`SkipHooks` 拦不住（回调只查 Schema 有无 ChangedAt）；Exec 才不触发回调链——保原时间戳、零履历污染。整体回滚=registry 全表 DELETE+逐行 INSERT（schema 反射取值）。
 - 冻结接线：app.SetVolumeFrozen(true)→snapshots.Freeze；2.5 G_freeze 闸门后续直接复用。diff/restore 的 app API 留给 3.2 retcon 流程。
+
+## 台账审计（WBS 2.4 已落地，2026-10-22，commit 450d90b2）
+- 冻结前机械校验圣经自洽，防垃圾进垃圾出。严重度分界（勿回退）：error=结构性矛盾（ref.dangling/enum.invalid/lifecycle 违规/locations.parent_cycle）**阻断 Freeze**（`*LedgerInconsistentError` 带完整问题清单）；warning=可疑但合法（unlocated/resolved_without_chapter/duplicate_name/self_loop/gap_incomplete）只报告。语义张力（G7 规则）属 S4/阶段 3，不在机械审计。
+- `internal/snapshot/audit.go`：AuditLedger 只读 10 表，纯函数 auditLedger 无 IO；lifecycle 复用 `internal/reader/lifecycle.go` 单源。**审计必须走事务句柄**（auditLedgerIn(ctx,tx,…)），s.db 多连接下读到另一份库态。
+- unlocated 警告只给「基础检查通过、仅缺定位」的行，error 行不叠加噪声。app 层 AuditSeriesBible 暴露审计。
+
+## G_freeze 自动闸门（WBS 2.5 已落地，2026-10-22，commit c855dba9）
+- 触发=卷级 scoped run 过 S4+S5 收口（G4 continue）且 `AuditReason=="volume"`（卷边界复评）→ 自动 snapshots.Freeze（含 2.4 审计闸门）。中途体检（golden3/milestone）收口**绝不冻结**；仍等于当前卷的目标不冻。
+- 卷边界复评定界=**刚完结的前一卷**（completedVolumeScope）做全卷收尾体检，过审即冻结；中途体检仍扫当前卷。audit_now 于跨卷时 reason=volume（原一律 milestone 已修）。完本 G终 finish → freezeRemainingVolumes 补冻剩余卷（每卷有 committed snapshot）。
+- advanceS5 兜底复评沿用 ctxt.AuditReason（勿按 AuditStage 推导，会误触冻结）。冻结失败不阻断收口（note 提示，卷保持可写）。volumeFreezer 经 SetVolumeFreezer 由 app 注入。
+- 阶段 2 剩余：2.3 修订（S4 也读快照，闭 G5）→ 阶段 3 retcon+巡检 → 阶段 4 前端。
