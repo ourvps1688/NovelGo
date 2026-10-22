@@ -40,3 +40,7 @@
 - 杜绝无限重试三道闸：`GateContext.FixBatchFailures` 同 run 内批次连续失败计数，达 `fixBatchFailureCap=3` 转 `StatusAwaitingGate`（Options=[continue,abort]）交用户裁决，不再原样重派；派发前 `fixProviderIdleTrip=10`（近 10 分钟 idle 超时 ≥10）供应商熔断不派发；批次成功清零计数。
 - 体检端强制 issue 原子化（>5 台账或 >2 章必须拆分，禁 meta-issue）；修复端 `fixPrompt`/技能加「超限主动 skip」护栏。
 - 前端：fix_done(ok:false) 把残留 fixing→pending（usePipeline.ts）+ FixProgressView 视图层兜底（ok===false||!running 时 fixing 按 pending 展示）。
+
+## 读者 lifecycle 时间戳（WBS 2.7 已落地，2026-10-22）
+- R2 不加新列：起点（埋设/形成/揭示）→planted_chapter_id，终点（回收/纠正）→revealed_chapter_id；known 单点生命周期不设回收章。状态机校验单源 `internal/reader/lifecycle.go`（ValidateLifecycle/Update；Update 仅触碰 type/planted/revealed 才执法，护存量数据）。采集双通道=S4 四事件缺口检测（signability-audit.md）+ 作者确认（前端「标记回收」）。
+- 本 worktree 钩子是 `scripts/hooks/pre-commit`（core.hooksPath，仅 gofmt+golangci-lint）；`.githooks/pre-commit` 是 CI 镜像版（含 fe build/lint/test）未启用。前端 vitest 存量失败 2 处（ContentPanel monaco/jsdom 缺 queryCommandSupported、WorkspaceView novel-edit-dialog testid 失配）不阻塞提交。

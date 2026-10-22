@@ -63,7 +63,12 @@ useWhen:
 除逐章通读正文外，**额外全量扫描设计台账**，把「仅看正文」升级为「正文 + 五大台账」双轨体检，产出**指向具体 entry ID** 的 issue（而非泛泛而谈）：
 - `get_timeline`：逐条 entry 检查 `planted` 之后是否有 `resolved`？有无悬空伏笔（只埋不收）或提前泄露的 reveal？→ 不一致则产 issue 如 `{"id":"I9","level":"P1","area":"长线牵引","desc":"timeline#42 伏笔未回收"}`。
 - `get_story_arcs`：每条 arc 的 `status` 是否 `completed/in_progress/dropped` 自洽？arc 的 node 是否连贯、有无断点？→ `{"id":"I10","level":"P1","area":"长线牵引","desc":"story_arc#7 节点断裂，中段无推进"}`。
-- `get_reader_perspective`：每条 entry 的 `resolved` 是否闭合？是否存在「埋了悬念但从未 reveal」的死线？→ `{"id":"I11","level":"P1","area":"读者视角","desc":"reader_perspective#15 误解线无回收"}`。
+- `get_reader_perspective`：**lifecycle 四事件缺口检测**（读者认知「埋设/回收/揭示/纠正」时间戳采集的检测侧，与作者前端「标记回收」确认构成双通道）——对照正文逐项核查：
+  - ① 埋设未回收（死线）：活跃悬念（suspense）种下已久、正文早已给出解答机会却仍无回收（payoff）记录；
+  - ② 误解未纠正：活跃误知（misconception）形成已久、正文已暗示或揭示真相却仍无纠正（correction）记录；
+  - ③ 该揭示未揭示：正文已向读者揭示的关键信息或已完成的回收/反转，台账无对应条目、或条目仍挂「未回收」；
+  - ④ 先埋后收：条目的埋设/形成章与正文实际揭示顺序是否一致（回收/纠正不得早于埋设/形成）。
+  - 每条缺口产 issue 一律 `fix_type:"ledger"` + `dimension:"reader_pov"`，desc 指向具体 `reader_perspective#ID`；修复即补写 lifecycle 时间戳（S5 用 `update_reader_perspective_entry` 设 `revealed_chapter_id`（suspense=回收、misconception=纠正），或 `create_reader_perspective_entry` 补埋设/揭示条目），如 `{"id":"I11","level":"P1","area":"读者视角","desc":"reader_perspective#15 误解线无回收","fix_type":"ledger","target_scope":"active_volume","dimension":"reader_pov","direction":"forward_fix"}`。
 - 低分放行章节核查：`get_chapter_list` 输出中带「质检」标注的章节（quality_score 已落库），凡评分偏低（如 <60）或质检报告显示「多次重写仍不达标后放行」的，必须核对其正文与问题并**必产一条 P1 issue**（评分门禁重试耗尽放行的章节不得静默放过）。
 - 控制成本：逐条扫描时只标记**具体不一致**，不重复读同一资源；扫描台账**不**替代逐章正文审读，二者互补。
 

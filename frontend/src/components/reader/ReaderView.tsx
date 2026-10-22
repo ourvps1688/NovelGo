@@ -382,7 +382,15 @@ export default function ReaderView({ novelId }: Props) {
           </label>
           <select
             value={form.type}
-            onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                type: e.target.value,
+                // known 是单点生命周期（仅揭示），无回收章；切到 known 时清掉回收章。
+                revealed_reading_number:
+                  e.target.value === "known" ? 0 : f.revealed_reading_number,
+              }))
+            }
             className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {TYPES.map((v) => (
@@ -440,23 +448,26 @@ export default function ReaderView({ novelId }: Props) {
               className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
-          <div className="flex-1">
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              {t("reader.recoveredChapterLabel")}
-            </label>
-            <input
-              type="number"
-              value={form.revealed_reading_number}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  revealed_reading_number: parseInt(e.target.value) || 0,
-                }))
-              }
-              min={0}
-              className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
+          {/* known 是单点生命周期（仅揭示），无回收章字段（WBS §0.2 状态机）。 */}
+          {form.type !== "known" && (
+            <div className="flex-1">
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                {t("reader.recoveredChapterLabel")}
+              </label>
+              <input
+                type="number"
+                value={form.revealed_reading_number}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    revealed_reading_number: parseInt(e.target.value) || 0,
+                  }))
+                }
+                min={0}
+                className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -791,7 +802,8 @@ export default function ReaderView({ novelId }: Props) {
                               className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {!isRevealed && (
+                              {/* known 是单点生命周期，无「回收」事件可标记。 */}
+                              {!isRevealed && entry.type !== "known" && (
                                 <button
                                   onClick={() => handleQuickReveal(entry)}
                                   className="p-1 rounded text-muted-foreground hover:text-tag-green-foreground hover:bg-tag-green/20 transition-colors"

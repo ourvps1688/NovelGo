@@ -46,6 +46,7 @@ S4 产出的结构化结果（由 orchestrator 注入到本次任务的 system �
    - 章细纲偏差 → `update_chapter_plan` 校准大纲。
    - 卷结构 / 卷纲问题 → `edit` 写 `volumes/id_{卷id}.md` 卷纲，必要时 `create_volume` 补卷（写卷纲前先 `list_volumes` 取真实卷 ID）。
    - 台账不一致（角色/关系/地点/弧线/时间线/读者认知）→ 用对应 `create_*`/`update_*` 工具同步；先 `get_*` 查重，避免重复造条目，口径与 statesync 一致。
+   - 读者认知 lifecycle 缺口（埋设未回收 / 误解未纠正 / 该揭示未揭示）→ 这类修复就是**补写 lifecycle 时间戳**：suspense 回收、misconception 纠正用 `update_reader_perspective_entry` 设 `revealed_chapter_id`（suspense=回收章、misconception=纠正章）；正文已揭示但台账缺条目时用 `create_reader_perspective_entry` 补埋设/形成/揭示条目。`planted_chapter_id` 是起点事件（埋设/形成/揭示）、`revealed_chapter_id` 是终点事件（回收/纠正）；回收章不得早于埋设章，known（揭示型）不设回收章。
 3. **修复后复述**：一份简短摘要，逐条说明「Ix → 改了什么 / 同步了哪些台账」，不超过 15 行，便于 S4 复评对照。
 
 ## 蓝图驱动修复（结构性 issue 必须先动台账，再传播到正文）

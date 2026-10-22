@@ -144,7 +144,7 @@ func formatReaderPerspective(known, suspenses, misconceptions []reader.ReaderPer
 			if e.RelatedTruth != "" {
 				truth = fmt.Sprintf(" → 实际：%s", e.RelatedTruth)
 			}
-			lines = append(lines, fmt.Sprintf("- %s%s%s", e.Content, truth, ref(e)))
+			lines = append(lines, fmt.Sprintf("- %s（%s形成）%s%s", e.Content, chapterLabel(e.PlantedChapterID), truth, ref(e)))
 		}
 		sections = append(sections, strings.Join(lines, "\n"))
 	}
@@ -153,6 +153,17 @@ func formatReaderPerspective(known, suspenses, misconceptions []reader.ReaderPer
 		return "暂无读者认知数据。"
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+// ── lifecycle 时序校验辅助 ──────────────────────────────
+
+// readerOrderOf 构建章节阅读序解析器（reader.ValidateLifecycle 时序校验用；0=无法定位则跳过比较）。
+func readerOrderOf(ctx context.Context, tc ToolContext) (func(int64) int, error) {
+	numbers, err := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).GetReadingNumbersByNovel(ctx, nil, tc.NovelID)
+	if err != nil {
+		return nil, fmt.Errorf("reader lifecycle: resolve reading order: %w", err)
+	}
+	return func(chapterID int64) int { return numbers[chapterID] }, nil
 }
 
 // ── create_reader_perspective_entry ──────────────────────
@@ -212,29 +223,42 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 		return result, err
 	}
 
+	// lifecycle 校验（WBS 2.7）：逐条按终态校验后再进事务，避免部分写入。
+	orderOf, err := readerOrderOf(ctx, tc)
+	if err != nil {
+		return nil, err
+	}
+	rps := make([]reader.ReaderPerspective, 0, len(a.Entries))
+	for _, item := range a.Entries {
+		chapterID := item.PlantedChapterID
+		rp := reader.ReaderPerspective{
+			NovelID:           tc.NovelID,
+			Type:              item.Type,
+			Content:           item.Content,
+			PlantedChapterID:  &chapterID,
+			RelatedTruth:      item.RelatedTruth,
+			RevealedChapterID: item.RevealedChapterID,
+		}
+		if err := reader.ValidateLifecycle(rp, orderOf); err != nil {
+			return &ToolResult{Success: false, Error: err.Error()}, nil
+		}
+		rps = append(rps, rp)
+	}
+
 	var ids []int64
 	var failedName string
 	var failedErr error
-	err := tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, item := range a.Entries {
-			chapterID := item.PlantedChapterID
-			rp := reader.ReaderPerspective{
-				NovelID:           tc.NovelID,
-				Type:              item.Type,
-				Content:           item.Content,
-				PlantedChapterID:  &chapterID,
-				RelatedTruth:      item.RelatedTruth,
-				RevealedChapterID: item.RevealedChapterID,
-			}
-			if err := tx.Create(&rp).Error; err != nil {
-				failedName = item.Content
+	err = tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i := range rps {
+			if err := tx.Create(&rps[i]).Error; err != nil {
+				failedName = a.Entries[i].Content
 				if len(failedName) > 20 {
 					failedName = failedName[:20]
 				}
 				failedErr = err
 				return err
 			}
-			ids = append(ids, rp.ID)
+			ids = append(ids, rps[i].ID)
 		}
 		return nil
 	})
@@ -298,6 +322,7 @@ func (t *UpdateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 		return nil, fmt.Errorf("query perspective entry: %w", err)
 	}
 
+	old := entry // 快照 lifecycle 三字段（PATCH 合并前后比对用）
 	if err := json.Unmarshal(tc.RawArgs, &entry); err != nil {
 		return &ToolResult{Success: false, Error: "参数格式不正确: " + err.Error()}, nil
 	}
@@ -309,6 +334,15 @@ func (t *UpdateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 	}
 	if result, err := ensureChapterIDsInNovel(ctx, tc, chapterIDs); err != nil || result != nil {
 		return result, err
+	}
+
+	// lifecycle 校验（WBS 2.7）：PATCH 合并后的终态校验，动了 lifecycle 字段才强制。
+	orderOf, err := readerOrderOf(ctx, tc)
+	if err != nil {
+		return nil, err
+	}
+	if err := reader.ValidateLifecycleUpdate(old, entry, orderOf); err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
 
 	if err := tc.DB.WithContext(ctx).Save(&entry).Error; err != nil {

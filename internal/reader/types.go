@@ -26,8 +26,8 @@ type ReaderPerspective struct {
 	Type              string    `gorm:"column:type;not null;index"          json:"type"`                    // "known" | "suspense" | "misconception"
 	Content           string    `gorm:"column:content;not null"             json:"content"`                 // 条目内容：读者知道/想知道/误以为的事情
 	RelatedTruth      string    `gorm:"column:related_truth"                json:"related_truth"`           // 作者视角：真实情况。所有类型可选，不只是 misconception
-	PlantedChapterID  *int64    `gorm:"column:planted_chapter_id;index"        json:"planted_chapter_id"`   // 在哪章种下；nil 表示历史记录无法关联章节
-	RevealedChapterID *int64    `gorm:"column:revealed_chapter_id;index"        json:"revealed_chapter_id"` // 在哪章回收，nil=未回收
+	PlantedChapterID  *int64    `gorm:"column:planted_chapter_id;index"        json:"planted_chapter_id"`   // 起点事件（埋设/形成/揭示，lifecycle raised_at/formed_at/revealed_at）；nil 表示历史记录无法关联章节
+	RevealedChapterID *int64    `gorm:"column:revealed_chapter_id;index"        json:"revealed_chapter_id"` // 终点事件（回收/纠正，lifecycle payoff_at/corrected_at），nil=未回收/持续中；known 单点不设（见 lifecycle.go）
 	CreatedAt         time.Time `gorm:"column:created_at;autoCreateTime"    json:"created_at"`
 	// VolumeID 归属卷（NULL=未归属/全书级）+ temporal 变革定位（WBS §0.4 清单）。
 	VolumeID  *int64     `gorm:"column:volume_id;index" json:"volume_id,omitempty"`

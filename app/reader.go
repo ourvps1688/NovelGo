@@ -41,7 +41,17 @@ func (a *App) GetReaderPerspectives(novelID int64) ([]reader.ReaderPerspective, 
 	return result.Items, nil
 }
 
+// readerLifecycleOrderOf 构建章节阅读序解析器（lifecycle 时序校验用；0=无法定位则跳过比较）。
+func (a *App) readerLifecycleOrderOf(novelID int64) (func(int64) int, error) {
+	numbers, err := a.chapter.GetReadingNumbersByNovel(a.ctx, nil, novelID)
+	if err != nil {
+		return nil, fmt.Errorf("reader lifecycle: resolve reading order: %w", err)
+	}
+	return func(chapterID int64) int { return numbers[chapterID] }, nil
+}
+
 // CreateReaderPerspective 创建一条读者认知条目。
+// 经 reader.ValidateLifecycle 落库（lifecycle 时间戳采集：作者确认通道，WBS 2.7）。
 func (a *App) CreateReaderPerspective(novelID int64, input CreateReaderPerspectiveInput) (*reader.ReaderPerspective, error) {
 	if input.Type == "" || input.Content == "" || input.PlantedChapterID == 0 {
 		return nil, fmt.Errorf("类型、内容和种下章节不能为空")
@@ -62,6 +72,13 @@ func (a *App) CreateReaderPerspective(novelID int64, input CreateReaderPerspecti
 		RelatedTruth:      input.RelatedTruth,
 		RevealedChapterID: input.RevealedChapterID,
 	}
+	orderOf, err := a.readerLifecycleOrderOf(novelID)
+	if err != nil {
+		return nil, err
+	}
+	if err := reader.ValidateLifecycle(item, orderOf); err != nil {
+		return nil, err
+	}
 	if err := a.reader.DB.WithContext(a.ctx).Create(&item).Error; err != nil {
 		return nil, fmt.Errorf("create reader perspective: %w", err)
 	}
@@ -69,6 +86,7 @@ func (a *App) CreateReaderPerspective(novelID int64, input CreateReaderPerspecti
 }
 
 // UpdateReaderPerspective 更新一条读者认知条目。PUT 全量覆盖用户可编辑字段。
+// 经 reader.ValidateLifecycleUpdate 落库（lifecycle 时间戳采集：作者确认通道，WBS 2.7）。
 func (a *App) UpdateReaderPerspective(id int64, novelID int64, input UpdateReaderPerspectiveInput) error {
 	var item reader.ReaderPerspective
 	if err := a.reader.DB.WithContext(a.ctx).
@@ -85,11 +103,19 @@ func (a *App) UpdateReaderPerspective(id int64, novelID int64, input UpdateReade
 	if err := a.ensureChapterIDsInNovel(novelID, chapterIDs); err != nil {
 		return err
 	}
+	old := item // 快照 lifecycle 三字段（ValidateLifecycleUpdate 比对用）
 	item.Type = input.Type
 	item.Content = input.Content
 	item.PlantedChapterID = input.PlantedChapterID
 	item.RelatedTruth = input.RelatedTruth
 	item.RevealedChapterID = input.RevealedChapterID
+	orderOf, err := a.readerLifecycleOrderOf(novelID)
+	if err != nil {
+		return err
+	}
+	if err := reader.ValidateLifecycleUpdate(old, item, orderOf); err != nil {
+		return err
+	}
 	if err := a.reader.DB.WithContext(a.ctx).Save(&item).Error; err != nil {
 		return fmt.Errorf("update reader perspective: %w", err)
 	}
