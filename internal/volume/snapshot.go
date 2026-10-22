@@ -4,10 +4,12 @@ import "time"
 
 // VolumeSnapshot 是卷冻结提交的已提交快照（WBS §0.4 D3 冻结：新表 volume_snapshots）。
 // 每卷每次冻结提交一行，snapshot_version 从 1 递增（与 volumes.snapshot_version 对齐）；
-// payload 为该卷 series bible 条目 + 正文清单的 JSON 快照，后续卷以它为「既定事实」。
+// payload 为冻结时刻 series bible 全量台账 + 正文清单的 JSON 快照，后续卷以它为「既定事实」
+// （WBS §7 点 5「不断增长的快照即系列圣经」），采集/提交/差异/回滚见 internal/snapshot。
 //
-// diff_ref 指向快照间 diff 的落盘位置（阶段 3 retcon 受控编辑的留痕/回滚依据）；
-// 阶段 2 落字段占位，2.2 快照机制接写入、阶段 3 接 diff。
+// diff_ref 是基准快照的对象键（base:<snapshot_id>，指向同一卷的上一版本快照行）：
+// 相对上一版本的 diff 由 (基准, 本快照) 唯一确定、运行时计算，不物化衍生文件；
+// 首版无基准，diff_ref 为空。阶段 3 retcon 受控编辑以此留痕/回滚。
 //
 // 唯一约束 (volume_id, snapshot_version)：同卷同版本只允许一份已提交快照，
 // 「冻结即串行提交」（WBS 阶段 2 风险对策）由此在存储层兜底。

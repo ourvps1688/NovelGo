@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/novelgo/novelgo/internal/git"
@@ -95,4 +96,52 @@ func TestDeleteVolumeRollsBackWhenOutlineCleanupFails(t *testing.T) {
 	require.Error(t, err)
 	_, err = app.volume.GetByID(app.ctx, nil, novel.ID, v.ID)
 	require.NoError(t, err)
+}
+
+// TestSetVolumeFrozen_CommitsSnapshot 冻结接线（WBS 2.2）：unfrozen→frozen
+// 提交 committed snapshot；幂等重复冻结不重复提交；解冻不涉快照；再冻结版本递增。
+func TestSetVolumeFrozen_CommitsSnapshot(t *testing.T) {
+	app := setupTestApp(t)
+	novel := createTestNovel(t, app)
+	name := "第一卷"
+	v, err := app.PlaceVolume(PlaceVolumeInput{NovelID: novel.ID, Name: &name})
+	require.NoError(t, err)
+
+	snapCount := func() int64 {
+		var n int64
+		require.NoError(t, app.db.Table("volume_snapshots").Where("volume_id = ?", v.ID).Count(&n).Error)
+		return n
+	}
+
+	frozen, err := app.SetVolumeFrozen(novel.ID, v.ID, true)
+	require.NoError(t, err)
+	assert.True(t, frozen.Frozen)
+	assert.NotNil(t, frozen.FrozenAt)
+	assert.Equal(t, int64(1), snapCount(), "首冻应提交一份快照")
+
+	// 幂等：重复冻结不重复提交
+	again, err := app.SetVolumeFrozen(novel.ID, v.ID, true)
+	require.NoError(t, err)
+	assert.True(t, again.Frozen)
+	assert.Equal(t, int64(1), snapCount(), "重复冻结不应再提交快照")
+
+	// 解冻不涉快照
+	thawed, err := app.SetVolumeFrozen(novel.ID, v.ID, false)
+	require.NoError(t, err)
+	assert.False(t, thawed.Frozen)
+	assert.Nil(t, thawed.FrozenAt)
+	assert.Equal(t, int64(1), snapCount())
+
+	// 再冻结 = 新版本快照，diff_ref 指向基准
+	refrozen, err := app.SetVolumeFrozen(novel.ID, v.ID, true)
+	require.NoError(t, err)
+	assert.True(t, refrozen.Frozen)
+	assert.Equal(t, int64(2), snapCount())
+
+	var snaps []volume.VolumeSnapshot
+	require.NoError(t, app.db.Where("volume_id = ?", v.ID).Order("snapshot_version ASC").Find(&snaps).Error)
+	require.Len(t, snaps, 2)
+	assert.Equal(t, 1, snaps[0].SnapshotVersion)
+	assert.Equal(t, 2, snaps[1].SnapshotVersion)
+	assert.Equal(t, "base:"+strconv.FormatInt(snaps[0].ID, 10), snaps[1].DiffRef)
 }

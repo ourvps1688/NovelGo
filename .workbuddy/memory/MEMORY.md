@@ -44,3 +44,9 @@
 ## 读者 lifecycle 时间戳（WBS 2.7 已落地，2026-10-22）
 - R2 不加新列：起点（埋设/形成/揭示）→planted_chapter_id，终点（回收/纠正）→revealed_chapter_id；known 单点生命周期不设回收章。状态机校验单源 `internal/reader/lifecycle.go`（ValidateLifecycle/Update；Update 仅触碰 type/planted/revealed 才执法，护存量数据）。采集双通道=S4 四事件缺口检测（signability-audit.md）+ 作者确认（前端「标记回收」）。
 - 本 worktree 钩子是 `scripts/hooks/pre-commit`（core.hooksPath，仅 gofmt+golangci-lint）；`.githooks/pre-commit` 是 CI 镜像版（含 fe build/lint/test）未启用。前端 vitest 存量失败 2 处（ContentPanel monaco/jsdom 缺 queryCommandSupported、WorkspaceView novel-edit-dialog testid 失配）不阻塞提交。
+
+## 卷快照机制（WBS 2.2 已落地，2026-10-22）
+- 采集口径=**冻结时刻全量 series bible**（§7「不断增长的快照即系列圣经」递增全量），非 volume_id 过滤（台账 volume_id 从未填充，全 NULL）。范围=§0.4 冻结清单 10 模型 + 正文清单（只读）。新包 `internal/snapshot`（volume 不能 import chapter，独立包）：Freeze（unfrozen→frozen 同事务提交快照，幂等）/Commit/Diff*/Restore。
+- diff_ref=`base:<snapshot_id>` 对象键（基准=同卷上一版本，diff 运行时算，不物化文件）；版本=max(volumes.snapshot_version, 行最大版本)+1，uk_volume_snapshot 冲突重试 3 次。
+- **restore 必须 raw SQL Exec**：2.6 temporal 回调与 oplog 回调是全局 gorm callback，`SkipHooks` 拦不住（回调只查 Schema 有无 ChangedAt）；Exec 才不触发回调链——保原时间戳、零履历污染。整体回滚=registry 全表 DELETE+逐行 INSERT（schema 反射取值）。
+- 冻结接线：app.SetVolumeFrozen(true)→snapshots.Freeze；2.5 G_freeze 闸门后续直接复用。diff/restore 的 app API 留给 3.2 retcon 流程。

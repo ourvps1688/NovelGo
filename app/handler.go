@@ -36,6 +36,7 @@ import (
 	"github.com/novelgo/novelgo/internal/setting"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/skill/remote"
+	"github.com/novelgo/novelgo/internal/snapshot"
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/style"
@@ -99,6 +100,7 @@ type App struct {
 	turnCommit *rollback.Store
 	writing    *writing.Store
 	volume     *volume.Store
+	snapshots  *snapshot.Service
 	activity   *activity.Store
 	pipeline   *pipeline.Service
 }
@@ -337,6 +339,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.turnCommit = rollback.NewStore(db, a.logger)
 	a.writing = writing.NewStore(db, a.logger)
 	a.volume = volume.NewStore(db, a.logger)
+	a.snapshots = snapshot.NewService(db, a.volume)
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, a.timeline.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, a.storyarc.ChapterDeletionBlockers),

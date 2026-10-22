@@ -29,6 +29,7 @@ import (
 	"github.com/novelgo/novelgo/internal/session"
 	"github.com/novelgo/novelgo/internal/setting"
 	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/snapshot"
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/style"
@@ -146,6 +147,7 @@ func setupTestApp(t *testing.T) *App {
 		turnCommit: turnCommitStore,
 		writing:    writingStore,
 		volume:     volumeStore,
+		snapshots:  snapshot.NewService(db, volumeStore),
 		activity:   activityStore,
 	}
 	chapterDeletionGuard := deletion.NewGuard(

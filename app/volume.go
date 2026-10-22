@@ -52,9 +52,18 @@ func (a *App) GetVolumes(novelID int64) ([]volume.Volume, error) {
 
 // SetVolumeFrozen 置位/解除卷冻结态（G_freeze）：frozen=true 后该卷正文与既定设定
 // 不再被流水线自动回改（S5 写保护拒写），跨卷问题默认前向适配本卷。
-// 幂等；返回最新卷状态。解冻供作者显式撤回定稿（如需继续修订本卷）。
+// 冻结（unfrozen→frozen）在同一事务内提交 committed snapshot（WBS 2.2 卷快照），
+// 作为后续卷的既定事实与 retcon 回滚点；已是冻结态时幂等、不重复提交。
+// 返回最新卷状态。解冻供作者显式撤回定稿（如需继续修订本卷），不涉快照。
 func (a *App) SetVolumeFrozen(novelID, volumeID int64, frozen bool) (*volume.Volume, error) {
-	v, err := a.volume.SetFrozen(a.ctx, nil, novelID, volumeID, frozen)
+	if frozen {
+		v, _, err := a.snapshots.Freeze(a.ctx, novelID, volumeID)
+		if err != nil {
+			return nil, fmt.Errorf("set volume frozen: %w", err)
+		}
+		return v, nil
+	}
+	v, err := a.volume.SetFrozen(a.ctx, nil, novelID, volumeID, false)
 	if err != nil {
 		return nil, fmt.Errorf("set volume frozen: %w", err)
 	}
