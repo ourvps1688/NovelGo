@@ -17,6 +17,7 @@ import (
 	_ "github.com/novelgo/novelgo/internal/migrate/v160" // blank：触发 v160.init 注册，Run 无需感知具体迁移
 	_ "github.com/novelgo/novelgo/internal/migrate/v161" // blank：注册写作日志按日汇总迁移
 	_ "github.com/novelgo/novelgo/internal/migrate/v162" // blank：注册 novels.kind 列与历史回填迁移
+	_ "github.com/novelgo/novelgo/internal/migrate/v170" // blank：注册 series bible 存量迁移（temporal 回填 + 结构化尽力填充）
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/pipeline"

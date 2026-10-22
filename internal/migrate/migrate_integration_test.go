@@ -35,6 +35,7 @@ func TestRunInitializesNewDatabaseAndMarksAllMigrationsDone(t *testing.T) {
 		{"v1.2.0-chapter-number-column-names", 2},
 		{"v1.6.0-chapter-id-refactor", 5},
 		{"v1.6.1-writing-daily", 1},
+		{"v1.7.0-series-bible-backfill", 2},
 	} {
 		var done int64
 		if err := db.Table("migrate_state").Where("migration = ? AND status = ?", migration.name, "done").Count(&done).Error; err != nil {
@@ -71,6 +72,7 @@ func TestRunDropsResidualDirPathWhenMigrationStateIsMissing(t *testing.T) {
 		{"v1.2.0-chapter-number-column-names", 2},
 		{"v1.6.0-chapter-id-refactor", 5},
 		{"v1.6.1-writing-daily", 1},
+		{"v1.7.0-series-bible-backfill", 2},
 	} {
 		var done int64
 		if err := db.Table("migrate_state").Where("migration = ? AND status = ?", migration.name, "done").Count(&done).Error; err != nil {
@@ -229,8 +231,8 @@ func TestRunMigratesOldestSupportedDatabaseEndToEnd(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM writing_log`); n != 1 {
 		t.Fatalf("重复迁移后应只有一条写作日汇总: got %d", n)
 	}
-	if n := count(`SELECT COUNT(*) FROM migrate_state WHERE status = 'done'`); n != 9 {
-		t.Fatalf("状态丢失后应重建全部迁移状态: got %d, want 9", n)
+	if n := count(`SELECT COUNT(*) FROM migrate_state WHERE status = 'done'`); n != 11 {
+		t.Fatalf("状态丢失后应重建全部迁移状态: got %d, want 11", n)
 	}
 }
 
@@ -274,9 +276,9 @@ func writeLegacyFile(t *testing.T, novelDir, rel, content string) {
 }
 
 // TestRunAddsSeriesBibleSchemaToLegacyDatabase 验证阶段 2 schema 落地（WBS §0.4）的升级路径：
-// 带 pre-2.1 列的 7 张台账表 + 旧数据 → migrate.Run → ① 新列全部落位且旧数据零值可读
-// （volume_id/changed_at=NULL、alive 缺省在世）；② 5 张 series bible 新表建成并可读写；
-// ③ volume_snapshots 的 (volume_id, snapshot_version) 唯一约束兜底「冻结即串行提交」。
+// 带 pre-2.1 列的 7 张台账表 + 旧数据 → migrate.Run → ① 新列全部落位且旧数据有默认
+// （volume_id=NULL=无卷、changed_at 回填迁移时刻、alive 缺省在世）；② 5 张 series bible
+// 新表建成并可读写；③ volume_snapshots 的 (volume_id, snapshot_version) 唯一约束兜底「冻结即串行提交」。
 func TestRunAddsSeriesBibleSchemaToLegacyDatabase(t *testing.T) {
 	setupMigrationIntegrationEnv(t)
 	db := openMigrationIntegrationDB(t)
@@ -287,18 +289,7 @@ func TestRunAddsSeriesBibleSchemaToLegacyDatabase(t *testing.T) {
 		}
 	}
 
-	// pre-2.1（阶段 1 结束时）的台账表形状：只有既有列，无 volume_id/changed_at/四维判定列。
-	for _, query := range []string{
-		`CREATE TABLE characters (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, personality TEXT, abilities TEXT, created_at DATETIME, updated_at DATETIME)`,
-		`CREATE TABLE character_relations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, source_character_id INTEGER NOT NULL, target_character_id INTEGER NOT NULL, relation_describe TEXT NOT NULL, description TEXT, chapter_id INTEGER, is_current BOOLEAN NOT NULL, created_at DATETIME)`,
-		`CREATE TABLE locations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, location_type TEXT, description TEXT, detail_json TEXT, parent_location_id INTEGER, tags TEXT, created_at DATETIME, updated_at DATETIME)`,
-		`CREATE TABLE story_arcs (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, arc_type TEXT NOT NULL, importance INTEGER DEFAULT 1, status TEXT NOT NULL, reactivate_at TEXT, created_at DATETIME, updated_at DATETIME)`,
-		`CREATE TABLE arc_nodes (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, story_arc_id INTEGER NOT NULL, title TEXT NOT NULL, description TEXT, target_reading_number INTEGER DEFAULT 0, actual_chapter_id INTEGER, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME, updated_at DATETIME)`,
-		`CREATE TABLE time_entries (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL, title TEXT NOT NULL, content TEXT, detail_json TEXT, target_reading_number INTEGER NOT NULL DEFAULT 0, importance INTEGER DEFAULT 3, source_chapter_id INTEGER, source TEXT, resolved_chapter_id INTEGER, created_at DATETIME, updated_at DATETIME)`,
-		`CREATE TABLE reader_perspectives (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL, related_truth TEXT, planted_chapter_id INTEGER, revealed_chapter_id INTEGER, created_at DATETIME)`,
-	} {
-		execSQL(query)
-	}
+	createPre21LedgerTables(t, db)
 	execSQL(`INSERT INTO characters (id, novel_id, name) VALUES (1, 1, '主角')`)
 	execSQL(`INSERT INTO time_entries (id, novel_id, category, status, title, target_reading_number) VALUES (1, 1, 'foreshadowing', 'pending', 'f1', 2)`)
 	execSQL(`INSERT INTO reader_perspectives (id, novel_id, type, content) VALUES (1, 1, 'suspense', 'p1')`)
@@ -343,15 +334,16 @@ func TestRunAddsSeriesBibleSchemaToLegacyDatabase(t *testing.T) {
 		}
 		return n
 	}
-	// 旧数据零值可读：卷归属/变革定位未回填时为 NULL；存量角色缺省「在世」（alive 默认 true）。
-	if n := count(`SELECT COUNT(*) FROM characters WHERE id = 1 AND name = '主角' AND volume_id IS NULL AND changed_at IS NULL AND alive = 1`); n != 1 {
-		t.Fatalf("characters 旧数据零值语义不符: matched=%d", n)
+	// 旧数据有默认（WBS 2.8）：volume_id 保持 NULL（语义「无卷/全书级」）；changed_at 由
+	// v1.7.0-series-bible-backfill 回填为迁移时刻（非 NULL）；存量角色缺省「在世」（alive 默认 true）。
+	if n := count(`SELECT COUNT(*) FROM characters WHERE id = 1 AND name = '主角' AND volume_id IS NULL AND changed_at IS NOT NULL AND alive = 1`); n != 1 {
+		t.Fatalf("characters 旧数据默认语义不符: matched=%d", n)
 	}
-	if n := count(`SELECT COUNT(*) FROM time_entries WHERE id = 1 AND volume_id IS NULL AND changed_at IS NULL`); n != 1 {
-		t.Fatalf("time_entries 旧数据零值语义不符: matched=%d", n)
+	if n := count(`SELECT COUNT(*) FROM time_entries WHERE id = 1 AND volume_id IS NULL AND changed_at IS NOT NULL`); n != 1 {
+		t.Fatalf("time_entries 旧数据默认语义不符: matched=%d", n)
 	}
-	if n := count(`SELECT COUNT(*) FROM reader_perspectives WHERE id = 1 AND volume_id IS NULL AND changed_at IS NULL`); n != 1 {
-		t.Fatalf("reader_perspectives 旧数据零值语义不符: matched=%d", n)
+	if n := count(`SELECT COUNT(*) FROM reader_perspectives WHERE id = 1 AND volume_id IS NULL AND changed_at IS NOT NULL`); n != 1 {
+		t.Fatalf("reader_perspectives 旧数据默认语义不符: matched=%d", n)
 	}
 
 	// 新表读写往返。
@@ -369,5 +361,193 @@ func TestRunAddsSeriesBibleSchemaToLegacyDatabase(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM volume_snapshots`); n != 1 {
 		t.Fatalf("重复快照不应落库: got %d", n)
+	}
+}
+
+// createPre21LedgerTables 建 pre-2.1（阶段 1 结束时）形状的 7 张台账表：
+// 只有既有列，无 volume_id/changed_at/四维判定列。
+func createPre21LedgerTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, query := range []string{
+		`CREATE TABLE characters (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, personality TEXT, abilities TEXT, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE character_relations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, source_character_id INTEGER NOT NULL, target_character_id INTEGER NOT NULL, relation_describe TEXT NOT NULL, description TEXT, chapter_id INTEGER, is_current BOOLEAN NOT NULL, created_at DATETIME)`,
+		`CREATE TABLE locations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, location_type TEXT, description TEXT, detail_json TEXT, parent_location_id INTEGER, tags TEXT, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE story_arcs (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, arc_type TEXT NOT NULL, importance INTEGER DEFAULT 1, status TEXT NOT NULL, reactivate_at TEXT, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE arc_nodes (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, story_arc_id INTEGER NOT NULL, title TEXT NOT NULL, description TEXT, target_reading_number INTEGER DEFAULT 0, actual_chapter_id INTEGER, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE time_entries (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL, title TEXT NOT NULL, content TEXT, detail_json TEXT, target_reading_number INTEGER NOT NULL DEFAULT 0, importance INTEGER DEFAULT 3, source_chapter_id INTEGER, source TEXT, resolved_chapter_id INTEGER, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE reader_perspectives (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL, related_truth TEXT, planted_chapter_id INTEGER, revealed_chapter_id INTEGER, created_at DATETIME)`,
+	} {
+		if err := db.Exec(query).Error; err != nil {
+			t.Fatalf("exec %q: %v", query, err)
+		}
+	}
+}
+
+// TestRunBackfillsLedgerTemporalAndStructuredFields 验证 WBS 2.8 存量迁移（闭 G6）：
+// pre-2.1 存量库 → migrate.Run → ① temporal 回填（7 表 changed_at=迁移时刻，volume_id
+// 保持 NULL=无卷）；② 四维结构化字段尽力填充（单一无歧义命中才写）；
+// ③ 迁移只跑一次（再次 Run 不改任何值）。验收「旧书加载不炸、字段有默认」。
+func TestRunBackfillsLedgerTemporalAndStructuredFields(t *testing.T) {
+	setupMigrationIntegrationEnv(t)
+	db := openMigrationIntegrationDB(t)
+	execSQL := func(query string) {
+		t.Helper()
+		if err := db.Exec(query).Error; err != nil {
+			t.Fatalf("exec %q: %v", query, err)
+		}
+	}
+	createPre21LedgerTables(t, db)
+
+	// 存量数据取自真实开发库文风（自由文本描述）。
+	execSQL(`INSERT INTO characters (id, novel_id, name, description) VALUES
+		(1, 1, '陈三斗', '28岁，退役水下工兵，陈家第十七代起桩人。右手只剩四指。'),
+		(2, 1, '陈守拙', '陈三斗之父，六十岁上下，名义上二十年前死在三峡。'),
+		(3, 1, '姓何的女人', '三十来岁，失踪潜水员何建国的家属（正文只称“那个姓何的女人”）。'),
+		(4, 1, '苏阿水', '52岁，疍家出身，外号水鬼苏。水里是神。'),
+		(5, 1, '小满', '二十出头，周德贵的表侄，他娘让周德贵带他出来。'),
+		(6, 1, '预填角色', '99岁，别名甲乙。')`)
+	execSQL(`INSERT INTO character_relations (id, novel_id, source_character_id, target_character_id, relation_describe, is_current) VALUES
+		(1, 1, 1, 2, '陈三斗对陈守拙：二十年不相往来，见面只谈桩。', 1),
+		(2, 1, 1, 5, '小满是他的表侄，二十出头、头一回下深水。', 1),
+		(3, 1, 1, 8, '旧雇主与手艺人，已闹翻：借口扣工钱。', 1),
+		(4, 1, 9, 10, '夫妻：她带着七八岁的孩子守在黑泉坑沿。', 1),
+		(5, 1, 1, 11, '亦师亦敌，从师徒到仇人。', 1),
+		(6, 1, 1, 12, '夫妻一场，聚少离多。', 1)`)
+	execSQL(`INSERT INTO locations (id, novel_id, name, description) VALUES
+		(1, 1, '石台尽头的铁栅门', '石台再往里的通道口被一道铁栅封住。'),
+		(2, 1, '黑泉天坑', '前年塌出来的一口天坑，宽二十来米。'),
+		(3, 1, '旧庙', '庙门坍塌，仅存山墙。'),
+		(4, 1, '预填地点', '此地已毁于战火。')`)
+	execSQL(`INSERT INTO story_arcs (id, novel_id, name, description, arc_type, status) VALUES
+		(1, 1, '陈三斗：从还债到收桩', '他的弧光。', 'character', 'active'),
+		(2, 1, '水鬼苏的最后一趟水', '旧江湖最后一代舵把子。', 'character', 'active'),
+		(3, 1, '守网人与续脉派', '信条之争。', 'sub', 'active'),
+		(4, 1, '陈三斗再起', '预填归属。', 'character', 'active')`)
+	execSQL(`INSERT INTO arc_nodes (id, novel_id, story_arc_id, title, status) VALUES (1, 1, 1, '发现仇人身份', 'pending')`)
+	execSQL(`INSERT INTO time_entries (id, novel_id, category, status, title, target_reading_number) VALUES (1, 1, 'foreshadowing', 'pending', '三长两短的求救号', 2)`)
+	execSQL(`INSERT INTO reader_perspectives (id, novel_id, type, content) VALUES (1, 1, 'suspense', '谁在夜里敲桩')`)
+
+	if err := migrate.Run(db, slog.Default()); err != nil {
+		t.Fatalf("migrate.Run: %v", err)
+	}
+
+	count := func(query string) int {
+		t.Helper()
+		var n int
+		if err := db.Raw(query).Scan(&n).Error; err != nil {
+			t.Fatalf("query %q: %v", query, err)
+		}
+		return n
+	}
+	// ① temporal 回填：7 张台账表 changed_at 全部非 NULL；volume_id 保持 NULL（无卷）。
+	for _, table := range []string{
+		"characters", "character_relations", "locations", "story_arcs",
+		"arc_nodes", "time_entries", "reader_perspectives",
+	} {
+		if n := count(`SELECT COUNT(*) FROM ` + table + ` WHERE changed_at IS NULL`); n != 0 {
+			t.Fatalf("%s.changed_at 应全部回填为迁移时刻: NULL rows=%d", table, n)
+		}
+		if n := count(`SELECT COUNT(*) FROM ` + table + ` WHERE volume_id IS NOT NULL`); n != 0 {
+			t.Fatalf("%s.volume_id 存量行应保持 NULL（无卷）: 非 NULL rows=%d", table, n)
+		}
+	}
+
+	// ② 结构化尽力填充（永不覆盖已填值由 v170 步骤测试覆盖）。
+	for _, c := range []struct {
+		id                    int64
+		gender, born, aliases string
+	}{
+		{1, "", "28岁", ""},
+		{2, "男", "六十岁上下", ""},
+		{3, "女", "三十来岁", ""},
+		{4, "", "52岁", `["水鬼苏"]`},
+		{5, "", "二十出头", ""},
+		{6, "", "99岁", `["甲乙"]`},
+	} {
+		var gender, born, aliases string
+		if err := db.Raw(`SELECT COALESCE(gender,''), COALESCE(birth_year,''), COALESCE(aliases,'') FROM characters WHERE id = ?`, c.id).
+			Row().Scan(&gender, &born, &aliases); err != nil {
+			t.Fatalf("read character %d: %v", c.id, err)
+		}
+		if gender != c.gender || born != c.born || aliases != c.aliases {
+			t.Fatalf("character %d 填充不符: gender=%q born=%q aliases=%q, want gender=%q born=%q aliases=%q",
+				c.id, gender, born, aliases, c.gender, c.born, c.aliases)
+		}
+	}
+	for _, r := range []struct {
+		id   int64
+		kind string
+	}{
+		{1, ""},      // 零命中不写
+		{2, "kin"},   // 表侄
+		{3, "rival"}, // 闹翻
+		{4, "lover"}, // 夫妻
+		{5, ""},      // 师徒+仇人多组命中不写
+		{6, "lover"}, // 夫妻一场
+	} {
+		var kind string
+		if err := db.Raw(`SELECT COALESCE(relation_kind,'') FROM character_relations WHERE id = ?`, r.id).Row().Scan(&kind); err != nil {
+			t.Fatalf("read relation %d: %v", r.id, err)
+		}
+		if kind != r.kind {
+			t.Fatalf("relation %d kind=%q, want %q", r.id, kind, r.kind)
+		}
+	}
+	for _, l := range []struct {
+		id    int64
+		state string
+	}{
+		{1, "blocked"},   // 被铁栅封住
+		{2, ""},          // 「塌出来」不误判为 destroyed
+		{3, "destroyed"}, // 坍塌
+		{4, "destroyed"}, // 已毁于战火
+	} {
+		var state string
+		if err := db.Raw(`SELECT COALESCE(state,'') FROM locations WHERE id = ?`, l.id).Row().Scan(&state); err != nil {
+			t.Fatalf("read location %d: %v", l.id, err)
+		}
+		if state != l.state {
+			t.Fatalf("location %d state=%q, want %q", l.id, state, l.state)
+		}
+	}
+	for _, a := range []struct {
+		id     int64
+		charID any // nil=不填
+	}{
+		{1, int64(1)}, // 前缀「陈三斗：」精确命中
+		{2, nil},      // 别名「水鬼苏」不参与匹配
+		{3, nil},      // 非角色弧不填
+		{4, int64(1)}, // 子串唯一命中
+	} {
+		var charID *int64
+		if err := db.Raw(`SELECT char_id FROM story_arcs WHERE id = ?`, a.id).Row().Scan(&charID); err != nil {
+			t.Fatalf("read story_arc %d: %v", a.id, err)
+		}
+		switch want := a.charID.(type) {
+		case nil:
+			if charID != nil {
+				t.Fatalf("story_arc %d char_id=%d, want NULL", a.id, *charID)
+			}
+		case int64:
+			if charID == nil || *charID != want {
+				t.Fatalf("story_arc %d char_id=%v, want %d", a.id, charID, want)
+			}
+		}
+	}
+
+	// ④ 迁移只跑一次：再次 Run 不改任何值（migrate_state 记 done，步骤跳过）。
+	before := count(`SELECT COUNT(*) FROM characters WHERE changed_at IS NOT NULL`)
+	firstChanged := count(`SELECT CAST(strftime('%s', changed_at) AS INTEGER) FROM characters WHERE id = 1`)
+	if err := migrate.Run(db, slog.Default()); err != nil {
+		t.Fatalf("migrate.Run (second): %v", err)
+	}
+	if after := count(`SELECT COUNT(*) FROM characters WHERE changed_at IS NOT NULL`); after != before {
+		t.Fatalf("二次 Run 不应改动 changed_at: before=%d after=%d", before, after)
+	}
+	if second := count(`SELECT CAST(strftime('%s', changed_at) AS INTEGER) FROM characters WHERE id = 1`); second != firstChanged {
+		t.Fatalf("二次 Run 不应刷新迁移时刻: first=%d second=%d", firstChanged, second)
+	}
+	if n := count(`SELECT COUNT(*) FROM character_relations WHERE COALESCE(relation_kind,'') = 'lover' AND id = 6`); n != 1 {
+		t.Fatalf("二次 Run 不应改动已填 relation_kind: matched=%d", n)
 	}
 }
