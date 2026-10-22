@@ -91,7 +91,51 @@ type TimelineEntry struct {
 	ResolvedChapterID   *int64    `gorm:"column:resolved_chapter_id;index"        json:"resolved_chapter_id"`           // 在哪章回收，nil 表示未回收
 	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime"        json:"created_at"`
 	UpdatedAt           time.Time `gorm:"column:updated_at;autoUpdateTime"        json:"updated_at"`
+	// VolumeID 归属卷（NULL=未归属/全书级）+ temporal 变革定位（WBS §0.4 清单）。
+	VolumeID  *int64     `gorm:"column:volume_id;index" json:"volume_id,omitempty"`
+	ChangedAt *time.Time `gorm:"column:changed_at"      json:"changed_at,omitempty"`
 }
 
 // TableName 指定 GORM 表名。
 func (TimelineEntry) TableName() string { return "time_entries" }
+
+// AnchorType 是时间线锚点类型的封闭枚举（WBS §0.4 冻结）：era|date|age|season|gap。
+// gap=卷间空白期（after_volume + duration 显式标注，防推算漂移）。
+const (
+	AnchorTypeEra    = "era"
+	AnchorTypeDate   = "date"
+	AnchorTypeAge    = "age"
+	AnchorTypeSeason = "season"
+	AnchorTypeGap    = "gap"
+)
+
+// ChronologyAnchor 是时间线维的结构化锚点（WBS §0.4 D2 冻结：新表 chronology_anchors），
+// 承载 §0.2 timeline 维的 absolute_anchors（era/date/age/season）与 gaps（卷间空白期）。
+// 代码原 timeline 包实为伏笔（time_entries），时间线本体从本表起结构化。
+type ChronologyAnchor struct {
+	ID      int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	NovelID int64  `gorm:"column:novel_id;not null;index"    json:"novel_id"`
+	Label   string `gorm:"column:label;not null"             json:"label"` // 锚点名，如「新历元年」「主角16岁离村」「三年之约」
+	// AnchorType 封闭枚举（AnchorType* 常量）：era|date|age|season|gap。
+	AnchorType string `gorm:"column:anchor_type;not null;index" json:"anchor_type"`
+	// EraDate era/date 锚点的取值（如「新历312年」「春分」），自由文本承载虚构历法。
+	EraDate string `gorm:"column:era_date" json:"era_date"`
+	// CharacterAges age 锚点的角色年龄表，JSON 对象 {"角色id或名": 年龄}。
+	CharacterAges string `gorm:"column:character_ages" json:"character_ages"`
+	// Season season 锚点的季节取值。
+	Season string `gorm:"column:season" json:"season"`
+	// AfterVolume gap 锚点：空白期位于哪一卷之后（volumes.id）；nil=非 gap/未定位。
+	AfterVolume *int64 `gorm:"column:after_volume;index" json:"after_volume,omitempty"`
+	// Duration gap 锚点：空白时长（如「三年」），自由文本。
+	Duration string `gorm:"column:duration" json:"duration"`
+	// VolumeID 归属卷：NULL=未归属/全书级。
+	VolumeID           *int64     `gorm:"column:volume_id;index"       json:"volume_id,omitempty"`
+	CreatedAt          time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ChangedAt          *time.Time `gorm:"column:changed_at"            json:"changed_at,omitempty"`
+	ChangedInVolumeID  *int64     `gorm:"column:changed_in_volume_id"  json:"changed_in_volume_id,omitempty"`
+	ChangedInChapterID *int64     `gorm:"column:changed_in_chapter_id" json:"changed_in_chapter_id,omitempty"`
+}
+
+// TableName 指定 GORM 表名。
+func (ChronologyAnchor) TableName() string { return "chronology_anchors" }

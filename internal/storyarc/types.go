@@ -17,6 +17,15 @@ type StoryArc struct {
 	ReactivateAt string    `gorm:"column:reactivate_at"              json:"reactivate_at"` // 自然语言，暂停弧线的恢复条件。LLM 填写，MCP 工具格式化后呈现给 LLM 自行判断
 	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"  json:"created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"  json:"updated_at"`
+
+	// ── 阶段 2（WBS §0.4 冻结清单）：角色弧/主题弧归属 + 卷归属 + temporal ──
+	// CharID 角色弧归属（characters.id，arc_type=character 时填）；nil=非角色弧。
+	CharID *int64 `gorm:"column:char_id;index" json:"char_id,omitempty"`
+	// Motif 主题弧母题（theme_arcs.motif，自由文本）；空=非主题弧。
+	Motif string `gorm:"column:motif" json:"motif"`
+	// VolumeID 归属卷：NULL=未归属/全书级（存量迁移前为空，见 2.8 backfill）。
+	VolumeID  *int64     `gorm:"column:volume_id;index" json:"volume_id,omitempty"`
+	ChangedAt *time.Time `gorm:"column:changed_at"      json:"changed_at,omitempty"`
 }
 
 func (StoryArc) TableName() string { return "story_arcs" }
@@ -37,6 +46,9 @@ type ArcNode struct {
 	Status              string    `gorm:"column:status;not null;default:pending" json:"status"`                // "pending" | "completed" | "abandoned"
 	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime"       json:"created_at"`
 	UpdatedAt           time.Time `gorm:"column:updated_at;autoUpdateTime"       json:"updated_at"`
+	// VolumeID 归属卷（NULL=未归属/全书级）+ temporal 变革定位（WBS §0.4 清单）。
+	VolumeID  *int64     `gorm:"column:volume_id;index" json:"volume_id,omitempty"`
+	ChangedAt *time.Time `gorm:"column:changed_at"      json:"changed_at,omitempty"`
 }
 
 func (ArcNode) TableName() string { return "arc_nodes" }

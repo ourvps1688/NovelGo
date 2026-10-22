@@ -272,3 +272,102 @@ func writeLegacyFile(t *testing.T, novelDir, rel, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestRunAddsSeriesBibleSchemaToLegacyDatabase 验证阶段 2 schema 落地（WBS §0.4）的升级路径：
+// 带 pre-2.1 列的 7 张台账表 + 旧数据 → migrate.Run → ① 新列全部落位且旧数据零值可读
+// （volume_id/changed_at=NULL、alive 缺省在世）；② 5 张 series bible 新表建成并可读写；
+// ③ volume_snapshots 的 (volume_id, snapshot_version) 唯一约束兜底「冻结即串行提交」。
+func TestRunAddsSeriesBibleSchemaToLegacyDatabase(t *testing.T) {
+	setupMigrationIntegrationEnv(t)
+	db := openMigrationIntegrationDB(t)
+	execSQL := func(query string) {
+		t.Helper()
+		if err := db.Exec(query).Error; err != nil {
+			t.Fatalf("exec %q: %v", query, err)
+		}
+	}
+
+	// pre-2.1（阶段 1 结束时）的台账表形状：只有既有列，无 volume_id/changed_at/四维判定列。
+	for _, query := range []string{
+		`CREATE TABLE characters (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, personality TEXT, abilities TEXT, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE character_relations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, source_character_id INTEGER NOT NULL, target_character_id INTEGER NOT NULL, relation_describe TEXT NOT NULL, description TEXT, chapter_id INTEGER, is_current BOOLEAN NOT NULL, created_at DATETIME)`,
+		`CREATE TABLE locations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, location_type TEXT, description TEXT, detail_json TEXT, parent_location_id INTEGER, tags TEXT, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE story_arcs (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, arc_type TEXT NOT NULL, importance INTEGER DEFAULT 1, status TEXT NOT NULL, reactivate_at TEXT, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE arc_nodes (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, story_arc_id INTEGER NOT NULL, title TEXT NOT NULL, description TEXT, target_reading_number INTEGER DEFAULT 0, actual_chapter_id INTEGER, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE time_entries (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL, title TEXT NOT NULL, content TEXT, detail_json TEXT, target_reading_number INTEGER NOT NULL DEFAULT 0, importance INTEGER DEFAULT 3, source_chapter_id INTEGER, source TEXT, resolved_chapter_id INTEGER, created_at DATETIME, updated_at DATETIME)`,
+		`CREATE TABLE reader_perspectives (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL, related_truth TEXT, planted_chapter_id INTEGER, revealed_chapter_id INTEGER, created_at DATETIME)`,
+	} {
+		execSQL(query)
+	}
+	execSQL(`INSERT INTO characters (id, novel_id, name) VALUES (1, 1, '主角')`)
+	execSQL(`INSERT INTO time_entries (id, novel_id, category, status, title, target_reading_number) VALUES (1, 1, 'foreshadowing', 'pending', 'f1', 2)`)
+	execSQL(`INSERT INTO reader_perspectives (id, novel_id, type, content) VALUES (1, 1, 'suspense', 'p1')`)
+
+	if err := migrate.Run(db, slog.Default()); err != nil {
+		t.Fatalf("migrate.Run: %v", err)
+	}
+
+	for _, col := range []struct{ table, column string }{
+		{"characters", "aliases"}, {"characters", "gender"}, {"characters", "birth_year"},
+		{"characters", "appearance_anchors"}, {"characters", "alive"}, {"characters", "location_ref"},
+		{"characters", "faction"}, {"characters", "role"}, {"characters", "capability_ceiling"},
+		{"characters", "sealed"}, {"characters", "voice_traits"},
+		{"characters", "volume_id"}, {"characters", "changed_at"},
+		{"characters", "changed_in_volume_id"}, {"characters", "changed_in_chapter_id"},
+		{"character_relations", "relation_kind"}, {"character_relations", "volume_id"}, {"character_relations", "changed_at"},
+		{"locations", "state"}, {"locations", "controller"}, {"locations", "volume_id"},
+		{"locations", "changed_at"}, {"locations", "changed_in_volume_id"}, {"locations", "changed_in_chapter_id"},
+		{"story_arcs", "char_id"}, {"story_arcs", "motif"}, {"story_arcs", "volume_id"}, {"story_arcs", "changed_at"},
+		{"arc_nodes", "volume_id"}, {"arc_nodes", "changed_at"},
+		{"time_entries", "volume_id"}, {"time_entries", "changed_at"},
+		{"reader_perspectives", "volume_id"}, {"reader_perspectives", "changed_at"},
+	} {
+		if !db.Migrator().HasColumn(col.table, col.column) {
+			t.Fatalf("新列缺失: %s.%s", col.table, col.column)
+		}
+	}
+	for _, table := range []string{
+		"chronology_anchors", "character_fact_knowledge", "pov_roster",
+		"ledger_change_history", "volume_snapshots",
+	} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("series bible 新表缺失: %s", table)
+		}
+	}
+
+	count := func(query string) int {
+		t.Helper()
+		var n int
+		if err := db.Raw(query).Scan(&n).Error; err != nil {
+			t.Fatalf("query %q: %v", query, err)
+		}
+		return n
+	}
+	// 旧数据零值可读：卷归属/变革定位未回填时为 NULL；存量角色缺省「在世」（alive 默认 true）。
+	if n := count(`SELECT COUNT(*) FROM characters WHERE id = 1 AND name = '主角' AND volume_id IS NULL AND changed_at IS NULL AND alive = 1`); n != 1 {
+		t.Fatalf("characters 旧数据零值语义不符: matched=%d", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM time_entries WHERE id = 1 AND volume_id IS NULL AND changed_at IS NULL`); n != 1 {
+		t.Fatalf("time_entries 旧数据零值语义不符: matched=%d", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM reader_perspectives WHERE id = 1 AND volume_id IS NULL AND changed_at IS NULL`); n != 1 {
+		t.Fatalf("reader_perspectives 旧数据零值语义不符: matched=%d", n)
+	}
+
+	// 新表读写往返。
+	execSQL(`INSERT INTO chronology_anchors (novel_id, label, anchor_type, era_date) VALUES (1, '新历元年', 'era', '新历')`)
+	execSQL(`INSERT INTO character_fact_knowledge (novel_id, char_id, fact_id, knows) VALUES (1, 1, 1, 1)`)
+	execSQL(`INSERT INTO pov_roster (novel_id, char_id, mode) VALUES (1, 1, 'limited')`)
+	execSQL(`INSERT INTO ledger_change_history (novel_id, entry_table, entry_id, field, old_value, new_value, source, at) VALUES (1, 'characters', 1, 'alive', 'true', 'false', 'retcon', '2026-10-22 10:00:00')`)
+	execSQL(`INSERT INTO volume_snapshots (novel_id, volume_id, snapshot_version, committed_at, payload) VALUES (1, 1, 1, '2026-10-22 10:00:00', '{}')`)
+	if n := count(`SELECT COUNT(*) FROM ledger_change_history WHERE entry_table = 'characters' AND entry_id = 1 AND source = 'retcon'`); n != 1 {
+		t.Fatalf("ledger_change_history 读写往返失败: matched=%d", n)
+	}
+	// 「冻结即串行提交」存储层兜底：同卷同版本快照只允许一份。
+	if err := db.Exec(`INSERT INTO volume_snapshots (novel_id, volume_id, snapshot_version, committed_at, payload) VALUES (1, 1, 1, '2026-10-22 11:00:00', '{}')`).Error; err == nil {
+		t.Fatal("同卷同版本快照重复提交应被唯一约束拒绝")
+	}
+	if n := count(`SELECT COUNT(*) FROM volume_snapshots`); n != 1 {
+		t.Fatalf("重复快照不应落库: got %d", n)
+	}
+}

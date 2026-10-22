@@ -2,6 +2,14 @@ package location
 
 import "time"
 
+// State 是地点存续状态的封闭枚举（WBS §0.4 冻结）：intact|destroyed|blocked。
+// 空串=未标注（存量迁移/新建缺省），一致性巡检把「已毁地点再出现」当张力报告。
+const (
+	StateIntact    = "intact"
+	StateDestroyed = "destroyed"
+	StateBlocked   = "blocked"
+)
+
 // Location 是小说中的地点/场景节点。
 //
 // 与 Python 版本的差异（14 字段 → 9 字段）：
@@ -53,6 +61,17 @@ type Location struct {
 	Tags             string    `gorm:"column:tags"                       json:"tags"`               // JSON 数组自由标签，如 ["危险","神秘","主角出生地"]
 	CreatedAt        time.Time `gorm:"column:created_at;autoCreateTime"  json:"created_at"`
 	UpdatedAt        time.Time `gorm:"column:updated_at;autoUpdateTime"  json:"updated_at"`
+
+	// ── 阶段 2（WBS §0.4 冻结清单）：地点维判定字段 + 卷归属 + temporal ──
+	// State 存续状态（StateIntact/Destroyed/Blocked），空=未标注。
+	State string `gorm:"column:state;index"    json:"state"`
+	// Controller 当前控制方（阵营/势力名，自由文本）。
+	Controller string `gorm:"column:controller" json:"controller"`
+	// VolumeID 归属卷：NULL=未归属/全书级（存量迁移前为空，见 2.8 backfill）。
+	VolumeID           *int64     `gorm:"column:volume_id;index"       json:"volume_id,omitempty"`
+	ChangedAt          *time.Time `gorm:"column:changed_at"            json:"changed_at,omitempty"` // 语义最后一次实质变革时刻（temporal.changed_at）
+	ChangedInVolumeID  *int64     `gorm:"column:changed_in_volume_id"  json:"changed_in_volume_id,omitempty"`
+	ChangedInChapterID *int64     `gorm:"column:changed_in_chapter_id" json:"changed_in_chapter_id,omitempty"`
 }
 
 // TableName 指定 GORM 表名。

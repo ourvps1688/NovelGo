@@ -1485,6 +1485,22 @@ export namespace character {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
+	    aliases: string;
+	    gender: string;
+	    birth_year: string;
+	    appearance_anchors: string;
+	    alive?: boolean;
+	    location_ref: string;
+	    faction: string;
+	    role: string;
+	    capability_ceiling: string;
+	    sealed: boolean;
+	    voice_traits: string;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
+	    changed_in_volume_id?: number;
+	    changed_in_chapter_id?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Character(source);
@@ -1500,6 +1516,21 @@ export namespace character {
 	        this.abilities = source["abilities"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.aliases = source["aliases"];
+	        this.gender = source["gender"];
+	        this.birth_year = source["birth_year"];
+	        this.appearance_anchors = source["appearance_anchors"];
+	        this.alive = source["alive"];
+	        this.location_ref = source["location_ref"];
+	        this.faction = source["faction"];
+	        this.role = source["role"];
+	        this.capability_ceiling = source["capability_ceiling"];
+	        this.sealed = source["sealed"];
+	        this.voice_traits = source["voice_traits"];
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
+	        this.changed_in_volume_id = source["changed_in_volume_id"];
+	        this.changed_in_chapter_id = source["changed_in_chapter_id"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1526,11 +1557,15 @@ export namespace character {
 	    source_character_id: number;
 	    target_character_id: number;
 	    relation_describe: string;
+	    relation_kind: string;
 	    description: string;
 	    chapter_id?: number;
 	    is_current: boolean;
 	    // Go type: time
 	    created_at: any;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new CharacterRelation(source);
@@ -1543,10 +1578,13 @@ export namespace character {
 	        this.source_character_id = source["source_character_id"];
 	        this.target_character_id = source["target_character_id"];
 	        this.relation_describe = source["relation_describe"];
+	        this.relation_kind = source["relation_kind"];
 	        this.description = source["description"];
 	        this.chapter_id = source["chapter_id"];
 	        this.is_current = source["is_current"];
 	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2091,6 +2129,13 @@ export namespace location {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
+	    state: string;
+	    controller: string;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
+	    changed_in_volume_id?: number;
+	    changed_in_chapter_id?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Location(source);
@@ -2108,6 +2153,12 @@ export namespace location {
 	        this.tags = source["tags"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.state = source["state"];
+	        this.controller = source["controller"];
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
+	        this.changed_in_volume_id = source["changed_in_volume_id"];
+	        this.changed_in_chapter_id = source["changed_in_chapter_id"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2684,6 +2735,9 @@ export namespace reader {
 	    revealed_chapter_id?: number;
 	    // Go type: time
 	    created_at: any;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new ReaderPerspective(source);
@@ -2699,6 +2753,8 @@ export namespace reader {
 	        this.planted_chapter_id = source["planted_chapter_id"];
 	        this.revealed_chapter_id = source["revealed_chapter_id"];
 	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3256,6 +3312,9 @@ export namespace storyarc {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new ArcNode(source);
@@ -3273,6 +3332,8 @@ export namespace storyarc {
 	        this.status = source["status"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3306,6 +3367,11 @@ export namespace storyarc {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
+	    char_id?: number;
+	    motif: string;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new StoryArc(source);
@@ -3323,6 +3389,10 @@ export namespace storyarc {
 	        this.reactivate_at = source["reactivate_at"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.char_id = source["char_id"];
+	        this.motif = source["motif"];
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3538,6 +3608,9 @@ export namespace timeline {
 	    created_at: any;
 	    // Go type: time
 	    updated_at: any;
+	    volume_id?: number;
+	    // Go type: time
+	    changed_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new TimelineEntry(source);
@@ -3559,6 +3632,8 @@ export namespace timeline {
 	        this.resolved_chapter_id = source["resolved_chapter_id"];
 	        this.created_at = this.convertValues(source["created_at"], null);
 	        this.updated_at = this.convertValues(source["updated_at"], null);
+	        this.volume_id = source["volume_id"];
+	        this.changed_at = this.convertValues(source["changed_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
