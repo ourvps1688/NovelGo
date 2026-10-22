@@ -65,4 +65,10 @@
 - S4/S4b/S6/S5 修复/S3 重写四类提示词尾部注入【已冻结卷既定事实】块（快照出处+前向依据句）；无快照空串不注入=与旧行为逐字一致。冲突改本卷适配，不得回改冻结卷。
 - 渲染单源 internal/snapshot/bible.go（LatestSnapshot→EstablishedFactsText→BibleText）；24KB 预算按表粒度截断（截断≠事实不存在）；坏 payload 返回空串宁不注入。pipeline 经 SetBibleProvider 注入解耦，出错降级。
 - prompt 构造器统一 bibleText 尾参（signability/finalAudit/fix/chapterRewrite）。技能 md 同口径（audit/fix 各补 bullet）。
-- **阶段 2 已全部完成**（2.1/2.8/2.6/2.7/2.2/2.4/2.5/2.3）。下步：阶段 3（3.1 retcon 闸门「候选→审批→受控编辑→留痕→回滚点」、3.2 受控编辑留痕（2.2 diff/Restore 的 app API 留给它）、3.3 一致性巡检）→ 阶段 4 前端。
+- **阶段 2 已全部完成**（2.1/2.8/2.6/2.7/2.2/2.4/2.5/2.3）。
+
+## retcon 审批闸门（WBS 3.1 已落地，2026-10-22，commit d4336d84）
+- internal/retcon 新包：retcon_cases 表 + 状态机 candidate→approved→editing→recorded→rolled_back（candidate→rejected 驳回支）；单向无环、终态封死、**迁移只能经显式 API**（retcon 必须显式审批，非循环自动，测试机械验证无环）。
+- 闸门规则：裁决（Approve/Reject）必附理由；BeginEdit 必先固化回滚点（快照 id）；Record 必附差异摘要；Rollback 必先接 RestorerFunc 且先还原后落状态；目标卷须已冻结（发起/批准守卫，含中途解冻）。
+- pipeline：handoffRetconToUser 沉淀 RetconBacklog→candidate（同 issue 未终态幂等去重）；SetRetconGate 注入，nil 降级。app API：List/Get/Create/Approve/RejectRetconCase。signability-audit.md 有 retcon_candidate 判定问句（宁前向勿 retcon）。
+- 下步：3.2 受控编辑留痕（Commit 回滚点/Diff 留痕/Restore 回滚接 BeginControlledEdit+RecordWithDiff+Rollback；注意 Record/Rollback 终态后要再 Commit 让 LatestSnapshot（=既定事实注入源）跟上 retcon 后的 canon）→ 3.3 一致性巡检 → 阶段 4。
