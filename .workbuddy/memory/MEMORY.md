@@ -60,4 +60,9 @@
 - 触发=卷级 scoped run 过 S4+S5 收口（G4 continue）且 `AuditReason=="volume"`（卷边界复评）→ 自动 snapshots.Freeze（含 2.4 审计闸门）。中途体检（golden3/milestone）收口**绝不冻结**；仍等于当前卷的目标不冻。
 - 卷边界复评定界=**刚完结的前一卷**（completedVolumeScope）做全卷收尾体检，过审即冻结；中途体检仍扫当前卷。audit_now 于跨卷时 reason=volume（原一律 milestone 已修）。完本 G终 finish → freezeRemainingVolumes 补冻剩余卷（每卷有 committed snapshot）。
 - advanceS5 兜底复评沿用 ctxt.AuditReason（勿按 AuditStage 推导，会误触冻结）。冻结失败不阻断收口（note 提示，卷保持可写）。volumeFreezer 经 SetVolumeFreezer 由 app 注入。
-- 阶段 2 剩余：2.3 修订（S4 也读快照，闭 G5）→ 阶段 3 retcon+巡检 → 阶段 4 前端。
+
+## S4/S5 依据冻结快照校验（WBS 2.3 已落地，2026-10-22，commit e5362b9b，闭 G5）
+- S4/S4b/S6/S5 修复/S3 重写四类提示词尾部注入【已冻结卷既定事实】块（快照出处+前向依据句）；无快照空串不注入=与旧行为逐字一致。冲突改本卷适配，不得回改冻结卷。
+- 渲染单源 internal/snapshot/bible.go（LatestSnapshot→EstablishedFactsText→BibleText）；24KB 预算按表粒度截断（截断≠事实不存在）；坏 payload 返回空串宁不注入。pipeline 经 SetBibleProvider 注入解耦，出错降级。
+- prompt 构造器统一 bibleText 尾参（signability/finalAudit/fix/chapterRewrite）。技能 md 同口径（audit/fix 各补 bullet）。
+- **阶段 2 已全部完成**（2.1/2.8/2.6/2.7/2.2/2.4/2.5/2.3）。下步：阶段 3（3.1 retcon 闸门「候选→审批→受控编辑→留痕→回滚点」、3.2 受控编辑留痕（2.2 diff/Restore 的 app API 留给它）、3.3 一致性巡检）→ 阶段 4 前端。
