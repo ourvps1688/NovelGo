@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/volume"
 )
 
@@ -19,19 +20,25 @@ const maxCommitAttempts = 3
 // diffRefPrefix diff_ref 对象键前缀：base:<snapshot_id> 指向基准快照行。
 const diffRefPrefix = "base:"
 
-// Service 提供卷快照的提交、查询、差异与回滚（WBS 2.2）。
+// Service 提供卷快照的提交、查询、差异与回滚（WBS 2.2），及冻结前台账审计（WBS 2.4）。
 type Service struct {
-	db      *gorm.DB
-	volumes *volume.Store
+	db       *gorm.DB
+	volumes  *volume.Store
+	chapters *chapter.Store
 }
 
 // NewService 创建卷快照服务。
-func NewService(db *gorm.DB, volumes *volume.Store) *Service {
-	return &Service{db: db, volumes: volumes}
+func NewService(db *gorm.DB, volumes *volume.Store, chapters *chapter.Store) *Service {
+	return &Service{db: db, volumes: volumes, chapters: chapters}
 }
 
 // Freeze 置卷冻结（G_freeze），并在 unfrozen→frozen 迁移的同一事务内提交 committed
 // snapshot（「冻结即串行提交」）。已是冻结态时幂等返回、不重复提交快照。
+//
+// 冻结迁移前先跑台账审计（WBS 2.4 防垃圾进垃圾出）：存在 error 级结构性不自洽时
+// 拒绝冻结并返回 *LedgerInconsistentError（携带完整问题清单）；warning 级不阻断。
+// 审计只在真正迁移时执行，幂等路径不重查。
+//
 // 返回最新卷状态与本次提交的快照（幂等路径快照为 nil）。
 func (s *Service) Freeze(ctx context.Context, novelID, volumeID int64) (*volume.Volume, *volume.VolumeSnapshot, error) {
 	for attempt := 0; ; attempt++ {
@@ -183,6 +190,15 @@ func (s *Service) freezeOnce(ctx context.Context, novelID, volumeID int64) (*vol
 		if v.Frozen {
 			outV = v
 			return nil // 幂等：已是冻结态，不动 frozen_at、不重复提交快照
+		}
+		// 2.4 冻结前台账审计：error 级不自洽禁止入快照（防垃圾进垃圾出）。
+		// 走事务句柄 tx：SQLite 多连接下用 s.db 会读到另一份库态。
+		report, err := s.auditLedgerIn(ctx, tx, novelID)
+		if err != nil {
+			return err
+		}
+		if report.ErrorCount > 0 {
+			return &LedgerInconsistentError{Report: report}
 		}
 		if _, err := s.volumes.SetFrozen(ctx, tx, novelID, volumeID, true); err != nil {
 			return err

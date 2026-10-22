@@ -6,6 +6,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/snapshot"
 	"github.com/novelgo/novelgo/internal/volume"
 )
 
@@ -50,10 +51,22 @@ func (a *App) GetVolumes(novelID int64) ([]volume.Volume, error) {
 	return volumes, nil
 }
 
+// AuditSeriesBible 机械审计台账结构自洽（WBS 2.4）：悬挂引用、枚举越界、lifecycle
+// 违规、包含环等 error 级问题会阻断卷冻结（防垃圾进垃圾出）；warning 级只报告。
+// 供作者冻结前自查与前端展示修复指引，只读不写。
+func (a *App) AuditSeriesBible(novelID int64) (*snapshot.AuditReport, error) {
+	report, err := a.snapshots.AuditLedger(a.ctx, novelID)
+	if err != nil {
+		return nil, fmt.Errorf("audit series bible: %w", err)
+	}
+	return report, nil
+}
+
 // SetVolumeFrozen 置位/解除卷冻结态（G_freeze）：frozen=true 后该卷正文与既定设定
 // 不再被流水线自动回改（S5 写保护拒写），跨卷问题默认前向适配本卷。
 // 冻结（unfrozen→frozen）在同一事务内提交 committed snapshot（WBS 2.2 卷快照），
 // 作为后续卷的既定事实与 retcon 回滚点；已是冻结态时幂等、不重复提交。
+// 冻结前跑台账审计（WBS 2.4）：error 级不自洽拒绝冻结（见 AuditSeriesBible）。
 // 返回最新卷状态。解冻供作者显式撤回定稿（如需继续修订本卷），不涉快照。
 func (a *App) SetVolumeFrozen(novelID, volumeID int64, frozen bool) (*volume.Volume, error) {
 	if frozen {

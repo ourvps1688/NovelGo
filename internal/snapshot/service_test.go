@@ -77,16 +77,16 @@ func seedFixture(t *testing.T, db *gorm.DB) int64 {
 	if err := db.WithContext(ctx).Create(&char).Error; err != nil {
 		t.Fatalf("seed character: %v", err)
 	}
+	char2 := character.Character{NovelID: 1, Name: "师父"}
+	if err := db.WithContext(ctx).Create(&char2).Error; err != nil {
+		t.Fatalf("seed character2: %v", err)
+	}
 	rel := character.CharacterRelation{
-		NovelID: 1, SourceCharacterID: char.ID, TargetCharacterID: char.ID + 100,
+		NovelID: 1, SourceCharacterID: char.ID, TargetCharacterID: char2.ID,
 		RelationDescribe: "亦师亦敌", IsCurrent: true,
 	}
 	if err := db.WithContext(ctx).Create(&rel).Error; err != nil {
 		t.Fatalf("seed relation: %v", err)
-	}
-	fact := character.CharacterFactKnowledge{NovelID: 1, CharID: char.ID, FactID: 1, Knows: true}
-	if err := db.WithContext(ctx).Create(&fact).Error; err != nil {
-		t.Fatalf("seed fact knowledge: %v", err)
 	}
 
 	loc := location.Location{NovelID: 1, Name: "迷雾森林"}
@@ -119,6 +119,10 @@ func seedFixture(t *testing.T, db *gorm.DB) int64 {
 	if err := db.WithContext(ctx).Create(&rp).Error; err != nil {
 		t.Fatalf("seed reader perspective: %v", err)
 	}
+	fact := character.CharacterFactKnowledge{NovelID: 1, CharID: char.ID, FactID: rp.ID, Knows: true}
+	if err := db.WithContext(ctx).Create(&fact).Error; err != nil {
+		t.Fatalf("seed fact knowledge: %v", err)
+	}
 	pov := reader.PovRoster{NovelID: 1, CharID: char.ID, Mode: reader.POVModeLimited}
 	if err := db.WithContext(ctx).Create(&pov).Error; err != nil {
 		t.Fatalf("seed pov roster: %v", err)
@@ -141,7 +145,7 @@ func TestCommit_PayloadCompleteAndDeterministic(t *testing.T) {
 	db := openSnapDB(t)
 	ctx := context.Background()
 	volID := seedFixture(t, db)
-	svc := NewService(db, volume.NewStore(db, testSnapLogger()))
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
 
 	snap, err := svc.Commit(ctx, 1, volID)
 	if err != nil {
@@ -181,8 +185,8 @@ func TestCommit_PayloadCompleteAndDeterministic(t *testing.T) {
 
 	var chars []map[string]any
 	dec := json.NewDecoder(bytes.NewReader(p.Tables["characters"]))
-	if err := dec.Decode(&chars); err != nil || len(chars) != 1 {
-		t.Fatalf("characters 行数: want 1 (err=%v), got %d", err, len(chars))
+	if err := dec.Decode(&chars); err != nil || len(chars) != 2 {
+		t.Fatalf("characters 行数: want 2 (err=%v), got %d", err, len(chars))
 	}
 	if chars[0]["name"] != "主角" {
 		t.Errorf("character name: got %v", chars[0]["name"])
@@ -216,7 +220,7 @@ func TestFreeze_CommitsOnceOnTransition(t *testing.T) {
 	db := openSnapDB(t)
 	ctx := context.Background()
 	volID := seedFixture(t, db)
-	svc := NewService(db, volume.NewStore(db, testSnapLogger()))
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
 
 	v1, snap1, err := svc.Freeze(ctx, 1, volID)
 	if err != nil {
@@ -274,7 +278,7 @@ func TestDiff_DetectsAddedRemovedChanged(t *testing.T) {
 	db := openSnapDB(t)
 	ctx := context.Background()
 	volID := seedFixture(t, db)
-	svc := NewService(db, volume.NewStore(db, testSnapLogger()))
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
 
 	base, err := svc.Commit(ctx, 1, volID)
 	if err != nil {
@@ -365,7 +369,7 @@ func TestRestore_RoundTripPreservesStateAndSilencesHooks(t *testing.T) {
 	db := openSnapDB(t)
 	ctx := context.Background()
 	volID := seedFixture(t, db)
-	svc := NewService(db, volume.NewStore(db, testSnapLogger()))
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
 
 	_, snap, err := svc.Freeze(ctx, 1, volID)
 	if err != nil {
@@ -454,7 +458,7 @@ func TestDiffAgainstCurrent(t *testing.T) {
 	db := openSnapDB(t)
 	ctx := context.Background()
 	volID := seedFixture(t, db)
-	svc := NewService(db, volume.NewStore(db, testSnapLogger()))
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
 
 	snap1, err := svc.Commit(ctx, 1, volID)
 	if err != nil {
@@ -503,7 +507,7 @@ func TestDiffToPrevious_FirstVersionEmptyBase(t *testing.T) {
 	db := openSnapDB(t)
 	ctx := context.Background()
 	volID := seedFixture(t, db)
-	svc := NewService(db, volume.NewStore(db, testSnapLogger()))
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
 
 	snap, err := svc.Commit(ctx, 1, volID)
 	if err != nil {
@@ -513,12 +517,12 @@ func TestDiffToPrevious_FirstVersionEmptyBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("diff to previous: %v", err)
 	}
-	// 空基线=全量新增：fixture 每表 1 行 × 10 表 = 10 行（正文清单不入 diff）
+	// 空基线=全量新增：fixture 台账 11 行（characters 2 + 其余 9 表各 1；正文清单不入 diff）
 	var total int
 	for _, td := range d.Tables {
 		total += len(td.Added)
 	}
-	if total != 10 {
-		t.Errorf("空基线新增行数: want 10, got %d (%+v)", total, d.Tables)
+	if total != 11 {
+		t.Errorf("空基线新增行数: want 11, got %d (%+v)", total, d.Tables)
 	}
 }

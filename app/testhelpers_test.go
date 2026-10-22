@@ -147,7 +147,7 @@ func setupTestApp(t *testing.T) *App {
 		turnCommit: turnCommitStore,
 		writing:    writingStore,
 		volume:     volumeStore,
-		snapshots:  snapshot.NewService(db, volumeStore),
+		snapshots:  snapshot.NewService(db, volumeStore, chapterStore),
 		activity:   activityStore,
 	}
 	chapterDeletionGuard := deletion.NewGuard(

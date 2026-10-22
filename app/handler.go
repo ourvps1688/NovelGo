@@ -339,7 +339,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.turnCommit = rollback.NewStore(db, a.logger)
 	a.writing = writing.NewStore(db, a.logger)
 	a.volume = volume.NewStore(db, a.logger)
-	a.snapshots = snapshot.NewService(db, a.volume)
+	a.snapshots = snapshot.NewService(db, a.volume, a.chapter)
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, a.timeline.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, a.storyarc.ChapterDeletionBlockers),
