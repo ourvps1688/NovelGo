@@ -121,8 +121,14 @@ func (o *Orchestrator) advanceS3(ctx context.Context, run *PipelineRun, decision
 		return nil
 	}
 	// 用户显式选择「进入签约体检」（里程碑闸提供），直接进体检（卷边界复检走 S4b）。
+	// 触发原因按闸门成因区分：刚跨入新卷 → volume（卷边界复评，收口即 G_freeze 冻结前一卷）；
+	// 每 5 章里程碑 → milestone（中途复检，不冻结）。
 	if decision == "audit_now" {
-		o.svc.enterAudit(ctx, run, "milestone")
+		reason := "milestone"
+		if o.svc.crossedVolumeBoundary(ctx, run.NovelID) {
+			reason = "volume"
+		}
+		o.svc.enterAudit(ctx, run, reason)
 		return nil
 	}
 	// 闸门响应态：用户在 G3b 闸门点了「continue」→ 回到写作循环（running）。
@@ -206,17 +212,20 @@ func (o *Orchestrator) advanceS4(ctx context.Context, run *PipelineRun, decision
 
 // advanceS5 修复闭环：由异步循环（executeFix→executeAudit）自动回到 S4 复评；
 // 此处仅作安全兜底，按上下文记录的体检阶段回到同阶段（S4b 卷边界复评 / S4 首检 / S6 终检）。
+// 复评原因优先沿用 ctxt.AuditReason（触发原因在 enterAudit 时记录，S5 回路全程保留），
+// 避免把 milestone 复检误标成 volume（卷边界）而误触 G_freeze；旧数据无记录时才按阶段推导。
 func (o *Orchestrator) advanceS5(ctx context.Context, run *PipelineRun, _ string) error {
 	var ctxt GateContext
 	if run.ContextJSON != "" {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
 	}
-	reason := "milestone"
-	switch ctxt.AuditStage {
-	case StageS4b:
-		reason = "volume"
-	case StageS6:
-		reason = "final"
+	reason := ctxt.AuditReason
+	if reason == "" {
+		reason = "milestone"
+		switch ctxt.AuditStage {
+		case StageS6:
+			reason = "final"
+		}
 	}
 	o.svc.enterAudit(ctx, run, reason)
 	return nil
@@ -233,6 +242,9 @@ func (o *Orchestrator) advanceS6(ctx context.Context, run *PipelineRun, decision
 			return err
 		}
 		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS6, Status: StatusFinished})
+		// G_freeze 完本收尾（WBS 2.5）：末卷（含单卷书）没有「跨入新卷」时刻，
+		// 在完本收口统一冻结本书尚未冻结的卷并提交快照。
+		o.svc.freezeRemainingVolumes(ctx, run.NovelID, run.RunID)
 		return nil
 	case "fix":
 		o.svc.enterFix(ctx, run)

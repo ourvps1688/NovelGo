@@ -404,6 +404,12 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
 		}, a.logger, "pipeline-s0-align", novelID, chapterID)
 	})
+	// 注入 G_freeze 自动冻结执行体（WBS 2.5）：卷过 S4+S5 收口 / 完本收口时由流水线自动
+	// 置冻结并同事务提交 committed snapshot（Freeze 内含 2.4 冻结前台账审计闸门，幂等）。
+	a.pipeline.SetVolumeFreezer(func(ctx context.Context, novelID, volumeID int64) error {
+		_, _, err := a.snapshots.Freeze(ctx, novelID, volumeID)
+		return err
+	})
 	// 启动恢复：把上次进程遗留的「running 僵尸运行」（执行 goroutine 已消亡）统一置为
 	// paused 并打中断标记，用户点「恢复」时按阶段重新派发执行体。见 RecoverInterruptedRuns。
 	a.pipeline.RecoverInterruptedRuns()

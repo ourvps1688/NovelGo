@@ -55,6 +55,10 @@ type Service struct {
 	chapterLister func(ctx context.Context, novelID int64) ([]int64, error)
 	// volumeAssigner 为存量书建默认卷并把所有未分卷章节归入该卷（修复 G3b 卷边界判定）。默认走 raw gorm。
 	volumeAssigner func(ctx context.Context, novelID int64) error
+	// volumeFreezer 是 G_freeze 自动闸门（WBS 2.5）的执行体：把指定卷置冻结并提交
+	// committed snapshot（含 2.4 冻结前台账审计）。由 app 层注入 internal/snapshot.Service.Freeze；
+	// 测试可注入 stub。为 nil 时跳过自动冻结（仅告警），不影响收口流转。
+	volumeFreezer func(ctx context.Context, novelID, volumeID int64) error
 	// orchestrator 是统一的阶段流转状态机（PR5 引入），ResumePipeline 委托它推进。
 	orchestrator *Orchestrator
 }
@@ -120,6 +124,12 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 // 生产环境必须注入，否则 executeS0Align 会跳过 statesync 仅做建卷。
 func (s *Service) SetStateSyncRunner(fn func(ctx context.Context, novelID, chapterID int64) error) {
 	s.stateSyncRunner = fn
+}
+
+// SetVolumeFreezer 注入 G_freeze 自动冻结执行体（由 app 层用 internal/snapshot.Service.Freeze 实现，
+// 冻结即同事务提交 committed snapshot）。未注入时自动冻结降级为跳过（告警），不影响流水线流转。
+func (s *Service) SetVolumeFreezer(fn func(ctx context.Context, novelID, volumeID int64) error) {
+	s.volumeFreezer = fn
 }
 
 // StartPipeline 启动一次新流水线，并广播阶段事件。
@@ -438,11 +448,48 @@ func (s *Service) currentVolumeScope(ctx context.Context, novelID int64) *int64 
 	return r.VolumeID
 }
 
-// delegateVolumeAudit 把 book-run 的卷级体检委托给「当前卷」的 scoped sub-run（G1）：
-// 复用或创建该卷的 scoped run，并把 book-run 置 waiting（阶段保持 S3，收口后唤醒）。
-// 当前卷不可定界（未分卷书 / 最新章未归卷）时返回 nil，调用方走 book-run 全书旧路径。
-func (s *Service) delegateVolumeAudit(ctx context.Context, bookRun *PipelineRun, stage string) *PipelineRun {
+// completedVolumeScope 返回「刚完结的前一卷」——全局阅读序上最近一个非当前卷的有卷章节所属卷。
+// 供卷边界复评（reason=volume，G_freeze 前置）定界：跨入新卷后对刚写完的一卷做全卷收尾体检
+// （S4+S5），通过即冻结。排序口径与 defaultVolumeBoundary 一致（volumes.sort_order DESC、
+// chapters.sort_order DESC、chapters.id DESC）；未分卷章节不参与（不是卷）。无前一卷时返回 nil。
+func (s *Service) completedVolumeScope(ctx context.Context, novelID int64) *int64 {
+	if s.store == nil || s.store.db == nil {
+		return nil
+	}
+	cur := s.currentVolumeScope(ctx, novelID)
+	type row struct{ VolumeID *int64 }
+	var r row
+	q := s.store.db.WithContext(ctx).
+		Table("chapters").
+		Select("chapters.volume_id").
+		Joins("LEFT JOIN volumes ON volumes.id = chapters.volume_id").
+		Where("chapters.novel_id = ? AND chapters.volume_id IS NOT NULL", novelID).
+		Order("volumes.sort_order DESC, chapters.sort_order DESC, chapters.id DESC")
+	if cur != nil {
+		q = q.Where("chapters.volume_id <> ?", *cur)
+	}
+	if err := q.Limit(1).Scan(&r).Error; err != nil {
+		s.logger.Warn("卷级作用域：查询前一卷失败", "err", err)
+		return nil
+	}
+	return r.VolumeID
+}
+
+// delegateVolumeAudit 把 book-run 的卷级体检委托给卷级 scoped sub-run（G1）：
+// 复用或创建目标卷的 scoped run，并把 book-run 置 waiting（阶段保持 S3，收口后唤醒）。
+// 目标卷不可定界（未分卷书 / 最新章未归卷）时返回 nil，调用方走 book-run 全书旧路径。
+//
+// 定界规则（G1 + 2.5）：
+//   - golden3 / milestone（中途体检）→ 「当前卷」= 本书最新写就章节所属卷（S4 只扫在写的这卷）；
+//   - volume（卷边界复评）→ 「刚完结的前一卷」：跨入新卷后对刚写完的一卷做全卷收尾体检，
+//     过 S4+S5 收口即触发 G_freeze 自动冻结（见 finishVolumeScopedRun）。当前卷（新卷）只作背景。
+func (s *Service) delegateVolumeAudit(ctx context.Context, bookRun *PipelineRun, stage, reason string) *PipelineRun {
 	scope := s.currentVolumeScope(ctx, bookRun.NovelID)
+	if reason == "volume" {
+		if prev := s.completedVolumeScope(ctx, bookRun.NovelID); prev != nil {
+			scope = prev
+		}
+	}
 	if scope == nil {
 		return nil
 	}
@@ -523,7 +570,92 @@ func (s *Service) finishVolumeScopedRun(ctx context.Context, scoped *PipelineRun
 		s.logger.Error("卷级收口：scoped run 终结失败", "run_id", scoped.RunID, "err", err)
 		return err
 	}
+	// G_freeze 自动闸门（WBS 2.5）：卷边界复评（AuditReason=volume）收口 = 该卷过 S4+S5，
+	// 自动置冻结 + 提交 committed snapshot（一卷一卷定稿）。
+	s.maybeFreezeOnHandoff(ctx, scoped, &scopedCtxt)
 	return nil
+}
+
+// maybeFreezeOnHandoff 在卷边界复评收口（该卷过 S4+S5）时执行 G_freeze 自动冻结：
+// 置冻结 + 同事务提交 committed snapshot。仅在 AuditReason=volume 且该卷已不是「当前卷」
+// （写作已推进走）时触发——中途体检（golden3/milestone）收口不冻结（卷还在写），
+// 也防定界 fallback 把仍在写的活跃卷误冻。冻结失败不阻断收口（卷保持可写）。
+func (s *Service) maybeFreezeOnHandoff(ctx context.Context, scoped *PipelineRun, scopedCtxt *GateContext) {
+	if scopedCtxt.AuditReason != "volume" || scoped.VolumeID == nil {
+		return
+	}
+	volumeID := *scoped.VolumeID
+	if cur := s.currentVolumeScope(ctx, scoped.NovelID); cur != nil && *cur == volumeID {
+		return
+	}
+	s.freezeVolumeWithNote(ctx, scoped.NovelID, volumeID, scoped.ParentRunID, StageS3, StatusRunning)
+}
+
+// freezeRemainingVolumes 完本收口（S6 finish）时冻结本书全部尚未冻结的卷并提交快照：
+// 边界复评冻结中间卷，末卷（含单卷书）在完本时收尾，补齐 WBS 2.2 验收「每卷有
+// committed snapshot」。逐卷独立执行，单卷失败不阻断其余。
+func (s *Service) freezeRemainingVolumes(ctx context.Context, novelID int64, runID string) {
+	if s.volumeFreezer == nil || s.store == nil || s.store.db == nil {
+		return
+	}
+	type row struct{ VolumeID int64 }
+	var rows []row
+	if err := s.store.db.WithContext(ctx).
+		Table("chapters").
+		Select("chapters.volume_id AS volume_id").
+		Joins("LEFT JOIN volumes ON volumes.id = chapters.volume_id").
+		Where("chapters.novel_id = ? AND chapters.volume_id IS NOT NULL", novelID).
+		Group("chapters.volume_id").
+		Order("MIN(volumes.sort_order)").
+		Scan(&rows).Error; err != nil {
+		s.logger.Warn("G_freeze 完本收口：查询卷列表失败", "novel_id", novelID, "err", err)
+		return
+	}
+	volStore := volume.NewStore(s.store.db, s.logger)
+	frozenNow, failed := 0, 0
+	for _, r := range rows {
+		v, err := volStore.GetByID(ctx, nil, novelID, r.VolumeID)
+		if err != nil || v == nil || v.Frozen {
+			continue // 已冻结 / 查不到：跳过（Freeze 幂等，这里只为少发噪声 note）
+		}
+		if err := s.volumeFreezer(ctx, novelID, r.VolumeID); err != nil {
+			failed++
+			s.logger.Error("G_freeze 完本收口：冻结失败", "novel_id", novelID, "volume_id", r.VolumeID, "err", err)
+			continue
+		}
+		frozenNow++
+	}
+	if frozenNow == 0 && failed == 0 {
+		return
+	}
+	note := fmt.Sprintf("G_freeze：完本收口，已冻结 %d 卷并提交快照", frozenNow)
+	if failed > 0 {
+		note += fmt.Sprintf("（%d 卷冻结失败，详见日志）", failed)
+	}
+	emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS6, Status: StatusFinished, Note: note})
+}
+
+// freezeVolumeWithNote 执行单卷 G_freeze 冻结（含 2.2 快照提交与 2.4 台账审计闸门），
+// 并把结果以 note 广播到指定 run 的阶段事件（note 仅作展示，不改变阶段状态）。
+// 冻结失败（如台账审计不过）只提示不抛错：卷保持可写，用户可修复台账后手动冻结
+// （App.SetVolumeFrozen）或重跑卷边界复评。
+func (s *Service) freezeVolumeWithNote(ctx context.Context, novelID, volumeID int64, runID, stage, status string) {
+	label := fmt.Sprintf("volume_id=%d", volumeID)
+	if v, err := volume.NewStore(s.store.db, s.logger).GetByID(ctx, nil, novelID, volumeID); err == nil && v != nil && v.Name != "" {
+		label = fmt.Sprintf("《%s》", v.Name)
+	}
+	if s.volumeFreezer == nil {
+		s.logger.Warn("G_freeze：未注入 volumeFreezer，跳过自动冻结", "novel_id", novelID, "volume_id", volumeID)
+		return
+	}
+	if err := s.volumeFreezer(ctx, novelID, volumeID); err != nil {
+		s.logger.Error("G_freeze：自动冻结失败", "novel_id", novelID, "volume_id", volumeID, "err", err)
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: stage, Status: status,
+			Note: fmt.Sprintf("卷%s已过 S4+S5，但 G_freeze 自动冻结被拒：%s。卷保持可写，请修复台账后手动冻结或重跑卷边界复评", label, err.Error())})
+		return
+	}
+	emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: stage, Status: status,
+		Note: fmt.Sprintf("卷%s已过 S4+S5，G_freeze 自动冻结并提交卷快照", label)})
 }
 
 // abortRelatives 终止联动（G1）：scoped sub-run 终止 → 父 book-run 一并终止（「终止」语义
@@ -556,9 +688,11 @@ func (s *Service) abortRelatives(ctx context.Context, run *PipelineRun) {
 // reason 决定进入的阶段：golden3 → S4（首检）；milestone / volume → S4b（卷边界复评）。
 // 同时把触发原因与体检阶段写回 ContextJSON，供修复后复评回到同阶段。
 //
-// 卷级作用域（G1）：book-run 的 golden3/milestone/volume 体检委托给「当前卷」的 scoped
-// sub-run 执行（S4 只扫当前卷）；未分卷项目（当前卷不可定界）、已在 scoped run 上的复评、
-// 以及完本终检（reason=final，恒为全书）走原路径，行为不变。
+// 卷级作用域（G1 + 2.5）：book-run 的 golden3/milestone/volume 体检委托给卷级 scoped
+// sub-run 执行——golden3/milestone 扫「当前卷」（S4 只扫在写的这卷），volume（卷边界复评）
+// 扫「刚完结的前一卷」（全卷收尾体检，过 S4+S5 收口即 G_freeze 冻结）；未分卷项目
+// （目标卷不可定界）、已在 scoped run 上的复评、以及完本终检（reason=final，恒为全书）
+// 走原路径，行为不变。
 func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason string) {
 	stage := StageS4
 	if reason != "golden3" {
@@ -566,7 +700,7 @@ func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason strin
 	}
 	target := run
 	if run.ParentRunID == "" && reason != "final" {
-		if scoped := s.delegateVolumeAudit(ctx, run, stage); scoped != nil {
+		if scoped := s.delegateVolumeAudit(ctx, run, stage, reason); scoped != nil {
 			target = scoped
 		}
 	}
