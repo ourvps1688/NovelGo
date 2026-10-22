@@ -73,6 +73,7 @@ type issueSample struct{ ID, Level, Area string }
 var (
 	issueSampleDefault = issueSample{ID: "I1", Level: "P0|P1", Area: "维度"}
 	issueSampleDrift   = issueSample{ID: "D1", Level: "P1", Area: "章节#12"}
+	issueSamplePatrol  = issueSample{ID: "T1", Level: "P0|P1", Area: "张力维度"}
 )
 
 // issueSchemaLine 生成提示词内嵌的 issue 单条 JSON 格式串。

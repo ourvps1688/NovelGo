@@ -22,6 +22,7 @@ func init() {
 	emitGate = func(_ context.Context, _ GatePayload) {}
 	emitControlAck = func(_ context.Context, _ ControlAckPayload) {}
 	emitStockAudit = func(_ context.Context, _ map[string]any) {}
+	emitConsistencyPatrol = func(_ context.Context, _ map[string]any) {}
 	emitFixStart = func(_ context.Context, _ map[string]any) {}
 	emitFixDone = func(_ context.Context, _ map[string]any) {}
 	emitRewriteBacklog = func(_ context.Context, _ map[string]any) {}

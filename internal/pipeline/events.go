@@ -8,15 +8,16 @@ import (
 
 // 流水线全局事件名（前端经 EventsOn 订阅）。
 const (
-	EvStage           = "pipeline:stage"            // 阶段变更：{run_id, novel_id, stage, status, note}
-	EvGate            = "pipeline:gate"             // 闸门待确认：{run_id, novel_id, stage, gate_id, summary, options}
-	EvControl         = "pipeline:control"          // 前端→后端控制指令：{run_id, cmd: start|pause|resume|stop}
-	EvControlAck      = "pipeline:control:ack"      // 后端→前端控制确认：{run_id, cmd, status}
-	EvStockAudit      = "pipeline:stock_audit"      // 全量对齐体检完成：{novel_id, run_id}
-	EvFixStart        = "pipeline:fix_start"        // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
-	EvFixDone         = "pipeline:fix_done"         // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
-	EvRewriteBacklog  = "pipeline:rewrite_backlog"  // 正文级问题回流 S3 重写回路：{run_id, novel_id, items}（前端展示重写清单）
-	EvRewriteProgress = "pipeline:rewrite_progress" // 自动章节重写进度：{run_id, novel_id, phase, index, total, chapter_id, error}
+	EvStage             = "pipeline:stage"              // 阶段变更：{run_id, novel_id, stage, status, note}
+	EvGate              = "pipeline:gate"               // 闸门待确认：{run_id, novel_id, stage, gate_id, summary, options}
+	EvControl           = "pipeline:control"            // 前端→后端控制指令：{run_id, cmd: start|pause|resume|stop}
+	EvControlAck        = "pipeline:control:ack"        // 后端→前端控制确认：{run_id, cmd, status}
+	EvStockAudit        = "pipeline:stock_audit"        // 全量对齐体检完成：{novel_id, run_id}
+	EvConsistencyPatrol = "pipeline:consistency_patrol" // 一致性巡检（张力报告）完成：{novel_id, run_id}
+	EvFixStart          = "pipeline:fix_start"          // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
+	EvFixDone           = "pipeline:fix_done"           // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
+	EvRewriteBacklog    = "pipeline:rewrite_backlog"    // 正文级问题回流 S3 重写回路：{run_id, novel_id, items}（前端展示重写清单）
+	EvRewriteProgress   = "pipeline:rewrite_progress"   // 自动章节重写进度：{run_id, novel_id, phase, index, total, chapter_id, error}
 )
 
 // StagePayload 阶段变更事件载荷。
@@ -63,6 +64,12 @@ func EmitControlAck(ctx context.Context, p ControlAckPayload) {
 // EmitStockAudit 广播「全量对齐」体检完成，通知前端刷新并展示结果。
 func EmitStockAudit(ctx context.Context, p map[string]any) {
 	wails.EventsEmit(ctx, EvStockAudit, p)
+}
+
+// EmitConsistencyPatrol 广播全书一致性巡检（张力报告，WBS 3.3）完成，
+// 通知前端刷新并只读展示巡检报告（张力清单）。
+func EmitConsistencyPatrol(ctx context.Context, p map[string]any) {
+	wails.EventsEmit(ctx, EvConsistencyPatrol, p)
 }
 
 // FixIssuePayload 是 S5 修复开始事件里的一条修复项（来自体检 issue 清单）。

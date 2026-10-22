@@ -18,11 +18,13 @@ const agentTypeBlueprint = "blueprint"
 // agentTypeSignability / agentTypeFix 分别是签约体检 / 修复执行 Agent 的 AgentType 字符串。
 // agentTypeBlueprintFix 是蓝图修复 Agent 的 AgentType 字符串（限权：只改卷纲 / 补卷）。
 // agentTypeRewrite 是章节重写 Agent 的 AgentType 字符串（回流 S3 重写回路：整章重写）。
+// agentTypePatrol 是一致性巡检 Agent 的 AgentType 字符串（WBS 3.3：张力报告，只读）。
 const (
 	agentTypeSignability  = "signability"
 	agentTypeFix          = "fix"
 	agentTypeBlueprintFix = "blueprintfix"
 	agentTypeRewrite      = "rewrite"
+	agentTypePatrol       = "patrol"
 )
 
 // skillAgentType 按 skill 名返回其在 agent.Run 中使用的 AgentType。
@@ -42,6 +44,8 @@ func skillAgentType(name string) agentcfg.AgentType {
 		return agentcfg.ChapterRewriteAgent // 回流 S3 重写回路：整章重写（授权 full_replace）
 	case "blueprint-drift-check":
 		return agentcfg.SignabilityAgent // 复用只读白名单（G3 蓝图漂移巡检）
+	case "consistency-patrol":
+		return agentcfg.ConsistencyPatrolAgent // 全书张力报告：只读、只报告不改写（WBS 3.3）
 	case "story-blueprint":
 		return agentcfg.BlueprintAgent
 	default:
@@ -64,6 +68,8 @@ func skillAgentTypeString(name string) string {
 		return agentTypeRewrite
 	case "blueprint-drift-check":
 		return agentTypeSignability // 复用只读体检 AgentType（G3 蓝图漂移巡检）
+	case "consistency-patrol":
+		return agentTypePatrol // 一致性巡检（张力报告，只读）
 	case "story-blueprint":
 		return agentTypeBlueprint
 	default:

@@ -194,6 +194,13 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 		require.NotContains(t, p, `"target_scope"`, "%s（核心契约）不应含全量字段", name)
 	}
 	require.Contains(t, driftPatrolPrompt(1), `"id":"D1"`, "巡检提示词应使用巡检示例值")
+	// 张力报告（WBS 3.3）用专属示例值 T1，但同持全量契约片段（张力需标
+	// target_scope/dimension/direction 供报告视图展示建议方向）。
+	patrol := patrolPrompt(1, "")
+	require.Contains(t, patrol, auditFormatLine(true, issueSamplePatrol), "patrolPrompt 应引用全量契约 schema 片段（巡检示例值）")
+	require.Contains(t, patrol, rules, "patrolPrompt 应引用契约必填说明")
+	require.Contains(t, patrol, `"schema_version"`, "patrolPrompt 应要求 schema_version")
+	require.Contains(t, patrol, `"id":"T1"`, "张力报告提示词应使用巡检示例值 T1")
 	for name, p := range map[string]string{
 		"fixPrompt":          fixPrompt(1, nil, "", ""),
 		"blueprintFixPrompt": blueprintFixPrompt(1, nil, ""),

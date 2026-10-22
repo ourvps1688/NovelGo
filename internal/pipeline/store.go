@@ -94,6 +94,10 @@ type GateContext struct {
 	// StockAudit 是「全量对齐」按钮触发的全本现状体检结果（区别于 S4 流水线体检的 Audit 字段），
 	// 只读展示，不影响流水线阶段流转。
 	StockAudit string `json:"stock_audit,omitempty"`
+	// PatrolReport 是全书一致性巡检（WBS 3.3「张力报告」）的结构化结果 JSON（AuditData 形状）：
+	// 建议性报告，只报告不改写、绝不进自动修复路由（区别于 Audit/StockAudit），改不改由作者定。
+	// 卷末（G_freeze 冻结成功）自动一次 + 控制指令 "patrol" 手动触发，供巡检报告视图只读展示。
+	PatrolReport string `json:"patrol_report,omitempty"`
 	// Interrupted 标记该运行是否因应用重启被启动恢复机制暂停（执行 goroutine 已随旧进程消亡，
 	// DB 状态却停留在 running）。恢复（ControlPipeline resume）时据此按当前阶段重新派发
 	// 执行体（体检/修复），派发后清除该标记，避免正常暂停的运行被重复派发。

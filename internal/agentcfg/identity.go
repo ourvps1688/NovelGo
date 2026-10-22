@@ -4,15 +4,16 @@ package agentcfg
 type AgentType int
 
 const (
-	MainAgent           AgentType = iota // 主创作助手
-	ReviewAgent                          // 章节审稿人
-	MemoryAgent                          // 记忆检索分析员
-	StateSyncAgent                       // 状态同步员（写章后自动回填台账）
-	BlueprintAgent                       // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
-	SignabilityAgent                     // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
-	FixAgent                             // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
-	BlueprintFixAgent                    // 蓝图修复员（S2 蓝图体检不通过时：限权改卷纲 / 补卷，不碰章节正文、不碰其他台账写）
-	ChapterRewriteAgent                  // 章节重写员（回流 S3 重写回路：依据正文级 issue 整章重写，授权 full_replace）
+	MainAgent              AgentType = iota // 主创作助手
+	ReviewAgent                             // 章节审稿人
+	MemoryAgent                             // 记忆检索分析员
+	StateSyncAgent                          // 状态同步员（写章后自动回填台账）
+	BlueprintAgent                          // 蓝图规划员（S2 阶段：自动建卷 / 写卷纲落库）
+	SignabilityAgent                        // 签约体检员（S4 阶段：只读体检，产出 issue 清单）
+	FixAgent                                // 修复执行员（S5 阶段：按 issue 清单改稿 / 补卷纲 / 同步台账）
+	BlueprintFixAgent                       // 蓝图修复员（S2 蓝图体检不通过时：限权改卷纲 / 补卷，不碰章节正文、不碰其他台账写）
+	ChapterRewriteAgent                     // 章节重写员（回流 S3 重写回路：依据正文级 issue 整章重写，授权 full_replace）
+	ConsistencyPatrolAgent                  // 一致性巡检员（WBS 3.3：全书张力报告，只读，只报告不改写）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -192,6 +193,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return blueprintFixAgentAllowlist
 	case ChapterRewriteAgent:
 		return fixAgentAllowlist // 章节重写复用修复员工具白名单（edit 整章覆写 + 台账写 + 只读上下文）
+	case ConsistencyPatrolAgent:
+		return signabilityAgentAllowlist // 一致性巡检复用只读白名单（张力报告只报告不改写）
 	default:
 		return nil
 	}
@@ -222,6 +225,8 @@ func AgentIdentity(t AgentType) string {
 		return blueprintFixAgentSystem1
 	case ChapterRewriteAgent:
 		return fixAgentSystem1 // 身份同修复员（可改稿 + 同步台账）；具体「整章重写」方法论由 chapter-rewrite 技能注入
+	case ConsistencyPatrolAgent:
+		return consistencyPatrolAgentSystem1
 	default:
 		return ""
 	}
@@ -551,3 +556,15 @@ const blueprintFixAgentSystem1 = `你是 novelgo 小说创作系统的蓝图修�
 - **不删数据**：白名单无 delete_record，绝不删除任何台账条目。
 - **幂等**：同一 issue 多次修复结果一致，先 list_volumes 查重再写。
 - 修复以「提升蓝图质量」为目标，不擅自大改已通过体检的卷纲部分。`
+
+const consistencyPatrolAgentSystem1 = `你是 novelgo 小说创作系统的一致性巡检员（Consistency Patrol Agent）。你的唯一职责是产出全书「张力报告」：对照「已冻结卷既定事实」（系列圣经快照）与当前台账、已写章节，把只允许前向适配所累计出来的漂移（张力）标出来，供作者裁决。
+
+## 可用工具（白名单，仅下列——只读）
+- 读章节：read（读章节正文关键段落）、get_chapter_list
+- 读台账：list_volumes、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
+
+## 硬性约束
+- **只报告、不改写**：白名单全是只读工具，你没有任何 edit/create_*/update_* 权限，不要尝试写任何数据。巡检结论是**建议性报告**：不触发任何修复、不做评分门禁，改不改、怎么改由作者定。
+- **不派发子 Agent**（白名单不含 run_subagent）。
+- 每条张力必须给具体证据（哪卷/哪章/哪条既定事实），不报无据臆测；不报单章文笔/节奏类质量问题（那是签约体检的活）。
+- 必须按任务提示词要求输出 JSON 块——巡检报告视图依赖它渲染张力清单。`

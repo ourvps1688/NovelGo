@@ -691,6 +691,12 @@ func (s *Service) freezeVolumeWithNote(ctx context.Context, novelID, volumeID in
 	}
 	emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: stage, Status: status,
 		Note: fmt.Sprintf("卷%s已过 S4+S5，G_freeze 自动冻结并提交卷快照", label)})
+	// 卷末自动一致性巡检（WBS 3.3 建议「卷末 + 手动」而非实时，控成本）：本卷冻结定稿
+	// 即「卷末」，后台跑一次全书张力报告（只读非阻断，失败只记日志），落 book-run 供
+	// 巡检报告视图。runID 为空（无流水线归属）时跳过，可经控制指令 "patrol" 手动补跑。
+	if runID != "" {
+		go s.runConsistencyPatrol(ctx, runID, novelID)
+	}
 }
 
 // abortRelatives 终止联动（G1）：scoped sub-run 终止 → 父 book-run 一并终止（「终止」语义
@@ -2358,6 +2364,10 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 		// 全量对齐：后台异步执行（建卷+statesync+全本体检），不阻塞控制指令返回。
 		go s.runFullAlign(ctx, run)
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
+	case "patrol":
+		// 一致性巡检（WBS 3.3 张力报告）：后台异步执行，只读非阻断、不改写、不改变当前阶段。
+		go s.runConsistencyPatrol(ctx, runID, run.NovelID)
+		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
 	default:
 		return fmt.Errorf("未知控制命令 %q", cmd)
 	}
@@ -2466,14 +2476,15 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 
 // 可替换的事件发射器，便于测试注入无操作实现。
 var (
-	emitStage           = EmitStage
-	emitGate            = EmitGate
-	emitControlAck      = EmitControlAck
-	emitStockAudit      = EmitStockAudit
-	emitFixStart        = EmitFixStart
-	emitFixDone         = EmitFixDone
-	emitRewriteBacklog  = EmitRewriteBacklog
-	emitRewriteProgress = EmitRewriteProgress
+	emitStage             = EmitStage
+	emitGate              = EmitGate
+	emitControlAck        = EmitControlAck
+	emitStockAudit        = EmitStockAudit
+	emitConsistencyPatrol = EmitConsistencyPatrol
+	emitFixStart          = EmitFixStart
+	emitFixDone           = EmitFixDone
+	emitRewriteBacklog    = EmitRewriteBacklog
+	emitRewriteProgress   = EmitRewriteProgress
 )
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。
