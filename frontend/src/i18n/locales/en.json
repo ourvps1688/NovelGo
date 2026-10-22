@@ -1944,6 +1944,105 @@
       "issues": "Issue List",
       "noIssues": "No significant issues found."
     },
+    "issueTags": {
+      "direction": {
+        "forward_fix": "Forward fix",
+        "retcon_candidate": "Retcon suggested"
+      },
+      "scope": {
+        "active_volume": "This volume",
+        "frozen_volume": "Frozen volume",
+        "none": "Whole book"
+      },
+      "dimension": {
+        "character": "Character",
+        "locus_arc": "Locus/Arc",
+        "timeline": "Timeline",
+        "reader_pov": "Reader POV",
+        "none": "Other"
+      }
+    },
+    "patrol": {
+      "title": "Consistency Patrol (Tension Report)",
+      "hint": "Cross-checks the established facts of frozen volumes against the current ledger and manuscript, reporting cumulative drift tensions (setting distortion / unfulfilled promises / quietly rewritten reader knowledge / timeline drift / retcon seams). Report-only: it never enters the auto-fix loop; you decide what to change.",
+      "run": "Run Patrol",
+      "running": "Patrol is running in the background (read-only, no rewriting). This panel refreshes automatically when it finishes; if nothing arrives after a long while it failed — just run it again.",
+      "issues": "Tension List",
+      "noIssues": "No significant tensions found.",
+      "noReport": "No patrol report yet: one runs automatically after a volume freeze; you can also trigger it with Run Patrol.",
+      "verdict": {
+        "pass": "No tension",
+        "needs_fix": "Tensions found"
+      }
+    },
+    "retcon": {
+      "title": "Retcon Approval",
+      "hint": "Changing a frozen volume requires explicit approval: candidate → decision → controlled edit (traced + rollback point) → record. Prefer forward adaptation of the current volume; retcon earlier volumes only when necessary.",
+      "empty": "No retcon cases. Issues hitting frozen-volume write protection / retcon candidates are filed here automatically.",
+      "open": "Review",
+      "status": {
+        "candidate": "Pending decision",
+        "approved": "Approved",
+        "editing": "Controlled edit",
+        "recorded": "Recorded",
+        "rejected": "Rejected",
+        "rolled_back": "Rolled back"
+      },
+      "origin": "Origin",
+      "issue": "Linked issue",
+      "created": "Filed at",
+      "targetVolume": "Target volume",
+      "selectFrozenVolume": "Select a frozen volume",
+      "noFrozenVolume": "No frozen volume yet: the target volume must be frozen first (see Volume Freeze), then controlled editing can begin.",
+      "riskHint": "A retcon rewrites established facts of a frozen volume and affects the forward continuity of later volumes. Make sure it cannot be resolved by forward adaptation before approving; approval opens a controlled-edit window (rollback point fixed automatically, fully reversible).",
+      "noteLabel": "Decision reason (required, kept in the record)",
+      "approve": "Approve & open controlled edit",
+      "approveOk": "Approved; controlled-edit window opened",
+      "reject": "Reject (forward-fix instead)",
+      "rejectOk": "Rejected; moving forward with adaptation",
+      "beginEdit": "Begin controlled edit (fix rollback point)",
+      "beginEditHint": "A rollback-point snapshot (pre-edit state) is fixed before editing starts; afterwards you may change the frozen volume inside the window, and every change is automatically marked source=retcon.",
+      "beginEditOk": "Rollback point fixed; controlled-edit window opened",
+      "viewDiff": "View diff (rollback point vs current)",
+      "record": "Record & close",
+      "recordOk": "Recorded",
+      "recordConfirm": "Confirm recording? The diff summary between the rollback point and the current ledger is fixed as the trace, and the established-facts snapshot is refreshed.",
+      "diffSummary": "Diff summary",
+      "diffVersions": "Diff range: snapshot v{{base}} → v{{target}}",
+      "diffEmpty": "No differences (rollback point matches the current ledger).",
+      "added": "Added",
+      "removed": "Removed",
+      "changed": "Changed",
+      "rollback": "Roll back to rollback point",
+      "rollbackOk": "Rolled back to the rollback point",
+      "rollbackConfirm": "Confirm rollback? The ledger is restored wholesale to the rollback-point snapshot (pre-edit state) and the established-facts snapshot is refreshed. The case then closes permanently and cannot be edited further.",
+      "rollbackNote": "Rollback reason (required, kept in the record)",
+      "decisionNote": "Decision note",
+      "decidedBy": "Decided by",
+      "appliedBy": "Applied by",
+      "rolledBackBy": "Rolled back by",
+      "snapshot": "Rollback snapshot"
+    },
+    "volumeManage": {
+      "title": "Volume Freeze",
+      "hint": "A frozen volume = established facts (series-bible snapshot): S4/S5/rewrites all use the frozen snapshot as their forward reference, and changes hitting a frozen volume are routed to retcon approval. Freeze only after the volume is finalized.",
+      "empty": "No volumes yet.",
+      "frozen": "Frozen",
+      "unfrozen": "Not frozen",
+      "snapshotVersion": "Snapshot v{{n}}",
+      "frozenAt": "frozen at {{time}}",
+      "freeze": "Freeze",
+      "unfreeze": "Unfreeze",
+      "freezeConfirm": "Freeze \"{{name}}\"? Freezing commits this volume's series-bible snapshot (established facts) and runs a ledger consistency audit — structural contradictions will be rejected. The volume then becomes write-protected; changes require retcon approval.",
+      "unfreezeConfirm": "Unfreeze \"{{name}}\"? The volume becomes writable again; committed snapshots are kept.",
+      "freezeBlocked": "Structural contradictions found, freeze blocked: ",
+      "frozenOk": "\"{{name}}\" frozen",
+      "unfrozenOk": "\"{{name}}\" unfrozen",
+      "audit": "Bible self-check",
+      "auditClean": "Ledger consistent: no structural contradictions ({{n}} warnings, they do not block freezing).",
+      "auditErrors": "Found {{n}} structural contradictions (freeze will be rejected):",
+      "auditWarnings": "Suspicious but legal (warnings, do not block freezing):"
+    },
     "ended": {
       "finished": "Pipeline finished.",
       "aborted": "Pipeline aborted."

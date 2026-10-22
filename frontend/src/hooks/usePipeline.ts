@@ -51,6 +51,9 @@ export function usePipeline(novelId: number) {
     total: 0,
     items: [],
   });
+  // 一致性巡检完成计数：每次 pipeline:consistency_patrol 事件 +1，
+  // 巡检报告面板据此清除「巡检运行中」提示（失败不广播，按钮保持可重试）。
+  const [patrolTick, setPatrolTick] = useState(0);
 
   useEffect(() => {
     const offStage = EventsOn("pipeline:stage", (p: StagePayload) => {
@@ -94,6 +97,21 @@ export function usePipeline(novelId: number) {
       "pipeline:rewrite_backlog",
       (p: { novel_id: number }) => {
         if (p.novel_id !== novelId) return;
+        GetPipelineState(novelId)
+          .then((r: pipeline.PipelineRun) => {
+            setRun(r);
+            setStage(r.CurrentStage);
+          })
+          .catch(() => {});
+      },
+    );
+    // 一致性巡检（张力报告）完成后后端广播该事件，重新拉取 run 以拿到 patrol_report，
+    // 并递增 patrolTick 让巡检报告面板清除「运行中」提示。
+    const offPatrol = EventsOn(
+      "pipeline:consistency_patrol",
+      (p: { novel_id: number }) => {
+        if (p.novel_id !== novelId) return;
+        setPatrolTick((n) => n + 1);
         GetPipelineState(novelId)
           .then((r: pipeline.PipelineRun) => {
             setRun(r);
@@ -268,6 +286,7 @@ export function usePipeline(novelId: number) {
       offAck();
       offStock();
       offRewrite();
+      offPatrol();
       offFixStart();
       offFixDone();
       offAgentActivity();
@@ -344,6 +363,7 @@ export function usePipeline(novelId: number) {
     fixProgress,
     fixActivity,
     rewriteProgress,
+    patrolTick,
     start,
     resume,
     control,

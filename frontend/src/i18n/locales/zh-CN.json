@@ -1905,6 +1905,105 @@
       "issues": "问题清单",
       "noIssues": "未发现明显问题。"
     },
+    "issueTags": {
+      "direction": {
+        "forward_fix": "前向适配",
+        "retcon_candidate": "建议回改"
+      },
+      "scope": {
+        "active_volume": "本卷",
+        "frozen_volume": "冻结卷",
+        "none": "全书"
+      },
+      "dimension": {
+        "character": "角色",
+        "locus_arc": "地点/弧线",
+        "timeline": "时间线",
+        "reader_pov": "读者视角",
+        "none": "其他"
+      }
+    },
+    "patrol": {
+      "title": "一致性巡检（张力报告）",
+      "hint": "对照「已冻结卷既定事实」与当前台账/正文，报告前向适配累计出来的漂移张力（设定失真/承诺未兑现/读者认知被悄悄改写/时间线漂移/retcon 衔接裂缝）。只报告不改写：不进自动修复路由，改不改由你定。",
+      "run": "运行巡检",
+      "running": "巡检在后台运行（只读、不改写）。完成后本面板自动刷新；若长时间无结果说明巡检失败，可重新运行。",
+      "issues": "张力清单",
+      "noIssues": "未发现明显张力。",
+      "noReport": "暂无巡检报告：卷冻结收口后会自动跑一次，也可点「运行巡检」手动触发。",
+      "verdict": {
+        "pass": "无张力",
+        "needs_fix": "有张力"
+      }
+    },
+    "retcon": {
+      "title": "retcon 审批",
+      "hint": "回改已冻结卷必须走显式审批：候选 → 裁决 → 受控编辑（留痕+回滚点）→ 收口。优先前向适配本卷，确需回改前卷再走 retcon。",
+      "empty": "暂无 retcon 案件。命中冻结卷写保护/retcon 候选的问题会自动沉淀为候选案件。",
+      "open": "查看/裁决",
+      "status": {
+        "candidate": "待裁决",
+        "approved": "已批准",
+        "editing": "受控编辑中",
+        "recorded": "已留痕",
+        "rejected": "已驳回",
+        "rolled_back": "已回滚"
+      },
+      "origin": "来源",
+      "issue": "关联问题",
+      "created": "发起于",
+      "targetVolume": "目标卷",
+      "selectFrozenVolume": "选择已冻结卷",
+      "noFrozenVolume": "尚无已冻结卷：目标卷必须先冻结（见卷冻结管理），才能进入受控编辑。",
+      "riskHint": "retcon 会回改已冻结卷的既定事实，并连带影响后续卷的前向依据。批准前请确认无法用前向适配消解；批准后进入受控编辑窗口（自动固化回滚点，可整体回滚）。",
+      "noteLabel": "裁决理由（必填，留痕）",
+      "approve": "批准并进入受控编辑",
+      "approveOk": "已批准，进入受控编辑窗口",
+      "reject": "驳回（走前向适配）",
+      "rejectOk": "已驳回，走前向适配",
+      "beginEdit": "开始受控编辑（固化回滚点）",
+      "beginEditHint": "开始前会固化回滚点快照（编辑前状态），此后可在窗口内回改冻结卷；改动自动标记来源为 retcon。",
+      "beginEditOk": "已固化回滚点，受控编辑窗口已开启",
+      "viewDiff": "查看差异（回滚点 vs 当前）",
+      "record": "留痕收口",
+      "recordOk": "已留痕收口",
+      "recordConfirm": "确认留痕收口？将以回滚点与当前台账的差异摘要固化留痕，并刷新既定事实快照。",
+      "diffSummary": "差异摘要",
+      "diffVersions": "差异范围：快照 v{{base}} → v{{target}}",
+      "diffEmpty": "尚无差异（回滚点与当前台账一致）。",
+      "added": "新增",
+      "removed": "删除",
+      "changed": "修改",
+      "rollback": "回滚到回滚点",
+      "rollbackOk": "已回滚到回滚点",
+      "rollbackConfirm": "确认回滚？将把台账整体还原到回滚点快照（编辑前状态）并刷新既定事实快照。回滚后案件封终态，不可再继续编辑。",
+      "rollbackNote": "回滚理由（必填，留痕）",
+      "decisionNote": "裁决理由",
+      "decidedBy": "裁决人",
+      "appliedBy": "执行人",
+      "rolledBackBy": "回滚人",
+      "snapshot": "回滚点快照"
+    },
+    "volumeManage": {
+      "title": "卷冻结管理",
+      "hint": "冻结卷=既定事实（系列圣经快照）：S4/S5/重写均以冻结快照为前向依据，命中冻结卷的改动会转 retcon 审批。卷定稿后再冻结。",
+      "empty": "暂无卷。",
+      "frozen": "已冻结",
+      "unfrozen": "未冻结",
+      "snapshotVersion": "快照 v{{n}}",
+      "frozenAt": "冻结于 {{time}}",
+      "freeze": "冻结",
+      "unfreeze": "解冻",
+      "freezeConfirm": "确认冻结「{{name}}」？冻结将提交该卷的系列圣经快照（既定事实），并做台账自洽审计——存在结构性矛盾将被拒绝。冻结后该卷转为写保护，改动需走 retcon 审批。",
+      "unfreezeConfirm": "确认解冻「{{name}}」？解冻后该卷恢复可写，已提交的快照保留。",
+      "freezeBlocked": "存在结构性矛盾，已阻止冻结：",
+      "frozenOk": "「{{name}}」已冻结",
+      "unfrozenOk": "「{{name}}」已解冻",
+      "audit": "圣经自检",
+      "auditClean": "台账自洽：无结构性矛盾（warning {{n}} 条，不阻断冻结）。",
+      "auditErrors": "发现 {{n}} 处结构性矛盾（冻结将被拒绝）：",
+      "auditWarnings": "可疑但合法（warning，不阻断冻结）："
+    },
     "ended": {
       "finished": "流水线已完成。",
       "aborted": "流水线已终止。"

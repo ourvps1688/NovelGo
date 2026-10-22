@@ -6,6 +6,9 @@ import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
 import SignabilityAuditView, { StockAuditPanel } from "./SignabilityAuditView";
 import PipelineControlBar from "./PipelineControlBar";
+import PatrolReportPanel from "./PatrolReportPanel";
+import RetconPanel from "./RetconPanel";
+import VolumeManagePanel from "./VolumeManagePanel";
 
 interface Props {
   novelId: number;
@@ -26,6 +29,7 @@ export default function PipelineWizard({ novelId }: Props) {
     fixProgress,
     fixActivity,
     rewriteProgress,
+    patrolTick,
     start,
     resume,
     control,
@@ -37,6 +41,20 @@ export default function PipelineWizard({ novelId }: Props) {
     try {
       const c = JSON.parse(run.ContextJSON);
       const raw = c.stock_audit;
+      if (!raw) return null;
+      return typeof raw === "string" ? JSON.parse(raw) : raw;
+    } catch {
+      return null;
+    }
+  }, [run]);
+
+  // 解析全书一致性巡检（张力报告，WBS 3.3）：存于 run.ContextJSON.patrol_report，
+  // 与 stock_audit 同模式（只读展示，绝不进自动修复路由）。
+  const patrolReport = useMemo(() => {
+    if (!run?.ContextJSON) return null;
+    try {
+      const c = JSON.parse(run.ContextJSON);
+      const raw = c.patrol_report;
       if (!raw) return null;
       return typeof raw === "string" ? JSON.parse(raw) : raw;
     } catch {
@@ -172,6 +190,20 @@ export default function PipelineWizard({ novelId }: Props) {
             {t(`pipeline.ended.${status}`)}
           </p>
         ) : null}
+
+        {/* 卷级管理面板（阶段 4）：一致性巡检报告 / retcon 审批 / 卷冻结管理。
+            与流水线阶段无关常驻展示，巡检报告依赖 run（无 run 时隐藏）。 */}
+        <div className="mt-4 flex flex-col gap-3">
+          {run ? (
+            <PatrolReportPanel
+              data={patrolReport}
+              tick={patrolTick}
+              onRun={() => control("patrol")}
+            />
+          ) : null}
+          <RetconPanel novelId={novelId} />
+          <VolumeManagePanel novelId={novelId} />
+        </div>
       </div>
     </div>
   );

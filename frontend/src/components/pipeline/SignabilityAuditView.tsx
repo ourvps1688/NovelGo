@@ -25,6 +25,7 @@ import type {
 } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import StageActivityPanel from "./StageActivityPanel";
+import { IssueScopeTags } from "./IssueTags";
 
 // 体检结果类型（AuditIssue / AuditData）的契约单源在 @/types/pipeline（对齐后端
 // internal/pipeline/contract.go），此处不再手写副本。
@@ -219,6 +220,7 @@ export function AuditResultView({
                   <span className="text-muted-foreground">{it.id}</span>
                 </div>
                 <p className="mt-1 text-muted-foreground">{it.desc}</p>
+                <IssueScopeTags issue={it} />
               </li>
             ))}
           </ul>
@@ -270,6 +272,7 @@ function RewriteBacklogPanel({ items }: { items: RewriteItem[] }) {
               <span className="text-muted-foreground">{it.id}</span>
             </div>
             <p className="mt-1 text-muted-foreground">{it.desc}</p>
+            <IssueScopeTags issue={it} />
             <p className="mt-1 text-xs text-muted-foreground">
               {it.chapters && it.chapters.length > 0
                 ? t("pipeline.rewriteBacklog.chapters", {
@@ -349,6 +352,7 @@ export function StockAuditPanel({ data }: { data: AuditData }) {
                   <span className="text-muted-foreground">{it.id}</span>
                 </div>
                 <p className="mt-1 text-muted-foreground">{it.desc}</p>
+                <IssueScopeTags issue={it} />
               </li>
             ))}
           </ul>
@@ -557,6 +561,7 @@ function FixProgressView({
                     <FixIssueStatusBadge status={displayStatus} />
                   </div>
                   <p className="mt-1 text-muted-foreground">{it.desc}</p>
+                  <IssueScopeTags issue={it} />
                 </li>
               );
             })}

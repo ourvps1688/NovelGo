@@ -6,8 +6,10 @@ export type PipelineStatus =
 
 export type PipelineMode = "new" | "continue";
 
+// patrol = 手动触发全书一致性巡检（WBS 3.3「张力报告」，只报告不改写），
+// 与 align_full 同构：后台异步执行、不改变当前阶段。
 export type ControlCmd =
-  "pause" | "resume" | "stop" | "set_auto" | "align_full";
+  "pause" | "resume" | "stop" | "set_auto" | "align_full" | "patrol";
 export type GateDecision =
   | "continue"
   | "modify"
