@@ -53,6 +53,39 @@ func TestFormatDeltaContent(t *testing.T) {
 	}
 }
 
+// TestFormatDeltaVoiceRowsReadable 验证 voice_dimensions 行变更经通用渲染可读
+// （P1 T4.2，WBS §0.5：diff 可读性走既有 FormatDelta，retcon 留痕同款）：
+// 表计数、增删行 id、字段级 old→new（字符串加引号、null 显式）与其他台账表同款。
+func TestFormatDeltaVoiceRowsReadable(t *testing.T) {
+	d := &Delta{
+		SchemaVersion: SchemaVersion,
+		Tables: []TableDelta{
+			{
+				Table:   "voice_dimensions",
+				Added:   []map[string]any{{"id": int64(7), "dimension": "taboo_words", "content": "禁用突然/忽然"}},
+				Removed: []map[string]any{{"id": int64(4), "dimension": "humor", "content": "冷幽默"}},
+				Changed: []RowDelta{
+					{ID: 3, Fields: map[string]FieldDelta{
+						"content": {Old: "先结论后铺垫", New: "先铺垫后结论"},
+						"metrics": {Old: nil, New: `{"avg_sent_len":12}`},
+					}},
+				},
+			},
+		},
+	}
+	got := FormatDelta(d)
+	want := strings.Join([]string{
+		"voice_dimensions: +1 -1 ~1",
+		"  + #7",
+		"  - #4",
+		`  ~ #3 content: "先结论后铺垫" → "先铺垫后结论"`,
+		`  ~ #3 metrics: null → "{\"avg_sent_len\":12}"`,
+	}, "\n")
+	if got != want {
+		t.Errorf("FormatDelta mismatch:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFormatDeltaBudget 验证超预算截断（字节预算不切碎 UTF-8）与长值截断。
 func TestFormatDeltaBudget(t *testing.T) {
 	long := strings.Repeat("长", 100) // 300+ 字节，应截到 maxValRunes=60 rune
