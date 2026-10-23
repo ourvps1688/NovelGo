@@ -32,6 +32,7 @@ import (
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/style"
 	"github.com/novelgo/novelgo/internal/timeline"
+	"github.com/novelgo/novelgo/internal/voice"
 	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/novelgo/novelgo/internal/writing"
 	"github.com/novelgo/novelgo/internal/writingconfig"
@@ -109,6 +110,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&rollback.TurnCommit{},
 		&style.Sample{},
 		&style.Profile{},
+		&voice.Entry{},
 		&writing.WritingLog{},
 		&activity.DailyActivity{},
 		&activity.DailyLLMUsage{},
