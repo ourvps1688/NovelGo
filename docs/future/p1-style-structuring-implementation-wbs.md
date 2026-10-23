@@ -164,6 +164,7 @@ type Entry struct {
 - **内容**：端到端验收测试：**可查询**（GetVoiceLedger 返回落库行）→ **可 diff**（两版本快照 diff 出 voice 行变更）→ **进快照**（freeze payload 含 voice_dimensions 行）。结论记入本节（3 行内）。
 - **验收**：三联断言全绿 + 结论写入本文件。
 - **依赖**：T4.2。
+- **结论**（T5.1 已毕）：`app/voice_acceptance_test.go` 三联断言全绿——①可查询：GetVoiceLedger 十维视图落库行 Present=true、未落库占位；②可 diff：v2 相对 v1 diff 出节奏内容改 + 禁忌词增（dimension 行键语义可见）；③进快照：freeze payload 含 voice_dimensions 2 行。
 
 ### T5.2 全量门禁
 
