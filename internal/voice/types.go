@@ -96,6 +96,19 @@ type Entry struct {
 // TableName 返回表名。与 characters.voice_traits（角色声纹特征列）语义无关。
 func (Entry) TableName() string { return "voice_dimensions" }
 
+// metrics JSON 键单源（WBS §0.2/T2.2 风险条）：确定性统计映射与后续渲染
+// 都从此取键，禁止两处各写一份字符串。
+const (
+	MetricKeyAvgSentLen      = "avg_sent_len"
+	MetricKeySentLenStdDev   = "sent_len_std_dev"
+	MetricKeyShortSentPct    = "short_sent_pct"
+	MetricKeyQuoteDensity    = "quote_density"
+	MetricKeyCommaDensity    = "comma_density"
+	MetricKeyPeriodDensity   = "period_density"
+	MetricKeyExclaimDensity  = "exclaim_density"
+	MetricKeyQuestionDensity = "question_density"
+)
+
 // ProfileItem 是提取 toolcall 输出契约中的结构化维度条目（WBS §0.3），
 // pattern mental / style 双写共用此形（jsonschema 标签即工具定义来源）。
 // 落库时 Metrics/Evidence 经 MetricsJSON/EvidenceJSON 序列化为 JSON 文本。

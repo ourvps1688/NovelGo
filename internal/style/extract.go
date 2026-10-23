@@ -8,12 +8,17 @@ import (
 
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/voice"
 )
 
 // Extract 分析样本文字的写作风格，生成仿写 skill。
 // 取消由调用方（app 层）通过 ctx 管理。
+// onVoiceProfile 可选（P1 双写，WBS §0.3/§0.6）：提取成功后回调结构化 Voice 维度
+// （确定性 Stats 映射 + LLM voice_profile 合并），由调用方并行落库；
+// 风格画像产出路径一字不动；提取失败不触发（空台账降级）。
 func Extract(ctx context.Context, llmClient *llm.Client,
-	samples []Sample, providerName, modelID, reasoningEffort string) (*ExtractResult, error) {
+	samples []Sample, providerName, modelID, reasoningEffort string,
+	onVoiceProfile func(items []voice.ProfileItem)) (*ExtractResult, error) {
 
 	// 计算 stats + 拼接全文
 	stats := ComputeStats(samples)
@@ -54,6 +59,15 @@ func Extract(ctx context.Context, llmClient *llm.Client,
 	}
 	if strings.TrimSpace(out.Name) == "" || strings.TrimSpace(out.Content) == "" {
 		return nil, fmt.Errorf("LLM 返回的风格技能内容不完整")
+	}
+
+	// P1 双写（WBS §0.3/§0.6）：确定性 Stats 映射 + LLM voice_profile 合并后经
+	// onVoiceProfile 并行落库；产出路径一字不动。LLM 未产出 voice_profile 时仍有
+	// Stats 确定性条目（metrics 数值），无素材时 StatsVoiceProfile 为空不触发。
+	if onVoiceProfile != nil {
+		if merged := MergeVoiceProfile(StatsVoiceProfile(samples, stats), out.VoiceProfile); len(merged) > 0 {
+			onVoiceProfile(merged)
+		}
 	}
 
 	return &ExtractResult{

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/novelgo/novelgo/internal/voice"
 )
 
 // StringSlice 是 []string 的 DB 适配类型，存储为 JSON TEXT。
@@ -113,4 +115,8 @@ type StyleSkillOutput struct {
 	Name        string `json:"name" jsonschema:"required,description=风格名称（中文）"`
 	Description string `json:"description" jsonschema:"required,description=一句话描述适合什么写作场景，什么时候调用"`
 	Content     string `json:"content" jsonschema:"required,description=风格仿写技能正文 markdown，含 ## 风格概述/句式特征/用词习惯/修辞手法/节奏控制/叙事视角与距离/氛围与语调/仿写要点/原文锚点 等章节，不含 frontmatter"`
+	// VoiceProfile 是 P1 风格结构化双写的可选产出（WBS §0.3/§0.6）：Voice 画像十维的
+	// 结构化维度清单，与风格画像产出并行落库（产出路径一字不动）。LLM 未产出即
+	// 降级不落库（宁缺勿错，不解析正文兜底猜测）。
+	VoiceProfile []voice.ProfileItem `json:"voice_profile,omitempty" jsonschema:"description=可选：Voice 画像结构化维度清单（dimension 仅限十维枚举之一），用于风格台账并行落库；无法提炼时省略此字段"`
 }

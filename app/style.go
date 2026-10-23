@@ -9,6 +9,7 @@ import (
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/style"
 	"github.com/novelgo/novelgo/internal/text"
+	"github.com/novelgo/novelgo/internal/voice"
 )
 
 // ListStyleSamplesInput 是列出风格素材的入参。
@@ -134,9 +135,14 @@ type ExtractStyleInput struct {
 	ProviderName    string  `json:"provider_name"`
 	ModelID         string  `json:"model_id"`
 	ReasoningEffort string  `json:"reasoning_effort"`
+	// NovelID 可选（P1 双写）：Voice 台账的归属书。缺省 0 时从选中素材推导
+	// （唯一非全局素材所属书），无法唯一锚定时不落台账（降级）。
+	NovelID int64 `json:"novel_id,omitempty"`
 }
 
 // ExtractStyle 从选中的素材中提取写作风格，生成仿写 skill。
+// 提取成功后结构化 Voice 维度并行落库（P1 双写，source=style_sample），
+// 风格画像产出路径一字不动；无法唯一锚定归属书时不落台账（降级）。
 func (a *App) ExtractStyle(input ExtractStyleInput) (*style.ExtractResult, error) {
 	if a.llmClient == nil {
 		return nil, fmt.Errorf("LLM 客户端未初始化")
@@ -151,6 +157,8 @@ func (a *App) ExtractStyle(input ExtractStyleInput) (*style.ExtractResult, error
 		return nil, fmt.Errorf("加载素材失败: %w", err)
 	}
 
+	voiceNovelID := voiceAnchorNovelID(input.NovelID, samples)
+
 	// 取消逻辑由 app 层管理
 	key := agent.CancelPrefixStyle + input.TaskID
 	ctx, cancel := context.WithCancel(a.ctx)
@@ -163,7 +171,34 @@ func (a *App) ExtractStyle(input ExtractStyleInput) (*style.ExtractResult, error
 	}()
 
 	return style.Extract(ctx, a.llmClient, samples,
-		input.ProviderName, input.ModelID, input.ReasoningEffort)
+		input.ProviderName, input.ModelID, input.ReasoningEffort,
+		func(items []voice.ProfileItem) {
+			if voiceNovelID == 0 {
+				a.logger.Debug("voice 台账双写跳过：无法唯一锚定归属书", "task_id", input.TaskID)
+				return
+			}
+			a.upsertVoiceProfileSource(voiceNovelID, voice.SourceStyleSample, items)
+		})
+}
+
+// voiceAnchorNovelID 确定 Voice 台账的归属书：显式传入优先；否则取选中素材中
+// 唯一的非全局素材所属书。全局素材混多书时无法唯一锚定，返回 0（降级不落库）。
+func voiceAnchorNovelID(inputNovelID int64, samples []style.Sample) int64 {
+	if inputNovelID > 0 {
+		return inputNovelID
+	}
+	var anchor int64
+	for _, s := range samples {
+		if s.NovelID == 0 {
+			continue
+		}
+		if anchor == 0 {
+			anchor = s.NovelID
+		} else if anchor != s.NovelID {
+			return 0 // 多书混选，无法唯一锚定
+		}
+	}
+	return anchor
 }
 
 // CancelExtract 取消指定 taskID 的风格提取任务。

@@ -96,6 +96,12 @@ func (a *App) ExtractPatternAll(input ExtractPatternInput) (*ExtractPatternAllRe
 // skill md 产出路径一字不动；单条写入失败仅记日志不阻断提取；
 // 空清单不触发（LLM 未产出 → 降级不落库）。
 func (a *App) upsertVoiceProfile(novelID int64, items []voice.ProfileItem) {
+	a.upsertVoiceProfileSource(novelID, voice.SourcePatternMental, items)
+}
+
+// upsertVoiceProfileSource 是双写落库的通用接线：按给定来源把结构化维度写入
+// voice_dimensions。单条写入失败仅记日志不阻断；空清单不触发（降级不落库）。
+func (a *App) upsertVoiceProfileSource(novelID int64, source voice.Source, items []voice.ProfileItem) {
 	if len(items) == 0 {
 		return
 	}
@@ -107,7 +113,7 @@ func (a *App) upsertVoiceProfile(novelID int64, items []voice.ProfileItem) {
 			Content:   it.Content,
 			Metrics:   it.MetricsJSON(),
 			Evidence:  it.EvidenceJSON(),
-			Source:    string(voice.SourcePatternMental),
+			Source:    string(source),
 		}
 		if err := store.Upsert(a.ctx, entry); err != nil {
 			a.logger.Warn("voice 台账双写跳过", "novel_id", novelID, "dimension", it.Dimension, "err", err)
