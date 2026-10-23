@@ -15,7 +15,6 @@ import (
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/agent"
-	"github.com/novelgo/novelgo/internal/agentcfg"
 	"github.com/novelgo/novelgo/internal/approval"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
@@ -27,7 +26,6 @@ import (
 	"github.com/novelgo/novelgo/internal/mcpserver"
 	"github.com/novelgo/novelgo/internal/migrate"
 	"github.com/novelgo/novelgo/internal/novel"
-	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/rag"
@@ -441,19 +439,11 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.pipeline.SetBibleProvider(func(ctx context.Context, novelID int64) (string, error) {
 		return a.snapshots.EstablishedFactsText(ctx, novelID)
 	})
-	// 注入「创作心智」提供者（P0 T2.3）：重写/体检/修复/巡检提示词的 Voice 块正文
-	// （技能正文+诚实边界声明，§0.3 provider 口径）。persona 未配置/解析失败返回空串，
-	// 对应块降级为不注入（提示词与未接文风时逐字一致）。
-	a.pipeline.SetVoiceProvider(func(ctx context.Context, novelID int64) (string, error) {
-		p, err := personasetting.NewStore(a.db, a.logger).Get(ctx, novelID)
-		if err != nil {
-			return "", err
-		}
-		if p == nil || !p.Enabled {
-			return "", nil
-		}
-		return agentcfg.BuildPersonaMindText(&agentcfg.PersonaRef{Kind: p.Kind, Ref: p.Ref}, a.skill, novelID), nil
-	})
+	// 注入「创作心智」提供者（P0 T2.3 + P1 T3.2）：重写/体检/修复/巡检提示词的 Voice 块正文
+	// = 心智正文（技能正文+诚实边界声明，§0.3 provider 口径）+ Voice 台账渲染追加
+	// （voice_dimensions 非空时，§0.4 顺序：P0 输出为前缀一字不动）。persona 未配置/
+	// 解析失败心智为空；台账为空时返回值与 P0 行为逐字一致（降级纪律）。
+	a.pipeline.SetVoiceProvider(a.voiceText)
 	// 注入「创作意图锚定」提供者（P0 T4.1 定源）：book-pitch 应用产物（novels 字段 +
 	// 五类 pitch 偏好）→ 当前卷纲正文 → 空串降级。仅 rewrite 用途装配（§0.5 矩阵）。
 	a.pipeline.SetIntentProvider(a.intentText)

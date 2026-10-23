@@ -3,13 +3,18 @@ package app
 // P1 WBS T3.1：Voice 台账查询与人工校正 API。
 // 台账真理源在 internal/voice（voice_dimensions 表，书级十维）；此处只做
 // 查询视图（含空维度占位）与人工校正入口（source=manual），不掺业务逻辑。
+//
+// T3.2：voiceText 是 voice provider 实现（心智正文 + 台账渲染追加，§0.4 顺序）。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/voice"
 )
 
@@ -106,4 +111,46 @@ func validateVoiceJSONField(name, value string) error {
 		return fmt.Errorf("voice: %s 须为合法 JSON", name)
 	}
 	return nil
+}
+
+// voiceText 是 voice provider 实现（P1 WBS T3.2，§0.4 消费端契约）：
+// 渲染顺序 = 心智正文（P0 路径，persona 未配置/解析失败为空）+ 台账渲染
+// （voice_dimensions 非空时追加，块内 §0.1 固定维度顺序）。
+//
+// 降级逐字一致（本 WBS 最高验收标准）：台账为空 → 返回值与 P0 行为逐字一致
+// （即仅心智正文/空串）；台账非空 → 台账块追加在心智正文之后（P0 输出成为前缀，
+// 一字不动）。台账读取失败降级为不追加（坏数据宁缺勿错），心智正文照常返回。
+func (a *App) voiceText(ctx context.Context, novelID int64) (string, error) {
+	mind, err := a.personaMindText(ctx, novelID)
+	if err != nil {
+		return "", err
+	}
+	rows, err := voice.NewStore(a.db, a.logger).List(ctx, novelID)
+	if err != nil {
+		// 台账读取失败只降级台账块，不拖垮心智正文（P0 前缀必须保住）。
+		a.logger.Warn("voice 台账读取失败，降级为不追加台账块", "novel_id", novelID, "err", err)
+		return mind, nil
+	}
+	ledger := voice.RenderLedger(rows)
+	switch {
+	case ledger == "":
+		return mind, nil // 台账空 → 与 P0 逐字一致
+	case mind == "":
+		return ledger, nil
+	default:
+		return mind + "\n\n" + ledger, nil
+	}
+}
+
+// personaMindText 是 P0 心智正文路径（T3.2 抽出，逻辑与 handler.go 原闭包一字不动）：
+// persona 未配置/未启用/解析失败返回空串，对应块降级为不注入。
+func (a *App) personaMindText(ctx context.Context, novelID int64) (string, error) {
+	p, err := personasetting.NewStore(a.db, a.logger).Get(ctx, novelID)
+	if err != nil {
+		return "", err
+	}
+	if p == nil || !p.Enabled {
+		return "", nil
+	}
+	return agentcfg.BuildPersonaMindText(&agentcfg.PersonaRef{Kind: p.Kind, Ref: p.Ref}, a.skill, novelID), nil
 }
