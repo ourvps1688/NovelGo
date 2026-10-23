@@ -15,6 +15,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/agent"
+	"github.com/novelgo/novelgo/internal/agentcfg"
 	"github.com/novelgo/novelgo/internal/approval"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
@@ -26,6 +27,7 @@ import (
 	"github.com/novelgo/novelgo/internal/mcpserver"
 	"github.com/novelgo/novelgo/internal/migrate"
 	"github.com/novelgo/novelgo/internal/novel"
+	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/preference"
 	"github.com/novelgo/novelgo/internal/rag"
@@ -439,6 +441,20 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.pipeline.SetBibleProvider(func(ctx context.Context, novelID int64) (string, error) {
 		return a.snapshots.EstablishedFactsText(ctx, novelID)
 	})
+	// 注入「创作心智」提供者（P0 T2.3）：重写/体检/修复/巡检提示词的 Voice 块正文
+	// （技能正文+诚实边界声明，§0.3 provider 口径）。persona 未配置/解析失败返回空串，
+	// 对应块降级为不注入（提示词与未接文风时逐字一致）。
+	a.pipeline.SetVoiceProvider(func(ctx context.Context, novelID int64) (string, error) {
+		p, err := personasetting.NewStore(a.db, a.logger).Get(ctx, novelID)
+		if err != nil {
+			return "", err
+		}
+		if p == nil || !p.Enabled {
+			return "", nil
+		}
+		return agentcfg.BuildPersonaMindText(&agentcfg.PersonaRef{Kind: p.Kind, Ref: p.Ref}, a.skill, novelID), nil
+	})
+	// SetIntentProvider 暂不注入（intent 源待 T4.1 探查定源后接线；nil 即降级为不注入）。
 	// 注入 retcon 审批闸门（WBS 3.1）：S5 交回的写保护/retcon 候选沉淀为持久化候选案，
 	// 作者显式审批后才允许受控回改冻结卷（3.2 接快照 diff/Restore 留痕与回滚）。
 	a.pipeline.SetRetconGate(a.retcons)

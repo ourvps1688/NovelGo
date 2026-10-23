@@ -47,6 +47,23 @@ func BuildPersonaSystemText(persona *PersonaRef, skillStore *skill.Store, novelI
 	return b.String()
 }
 
+// BuildPersonaMindText 解析 persona 引用并构建「心智正文」（P0 WBS §0.3 的 provider 口径）：
+// 技能正文 + 诚实边界声明。统一上下文装配器（internal/contextasm）以本返回值为
+// Voice 块正文，块头（PersonaMarker/VoiceHeader）与 purpose 引导语由装配器渲染，
+// 本函数不拼块头与引导语。
+// 返回空串表示无法解析（persona 为 nil、skillStore 为 nil 或引用不存在），
+// 调用方应降级为不注入该块。
+func BuildPersonaMindText(persona *PersonaRef, skillStore *skill.Store, novelID int64) string {
+	if persona == nil || skillStore == nil {
+		return ""
+	}
+	content, _ := resolvePersonaContent(persona, skillStore, novelID)
+	if content == "" {
+		return ""
+	}
+	return content + "\n\n" + PersonaHonestyNote
+}
+
 // resolvePersonaContent 把 persona 引用解析到技能正文 + 展示名（技能名）。
 //   - Kind=="skill"：Ref 为技能名，直接 Get。
 //   - Kind=="author"：Ref 为规范 source_author，在该 novel 的 mental 技能中匹配；

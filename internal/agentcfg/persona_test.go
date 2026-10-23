@@ -86,6 +86,24 @@ func TestBuildPersonaSystemText_Unresolved(t *testing.T) {
 	require.Empty(t, BuildPersonaSystemText(nil, store, novelID), "nil persona 应返回空串")
 }
 
+// TestBuildPersonaMindText 锁 P0 provider 口径（WBS §0.3）：心智正文 = 技能正文 +
+// 诚实边界声明，逐字断言；**不含** PersonaMarker 块头与 chat 引导语（那两段由
+// 统一装配器渲染，provider 不得自带，否则 Voice 块会嵌套两个块头）。
+func TestBuildPersonaMindText(t *testing.T) {
+	store, novelID := personaTestStore(t, skillSpec{
+		name: "X 的创作心智", kind: "mental", sourceAuthor: "刘慈欣", body: "X_MENTAL_BODY",
+	})
+
+	got := BuildPersonaMindText(&PersonaRef{Kind: "skill", Ref: "X 的创作心智"}, store, novelID)
+	require.Equal(t, "X_MENTAL_BODY"+"\n\n"+PersonaHonestyNote, got, "心智正文=正文+诚实声明（逐字）")
+	require.NotContains(t, got, PersonaMarker, "provider 不得自带块头")
+	require.NotContains(t, got, "以下创作心智将指导你起草本轮新章节", "provider 不得自带引导语")
+
+	// 解析失败降级为空串（对应块不注入）。
+	require.Empty(t, BuildPersonaMindText(&PersonaRef{Kind: "skill", Ref: "不存在"}, store, novelID))
+	require.Empty(t, BuildPersonaMindText(nil, store, novelID))
+}
+
 func TestBuildSystemMessages_PersonaDoesNotBreakAlways(t *testing.T) {
 	store, novelID := personaTestStore(t,
 		skillSpec{name: "X 的创作心智", kind: "mental", sourceAuthor: "刘慈欣", body: "X_MENTAL_BODY"},
