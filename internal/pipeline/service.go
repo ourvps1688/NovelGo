@@ -1183,12 +1183,15 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	// 否则会对修不动的问题反复重试（空转）或上报 skipped 永久丢弃（修复链断裂）。
 	// 改为显式路由到 S3 章节重写回路——标记 FixStates=rewrite 并沉淀到 RewriteBacklog。
 	// （命中写保护的正文级问题已在上方路由进 RetconBacklog，不会落入本清单。）
+	// V 系文风漂移项（isStyleExempt）也在此收口进 RewriteBacklog（「自动进路由」=进
+	// 既有容器供作者查看，零新路由），但下游派发一律豁免——与下方 pending 过滤成对，
+	// 保证每个 issue 必进「retcon / rewrite / pending / resolved」四分区之一，无死区。
 	backlog := ctxt.RewriteBacklog
 	if backlog == nil {
 		backlog = []RewriteItem{}
 	}
 	for _, it := range auditData.Issues {
-		if it.FixType != FixTypeBody || isResolved[it.ID] {
+		if isResolved[it.ID] || (it.FixType != FixTypeBody && !isStyleExempt(it.ID)) {
 			continue
 		}
 		backlog = upsertRewriteItem(backlog, RewriteItem{
@@ -1213,7 +1216,9 @@ func (s *Service) executeFix(runID string, novelID int64) {
 
 	pending := make([]AuditIssue, 0, len(auditData.Issues))
 	for _, it := range auditData.Issues {
-		if !isResolved[it.ID] && it.FixType != FixTypeBody {
+		// V 系文风漂移项豁免自动修复派发（只报告不改写，WBS §0.3）：已随上方
+		// 析出循环进 RewriteBacklog 供作者裁决，绝不进修复批次。
+		if !isResolved[it.ID] && it.FixType != FixTypeBody && !isStyleExempt(it.ID) {
 			pending = append(pending, it)
 		}
 	}
@@ -1421,7 +1426,9 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 // 派发章节重写 agent** 把被标记章节整章重写（用户选择全自动模式），重写后自动回到 S4 复评；
 // 复评若仍报出同一批正文问题会再次进入本函数，由 autoRewriteCap 上限收敛（达到上限改交人工）。
 //
-// 两种「交回用户」的出口（明确暂停 + 广播 rewrite_handoff，前端展示「已转交章节重写」而非「修复完成」）：
+// 三种「交回用户」的出口（明确暂停 + 广播 rewrite_handoff，前端展示「已转交章节重写」而非「修复完成」）：
+//  0. 重写清单里没有任何可派发项（全为 V 系文风漂移豁免/写保护兜底项）——只报告不改写，
+//     交回作者裁决（note「文风漂移项待作者裁决」），绝不进自动重写循环；
 //  1. 重写轮数已达 autoRewriteCap —— 自动重写多次仍无效，交回人工决策；
 //  2. 重写清单涉及章节无法在本书定位（chapters 为空或缺章）——无法自动重写，只能手动。
 //
@@ -1434,6 +1441,27 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 		return
 	}
 
+	// 出口 0（P2 T2.2 派发豁免）：可派发项=非写保护且非 V 系文风漂移（isStyleExempt）。
+	// V 系「只报告不改写」（WBS §0.3）：进 RewriteBacklog 供作者查看，但绝不派发
+	// 自动章节重写。全豁免（清单里没有任何可派发项）→ 手动交接收口，绝不进
+	// 「重写→复评」循环空转（风险 G2 防死循环）。
+	dispatchable := make([]RewriteItem, 0, len(ctxt.RewriteBacklog))
+	for _, item := range ctxt.RewriteBacklog {
+		if writeProtected(item.TargetScope, item.Direction) || isStyleExempt(item.ID) {
+			continue
+		}
+		dispatchable = append(dispatchable, item)
+	}
+	if len(dispatchable) == 0 {
+		n := len(ctxt.RewriteBacklog)
+		s.handoffRewriteWithMsg(ctx, runID, novelID, ctxt, fmt.Sprintf(
+			"%d 个文风漂移项（V 系）只报告不改写，已豁免自动章节重写，文风漂移项待作者裁决："+
+				"请在写作页酌情润色相关章节或保持原样后，再重新进入修复/复评",
+			n,
+		))
+		return
+	}
+
 	// 出口 1：重写轮数已达上限 → 交回人工。
 	if ctxt.RewriteRounds >= autoRewriteCap {
 		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
@@ -1441,7 +1469,8 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 	}
 
 	// 把重写清单涉及章节的阅读序号映射回真实 chapter_id；剔除无法定位的章节。
-	chaptersByReading, err := s.resolveRewriteChapters(ctx, novelID, ctxt.RewriteBacklog)
+	// 只解析可派发项（写保护项与 V 系豁免项不派发，无需定位）。
+	chaptersByReading, err := s.resolveRewriteChapters(ctx, novelID, dispatchable)
 	if err != nil {
 		s.logger.Warn("S5 重写：章节定位失败，降级交回用户", "run_id", runID, "err", err)
 		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
@@ -1454,21 +1483,15 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 	}
 
 	// 自动重写：逐章派发章节重写 agent（每章独立会话，充足轮数预算）。
-	// 写保护防御：命中冻结卷写保护/retcon 候选的清单项绝不派发（冻结卷章节不得被自动
-	// 重写）。正常路径下 bodyIssuesOf 已把这类项分流进 RetconBacklog，此处兜底旧数据。
+	// 派发范围=可派发项（上方已过滤写保护与 V 系豁免；正常路径下 bodyIssuesOf 已把
+	// 写保护项分流进 RetconBacklog，此处兜底旧数据）。
 	s.setDispatching(ctx, runID, true)
 	total := 0
-	for _, item := range ctxt.RewriteBacklog {
-		if writeProtected(item.TargetScope, item.Direction) {
-			continue
-		}
+	for _, item := range dispatchable {
 		total += len(chaptersByReading[item.ID])
 	}
 	index := 0
-	for _, item := range ctxt.RewriteBacklog {
-		if writeProtected(item.TargetScope, item.Direction) {
-			continue
-		}
+	for _, item := range dispatchable {
 		chaps := chaptersByReading[item.ID]
 		for _, ch := range chaps {
 			index++
@@ -1522,6 +1545,13 @@ func (s *Service) handoffRewriteToUser(ctx context.Context, runID string, novelI
 			n,
 		)
 	}
+	s.handoffRewriteWithMsg(ctx, runID, novelID, ctxt, msg)
+}
+
+// handoffRewriteWithMsg 是 rewrite_handoff 交回的统一出口（暂停 + 广播 + 前端 note），
+// 消息由调用方按语义定制（自动重写超限/章节不可定位/文风漂移全豁免）。
+func (s *Service) handoffRewriteWithMsg(ctx context.Context, runID string, novelID int64, ctxt GateContext, msg string) {
+	n := len(ctxt.RewriteBacklog)
 	emitFixDone(ctx, map[string]any{
 		"run_id":          runID,
 		"novel_id":        novelID,

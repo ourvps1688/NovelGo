@@ -840,6 +840,133 @@ func TestServiceAutoRewriteDispatch(t *testing.T) {
 	require.Len(t, finalCtxt.RewriteBacklog, 1, "复评仍报正文问题，重写清单应保留 1 项")
 }
 
+// TestServiceStyleExemptSkipsAutoRewrite 验证 P2 T2.2 派发豁免（验收②）：
+// 混合清单里 V 系文风漂移项进 RewriteBacklog 供作者查看，但自动章节重写只派发
+// 非豁免项——I 系正文问题照常整章重写，V 系涉及章节零自动改写（只报告不改写）。
+func TestServiceStyleExemptSkipsAutoRewrite(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, db.Create(&chapter.Chapter{
+			NovelID: 431, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
+		}).Error)
+	}
+	seeded, err := svc.chapterStore.ListAllByNovel(ctx, nil, 431)
+	require.NoError(t, err)
+	readingToID := map[int]int64{}
+	for _, ch := range seeded {
+		readingToID[ch.ReadingNumber] = ch.ID
+	}
+
+	// V1 指向第 3 章（文风漂移，豁免派发），I2 指向第 4 章（常规正文问题，照常派发）。
+	issueV := `{"id":"V1","level":"P1","area":"文风漂移·章节#3","desc":"第3章文风指标 avg_sent_len 偏离基线",` +
+		`"fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}`
+	issueI := `{"id":"I2","level":"P0","area":"开篇过签力","desc":"第4章未立人设，代入感弱","fix_type":"body"}`
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"混合清单","issues":[` + issueV + `,` + issueI + `]}`
+
+	var rewrittenIDs []int64
+	var auditCalled bool
+	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
+		switch name {
+		case "chapter-rewrite":
+			rewrittenIDs = append(rewrittenIDs, extractChapterIDFromPrompt(t, input.Prompt))
+			return SkillOutput{Text: "已整章重写"}, nil
+		case "signability-audit":
+			auditCalled = true
+			// 复评仍报出同一批问题（未一次解决），停在闸门等人工。
+			return SkillOutput{Text: "复评：\n```json\n" +
+				`{"verdict":"needs_fix","score":16,"summary":"复评仍报","issues":[` + issueV + `,` + issueI + `]}` +
+				"\n```"}, nil
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	oldProg := emitRewriteProgress
+	emitRewriteProgress = func(_ context.Context, _ map[string]any) {}
+	defer func() { emitRewriteProgress = oldProg }()
+
+	run, err := svc.StartPipeline(ctx, 431, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.Equal(t, []int64{readingToID[4]}, rewrittenIDs,
+		"只应重写 I 系指向的第 4 章；V 系第 3 章零自动改写（豁免派发）")
+	require.True(t, auditCalled, "I 系重写后应自动回到复评")
+	require.Equal(t, 1, finalCtxt.RewriteRounds, "重写轮数应 +1（只计可派发项）")
+	require.Len(t, finalCtxt.RewriteBacklog, 2, "复评仍报同批问题，V 系与 I 系都应留在重写清单")
+}
+
+// TestServiceStyleExemptHandoffNoLoop 验证 P2 T2.2 派发豁免（验收③）：全 V 系
+// RewriteBacklog 不触发自动重写循环——零 chapter-rewrite 派发、零复评，
+// 手动交接收口（note「文风漂移项待作者裁决」）且 RewriteRounds 不递增。
+func TestServiceStyleExemptHandoffNoLoop(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
+	for i := 1; i <= 3; i++ {
+		require.NoError(t, db.Create(&chapter.Chapter{
+			NovelID: 432, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
+		}).Error)
+	}
+
+	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"仅文风漂移","issues":[` +
+		`{"id":"V1","level":"P1","area":"文风漂移·章节#2","desc":"第2章文风指标 quote_density 偏离基线",` +
+		`"fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
+
+	var rewriteCalled, auditCalled bool
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "chapter-rewrite":
+			rewriteCalled = true
+		case "signability-audit":
+			auditCalled = true
+		}
+		return SkillOutput{Text: "ok"}, nil
+	}
+
+	var fixDonePayload map[string]any
+	oldEmit := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
+	defer func() { emitFixDone = oldEmit }()
+
+	run, err := svc.StartPipeline(ctx, 432, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+
+	got, _ := svc.store.GetByRunID(ctx, run.RunID)
+	var finalCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
+
+	require.False(t, rewriteCalled, "全豁免清单不得派发自动章节重写")
+	require.False(t, auditCalled, "全豁免不得进复评（防「重写→复评」死循环）")
+	require.Equal(t, 0, finalCtxt.RewriteRounds, "重写轮数不得递增")
+	require.Len(t, finalCtxt.RewriteBacklog, 1, "V 系应沉淀进重写清单供作者查看")
+	require.Equal(t, "V1", finalCtxt.RewriteBacklog[0].ID)
+	require.NotNil(t, fixDonePayload)
+	require.Equal(t, true, fixDonePayload["rewrite_handoff"], "fix_done 应带 rewrite_handoff 标记（前端零改动）")
+	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "文风漂移项待作者裁决")
+}
+
 // extractChapterIDFromPrompt 从 chapterRewritePrompt 生成的内容中解析 chapter_id=NNN。
 func extractChapterIDFromPrompt(t *testing.T, prompt string) int64 {
 	t.Helper()

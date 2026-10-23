@@ -249,3 +249,35 @@ func TestAuditZeroDriftWithoutProviders(t *testing.T) {
 	assert.NotContains(t, sc.Audit, "文风漂移", "降级输出与旧行为逐字一致")
 	assert.Equal(t, "needs_fix", ad.Verdict)
 }
+
+// TestIsStyleExempt 验证派发豁免谓词（WBS §0.3）只认 V 系命名空间：
+// V 归文风漂移独占，I/D/T 系与空 ID 一律不豁免（派发行为逐字不变）。
+func TestIsStyleExempt(t *testing.T) {
+	for _, id := range []string{"V1", "V12", "V999"} {
+		assert.True(t, isStyleExempt(id), id)
+	}
+	for _, id := range []string{"I1", "D1", "T1", "G1", ""} {
+		assert.False(t, isStyleExempt(id), id)
+	}
+}
+
+// TestStyleIssueRoutingContainers 验证「自动进路由」契约①：V 系经既有容器
+// 自然收口，零新路由——body 级 V 系进 RewriteBacklog（bodyIssuesOf），
+// 写保护 V 系（frozen_volume/retcon_candidate）进 RetconBacklog（retconItemsOf），
+// 两清单互不相交。
+func TestStyleIssueRoutingContainers(t *testing.T) {
+	audit := AuditData{Issues: []AuditIssue{
+		{ID: "V1", Level: "P1", Area: "文风漂移·章节#3", Desc: "第3章文风指标偏离基线",
+			FixType: FixTypeBody, TargetScope: TargetScopeActiveVolume,
+			Dimension: DimensionNone, Direction: DirectionForwardFix},
+		{ID: "V2", Level: "P1", Area: "文风漂移·章节#1", Desc: "第1章文风指标偏离基线",
+			FixType: FixTypeBody, TargetScope: TargetScopeFrozenVolume,
+			Dimension: DimensionNone, Direction: DirectionRetconCandidate},
+	}}
+	body := bodyIssuesOf(audit)
+	assert.Len(t, body, 1)
+	assert.Equal(t, "V1", body[0].ID, "V 系 body 级应自然收口进重写清单")
+	ret := retconItemsOf(audit)
+	assert.Len(t, ret, 1)
+	assert.Equal(t, "V2", ret[0].ID, "写保护 V 系应自然收口进 retcon 清单")
+}

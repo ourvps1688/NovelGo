@@ -99,3 +99,13 @@ func shapeDriftIssues(findings []voice.DriftFinding, chapterNum int, frozen bool
 	}
 	return out
 }
+
+// isStyleExempt 判定 V 系文风漂移 issue：派发豁免谓词（WBS §0.3 分级纪律消解）。
+// 文风漂移「只报告不改写」（A5 同族纪律）——检测器零写入之外，自动修复批次与
+// 自动章节重写派发也一律跳过 V 系项；作者显式推进（手动重写/润色）不受此限。
+//
+// ID 前缀 "V" 单源判别：V 归文风漂移独占命名空间（D 归 G3 蓝图漂移、T 归巡检、
+// I 归常规 LLM 体检——见 issueSample 命名空间裁决注释），绝不混排。
+func isStyleExempt(id string) bool {
+	return strings.HasPrefix(id, "V")
+}
