@@ -454,7 +454,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		}
 		return agentcfg.BuildPersonaMindText(&agentcfg.PersonaRef{Kind: p.Kind, Ref: p.Ref}, a.skill, novelID), nil
 	})
-	// SetIntentProvider 暂不注入（intent 源待 T4.1 探查定源后接线；nil 即降级为不注入）。
+	// 注入「创作意图锚定」提供者（P0 T4.1 定源）：book-pitch 应用产物（novels 字段 +
+	// 五类 pitch 偏好）→ 当前卷纲正文 → 空串降级。仅 rewrite 用途装配（§0.5 矩阵）。
+	a.pipeline.SetIntentProvider(a.intentText)
 	// 注入 retcon 审批闸门（WBS 3.1）：S5 交回的写保护/retcon 候选沉淀为持久化候选案，
 	// 作者显式审批后才允许受控回改冻结卷（3.2 接快照 diff/Restore 留痕与回滚）。
 	a.pipeline.SetRetconGate(a.retcons)
