@@ -73,6 +73,16 @@ useWhen:
 - 低分放行章节核查：`get_chapter_list` 输出中带「质检」标注的章节（quality_score 已落库），凡评分偏低（如 <60）或质检报告显示「多次重写仍不达标后放行」的，必须核对其正文与问题并**必产一条 P1 issue**（评分门禁重试耗尽放行的章节不得静默放过）。
 - 控制成本：逐条扫描时只标记**具体不一致**，不重复读同一资源；扫描台账**不**替代逐章正文审读，二者互补。
 
+## 文风漂移核查（V 系，只报告不改写）
+对照任务提示词尾部注入的 **Voice 文风契约块**（人格心智/风格基线；若提示词无该块则**跳过本节，零 issue**），逐章审读**主观品味类**文风偏移：叙事口吻与腔调、用词味道、句式习惯、语感是否与契约一致（如「契约：冷硬克制；第12章实际：轻浮网感吐槽腔」）。
+- 只报机器测不出的「味道」偏移（用词/腔调/语感）；句长分布、引语密度等**可量化指标由流水线确定性检测兜底**，不要重复报纯数值问题，也不要凭空造基线数字。
+- 产出 **V 系 issue**（与 I 系分开顺编，`"id"` 从 `"V1"` 起编；流水线合并确定性检测产出时自动避让续编，不撞号）：
+  - `"area"` 形如 `"文风漂移·章节#N"`（N=全局阅读序号，与 `get_chapter_list` 一致）；`desc` 说清哪一处偏移、对照契约哪一条不符；
+  - `"level"` 恒 `"P1"`（warning 级起步）——**绝不**把文风问题记成 `P0`、不放进致命伤清单；
+  - 文风漂移**不计入八维评分与 /40 总分，也不单独翻转 `verdict`**（verdict 判定仍只看 P0 与总分，保持既有规则不动）；
+  - `"fix_type"` 恒 `"body"`、`"dimension"` 恒 `"none"`；`target_scope`/`direction` 照「输出格式」三枚举规则标注（落点卷已冻结→`"frozen_volume"`）。
+- V 系 issue 同样受 issue 原子化纪律约束：一章一议（可多条指标各一条），禁止跨章打包。
+
 ## 工作流（只读，禁止写库/子 Agent）
 1. **逐章通读（范围见「审计范围」节）**：用 `get_chapter_list` 列出章节并按作用域过滤（卷级 scoped 体检只保留本卷章节，全书体检保留全部），用 `read` **逐章通读作用域内全部已成稿章节**——全书前三章（黄金三章）逐字精读，其余章节按 3–5 章一批依次读完，**不得抽样跳章**。章节很多时也要分批评完，这是体检结论确定性的底线。
 2. **按需补读台账**：若需验证设定/人物/卷纲，可调用一次 `list_volumes`、`get_characters`、`get_character_relations`、`get_locations`、`get_timeline`、`get_story_arcs`、`get_reader_perspective` 或 `search_story_memory`。禁止反复查询同一资源。
@@ -101,7 +111,8 @@ useWhen:
     {"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},
     {"id":"I2","level":"P1","area":"节奏爽点","desc":"第6-10章爽点断档","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},
     {"id":"I3","level":"P1","area":"长线牵引","desc":"timeline#42 伏笔未回收","fix_type":"ledger","target_scope":"active_volume","dimension":"timeline","direction":"forward_fix"},
-    {"id":"I4","level":"P0","area":"设定自洽","desc":"本卷第12章与已冻结前卷第3章修为设定硬冲突，改本卷无法消解","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"retcon_candidate"}
+    {"id":"I4","level":"P0","area":"设定自洽","desc":"本卷第12章与已冻结前卷第3章修为设定硬冲突，改本卷无法消解","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"retcon_candidate"},
+    {"id":"V1","level":"P1","area":"文风漂移·章节#12","desc":"第12章叙事腔调偏离文风契约（契约：冷硬克制；实际：轻浮网感吐槽腔）","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}
   ]
 }
 ```
