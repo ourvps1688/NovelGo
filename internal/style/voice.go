@@ -6,6 +6,22 @@ import (
 	"github.com/novelgo/novelgo/internal/voice"
 )
 
+// StatsMetrics 装配 Stats → 八键 metrics map（键取 voice.MetricKey* 单源）。
+// P2 漂移检测的 current 值装配用；与 StatsVoiceProfile 的分维映射同源一致
+// （键名单源，维度拆分见 StatsVoiceProfile）。
+func StatsMetrics(stats Stats) map[string]float64 {
+	return map[string]float64{
+		voice.MetricKeyAvgSentLen:      stats.AvgSentLen,
+		voice.MetricKeySentLenStdDev:   stats.SentLenStdDev,
+		voice.MetricKeyShortSentPct:    stats.ShortSentPct,
+		voice.MetricKeyQuoteDensity:    stats.QuoteDensity,
+		voice.MetricKeyCommaDensity:    stats.CommaDensity,
+		voice.MetricKeyPeriodDensity:   stats.PeriodDensity,
+		voice.MetricKeyExclaimDensity:  stats.ExclaimDensity,
+		voice.MetricKeyQuestionDensity: stats.QuestionDensity,
+	}
+}
+
 // StatsVoiceProfile 把确定性文本统计映射为 Voice 十维的结构化条目（WBS §0.6/T2.2）：
 //
 //	AvgSentLen/SentLenStdDev/ShortSentPct → sentence_fingerprint（句式指纹）

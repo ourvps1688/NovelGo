@@ -1,6 +1,10 @@
 package voice
 
-import "math"
+import (
+	"encoding/json"
+	"math"
+	"strings"
+)
 
 // drift.go —— P2 文风漂移检测的确定性数值比对（WBS p2-style-gate §0.1）。
 //
@@ -93,4 +97,34 @@ func DetectDrift(baseline, current map[string]float64) []DriftFinding {
 // finite 判断 v 是有限数（非 NaN/Inf）。
 func finite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// MergeMetrics 装配漂移基线：合并 Voice 台账各行 metrics JSON 为单一基线视图
+// （DetectDrift 只消费八键，其余键无害忽略）。同键先行优先（键↔维度归属见
+// style.StatsVoiceProfile，实操不重叠）；坏 JSON 行整行跳过（宁缺勿错）；
+// 空台账/全空 metrics 返回 nil（零基线 → DetectDrift 零输出，不造默认基线）。
+func MergeMetrics(entries []Entry) map[string]float64 {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(metricCheckOrder))
+	for _, e := range entries {
+		if strings.TrimSpace(e.Metrics) == "" {
+			continue
+		}
+		var m map[string]float64
+		if err := json.Unmarshal([]byte(e.Metrics), &m); err != nil {
+			continue // 坏数据宁缺勿错
+		}
+		for k, v := range m {
+			if _, exists := out[k]; exists {
+				continue // 先行优先
+			}
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

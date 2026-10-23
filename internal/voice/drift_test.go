@@ -114,3 +114,33 @@ func TestDetectDrift_StableOrder(t *testing.T) {
 		assert.Equal(t, w, got[i].Metric)
 	}
 }
+
+// TestMergeMetrics_MergeAndFirstWins 多行合并 + 同键先行优先。
+func TestMergeMetrics_MergeAndFirstWins(t *testing.T) {
+	got := MergeMetrics([]Entry{
+		{Metrics: `{"avg_sent_len":12.5,"quote_density":3.2}`},
+		{Metrics: `{"avg_sent_len":99,"comma_density":1.1}`}, // avg_sent_len 不覆盖先行
+	})
+	require.Len(t, got, 3)
+	assert.Equal(t, 12.5, got[MetricKeyAvgSentLen])
+	assert.Equal(t, 3.2, got[MetricKeyQuoteDensity])
+	assert.Equal(t, 1.1, got[MetricKeyCommaDensity])
+}
+
+// TestMergeMetrics_BadRowsSkipped 坏 JSON 行整行跳过、空 metrics 跳过（宁缺勿错）。
+func TestMergeMetrics_BadRowsSkipped(t *testing.T) {
+	got := MergeMetrics([]Entry{
+		{Metrics: `{bad json`},
+		{Metrics: "  "},
+		{Metrics: `{"avg_sent_len":12}`},
+	})
+	require.Len(t, got, 1)
+	assert.Equal(t, 12.0, got[MetricKeyAvgSentLen])
+}
+
+// TestMergeMetrics_EmptyNil 空台账/全空 metrics → nil（零基线不造默认值）。
+func TestMergeMetrics_EmptyNil(t *testing.T) {
+	assert.Nil(t, MergeMetrics(nil))
+	assert.Nil(t, MergeMetrics([]Entry{}))
+	assert.Nil(t, MergeMetrics([]Entry{{Metrics: ""}, {Metrics: `{bad`}}))
+}

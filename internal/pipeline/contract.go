@@ -74,6 +74,9 @@ var (
 	issueSampleDefault = issueSample{ID: "I1", Level: "P0|P1", Area: "维度"}
 	issueSampleDrift   = issueSample{ID: "D1", Level: "P1", Area: "章节#12"}
 	issueSamplePatrol  = issueSample{ID: "T1", Level: "P0|P1", Area: "张力维度"}
+	// issueSampleStyle 是 P2 文风漂移（V 系）示例。ID 命名空间裁决（WBS p2 §0.2）：
+	// D 归 G3 蓝图漂移（issueSampleDrift）、T 归巡检、I 归常规体检——V 系勿混用。
+	issueSampleStyle = issueSample{ID: "V1", Level: "P1", Area: "文风漂移·章节#12"}
 )
 
 // issueSchemaLine 生成提示词内嵌的 issue 单条 JSON 格式串。

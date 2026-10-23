@@ -54,6 +54,25 @@ func TestStatsVoiceProfile(t *testing.T) {
 	}
 }
 
+// TestStatsMetrics 锁死八键装配（P2 漂移 current 值来源，键与 StatsVoiceProfile 同源）。
+func TestStatsMetrics(t *testing.T) {
+	stats := Stats{
+		AvgSentLen: 8.7, SentLenStdDev: 3.2, ShortSentPct: 80,
+		QuoteDensity: 1.5,
+		CommaDensity: 2, PeriodDensity: 3, ExclaimDensity: 0.5, QuestionDensity: 0.1,
+	}
+	got := StatsMetrics(stats)
+	require.Len(t, got, 8)
+	assert.InDelta(t, 8.7, got[voice.MetricKeyAvgSentLen], 1e-9)
+	assert.InDelta(t, 3.2, got[voice.MetricKeySentLenStdDev], 1e-9)
+	assert.InDelta(t, 80.0, got[voice.MetricKeyShortSentPct], 1e-9)
+	assert.InDelta(t, 1.5, got[voice.MetricKeyQuoteDensity], 1e-9)
+	assert.InDelta(t, 2.0, got[voice.MetricKeyCommaDensity], 1e-9)
+	assert.InDelta(t, 3.0, got[voice.MetricKeyPeriodDensity], 1e-9)
+	assert.InDelta(t, 0.5, got[voice.MetricKeyExclaimDensity], 1e-9)
+	assert.InDelta(t, 0.1, got[voice.MetricKeyQuestionDensity], 1e-9)
+}
+
 func TestMergeVoiceProfile(t *testing.T) {
 	assert.Nil(t, MergeVoiceProfile(nil, nil))
 
