@@ -31,6 +31,7 @@ import (
 	"github.com/novelgo/novelgo/internal/reader"
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/timeline"
+	"github.com/novelgo/novelgo/internal/voice"
 )
 
 // tableSpec 注册一张 series bible 台账表的快照行为。
@@ -47,6 +48,11 @@ type tableSpec struct {
 // （character_fact_knowledge / pov_roster / chronology_anchors）。
 // 邻接组织表（character_groups、character_group_members、location_relations、
 // chapter_plans）不在冻结清单内，不入快照。
+// P1 追加 voice_dimensions（WBS §0.5）：书级十维 Voice 台账，风格非卷级事实，
+// 无 volume_id 且不入 temporal（无 changed_at）——是冻结清单的口径例外，
+// 采集仍走全量（novel_id 维度），capture/diff/restore 机制零改动复用。
+// 注意：存量卷首快照后新增本表 → 首个含 voice 的快照 diff 相对旧基准呈现
+// 「全量新增行」属预期行为（旧 payload 无此表键=空基线），勿当 bug 修。
 var registry = []tableSpec{
 	{"characters", func() any { return &[]character.Character{} }},
 	{"character_relations", func() any { return &[]character.CharacterRelation{} }},
@@ -58,4 +64,5 @@ var registry = []tableSpec{
 	{"chronology_anchors", func() any { return &[]timeline.ChronologyAnchor{} }},
 	{"reader_perspectives", func() any { return &[]reader.ReaderPerspective{} }},
 	{"pov_roster", func() any { return &[]reader.PovRoster{} }},
+	{"voice_dimensions", func() any { return &[]voice.Entry{} }},
 }

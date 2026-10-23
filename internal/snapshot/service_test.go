@@ -19,6 +19,7 @@ import (
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/timeline"
+	"github.com/novelgo/novelgo/internal/voice"
 	"github.com/novelgo/novelgo/internal/volume"
 )
 
@@ -126,6 +127,12 @@ func seedFixture(t *testing.T, db *gorm.DB) int64 {
 	pov := reader.PovRoster{NovelID: 1, CharID: char.ID, Mode: reader.POVModeLimited}
 	if err := db.WithContext(ctx).Create(&pov).Error; err != nil {
 		t.Fatalf("seed pov roster: %v", err)
+	}
+	// Voice 台账（P1 T4.1）：书级十维，无 volume_id / 无 changed_at（不入 temporal）。
+	// metrics 留空以覆盖可空列往返。
+	vc := voice.Entry{NovelID: 1, Dimension: string(voice.DimRhythm), Content: "先结论后铺垫", Source: string(voice.SourceManual)}
+	if err := db.WithContext(ctx).Create(&vc).Error; err != nil {
+		t.Fatalf("seed voice dimension: %v", err)
 	}
 	return vol.ID
 }
@@ -452,6 +459,103 @@ func TestRestore_RoundTripPreservesStateAndSilencesHooks(t *testing.T) {
 	}
 }
 
+// ── voice_dimensions 专项（P1 T4.1，WBS §0.5）─────────────────────────
+
+// TestVoiceDimensions_FreezeDiffRestore 验证 voice_dimensions 入 registry 后
+// freeze→diff→restore 三态链路：改/增行在 diff 可见（维度枚举值为行键语义），
+// 回滚丢新增、还原改动，重采集与快照 payload 逐字节一致
+// （created_at/updated_at 保真——本表不入 temporal，无 changed_at）。
+func TestVoiceDimensions_FreezeDiffRestore(t *testing.T) {
+	db := openSnapDB(t)
+	ctx := context.Background()
+	volID := seedFixture(t, db)
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
+
+	_, snap1, err := svc.Freeze(ctx, 1, volID)
+	if err != nil {
+		t.Fatalf("freeze v1: %v", err)
+	}
+	v1, err := parsePayload(snap1.Payload)
+	if err != nil {
+		t.Fatalf("parse v1: %v", err)
+	}
+
+	// 改：DimRhythm 内容翻转；增：DimTabooWords 新行（metrics 留空覆盖可空列）
+	var rhythm voice.Entry
+	if err := db.Where("novel_id = ? AND dimension = ?", 1, voice.DimRhythm).First(&rhythm).Error; err != nil {
+		t.Fatalf("load rhythm: %v", err)
+	}
+	rhythm.Content = "先铺垫后结论"
+	if err := db.Save(&rhythm).Error; err != nil {
+		t.Fatalf("update rhythm: %v", err)
+	}
+	taboo := voice.Entry{NovelID: 1, Dimension: string(voice.DimTabooWords), Content: "禁用突然/忽然", Source: string(voice.SourceManual)}
+	if err := db.Create(&taboo).Error; err != nil {
+		t.Fatalf("create taboo: %v", err)
+	}
+
+	snap2, err := svc.Commit(ctx, 1, volID)
+	if err != nil {
+		t.Fatalf("commit v2: %v", err)
+	}
+
+	d, err := svc.DiffSnapshots(ctx, snap1.ID, snap2.ID)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	var voiceDelta TableDelta
+	for _, td := range d.Tables {
+		if td.Table == "voice_dimensions" {
+			voiceDelta = td
+		}
+	}
+	// 三态①改：content 字段 delta（updated_at 变化不作断言锚点）
+	if len(voiceDelta.Changed) != 1 || voiceDelta.Changed[0].ID != rhythm.ID {
+		t.Fatalf("voice changed: %+v", voiceDelta.Changed)
+	}
+	cd, ok := voiceDelta.Changed[0].Fields["content"]
+	if !ok || cd.Old != "先结论后铺垫" || cd.New != "先铺垫后结论" {
+		t.Errorf("content delta: %+v", voiceDelta.Changed[0].Fields["content"])
+	}
+	// 三态②增：整行可读，dimension 枚举值为行键语义
+	if len(voiceDelta.Added) != 1 || voiceDelta.Added[0]["dimension"] != string(voice.DimTabooWords) {
+		t.Errorf("voice added: %+v", voiceDelta.Added)
+	}
+	if len(voiceDelta.Removed) != 0 {
+		t.Errorf("voice removed: %+v", voiceDelta.Removed)
+	}
+
+	// 三态③回滚：丢新增、还原改动（全表替换：现 2 行 → 删 2 插 1）
+	sum, err := svc.Restore(ctx, snap1.ID)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if s := sum.Tables["voice_dimensions"]; s.Deleted != 2 || s.Inserted != 1 {
+		t.Errorf("voice_dimensions 摘要: %+v", s)
+	}
+
+	now, err := capturePayload(ctx, db, 1, volID, 1, snap1.CommittedAt)
+	if err != nil {
+		t.Fatalf("recapture: %v", err)
+	}
+	if !bytes.Equal(v1.Tables["voice_dimensions"], now.Tables["voice_dimensions"]) {
+		t.Errorf("回滚不精确：voice_dimensions 与快照 payload 不一致\n快照: %s\n现状: %s",
+			v1.Tables["voice_dimensions"], now.Tables["voice_dimensions"])
+	}
+
+	// 显式确认：新增行已丢弃、改动行内容已还原
+	var after voice.Entry
+	if err := db.Where("novel_id = ? AND dimension = ?", 1, voice.DimRhythm).First(&after).Error; err != nil {
+		t.Fatalf("reload rhythm: %v", err)
+	}
+	if after.Content != "先结论后铺垫" {
+		t.Errorf("rhythm content: want 旧值, got %q", after.Content)
+	}
+	if n := countRows(t, db, "voice_dimensions"); n != 1 {
+		t.Errorf("voice_dimensions 行数: want 1, got %d", n)
+	}
+}
+
 // ── 快照 vs 当前 ─────────────────────────────────────────────────────
 
 func TestDiffAgainstCurrent(t *testing.T) {
@@ -517,12 +621,12 @@ func TestDiffToPrevious_FirstVersionEmptyBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("diff to previous: %v", err)
 	}
-	// 空基线=全量新增：fixture 台账 11 行（characters 2 + 其余 9 表各 1；正文清单不入 diff）
+	// 空基线=全量新增：fixture 台账 12 行（characters 2 + 其余 10 表各 1，含 voice_dimensions；正文清单不入 diff）
 	var total int
 	for _, td := range d.Tables {
 		total += len(td.Added)
 	}
-	if total != 11 {
-		t.Errorf("空基线新增行数: want 11, got %d (%+v)", total, d.Tables)
+	if total != 12 {
+		t.Errorf("空基线新增行数: want 12, got %d (%+v)", total, d.Tables)
 	}
 }
