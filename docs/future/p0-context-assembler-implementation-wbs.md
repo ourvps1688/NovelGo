@@ -192,6 +192,7 @@ type TextProvider func(ctx context.Context, novelID int64) (string, error)
 - **内容**：同一章节分别在 voice 开/关下跑 S3 重写，对比产出：①文风锚定语句生效、叙事习惯可见保持；②关 voice 时与 P0 前行为无差别。结论记入本节（3 行内）。
 - **验收**：A/B 结论写入本文件。
 - **依赖**：T5.1。
+- **A/B 结论**（2026-10-23，deepseek-v4-pro 真实双臂，`internal/pipeline/rewrite_voice_ab_e2e_test.go`）：① voice 开五条叙事习惯全部可见保持——均句长 8.7 字短句白描、锚定句式「他心想：」2 次、零比喻、对话零修饰、段段以物件/动作收束，文风锚定语句生效；② voice 关产出零指纹、默认网文腔（均句长 20.3 字、多处「像…」比喻、对话带神态修饰），与 P0 前行为无差别（提示词侧另有 golden 逐字一致保证）。
 
 ### T5.3 提交推送与收尾
 
