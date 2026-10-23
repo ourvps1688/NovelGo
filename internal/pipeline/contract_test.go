@@ -172,6 +172,64 @@ func TestParseFreshAuditStampsSchemaVersion(t *testing.T) {
 	require.Equal(t, AuditSchemaVersion, parseAudit(string(b)).SchemaVersion, "往返解析应保留版本号")
 }
 
+// ── P2 T3.2：V 系契约接线与解析兼容 ────────────────────────────────────────
+
+// TestIssueSampleStyleWiring 验证 V 系 schema 片段接线 auditFormatLine
+// （driftPatrolPrompt 同款体例，WBS p2 T3.2）：体检提示词携带 V 系全量契约
+// 片段与示例值断言（体例同 issueSampleDrift/issueSamplePatrol 既有断言）。
+func TestIssueSampleStyleWiring(t *testing.T) {
+	frag := auditFormatLine(true, issueSampleStyle)
+	require.Contains(t, frag, `"id":"V1"`, "V 系片段应使用示例值 V1")
+	require.Contains(t, frag, `"level":"P1"`, "V 系示例 level 恒 P1")
+	require.Contains(t, frag, `"area":"文风漂移·章节#12"`, "V 系示例 area 契约形态")
+	require.Contains(t, frag, `"fix_type"`, "V 系走全量契约（含 fix_type/三枚举）")
+	require.Contains(t, frag, `"target_scope"`, "V 系走全量契约")
+	for name, p := range map[string]string{
+		"signabilityPrompt": signabilityPrompt(1, "", contextasm.ContextBlocks{}),
+		"finalAuditPrompt":  finalAuditPrompt(1, contextasm.ContextBlocks{}),
+	} {
+		require.Contains(t, p, frag, "%s 应引用 V 系全量契约 schema 片段", name)
+		require.Contains(t, p, `"id":"V1"`, "%s 应使用文风漂移示例值 V1", name)
+	}
+}
+
+// TestAuditStaleReasonStyleCompat 验证陈旧判定不误伤 V 系（WBS p2 T3.2）：
+// V 系 issue 携带全量契约字段，纯 V 系与 I/V 混排体检都不得被判陈旧
+// （issueContractGroups 宁松勿杀：任一 issue 携带即覆盖）。
+func TestAuditStaleReasonStyleCompat(t *testing.T) {
+	mk := func(id, area string) AuditIssue {
+		return AuditIssue{ID: id, Level: "P1", Area: area, Desc: "d",
+			FixType: FixTypeBody, TargetScope: TargetScopeActiveVolume,
+			Dimension: DimensionNone, Direction: DirectionForwardFix}
+	}
+	driftOnly := AuditData{Verdict: "pass", SchemaVersion: AuditSchemaVersion,
+		Issues: []AuditIssue{mk("V1", "文风漂移·章节#3"), mk("V2", "文风漂移·章节#4")}}
+	require.Empty(t, auditStaleReason(driftOnly), "纯 V 系（≥2 条）携全量契约字段不得判陈旧")
+
+	mixed := driftOnly
+	mixed.Issues = append([]AuditIssue{{ID: "I1", Level: "P0", Area: "a", Desc: "d"}}, driftOnly.Issues...)
+	require.Empty(t, auditStaleReason(mixed), "V 系携带契约字段应覆盖字段组（宁松勿杀任一命中）")
+}
+
+// TestParseFreshAuditStyleIssues 验证 parseFreshAudit 对 V 系解析兼容（WBS p2 T3.2）：
+// V 系字段完整保留、版本照补、且不触发陈旧误判。
+func TestParseFreshAuditStyleIssues(t *testing.T) {
+	raw := `{"verdict":"pass","score":33,"summary":"s","issues":[` +
+		`{"id":"V1","level":"P1","area":"文风漂移·章节#12","desc":"腔调偏离文风契约",` +
+		`"fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
+	a := parseFreshAudit(raw)
+	require.Len(t, a.Issues, 1)
+	require.Equal(t, AuditSchemaVersion, a.SchemaVersion, "新鲜 V 系产出照补当前契约版本")
+	it := a.Issues[0]
+	require.Equal(t, "V1", it.ID)
+	require.Equal(t, "P1", it.Level)
+	require.Equal(t, FixTypeBody, it.FixType)
+	require.Equal(t, TargetScopeActiveVolume, it.TargetScope)
+	require.Equal(t, DimensionNone, it.Dimension)
+	require.Equal(t, DirectionForwardFix, it.Direction)
+	require.Empty(t, auditStaleReason(a), "V 系新鲜产出不误判陈旧")
+}
+
 // ── 提示词 ↔ 契约单源回归 ────────────────────────────────────────────────
 
 // TestPromptSchemaSingleSource 验证 5 处体检提示词与 2 处修复回执全部引用契约生成器：

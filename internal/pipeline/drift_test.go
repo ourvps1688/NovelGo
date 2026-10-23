@@ -281,3 +281,35 @@ func TestStyleIssueRoutingContainers(t *testing.T) {
 	assert.Len(t, ret, 1)
 	assert.Equal(t, "V2", ret[0].ID, "写保护 V 系应自然收口进 retcon 清单")
 }
+
+// TestMergeDriftIssues 验证检测器 V 系并入编号避让（WBS §0.2 同 run 不撞号）：
+// LLM 主观 V 系先行（V1 起编），检测器自动续编；无既有 V 系时原样尾部追加
+// （与旧 append 行为逐字一致）。
+func TestMergeDriftIssues(t *testing.T) {
+	mk := func(id string) AuditIssue {
+		return AuditIssue{ID: id, Level: "P1", Area: "a", Desc: "d", FixType: FixTypeBody}
+	}
+	ids := func(items []AuditIssue) []string {
+		out := make([]string, 0, len(items))
+		for _, it := range items {
+			out = append(out, it.ID)
+		}
+		return out
+	}
+
+	// 无既有 V 系：原样追加（与旧 append 行为逐字一致）。
+	out := mergeDriftIssues([]AuditIssue{mk("I1")}, []AuditIssue{mk("V1"), mk("V2")})
+	assert.Equal(t, []string{"I1", "V1", "V2"}, ids(out))
+
+	// 既有 V1（LLM 主观 V 系先行）：检测器续编 V2、V3，绝不撞号。
+	out = mergeDriftIssues([]AuditIssue{mk("I1"), mk("V1")}, []AuditIssue{mk("V1"), mk("V2")})
+	assert.Equal(t, []string{"I1", "V1", "V2", "V3"}, ids(out))
+
+	// 漂移为空：既有清单原样返回。
+	base := []AuditIssue{mk("I1")}
+	assert.Equal(t, base, mergeDriftIssues(base, nil))
+
+	// 既有非连续 V 序号：从最大序号续编。
+	out = mergeDriftIssues([]AuditIssue{mk("V5")}, []AuditIssue{mk("V1")})
+	assert.Equal(t, []string{"V5", "V6"}, ids(out))
+}

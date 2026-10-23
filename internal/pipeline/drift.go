@@ -8,6 +8,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/style"
@@ -108,4 +109,41 @@ func shapeDriftIssues(findings []voice.DriftFinding, chapterNum int, frozen bool
 // I 归常规 LLM 体检——见 issueSample 命名空间裁决注释），绝不混排。
 func isStyleExempt(id string) bool {
 	return strings.HasPrefix(id, "V")
+}
+
+// mergeDriftIssues 把检测器 V 系产出并入 LLM 体检结果清单尾部，编号避让既有 ID：
+// LLM 主观 V 系先行（V1 起编），检测器 V 系自动续编到既有最大 V 序号 +1，同 run
+// 内绝不撞号（WBS §0.2「同 run 内不混排」机械保证，防 upsert/FixStates 按 ID
+// 吞项）。既有无 V 系时原样尾部追加（与旧 append 行为逐字一致）。
+func mergeDriftIssues(existing, drift []AuditIssue) []AuditIssue {
+	if len(drift) == 0 {
+		return existing
+	}
+	maxV := 0
+	for _, it := range existing {
+		if n, ok := styleIssueIndex(it.ID); ok && n > maxV {
+			maxV = n
+		}
+	}
+	if maxV == 0 {
+		return append(existing, drift...)
+	}
+	out := append(existing, make([]AuditIssue, len(drift))...)
+	for i, d := range drift {
+		d.ID = fmt.Sprintf("V%d", maxV+1+i)
+		out[len(existing)+i] = d
+	}
+	return out
+}
+
+// styleIssueIndex 解析 V 系 issue ID 的序号（"V3"→3）；非 V 前缀或非数字尾缀不认。
+func styleIssueIndex(id string) (int, bool) {
+	if !isStyleExempt(id) || len(id) < 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(id[1:])
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
 }

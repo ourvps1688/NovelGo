@@ -880,7 +880,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	// 经 bodyIssuesOf/retconItemsOf 自然收口进既有修复/重写路由）。verdict 不翻转——
 	// drift-only 保持 LLM verdict，不触发收口修复循环；蓝图体检不参与文风检测。
 	if ctxt.AuditKind != "blueprint" {
-		audit.Issues = append(audit.Issues, s.runStyleDriftCheck(ctx, novelID, run.VolumeID)...)
+		audit.Issues = mergeDriftIssues(audit.Issues, s.runStyleDriftCheck(ctx, novelID, run.VolumeID))
 	}
 	auditJSON, _ := json.Marshal(audit)
 
@@ -1798,7 +1798,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 
 	audit := parseFreshAudit(out.Text)
 	// P2 文风漂移：终检扫全书（scope=nil），V 系追加尾部；verdict 不翻转（G终人工裁决）。
-	audit.Issues = append(audit.Issues, s.runStyleDriftCheck(ctx, novelID, nil)...)
+	audit.Issues = mergeDriftIssues(audit.Issues, s.runStyleDriftCheck(ctx, novelID, nil))
 	auditJSON, _ := json.Marshal(audit)
 
 	var ctxt GateContext
@@ -1834,6 +1834,8 @@ func finalAuditPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
 		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
+		"文风漂移项（如有）走 V 系契约："+auditFormatLine(true, issueSampleStyle)+
+		"（id 从 V1 起编、level 恒 P1、不计入评分与 verdict）；"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID) + blocks.Render(contextasm.PurposeAudit)
 }
 
@@ -2327,6 +2329,8 @@ func signabilityPrompt(novelID int64, scopeText string, blocks contextasm.Contex
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
+		"文风漂移项（如有）走 V 系契约："+auditFormatLine(true, issueSampleStyle)+
+		"（id 从 V1 起编、level 恒 P1、不计入评分与 verdict）；"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText) + blocks.Render(contextasm.PurposeAudit)
 }
 
