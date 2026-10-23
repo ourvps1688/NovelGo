@@ -53,6 +53,9 @@ type tableSpec struct {
 // 采集仍走全量（novel_id 维度），capture/diff/restore 机制零改动复用。
 // 注意：存量卷首快照后新增本表 → 首个含 voice 的快照 diff 相对旧基准呈现
 // 「全量新增行」属预期行为（旧 payload 无此表键=空基线），勿当 bug 修。
+// styleTableName 书级风格台账表名（P2 §0.4 风格回滚唯一目标表，单源禁改）。
+const styleTableName = "voice_dimensions"
+
 var registry = []tableSpec{
 	{"characters", func() any { return &[]character.Character{} }},
 	{"character_relations", func() any { return &[]character.CharacterRelation{} }},
@@ -64,5 +67,15 @@ var registry = []tableSpec{
 	{"chronology_anchors", func() any { return &[]timeline.ChronologyAnchor{} }},
 	{"reader_perspectives", func() any { return &[]reader.ReaderPerspective{} }},
 	{"pov_roster", func() any { return &[]reader.PovRoster{} }},
-	{"voice_dimensions", func() any { return &[]voice.Entry{} }},
+	{styleTableName, func() any { return &[]voice.Entry{} }},
+}
+
+// tableByName 按表名取 registry 规格（RestoreStyle 按表回滚用，见 restore.go）。
+func tableByName(name string) (tableSpec, bool) {
+	for _, spec := range registry {
+		if spec.name == name {
+			return spec, true
+		}
+	}
+	return tableSpec{}, false
 }

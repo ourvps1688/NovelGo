@@ -178,6 +178,41 @@ func (s *Service) Restore(ctx context.Context, snapshotID int64) (*RestoreSummar
 	return sum, nil
 }
 
+// RestoreStyle 把书级风格台账（voice_dimensions）回滚到快照提交时刻（P2 §0.4
+// 风格回滚锚点=冻结快照）。只动 voice_dimensions 一张表，事实层各表一行不动——
+// 风格行是书级行（novel_id 维度），全量 Restore 会把全书事实表打回快照态，
+// 风格回改（retcon 风格案 Rollback）必须走本按表入口，防误伤事实层。
+// raw SQL Exec/时间戳保真纪律与全量 Restore 一致（回滚不是一次台账编辑，
+// 不触发 temporal/oplog 回调）。快照行自身与正文不受影响。
+// 警告：破坏性操作，调用方（retcon 状态机/作者显式确认）负责把关。
+func (s *Service) RestoreStyle(ctx context.Context, snapshotID int64) (*RestoreSummary, error) {
+	snap, err := s.GetSnapshot(ctx, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := parsePayload(snap.Payload)
+	if err != nil {
+		return nil, err
+	}
+	spec, ok := tableByName(styleTableName)
+	if !ok {
+		return nil, fmt.Errorf("snapshot: registry 缺风格表 %s", styleTableName)
+	}
+	sum := &RestoreSummary{Tables: make(map[string]RestoreTableSummary, 1)}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		ts, err := restoreOneTable(ctx, tx, payload, spec)
+		if err != nil {
+			return err
+		}
+		sum.Tables[styleTableName] = ts
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sum, nil
+}
+
 // freezeOnce 单次冻结事务：置冻结 + 迁移时提交快照。
 func (s *Service) freezeOnce(ctx context.Context, novelID, volumeID int64) (*volume.Volume, *volume.VolumeSnapshot, error) {
 	var outV *volume.Volume

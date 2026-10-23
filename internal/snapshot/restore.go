@@ -34,22 +34,33 @@ type RestoreSummary struct {
 func restoreTables(ctx context.Context, tx *gorm.DB, p *Payload) (*RestoreSummary, error) {
 	sum := &RestoreSummary{Tables: make(map[string]RestoreTableSummary, len(registry))}
 	for _, spec := range registry {
-		res := tx.WithContext(ctx).Exec("DELETE FROM "+spec.name+" WHERE novel_id = ?", p.NovelID)
-		if res.Error != nil {
-			return nil, fmt.Errorf("snapshot: 回滚清空 %s: %w", spec.name, res.Error)
-		}
-		ts := RestoreTableSummary{Deleted: res.RowsAffected}
-
-		if raw := p.Tables[spec.name]; len(raw) > 0 {
-			n, err := insertRows(ctx, tx, spec, raw)
-			if err != nil {
-				return nil, err
-			}
-			ts.Inserted = n
+		ts, err := restoreOneTable(ctx, tx, p, spec)
+		if err != nil {
+			return nil, err
 		}
 		sum.Tables[spec.name] = ts
 	}
 	return sum, nil
+}
+
+// restoreOneTable 把单张 registry 台账表恢复到 payload 提交时刻（全表替换语义）：
+// DELETE 该 novel 全部现值后按 payload 原值回插（raw SQL Exec/时间戳保真纪律同上）。
+// RestoreStyle（P2 §0.4 风格回滚）经此按表过滤，只动 voice_dimensions。
+func restoreOneTable(ctx context.Context, tx *gorm.DB, p *Payload, spec tableSpec) (RestoreTableSummary, error) {
+	res := tx.WithContext(ctx).Exec("DELETE FROM "+spec.name+" WHERE novel_id = ?", p.NovelID)
+	if res.Error != nil {
+		return RestoreTableSummary{}, fmt.Errorf("snapshot: 回滚清空 %s: %w", spec.name, res.Error)
+	}
+	ts := RestoreTableSummary{Deleted: res.RowsAffected}
+
+	if raw := p.Tables[spec.name]; len(raw) > 0 {
+		n, err := insertRows(ctx, tx, spec, raw)
+		if err != nil {
+			return ts, err
+		}
+		ts.Inserted = n
+	}
+	return ts, nil
 }
 
 // insertRows 把 payload 行集按原值写回（raw SQL 逐行 INSERT，显式列值含主键与时间戳）。

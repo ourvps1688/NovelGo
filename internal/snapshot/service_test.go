@@ -630,3 +630,132 @@ func TestDiffToPrevious_FirstVersionEmptyBase(t *testing.T) {
 		t.Errorf("空基线新增行数: want 12, got %d (%+v)", total, d.Tables)
 	}
 }
+
+// ── P2 T4.1 双快照语义与风格回滚（RestoreStyle）────────────────────────────
+
+// TestRestoreStyle_ThreeStates 验证 WBS p2 T4.1 三态：
+// ①「冻结双层钉住」= 单条快照记录同携事实层与风格层（§0.4 不拆两条记录），
+//
+//	且 freeze 后书级 style/事实层演进都不改冻结快照（快照不可变性）；
+//
+// ② RestoreStyle 只还原 voice_dimensions，事实表逐行不变（防误伤断言），
+//
+//	且不触发 temporal/oplog 回调（raw SQL 纪律，履历零新增）；
+//
+// ③ 全量 Restore 行为与既有逐字一致（回归：事实层演进被丢弃，整体回滚语义不变）。
+func TestRestoreStyle_ThreeStates(t *testing.T) {
+	db := openSnapDB(t)
+	ctx := context.Background()
+	volID := seedFixture(t, db)
+	svc := NewService(db, volume.NewStore(db, testSnapLogger()), chapter.NewStore(db, testSnapLogger()))
+
+	// ── 双层钉住：单条快照记录同携事实层与风格层。
+	_, snap, err := svc.Freeze(ctx, 1, volID)
+	if err != nil {
+		t.Fatalf("freeze: %v", err)
+	}
+	if n := countRows(t, db, "volume_snapshots"); n != 1 {
+		t.Fatalf("快照记录数: want 1（双层钉住单记录）, got %d", n)
+	}
+	base, err := parsePayload(snap.Payload)
+	if err != nil {
+		t.Fatalf("parse payload: %v", err)
+	}
+	if len(base.Tables["characters"]) == 0 || len(base.Tables[styleTableName]) == 0 {
+		t.Fatalf("快照应同携事实层与风格层: characters=%dB voice=%dB",
+			len(base.Tables["characters"]), len(base.Tables[styleTableName]))
+	}
+
+	// ── ① 演进：书级 style 改一行 + 增一行；事实层增一行——冻结快照必须纹丝不动。
+	var rhythm voice.Entry
+	if err := db.Where("novel_id = ? AND dimension = ?", 1, voice.DimRhythm).First(&rhythm).Error; err != nil {
+		t.Fatalf("load rhythm: %v", err)
+	}
+	rhythm.Content = "演进后的文风"
+	if err := db.Save(&rhythm).Error; err != nil {
+		t.Fatalf("update rhythm: %v", err)
+	}
+	taboo := voice.Entry{NovelID: 1, Dimension: string(voice.DimTabooWords), Content: "禁用突然", Source: string(voice.SourceManual)}
+	if err := db.Create(&taboo).Error; err != nil {
+		t.Fatalf("create taboo: %v", err)
+	}
+	newChar := character.Character{NovelID: 1, Name: "快照后新角色"}
+	if err := db.Create(&newChar).Error; err != nil {
+		t.Fatalf("create character: %v", err)
+	}
+	var got volume.VolumeSnapshot
+	if err := db.First(&got, snap.ID).Error; err != nil {
+		t.Fatalf("reload snapshot: %v", err)
+	}
+	if got.Payload != snap.Payload {
+		t.Errorf("冻结快照被改写（不可变性破坏）")
+	}
+
+	// ── ② RestoreStyle：只动风格表，事实表逐行不变，履历零新增。
+	before, err := capturePayload(ctx, db, 1, volID, 1, snap.CommittedAt)
+	if err != nil {
+		t.Fatalf("capture before: %v", err)
+	}
+	var histBefore, oplogBefore int64
+	db.Model(&storage.LedgerChangeHistory{}).Count(&histBefore)
+	db.Model(&storage.OperationLogRecord{}).Count(&oplogBefore)
+
+	sum, err := svc.RestoreStyle(ctx, snap.ID)
+	if err != nil {
+		t.Fatalf("restore style: %v", err)
+	}
+	if len(sum.Tables) != 1 {
+		t.Errorf("RestoreStyle 应只动一张表: %+v", sum.Tables)
+	}
+	if s := sum.Tables[styleTableName]; s.Deleted != 2 || s.Inserted != 1 {
+		t.Errorf("voice_dimensions 摘要: want 删2插1, got %+v", s)
+	}
+
+	after, err := capturePayload(ctx, db, 1, volID, 1, snap.CommittedAt)
+	if err != nil {
+		t.Fatalf("capture after: %v", err)
+	}
+	for _, spec := range registry {
+		if spec.name == styleTableName {
+			continue
+		}
+		if !bytes.Equal(before.Tables[spec.name], after.Tables[spec.name]) {
+			t.Errorf("事实表 %s 被风格回滚误伤\n前: %s\n后: %s",
+				spec.name, before.Tables[spec.name], after.Tables[spec.name])
+		}
+	}
+	if !bytes.Equal(after.Tables[styleTableName], base.Tables[styleTableName]) {
+		t.Errorf("风格表未还原到快照态\n快照: %s\n现状: %s",
+			base.Tables[styleTableName], after.Tables[styleTableName])
+	}
+	var histAfter, oplogAfter int64
+	db.Model(&storage.LedgerChangeHistory{}).Count(&histAfter)
+	db.Model(&storage.OperationLogRecord{}).Count(&oplogAfter)
+	if histAfter != histBefore || oplogAfter != oplogBefore {
+		t.Errorf("风格回滚不得触发 temporal/oplog 回调: history %d→%d, oplog %d→%d",
+			histBefore, histAfter, oplogBefore, oplogAfter)
+	}
+	// 显式确认：快照后新增的事实行仍在（风格回滚绝不触碰事实层）。
+	var kept int64
+	if err := db.Model(&character.Character{}).Where("id = ?", newChar.ID).Count(&kept).Error; err != nil {
+		t.Fatalf("count new char: %v", err)
+	}
+	if kept != 1 {
+		t.Errorf("快照后新增事实行应保留（RestoreStyle 只动风格）")
+	}
+
+	// ── ③ 全量 Restore 回归：整体回滚语义逐字不变（事实层演进随回滚丢弃）。
+	if _, err := svc.Restore(ctx, snap.ID); err != nil {
+		t.Fatalf("full restore: %v", err)
+	}
+	full, err := capturePayload(ctx, db, 1, volID, 1, snap.CommittedAt)
+	if err != nil {
+		t.Fatalf("capture full: %v", err)
+	}
+	for _, spec := range registry {
+		if !bytes.Equal(full.Tables[spec.name], base.Tables[spec.name]) {
+			t.Errorf("全量 Restore 后 %s 不等于快照态\n快照: %s\n现状: %s",
+				spec.name, base.Tables[spec.name], full.Tables[spec.name])
+		}
+	}
+}
