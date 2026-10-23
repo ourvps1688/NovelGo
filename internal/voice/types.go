@@ -8,7 +8,10 @@
 //   - Voice 为书级，不挂 volume_id（风格非卷级事实）。
 package voice
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Dimension 是 Voice 画像的维度枚举值（WBS §0.1，十值）。
 type Dimension string
@@ -92,3 +95,75 @@ type Entry struct {
 
 // TableName 返回表名。与 characters.voice_traits（角色声纹特征列）语义无关。
 func (Entry) TableName() string { return "voice_dimensions" }
+
+// ProfileItem 是提取 toolcall 输出契约中的结构化维度条目（WBS §0.3），
+// pattern mental / style 双写共用此形（jsonschema 标签即工具定义来源）。
+// 落库时 Metrics/Evidence 经 MetricsJSON/EvidenceJSON 序列化为 JSON 文本。
+type ProfileItem struct {
+	Dimension string             `json:"dimension" jsonschema:"required,description=Voice 画像维度枚举值，仅限：sentence_fingerprint/high_freq_words/taboo_words/rhythm/humor/certainty_tone/pov/tense/imagery_density/dialogue_ratio"`
+	Content   string             `json:"content" jsonschema:"required,description=该维度的风格结论（描述性文字，中文）"`
+	Metrics   map[string]float64 `json:"metrics,omitempty" jsonschema:"description=可选确定性数值指标（键如 avg_sent_len/quote_density）；无则省略"`
+	Evidence  *ProfileEvidence   `json:"evidence,omitempty" jsonschema:"description=可选证据锚点；无则省略"`
+}
+
+// ProfileEvidence 是 ProfileItem 的证据锚点（§0.2 evidence JSON 的结构化来源）。
+type ProfileEvidence struct {
+	ChapterIDs []int64 `json:"chapter_ids,omitempty" jsonschema:"description=佐证本维度的章节 chapter_id 列表"`
+	SampleIDs  []int64 `json:"sample_ids,omitempty" jsonschema:"description=佐证本维度的风格素材 sample_id 列表"`
+	Note       string  `json:"note,omitempty" jsonschema:"description=补充说明"`
+}
+
+// MetricsJSON 序列化确定性指标为 JSON 文本；无指标返回空串（可空列）。
+func (p ProfileItem) MetricsJSON() string {
+	if len(p.Metrics) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(p.Metrics)
+	if err != nil {
+		return "" // 坏数据宁缺勿错
+	}
+	return string(b)
+}
+
+// EvidenceJSON 按「独立证据 <2 降级」纪律（WBS §0.3，B1 平移）序列化证据锚点：
+//   - 锚点 ≥2：原样序列化；
+//   - 锚点恰 1 个：锚点置空、仅留 note 标注（维度照常落库，不阻断）；
+//   - 无锚点：返回空串。
+func (p ProfileItem) EvidenceJSON() string {
+	ev := p.Evidence
+	if ev == nil {
+		return ""
+	}
+	anchors := distinctInt64(ev.ChapterIDs) + distinctInt64(ev.SampleIDs)
+	out := ProfileEvidence{Note: ev.Note}
+	switch {
+	case anchors >= 2:
+		out.ChapterIDs = ev.ChapterIDs
+		out.SampleIDs = ev.SampleIDs
+	case anchors == 1:
+		marker := "独立证据 <2，锚点已置空"
+		if out.Note == "" {
+			out.Note = marker
+		} else {
+			out.Note += "；" + marker
+		}
+	default:
+		if out.Note == "" {
+			return ""
+		}
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// distinctInt64 返回列表中互异值个数。
+func distinctInt64(list []int64) int {
+	seen := make(map[int64]bool, len(list))
+	for _, v := range list {
+		seen[v] = true
+	}
+	return len(seen)
+}

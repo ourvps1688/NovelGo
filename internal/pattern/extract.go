@@ -19,6 +19,7 @@ import (
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
 	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/voice"
 )
 
 const (
@@ -65,6 +66,9 @@ type Extractor struct {
 	Progress  func(Progress)
 	// EvidenceRetriever 可选；非 nil 时启用 V2-D 向量证据前置。
 	EvidenceRetriever EvidenceRetriever
+	// VoiceSink 可选；mental 提取产出 voice_profile 时回调（P1 双写，WBS §0.3）。
+	// LLM 未产出（空清单）不触发——降级不落库；skill md 产出路径不经过此回调。
+	VoiceSink func(novelID int64, items []voice.ProfileItem)
 }
 
 // Extract 执行完整的模式提取 Pipeline：Pre-step 边界分析 → Step 1 章节摘要 → Step 2 递归压缩 → Step 3 生成技能
@@ -293,6 +297,11 @@ func (e *Extractor) runFinal(ctx context.Context, input ExtractPatternInput, pr 
 		Message: fmt.Sprintf("已生成「%s」", sk.Name),
 		Tokens:  pr.trace.FinalTokens,
 	})
+	// P1 双写（WBS §0.3）：结构化维度经 VoiceSink 并行落库；skill md 产出路径不变。
+	// LLM 未产出（空清单）不触发——降级不落库，不解析正文兜底猜测。
+	if len(outcome.VoiceProfile) > 0 && e.VoiceSink != nil {
+		e.VoiceSink(finalInput.NovelID, outcome.VoiceProfile)
+	}
 	return &ExtractPatternResult{
 		TaskID:        finalInput.TaskID,
 		Name:          sk.Name,
@@ -573,6 +582,8 @@ type finalSkillOutcome struct {
 	Raw           string
 	Fidelity      *FidelityScorecard
 	DemotedModels []string
+	// VoiceProfile 是 P1 双写的结构化维度（仅 mental），由 runFinal 转交 VoiceSink。
+	VoiceProfile []voice.ProfileItem
 }
 
 // finalSkill Step 3：所有阶段块 → 通过 output_skill 工具调用生成最终技能。
@@ -660,6 +671,7 @@ func (e *Extractor) finalMentalSkill(ctx context.Context, input ExtractPatternIn
 		Raw:           md,
 		Fidelity:      fidelity,
 		DemotedModels: demoted,
+		VoiceProfile:  out.VoiceProfile,
 	}, nil
 }
 
@@ -738,7 +750,12 @@ func (e *Extractor) finalMentalMultiLens(ctx context.Context, input ExtractPatte
 		md = appendFidelitySection(md, fidelity)
 	}
 
-	return finalSkillOutcome{Raw: md, Fidelity: fidelity, DemotedModels: demoted}, nil
+	return finalSkillOutcome{
+		Raw:           md,
+		Fidelity:      fidelity,
+		DemotedModels: demoted,
+		VoiceProfile:  mergeVoiceProfiles(mental.VoiceProfile, expr.VoiceProfile, decision.VoiceProfile),
+	}, nil
 }
 
 // finalMentalLens 多镜头精提的单个聚焦镜头：调用 output_skill 生成仅含本镜头指定章节的
@@ -753,6 +770,23 @@ func (e *Extractor) finalMentalLens(ctx context.Context, input ExtractPatternInp
 		return LensOutput{}, fmt.Errorf("解析多镜头产出失败: %w", err)
 	}
 	return out, nil
+}
+
+// mergeVoiceProfiles 合并多镜头的 Voice 画像维度（按传入顺序首次出现优先、同维度去重），
+// 全部为空时返回 nil。去重后仍由 voice.Store.Upsert 幂等兜底。
+func mergeVoiceProfiles(profiles ...[]voice.ProfileItem) []voice.ProfileItem {
+	seen := make(map[string]bool)
+	var out []voice.ProfileItem
+	for _, items := range profiles {
+		for _, it := range items {
+			if seen[it.Dimension] {
+				continue
+			}
+			seen[it.Dimension] = true
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 // mergeLensBodies 按五层 canonical 顺序拼装三路镜头正文：

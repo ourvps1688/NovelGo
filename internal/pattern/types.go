@@ -1,6 +1,9 @@
 package pattern
 
-import "github.com/novelgo/novelgo/internal/llm"
+import (
+	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/voice"
+)
 
 type ExtractPatternInput struct {
 	TaskID          string  `json:"task_id,omitempty"`
@@ -68,6 +71,10 @@ type MentalSkillOutput struct {
 	Description string          `json:"description" jsonschema:"required,description=一句话描述何时使用此创作心智技能"`
 	Content     string          `json:"content" jsonschema:"required,description=技能正文 markdown（不含 frontmatter），须含五章：叙事心智模型/创作决策启发式/价值观与反模式/表达DNA/诚实边界，且心智模型与启发式须附章节锚点"`
 	Evidence    []ModelEvidence `json:"evidence,omitempty" jsonschema:"description=每个心智模型的章节证据锚点（chapter_id 列表），用于 V2 确定性跨弧复现门禁；要求每个模型≥2 个相互独立的章节"`
+	// VoiceProfile 是 P1 风格结构化双写的可选产出（WBS §0.3）：Voice 画像十维的
+	// 结构化维度清单，与 skill md 并行落库（md 产出路径一字不动）。LLM 未产出即
+	// 降级不落库（宁缺勿错，不解析正文兜底猜测）。
+	VoiceProfile []voice.ProfileItem `json:"voice_profile,omitempty" jsonschema:"description=可选：Voice 画像结构化维度清单（dimension 仅限十维枚举之一），用于风格台账并行落库；无法提炼时省略此字段"`
 }
 
 // ModelEvidence 是单个心智模型的证据锚点，供确定性门禁计数。
@@ -87,6 +94,8 @@ type LensOutput struct {
 	Description string          `json:"description,omitempty" jsonschema:"description=一句话描述（仅 mental 主镜头填写，其余镜头留空）"`
 	Content     string          `json:"content" jsonschema:"required,description=本镜头聚焦产出的技能正文 markdown（不含 frontmatter），仅含指定章节"`
 	Evidence    []ModelEvidence `json:"evidence,omitempty" jsonschema:"description=（仅 mental 镜头）每个心智模型的章节证据锚点；其余镜头留空"`
+	// VoiceProfile 同 MentalSkillOutput：可选结构化维度，多镜头产出按镜头顺序去重合并。
+	VoiceProfile []voice.ProfileItem `json:"voice_profile,omitempty" jsonschema:"description=可选：本镜头可提炼的 Voice 画像结构化维度清单；无法提炼时省略此字段"`
 }
 
 // FidelityScorecard 是 V2 产出后保真度测试的结果（nuwa 保真度评分卡的 fiction 适配版）。
