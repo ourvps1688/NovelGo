@@ -119,7 +119,25 @@
     "githubIssue": "Have questions? File an Issue",
     "githubStar": "If this helps you, please Star",
     "skillMatrix": "Skill Matrix",
-    "workflow": "Workflow"
+    "workflow": "Workflow",
+    "factory": {
+      "absorb": {
+        "title": "Absorb Factory",
+        "feeds": "Feeds the style ceiling"
+      },
+      "create": {
+        "title": "Create Factory",
+        "feeds": "Feeds the prose & truth layer"
+      },
+      "quality": {
+        "title": "Quality Factory",
+        "feeds": "Feeds the signability floor"
+      },
+      "base": {
+        "title": "Infrastructure",
+        "feeds": "Feeds everything"
+      }
+    }
   },
   "sidebar": {
     "comingSoon": "Coming Soon",

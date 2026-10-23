@@ -115,7 +115,25 @@
     "githubIssue": "有任何问题？去提 Issue",
     "githubStar": "如果对你有帮助，欢迎 Star",
     "skillMatrix": "技能矩阵",
-    "workflow": "工作流"
+    "workflow": "工作流",
+    "factory": {
+      "absorb": {
+        "title": "吸收工厂",
+        "feeds": "喂给文风上限"
+      },
+      "create": {
+        "title": "创作工厂",
+        "feeds": "喂给正文与真理层"
+      },
+      "quality": {
+        "title": "质检工厂",
+        "feeds": "喂给签约下限"
+      },
+      "base": {
+        "title": "基础设施",
+        "feeds": "喂给全部"
+      }
+    }
   },
   "sidebar": {
     "comingSoon": "即将推出",

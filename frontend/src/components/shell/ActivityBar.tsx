@@ -23,6 +23,13 @@ import {
 import { useTranslation } from "react-i18next";
 import type { SidebarPanelId } from "@/types/panel";
 import { usePanelStore } from "@/stores/usePanelStore";
+import {
+  FACTORY_ORDER,
+  factoryFeedsKey,
+  factoryOf,
+  factoryTitleKey,
+  type FactoryId,
+} from "@/lib/factory";
 
 interface Activity {
   id: SidebarPanelId;
@@ -31,6 +38,8 @@ interface Activity {
   disabled?: boolean;
 }
 
+// 现有 16 项功能条目全保留（plan §7 功能型入口不硬移除），
+// 归属由 factory.ts FACTORY_MAP 单源决定，此处不自造归属。
 const activities: Activity[] = [
   { id: "search", icon: Search, labelKey: "shell.search" },
   { id: "novels", icon: Library, labelKey: "shell.bookshelf" },
@@ -68,6 +77,14 @@ function getInitialCollapsed(): boolean {
   }
 }
 
+// 按价值链顺序（吸收→创作→质检→基础）分组，组内保持既有相对顺序。
+function groupActivities(): { factory: FactoryId; items: Activity[] }[] {
+  return FACTORY_ORDER.map((factory) => ({
+    factory,
+    items: activities.filter((a) => factoryOf(a.id) === factory),
+  })).filter((g) => g.items.length > 0);
+}
+
 export default function ActivityBar({ onSelect }: Props) {
   const { t } = useTranslation();
   const activeId = usePanelStore((s) => s.sidebarPanel ?? s.activePanel);
@@ -84,6 +101,8 @@ export default function ActivityBar({ onSelect }: Props) {
       return next;
     });
   };
+
+  const groups = groupActivities();
 
   return (
     <nav
@@ -106,17 +125,28 @@ export default function ActivityBar({ onSelect }: Props) {
         )}
       </button>
 
-      {activities.map((a, i) => {
-        const isActive = a.id === activeId;
-        return (
-          <div key={a.id}>
-            {i === 0 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
-            {i === 4 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
-            <button
-              disabled={a.disabled}
-              onClick={() => onSelect(a.id)}
-              title={`${t(a.labelKey)}${a.disabled ? t("shell.comingSoon") : ""}`}
-              className={`relative flex h-10 items-center rounded-lg transition-all duration-200
+      {groups.map((group, gi) => (
+        <div key={group.factory}>
+          {gi > 0 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
+          {!collapsed && (
+            <div className="px-3 pt-1 pb-0.5">
+              <div className="text-xs font-semibold text-muted-foreground/80 truncate">
+                {t(factoryTitleKey(group.factory))}
+              </div>
+              <div className="text-[10px] leading-tight text-muted-foreground/50 truncate">
+                {t(factoryFeedsKey(group.factory))}
+              </div>
+            </div>
+          )}
+          {group.items.map((a) => {
+            const isActive = a.id === activeId;
+            return (
+              <button
+                key={a.id}
+                disabled={a.disabled}
+                onClick={() => onSelect(a.id)}
+                title={`${t(a.labelKey)}${a.disabled ? t("shell.comingSoon") : ""}`}
+                className={`relative flex h-10 items-center rounded-lg transition-all duration-200
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
                 ${
                   collapsed
@@ -130,23 +160,24 @@ export default function ActivityBar({ onSelect }: Props) {
                       ? "text-foreground bg-muted"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                 }`}
-            >
-              {isActive && !a.disabled && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
-              )}
-              <a.icon
-                className="h-[18px] w-[18px] shrink-0"
-                strokeWidth={1.75}
-              />
-              {!collapsed && (
-                <span className="truncate text-sm font-medium">
-                  {t(a.labelKey)}
-                </span>
-              )}
-            </button>
-          </div>
-        );
-      })}
+              >
+                {isActive && !a.disabled && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+                )}
+                <a.icon
+                  className="h-[18px] w-[18px] shrink-0"
+                  strokeWidth={1.75}
+                />
+                {!collapsed && (
+                  <span className="truncate text-sm font-medium">
+                    {t(a.labelKey)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }
