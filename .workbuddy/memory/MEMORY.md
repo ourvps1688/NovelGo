@@ -1,43 +1,37 @@
 # NovelGo 项目长期备忘
 
-## 项目性质与约定
-- NovelGo = sigpanic/goink（Go 1.25 + Wails v2 + React 19 + SQLite/ONNX，AGPL-3.0）合规派生 fork。README/NOTICE/About 必须保留 "Based on Goink by 响滩 (sigpanic)" 与 "This is a modified version of Goink..." 声明，不得移除。
-- 模块 `github.com/novelgo/novelgo`；数据目录 `~/NovelGo`；品牌 N+G monogram。仓库 `ourvps1688/NovelGo`（origin）；upstream=sigpanic/goink。
+## 项目性质
+- NovelGo = sigpanic/goink（Go 1.25 + Wails v2 + React 19 + SQLite/ONNX，AGPL-3.0）合规派生 fork。README/NOTICE/About 必须保留 "Based on Goink by 响滩 (sigpanic)" 与 "This is a modified version of Goink..." 声明。
+- 模块 `github.com/novelgo/novelgo`；数据目录 `~/NovelGo`；N+G monogram。仓库 `ourvps1688/NovelGo`（origin）；upstream=sigpanic/goink。
 
 ## 构建/环境（勿回退）
-- 前端只做 index.css 皮肤 token，不动组件/布局/入口。前端四道闸：`npm --prefix frontend run format:check / i18n:check / lint / build`（eslint 限 0 error）。改前端须 build 后重启 wails dev 才生效。
-- CGO：`export PATH="/c/msys64/mingw64/bin:$PATH"; export CGO_CFLAGS="-IC:/tools/sqlite3-headers"`（漏则缺 sqlite3.h）。golangci-lint 在 `/c/Users/Administrator/go/bin`。gofmt 需 LF 归一化后查（CRLF 全量误报）。`cmd | tail` 掩盖退出码用 `${PIPESTATUS[0]}`。
-- 推送：`GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`；PAT 在仓库根 github_pat.txt（.gitignore 不入库）。钩子=scripts/hooks/pre-commit（gofmt+lint）。Bash 用 `/d/workbuddyfiles/NovelGO` 绝对路径。
-- 测试瞬态：真实 LLM E2E 高负载偶发 60s 整数超时 FAIL，单项+包复跑绿即收口勿当回归；无 key Skip（NOVELGO_EVAL_KEY）。
+- 前端只做 index.css 皮肤 token；四道闸 `npm --prefix frontend run format:check / i18n:check / lint / build`（eslint 限 0 error）；改前端须 build 后重启 wails dev。
+- CGO：`export PATH="/c/msys64/mingw64/bin:$PATH"; export CGO_CFLAGS="-IC:/tools/sqlite3-headers"`（lint 也须带）。golangci-lint 在 `/c/Users/Administrator/go/bin`。gofmt 须 LF 归一化后查（CRLF 误报）。`cmd | tail` 掩退出码用 `${PIPESTATUS[0]}`。
+- 推送：`GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`；PAT 在仓库根 github_pat.txt。钩子=scripts/hooks/pre-commit（gofmt+lint）。commit&&push 链式偶显 "nothing to commit" 但已落盘→核 log 后单独 push。
+- 测试瞬态：真实 LLM E2E 偶发超时 FAIL，复跑绿即收口；无 key Skip（NOVELGO_EVAL_KEY）。
 
-## 流水线（已落地）
-- 阶段 S0–S6、闸门 G1/G1b/G3b/G4/G终，Orchestrator.Advance 唯一裁决。body 级 issue 不进 S5 批次→RewriteBacklog 回 S3 重写；S5 分批（P0 每批1/P1 每批2，MaxTurns=18）+断点续修+修复回执+复评。启动恢复僵尸 run→paused。
-- S5 有界化：FixBatchFailures 连败 3→AwaitingGate 交裁决；fixProviderIdleTrip=10 供应商熔断；issue 原子化（>5 台账/>2 章必拆）。
-- 自动重写回路：RewriteAgent+chapter-rewrite.md 整章 full_replace，Rounds≤autoRewriteCap=2，超限回落 paused+rewrite_handoff。控制指令必须同步广播 pipeline:stage（带 Note）。
+## 流水线
+- S0–S6 / G1/G1b/G3b/G4/G终，Orchestrator.Advance 唯一裁决。body 级 issue→RewriteBacklog 回 S3；S5 分批+断点续修+复评，连败 3→AwaitingGate，idleTrip=10 熔断，issue 原子化。自动重写 RewriteAgent，Rounds≤2 超限 rewrite_handoff。控制指令须同步广播 pipeline:stage。
 
 ## 卷快照（internal/snapshot）
-- 口径=冻结时全量 series bible（10 模型+正文清单）；Freeze/Commit/Diff*/Restore；diff_ref=base:<id> 运行时算。**restore 必须 raw SQL Exec**（gorm callback 对 SkipHooks 无效；Exec 保时间戳零履历污染），整体回滚=全表 DELETE+逐行 INSERT。
-- 台账审计 audit.go：error=结构矛盾（ref.dangling/enum/lifecycle/parent_cycle）阻断 Freeze；warning 只报告；审计走事务句柄。G_freeze=S4+S5 收口且 AuditReason=="volume" 自动 Freeze；中途体检（golden3/milestone）绝不冻结；完本 freezeRemainingVolumes 补冻。
-- S4/S4b/S6/S5/S3 提示词注入【已冻结卷既定事实】（bible.go 单源渲染，24KB 截断，坏 payload 返空串）。
+- 冻结=全量 series bible（10 模型+正文）；**restore 必须 raw SQL Exec**（gorm callback 对 SkipHooks 无效）。审计 error 阻断冻结；G_freeze=S4+S5 收口且 AuditReason=="volume"。提示词注入【已冻结卷既定事实】（bible.go 单源，坏 payload 返空）。
+- RestoreStyle（P2 T4.1）：restoreOneTable 只还原 voice_dimensions，事实层零触碰；冻结快照双层钉住（事实+风格同记录，勿拆两条）。
 
-## retcon（3.1/3.2）
-- 状态机 candidate→approved→editing→recorded→rolled_back（+rejected 驳回支），单向无环、迁移只经显式 API。裁决必附理由；BeginEdit 先固化回滚点快照；Record 附 diff 摘要；Rollback 先 Restore 后落状态。目标卷须已冻结。
-- Record/Rollback 终态前各 Commit 一份 canon（LatestSnapshot 跟上，勿删）。三执行体 handler.go 注入（Commit/DiffAgainstCurrent+FormatDelta/Restore）；**testhelpers 必须同形装配三钩子**（漏装=nil panic）。
+## retcon
+- 状态机 candidate→approved→editing→recorded→rolled_back（+rejected），迁移只经显式 API。裁决必附理由；BeginEdit 固化回滚点；Record 附 diff；Rollback 先 Restore 后落状态；Record/Rollback 终态前各 Commit canon。目标卷须已冻结。
+- **testhelpers 必须与 handler.go 同形装配全部钩子**（漏装=nil panic）。
 
 ## 巡检（3.3）
-- consistency-patrol.md 只读张力报告→GateContext.PatrolReport+事件 pipeline:consistency_patrol；只报告不改写是机械保证（patrol_test 断言零污染）；触发=冻结成功后自动一次+control("patrol")。不自动立 retcon 案。
+- consistency-patrol.md 只读张力报告；零污染是机械保证（patrol_test 断言）；触发=冻结后自动一次+control("patrol")；不自动立 retcon 案。
 
 ## P0 上下文装配器
-- internal/contextasm：ContextBlocks{Facts,Voice,Intent} 尾接提示词末尾，Facts→Voice→Intent；purpose 矩阵：rewrite 三块全注 / audit·fix·patrol=Facts+Voice / chat=Voice。四纪律：有则注入/无则降级逐字一致[最高验收]/预算截断 8KB/宁缺勿错。PersonaMarker 禁改。golden 基线 testdata/p0_baseline_*.txt。
+- internal/contextasm：Facts→Voice→Intent 尾接提示词；purpose 矩阵 rewrite 全注/audit·fix·patrol=Facts+Voice/chat=Voice。四纪律：有则注入/无则降级逐字一致[最高验收]/8KB 截断/宁缺勿错。PersonaMarker 禁改。golden=testdata/p0_baseline_*.txt（提示词演进须重定格并备案）。
 
-## P1 风格结构化（账 #158–#168 全销）
-- internal/voice：voice_dimensions（(novel_id,dimension) Upsert；书级十维；不入 temporal）。十维枚举/metrics 键/source 单源禁改。双写=skill md 与 style_profiles 路径一字不动+voice_profile toolcall 并行落库（未产出不落库）。
-- voiceText=personaMindText（P0 闭包一字不动）+RenderLedger（render.go 单源固定序只渲染 content）；台账空→与 P0 逐字一致；读失败弃台账块。voice 入 snapshot registry 四机制自动覆盖（存量卷首个含 voice 快照 diff 全量新增=预期勿当 bug）。
-- retcon Rollback 已可还原 voice 行（P2 风格回改铺路），A3 零触碰。三联验收 app/voice_acceptance_test.go 全绿。
+## P1 风格结构化（全销）
+- internal/voice：voice_dimensions（(novel_id,dimension) Upsert，书级十维，不入 temporal）；枚举/metrics/source 单源禁改。双写=skill md 不动+voice_profile 并行落库。voiceText=personaMindText+RenderLedger；台账空→与 P0 逐字一致。voice 已入 snapshot registry。
 
-## P2 文风进闸门（已立项，WBS=p2-style-gate-implementation-wbs.md，账 #169–#179）
-- 漂移检测=确定性数值比对（style.ComputeStats vs voice.MetricKey 八键基线，阈值表单源保守初值）；无基线/坏数据→零 issue（降级第 5 条，最高验收）。
-- V 系 issue：ID 前缀 V 单源（**D 归 G3 蓝图漂移**）、Level=P1、三枚举照常、fix_type=body。「只报告不改写」=检测器零写入+**自动派发豁免**（isStyleExempt，作者显式推进不受限）+verdict 不翻转；全豁免 RewriteBacklog 走手动交接收口防死循环。
-- G_freeze 双快照=冻结快照双层钉住（同事务 registry 携带，**不拆两条记录**护 DiffToPrevious/uk）；RestoreStyle 按表只还原 voice_dimensions（书级行防误伤事实层）。
-- retcon 风格回改=A3 零新流程+RetconCase.Kind（fact/style）+Rollback 按 kind 路由；testhelpers 同形装配钩子防 nil panic。前端零改动（UI 属 P3）。
-- 后续 P3/P4 见 docs/future/ultimate-form-integration-plan.md。
+## P2 文风进闸门（已全销 #169–#179，WBS=p2-style-gate-implementation-wbs.md）
+- 漂移=确定性比对（style.ComputeStats vs voice.MetricKey 八键，`|cur−base|>max(abs,rel×|base|)`）；无基线/坏数据→零 issue（最高验收）。V 系：ID 前缀 V 单源（D 归蓝图、T 归巡检、I 归常规）、Level=P1、fix_type=body、不进评分不翻 verdict；合并续编 maxV+1 防撞号。
+- 只报告不改写=检测器零写入+isStyleExempt 派发豁免+全豁免 RewriteBacklog 手动交接（防死循环）。executeFix 四分区闭合（retcon/rewrite/pending/resolved 必居其一）。**persistRetconCandidates 立案只在 handoffRetconToUser 出口**（backlog 优先时不立案，既有语义）。
+- retcon kind 路由：RetconCase.Kind（fact 缺省/style，单源）→Rollback style→RestoreStyle/fact 与存量空 kind→全量；V 系立案带 style；testhelpers 同形装配 SetStyleRestorer。**每加迁移须同步 migrate 集成测试的 done 总步数断言**（当前 12）并补 E2E 历史输入+断言（注释硬要求）。
+- 双验收=p2_acceptance_test.go（进路由+派发豁免+立案 kind）×retcon 全链（风格回滚只动 voice 行）。前端零改动（UI 属 P3）；后续见 docs/future/ultimate-form-integration-plan.md。
