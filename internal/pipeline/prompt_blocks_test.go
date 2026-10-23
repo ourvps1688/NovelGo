@@ -78,6 +78,29 @@ func TestPromptBlocksEmptyMatchesBaseline(t *testing.T) {
 	}
 }
 
+// ④ Facts+Voice+Intent 三块全非空（T4.2）：尾部严格按 Facts→Voice→Intent 顺序追加。
+// §0.5 矩阵（仅 rewrite 取 Intent）由 Assembler.Build 保证（context_blocks_test ③ 锁定），
+// 本测试锁定构造器层的三块渲染顺序。
+func TestPromptBlocksAllThreeOrderFactsVoiceIntent(t *testing.T) {
+	const (
+		voice  = "表达指纹：短句、克制、动词开头。"
+		intent = "卖点：凡人流修仙，稳健发育。"
+	)
+	for _, tc := range p0PromptCases() {
+		got := tc.make(contextasm.ContextBlocks{Facts: p0FactsMarker, Voice: voice, Intent: intent})
+		want := readP0Baseline(t, tc.name+"_empty") +
+			"\n\n【已冻结卷既定事实（系列圣经快照）】\n" + p0FactsMarker + "\n" +
+			"以上是已冻结（定稿）卷在最近一次冻结时固化的系列圣经，是本次校验/修复的**既定事实依据**：\n" +
+			"与之冲突的一律改本卷及后续来适配它（前向修复），**不得**为消解冲突回改已冻结卷；" +
+			"与之不冲突的部分以正文与台账工具读到的现状为准。" +
+			voiceBlockTail(tc.purpose, voice) +
+			"\n\n【创作意图锚定】\n" + intent + "\n" +
+			"以上是本书的创作意图与卖点定位，写作与校验以此为方向锚定；与之冲突时以意图为准调整执行细节，不得偏离卖点定位。"
+		require.Equal(t, want, got,
+			"三块全非空须按 Facts→Voice→Intent 顺序尾部追加：%s", tc.name)
+	}
+}
+
 // ③ Facts+Voice：前文（空基线）一字不动，尾部按 Facts→Voice 顺序追加，
 // 且追加的 Voice 块引导语按 purpose（§0.6）取。
 func TestPromptBlocksFactsThenVoiceAppended(t *testing.T) {
