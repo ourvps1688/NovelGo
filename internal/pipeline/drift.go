@@ -6,11 +6,58 @@ package pipeline
 // 漂移发现→AuditIssue 成形。本文件零写入（A5「只报告不改写」机械保证）。
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/novelgo/novelgo/internal/style"
 	"github.com/novelgo/novelgo/internal/voice"
+	"github.com/novelgo/novelgo/internal/volume"
 )
+
+// runStyleDriftCheck 对检测范围章节逐章做文风漂移检测（WBS p2 §0.1–0.3），
+// 返回 V 系 issue 清单（按章节阅读序稳定顺编）。范围=同作用域章节：
+// scopeVolumeID 非 nil 只扫该卷（卷级 scoped run）；nil 扫全书（S6 终检）。
+//
+// 降级纪律（宁缺勿错，绝不阻断体检主链）：provider 为 nil、基线为空、章节列表/
+// 正文读取失败、正文为空 → 对应部分跳过；整体最多零 issue，从不返回错误。
+func (s *Service) runStyleDriftCheck(ctx context.Context, novelID int64, scopeVolumeID *int64) []AuditIssue {
+	if s.chapterTextReader == nil || s.voiceMetricsProvider == nil || s.chapterStore == nil {
+		return nil
+	}
+	baseline, err := s.voiceMetricsProvider(ctx, novelID)
+	if err != nil || len(baseline) == 0 {
+		return nil // 无基线零 issue，不造默认基线
+	}
+	chapters, err := s.chapterStore.ListAllByNovel(ctx, nil, novelID)
+	if err != nil || len(chapters) == 0 {
+		return nil
+	}
+	// 冻结态按卷查（volume.Frozen）；查不到按活跃卷缺省（forward_fix 安全值）。
+	frozenByVolume := map[int64]bool{}
+	if vols, verr := volume.NewStore(s.store.db, s.logger).ListByNovel(ctx, nil, novelID); verr == nil {
+		for _, v := range vols {
+			frozenByVolume[v.ID] = v.Frozen
+		}
+	}
+	var out []AuditIssue
+	seq := 1
+	for _, ch := range chapters {
+		if scopeVolumeID != nil && (ch.VolumeID == nil || *ch.VolumeID != *scopeVolumeID) {
+			continue
+		}
+		text, terr := s.chapterTextReader(ctx, novelID, ch.ID)
+		if terr != nil || strings.TrimSpace(text) == "" {
+			continue // 读不到正文跳过该章（宁缺勿错）
+		}
+		frozen := ch.VolumeID != nil && frozenByVolume[*ch.VolumeID]
+		issues := shapeDriftIssues(
+			voice.DetectDrift(baseline, chapterCurrentMetrics(text)), ch.ReadingNumber, frozen, seq)
+		seq += len(issues)
+		out = append(out, issues...)
+	}
+	return out
+}
 
 // chapterCurrentMetrics 对单章正文做确定性统计并装配八键 current map
 // （键取 style.StatsMetrics / voice.MetricKey* 单源）。

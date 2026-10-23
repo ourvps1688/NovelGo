@@ -69,6 +69,13 @@ type Service struct {
 	// 注入重写/体检/修复/巡检提示词作为文风锚定块。由 app 层用
 	// agentcfg.BuildPersonaSystemText 实现；nil 或出错时降级为不注入。
 	voiceProvider func(ctx context.Context, novelID int64) (string, error)
+	// chapterTextReader 返回单章正文（P2 漂移检测采样输入，WBS p2 §0.1）。
+	// 由 app 层用 git.ReadFile(novelID, git.ChapterPath(id)) 装配；nil 时漂移检测
+	// 整体跳过（降级零 issue，宁缺勿错）。
+	chapterTextReader func(ctx context.Context, novelID, chapterID int64) (string, error)
+	// voiceMetricsProvider 返回本书 Voice 台账基线指标（voice.MergeMetrics 装配，
+	// P2 漂移检测基线）。nil / 出错 / 空基线时漂移检测整体跳过（不造默认基线）。
+	voiceMetricsProvider func(ctx context.Context, novelID int64) (map[string]float64, error)
 	// intentProvider 返回创作意图正文（卖点定位），rewrite 路径注入意图锚定块（P0 WBS §4）。
 	// T4.1 定源后由 app 层注入；nil 或出错时降级为不注入。
 	intentProvider func(ctx context.Context, novelID int64) (string, error)
@@ -160,6 +167,18 @@ func (s *Service) SetBibleProvider(fn func(ctx context.Context, novelID int64) (
 // 未注入/出错时降级为不注入。
 func (s *Service) SetVoiceProvider(fn func(ctx context.Context, novelID int64) (string, error)) {
 	s.voiceProvider = fn
+}
+
+// SetChapterTextReader 注入单章正文读取体（P2 漂移检测，由 app 层用
+// git.ReadFile+git.ChapterPath 装配）。未注入时漂移检测整体跳过（降级零 issue）。
+func (s *Service) SetChapterTextReader(fn func(ctx context.Context, novelID, chapterID int64) (string, error)) {
+	s.chapterTextReader = fn
+}
+
+// SetVoiceMetricsProvider 注入 Voice 基线指标提供者（P2 漂移检测，由 app 层用
+// voice.Store.List + voice.MergeMetrics 装配）。未注入/出错/空基线时漂移检测跳过。
+func (s *Service) SetVoiceMetricsProvider(fn func(ctx context.Context, novelID int64) (map[string]float64, error)) {
+	s.voiceMetricsProvider = fn
 }
 
 // SetIntentProvider 注入「创作意图」文本提供者（T4.1 定源后由 app 层接入）。
@@ -857,6 +876,12 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	}
 
 	audit := parseFreshAudit(out.Text)
+	// P2 文风漂移（WBS p2 §0.3）：确定性检测的 V 系 issue 追加到清单尾部（warning 级，
+	// 经 bodyIssuesOf/retconItemsOf 自然收口进既有修复/重写路由）。verdict 不翻转——
+	// drift-only 保持 LLM verdict，不触发收口修复循环；蓝图体检不参与文风检测。
+	if ctxt.AuditKind != "blueprint" {
+		audit.Issues = append(audit.Issues, s.runStyleDriftCheck(ctx, novelID, run.VolumeID)...)
+	}
 	auditJSON, _ := json.Marshal(audit)
 
 	// ctxt 已在函数顶部解析；按 AuditKind 把体检结果写回对应字段（蓝图 → BlueprintAudit，签约 → Audit）。
@@ -1742,6 +1767,8 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 	}
 
 	audit := parseFreshAudit(out.Text)
+	// P2 文风漂移：终检扫全书（scope=nil），V 系追加尾部；verdict 不翻转（G终人工裁决）。
+	audit.Issues = append(audit.Issues, s.runStyleDriftCheck(ctx, novelID, nil)...)
 	auditJSON, _ := json.Marshal(audit)
 
 	var ctxt GateContext

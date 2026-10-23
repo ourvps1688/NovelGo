@@ -20,6 +20,7 @@ import (
 	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/config"
 	"github.com/novelgo/novelgo/internal/deletion"
+	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/location"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
@@ -42,6 +43,7 @@ import (
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/style"
 	"github.com/novelgo/novelgo/internal/timeline"
+	"github.com/novelgo/novelgo/internal/voice"
 	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/novelgo/novelgo/internal/writing"
 )
@@ -444,6 +446,18 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// （voice_dimensions 非空时，§0.4 顺序：P0 输出为前缀一字不动）。persona 未配置/
 	// 解析失败心智为空；台账为空时返回值与 P0 行为逐字一致（降级纪律）。
 	a.pipeline.SetVoiceProvider(a.voiceText)
+	// 注入文风漂移检测输入提供者（P2 T2.1）：单章正文（git 文件读取）与 Voice 台账
+	// 基线指标（voice.MergeMetrics 装配）。任一缺失/出错/空基线时漂移检测降级零 issue。
+	a.pipeline.SetChapterTextReader(func(_ context.Context, novelID, chapterID int64) (string, error) {
+		return git.ReadFile(novelID, git.ChapterPath(chapterID))
+	})
+	a.pipeline.SetVoiceMetricsProvider(func(ctx context.Context, novelID int64) (map[string]float64, error) {
+		entries, err := voice.NewStore(a.db, a.logger).List(ctx, novelID)
+		if err != nil {
+			return nil, err
+		}
+		return voice.MergeMetrics(entries), nil
+	})
 	// 注入「创作意图锚定」提供者（P0 T4.1 定源）：book-pitch 应用产物（novels 字段 +
 	// 五类 pitch 偏好）→ 当前卷纲正文 → 空串降级。仅 rewrite 用途装配（§0.5 矩阵）。
 	a.pipeline.SetIntentProvider(a.intentText)
