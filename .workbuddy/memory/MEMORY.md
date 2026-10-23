@@ -87,3 +87,8 @@
 - provider 口径：只返回正文，块头/引导语/尾注由装配器渲染。Intent 定源=book-pitch 落库产物（novels+preference_items 五类 category，同类取最新）→当前卷纲正文→空；voice=persona 心智文本（provider 保证含诚实边界声明）。
 - golden 基线范式：改造前输出固化 `internal/pipeline/testdata/p0_baseline_*.txt` 逐字比对（empty/facts 两档×五构造器），降级零变化机械可验。A/B 真实双臂（rewrite_voice_ab_e2e_test.go）证明 voice 开文风锚定生效、关则旧行为。
 - 坑：单发 E2E 模拟 S3 重写不能拿 chapter-rewrite 技能当 system prompt（工具循环导向，模型输出工具调用文本）；模型选择避开 flash/lite 优先 reasoner→chat→pro；gofmt 需 LF 归一化后查（CRLF 全量误报）；真实 LLM E2E 无 key Skip（NOVELGO_EVAL_KEY/dev 配置），高负载偶发瞬态失败复跑即可。
+
+## P1 风格结构化（2026-10-23 全部完成，WBS=p1-style-structuring-implementation-wbs.md，账 #158–#168 全销）
+- `internal/voice` 台账真理源：voice_dimensions（(novel_id,dimension) 唯一 Upsert；书级十维、无 volume_id、不加 changed_at 不入 temporal/审计）；十维枚举/metrics 键/source 枚举各单源禁改。双写契约：skill md 与 style_profiles 产出路径一字不动，voice_profile toolcall 字段并行落库（LLM 未产出降级不落库）。
+- 消费端（§0.4）：voiceText=心智正文（personaMindText=P0 闭包一字不动）+RenderLedger 台账渲染（internal/voice/render.go 单源，§0.1 固定序，只渲染 content）；**台账空→输出与 P0 逐字一致（最高验收）**，台账读取失败只弃台账块保 P0 前缀。快照（§0.5）：voice_dimensions 入 registry，四机制自动覆盖；存量卷首个含 voice 快照 diff 呈全量新增行属预期（registry 注释风险条）。
+- retcon 链路：Rollback 经 snapshot.Restore 覆盖 voice 行（P2 风格回改铺路），A3 状态机零触碰。三联验收 app/voice_acceptance_test.go：可查询/可 diff/进快照。后续路线：P2 文风进闸门（warning 起步）。
