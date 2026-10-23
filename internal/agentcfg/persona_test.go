@@ -66,6 +66,22 @@ func TestBuildPersonaSystemText_Skill(t *testing.T) {
 	require.Contains(t, got, PersonaHonestyNote, "应包含诚实边界声明")
 }
 
+// TestBuildPersonaSystemText_Golden 锁 chat 常驻块全文逐字（T3.1 渲染单源化前后零变化）：
+// PersonaMarker + "\n\n" + chat 引导语 + "\n\n" + 心智正文（技能正文 + "\n\n" + 诚实声明）。
+// 引导语文案与 agentcfg.BuildPersonaSystemText 现行文案逐字一致（WBS §0.6 chat 行 golden，禁改）。
+func TestBuildPersonaSystemText_Golden(t *testing.T) {
+	store, novelID := personaTestStore(t, skillSpec{
+		name: "X 的创作心智", kind: "mental", sourceAuthor: "刘慈欣", body: "X_MENTAL_BODY",
+	})
+
+	got := BuildPersonaSystemText(&PersonaRef{Kind: "skill", Ref: "X 的创作心智"}, store, novelID)
+	want := "【写作人格 · Persona】\n\n" +
+		"以下创作心智将指导你起草本轮新章节。请在保持故事世界一致性的前提下，以该作者的叙事习惯、表达指纹与创作决策启发式来写作，而不是简单模仿或套用公式。" +
+		"\n\nX_MENTAL_BODY\n\n" +
+		"注意：以下创作心智推断自虚构文本，仅供参考，不得作为真实作者意图的断言。"
+	require.Equal(t, want, got, "chat 常驻块全文须逐字不变（golden）")
+}
+
 func TestBuildPersonaSystemText_Author_PrefersAggregated(t *testing.T) {
 	store, novelID := personaTestStore(t,
 		skillSpec{name: "刘慈欣-心智-聚合", kind: "mental", sourceAuthor: "刘慈欣", body: "AGGREGATED_BODY", aggregated: true},

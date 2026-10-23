@@ -3,6 +3,7 @@ package agentcfg
 import (
 	"strings"
 
+	"github.com/novelgo/novelgo/internal/contextasm"
 	"github.com/novelgo/novelgo/internal/skill"
 )
 
@@ -20,7 +21,8 @@ type PersonaRef struct {
 
 // PersonaMarker 是 persona 系统消息的标识头，用于已有会话每轮注入时检测去重
 // （避免与"新会话常驻块"重复注入）。亦作为该块的视觉/语义边界。
-const PersonaMarker = "【写作人格 · Persona】"
+// 文案单源在 internal/contextasm（P0 WBS §6），此处仅别名引用，禁改文案。
+const PersonaMarker = contextasm.PersonaMarker
 
 // PersonaHonestyNote 诚实边界声明（尊重 PRD WC-5）：创作心智推断自虚构文本，
 // 不代表真实作者意图。构建 persona 引导段时必须追加。导出供测试与前端引用。
@@ -29,22 +31,16 @@ const PersonaHonestyNote = "注意：以下创作心智推断自虚构文本，�
 // BuildPersonaSystemText 解析 persona 引用并构建注入 LLM 的引导段文本
 // （标识头 + 引导说明 + 技能正文 + 诚实边界声明）。
 // 返回空串表示无法解析（persona 为 nil、skillStore 为 nil 或引用不存在），调用方应跳过注入。
+//
+// T3.1 渲染单源化：拼装委托 contextasm.RenderVoice(purpose=chat)（块头 PersonaMarker、
+// chat 引导语、心智正文格式全部由装配器渲染），与改造前输出逐字一致（golden 锁定）。
+// msg.Persona 结构、每轮注入去重（messagesContainPersona）、持久化语义零改动。
 func BuildPersonaSystemText(persona *PersonaRef, skillStore *skill.Store, novelID int64) string {
-	if persona == nil || skillStore == nil {
+	mind := BuildPersonaMindText(persona, skillStore, novelID)
+	if mind == "" {
 		return ""
 	}
-	content, _ := resolvePersonaContent(persona, skillStore, novelID)
-	if content == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(PersonaMarker)
-	b.WriteString("\n\n")
-	b.WriteString("以下创作心智将指导你起草本轮新章节。请在保持故事世界一致性的前提下，以该作者的叙事习惯、表达指纹与创作决策启发式来写作，而不是简单模仿或套用公式。\n\n")
-	b.WriteString(content)
-	b.WriteString("\n\n")
-	b.WriteString(PersonaHonestyNote)
-	return b.String()
+	return contextasm.RenderVoice(contextasm.PurposeChat, mind)
 }
 
 // BuildPersonaMindText 解析 persona 引用并构建「心智正文」（P0 WBS §0.3 的 provider 口径）：
