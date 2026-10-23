@@ -830,7 +830,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	}
 	auditSkill := "signability-audit"
 	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID),
-		s.buildBlocks(ctx, novelID, contextasm.PurposeAudit).Facts)
+		s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
 	if ctxt.AuditKind == "blueprint" {
 		auditSkill = "blueprint-audit"
 		auditPrompt = blueprintAuditPrompt(novelID)
@@ -1269,7 +1269,7 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
 		fixSkill := "signability-fix"
 		fixPromptText := fixPrompt(novelID, batch, auditData.Summary,
-			s.buildBlocks(ctx, novelID, contextasm.PurposeFix).Facts)
+			s.buildBlocks(ctx, novelID, contextasm.PurposeFix))
 		if ctxt.AuditKind == "blueprint" {
 			fixSkill = "blueprint-fix"
 			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
@@ -1614,7 +1614,7 @@ func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, ite
 // executeChapterRewrite 对单章派发章节重写 agent（chapter-rewrite 技能），按 body issue 整章重写。
 func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter) error {
 	prompt := chapterRewritePrompt(novelID, item, ch,
-		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite).Facts)
+		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite))
 	_, err := s.skillRunner(ctx, "chapter-rewrite", SkillInput{
 		NovelID:   novelID,
 		Prompt:    prompt,
@@ -1628,8 +1628,9 @@ func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novel
 }
 
 // chapterRewritePrompt 构造单章重写的任务提示：注入章节定位信息与要解决的正文级 issue。
-// bibleText 非空时注入「已冻结卷既定事实」块（重写须在既定事实上展开，不得写回冻结卷）。
-func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, bibleText string) string {
+// blocks 按 Facts→Voice→Intent 顺序尾部装配（P0 §0.5 rewrite 三块全注）；
+// 冻结快照非空时重写须在既定事实上展开，不得写回冻结卷。
+func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, blocks contextasm.ContextBlocks) string {
 	return fmt.Sprintf(
 		"本书 novel_id=%d。请整章重写以下章节以解决正文级签约体检问题：\n"+
 			"- 第 %d 章（chapter_id=%d，标题：%s）— 问题 %s[%s] %s：%s\n\n"+
@@ -1637,7 +1638,7 @@ func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, b
 			"（如立人设 / 补爽点 / 修节奏 / 兑现伏笔），保持与前后章节及台账（角色/弧线/时间线/读者认知）一致；"+
 			"正文格式遵守规范：无破折号「——」、无序号段落分隔符、无 AI 味硬伤，正文只含叙事不含章节号/标题/章末标记。",
 		novelID, ch.ReadingNumber, ch.ID, ch.Title, item.ID, item.Level, item.Area, item.Desc,
-	) + bibleBlock(bibleText)
+	) + blocks.Render(contextasm.PurposeRewrite)
 }
 
 // runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：
@@ -1725,7 +1726,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 
 	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
-		Prompt:    finalAuditPrompt(novelID, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit).Facts),
+		Prompt:    finalAuditPrompt(novelID, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
 		MaxTurns:  16,
 		SessionID: "pipeline:" + runID + ":final",
 	})
@@ -1771,11 +1772,12 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 }
 
 // finalAuditPrompt 构造 S6 完本级终检的任务提示词。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
-func finalAuditPrompt(novelID int64, bibleText string) string {
+// blocks 尾部装配上下文块（P0 §0.5 audit=Facts+Voice，完本审同体检口径）。
+func finalAuditPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 signability-audit 方法论，对全书做**完本级**终检："+
 		"**逐章通读**所有成稿章节（不得抽样跳章），逐维打分并举证；最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
-		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID) + bibleBlock(bibleText)
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥34/40 → pass。", novelID) + blocks.Render(contextasm.PurposeAudit)
 }
 
 // ── 入口判定与安全检查点（PR5）────────────────────────────────
@@ -2260,25 +2262,15 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 		label, *volumeID)
 }
 
-// bibleBlock 把「已冻结卷既定事实」文本拼为提示词尾部注入块（WBS 2.3）；空串返回空，
-// 提示词与未接快照时逐字一致。块文案单源在 internal/contextasm（P0 WBS §6），
-// 本函数仅保留 "\n\n" 前缀并薄委托，输出与旧实现逐字一致。
-func bibleBlock(bibleText string) string {
-	if bibleText == "" {
-		return ""
-	}
-	return "\n\n" + contextasm.RenderFacts(bibleText)
-}
-
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
-// bibleText 非空时注入「已冻结卷既定事实」块（S4 依据前卷快照校验，WBS 2.3）。
+// blocks 尾部装配上下文块（S4 依据前卷快照校验，WBS 2.3；P0 §0.5 audit=Facts+Voice）。
 // issue JSON 契约片段由 contract.go 单源生成（全量契约）。
-func signabilityPrompt(novelID int64, scopeText, bibleText string) string {
+func signabilityPrompt(novelID int64, scopeText string, blocks contextasm.ContextBlocks) string {
 	return fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
-		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText) + bibleBlock(bibleText)
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText) + blocks.Render(contextasm.PurposeAudit)
 }
 
 // blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。issue JSON 契约片段由 contract.go
@@ -2306,9 +2298,9 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) stri
 }
 
 // fixPrompt 构造一批待修问题的修复提示词：只传本批问题子集（均为未修复项），
-// 保证 agent 在有限轮数内聚焦逐条修复到位。bibleText 非空时注入「已冻结卷既定事实」块
-// （S5 前向修复以快照为唯一依据，WBS 2.3）。
-func fixPrompt(novelID int64, issues []AuditIssue, summary, bibleText string) string {
+// 保证 agent 在有限轮数内聚焦逐条修复到位。blocks 尾部装配上下文块
+// （S5 前向修复以快照为唯一依据，WBS 2.3；P0 §0.5 fix=Facts+Voice）。
+func fixPrompt(novelID int64, issues []AuditIssue, summary string, blocks contextasm.ContextBlocks) string {
 	data := AuditData{Verdict: "needs_fix", Summary: summary, Issues: issues}
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复的**台账/卷纲级（fix_type=ledger）**项）。"+
@@ -2326,7 +2318,7 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary, bibleText string) st
 		fixReceiptFormatLine()+"——"+
 		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）；"+
 		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
-		novelID, len(issues), b) + bibleBlock(bibleText)
+		novelID, len(issues), b) + blocks.Render(contextasm.PurposeFix)
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/contextasm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,7 +31,7 @@ func capturePatrolEmit(t *testing.T) <-chan map[string]any {
 // TestPatrolPromptReadOnlyContract 验证张力报告提示词：全量契约片段 + 示例值 T1 +
 // 「只报告不改写」声明 + 既定事实基准注入（WBS 2.3）。
 func TestPatrolPromptReadOnlyContract(t *testing.T) {
-	p := patrolPrompt(7, "卷1（已冻结）：主角林川，时间线锚点五年")
+	p := patrolPrompt(7, contextasm.ContextBlocks{Facts: "卷1（已冻结）：主角林川，时间线锚点五年"})
 	require.Contains(t, p, auditFormatLine(true, issueSamplePatrol), "应引用全量契约 schema 片段")
 	require.Contains(t, p, `"id":"T1"`, "应使用张力报告示例值 T1")
 	require.Contains(t, p, issueFieldRules(), "应引用契约必填说明")

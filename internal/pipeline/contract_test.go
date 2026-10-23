@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/novelgo/novelgo/internal/contextasm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -178,8 +179,8 @@ func TestParseFreshAuditStampsSchemaVersion(t *testing.T) {
 func TestPromptSchemaSingleSource(t *testing.T) {
 	rules := issueFieldRules()
 	for name, p := range map[string]string{
-		"signabilityPrompt": signabilityPrompt(1, "", ""),
-		"finalAuditPrompt":  finalAuditPrompt(1, ""),
+		"signabilityPrompt": signabilityPrompt(1, "", contextasm.ContextBlocks{}),
+		"finalAuditPrompt":  finalAuditPrompt(1, contextasm.ContextBlocks{}),
 		"stockAuditPrompt":  stockAuditPrompt(1),
 	} {
 		require.Contains(t, p, auditFormatLine(true, issueSampleDefault), "%s 应引用全量契约 schema 片段", name)
@@ -196,13 +197,13 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 	require.Contains(t, driftPatrolPrompt(1), `"id":"D1"`, "巡检提示词应使用巡检示例值")
 	// 张力报告（WBS 3.3）用专属示例值 T1，但同持全量契约片段（张力需标
 	// target_scope/dimension/direction 供报告视图展示建议方向）。
-	patrol := patrolPrompt(1, "")
+	patrol := patrolPrompt(1, contextasm.ContextBlocks{})
 	require.Contains(t, patrol, auditFormatLine(true, issueSamplePatrol), "patrolPrompt 应引用全量契约 schema 片段（巡检示例值）")
 	require.Contains(t, patrol, rules, "patrolPrompt 应引用契约必填说明")
 	require.Contains(t, patrol, `"schema_version"`, "patrolPrompt 应要求 schema_version")
 	require.Contains(t, patrol, `"id":"T1"`, "张力报告提示词应使用巡检示例值 T1")
 	for name, p := range map[string]string{
-		"fixPrompt":          fixPrompt(1, nil, "", ""),
+		"fixPrompt":          fixPrompt(1, nil, "", contextasm.ContextBlocks{}),
 		"blueprintFixPrompt": blueprintFixPrompt(1, nil, ""),
 	} {
 		require.Contains(t, p, fixReceiptFormatLine(), "%s 应引用契约修复回执格式串", name)

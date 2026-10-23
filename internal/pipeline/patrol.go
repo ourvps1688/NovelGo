@@ -21,10 +21,10 @@ import (
 //   - 手动：控制指令 "patrol"（ControlPipeline）。
 
 // patrolPrompt 构造全书一致性巡检（张力报告）的任务提示词：只读、只报告不改写。
-// bibleText 非空时注入「已冻结卷既定事实」块（巡检基准线，WBS 2.3）。
+// blocks 尾部装配上下文块（巡检基准线，WBS 2.3；P0 §0.5 patrol=Facts+Voice）。
 // issue JSON 契约片段由 contract.go 单源生成（全量契约：张力需标
 // target_scope/dimension/direction 供报告视图展示建议方向）。
-func patrolPrompt(novelID int64, bibleText string) string {
+func patrolPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 	return fmt.Sprintf("本书 novel_id=%d。请基于 consistency-patrol 方法论做一次**全书一致性巡检（张力报告）**："+
 		"用 get_chapter_list 列出全部章节，对照「已冻结卷既定事实」与当前台账（角色/关系/地点/时间线/弧线/读者认知）通读全书，"+
 		"只报**张力**（前向适配累计出来的漂移）：设定失真、承诺未兑现、读者认知被悄悄改写、时间线漂移、retcon 衔接裂缝；"+
@@ -33,7 +33,7 @@ func patrolPrompt(novelID int64, bibleText string) string {
 		"这是**只报告不改写**的兜底巡检：你不改任何数据，verdict 只是给作者的参考信号（有张力 → needs_fix，无 → pass），"+
 		"不会触发任何自动修复，改不改由作者定。"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+auditFormatLine(true, issueSamplePatrol)+"——"+issueFieldRules(),
-		novelID) + bibleBlock(bibleText)
+		novelID) + blocks.Render(contextasm.PurposePatrol)
 }
 
 // runConsistencyPatrol 执行一次全书一致性巡检（张力报告）：跑 consistency-patrol
@@ -46,7 +46,7 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	bg := s.appCtx
 	out, err := s.skillRunner(bg, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
-		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol).Facts),
+		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)),
 		MaxTurns:  12,
 		SessionID: "pipeline:patrol:" + strconv.FormatInt(novelID, 10),
 	})
