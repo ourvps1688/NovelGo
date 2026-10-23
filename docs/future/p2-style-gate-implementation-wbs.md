@@ -156,7 +156,7 @@
 - **内容**：端到端验收测试：①**漂移 issue 自动进既有修复/重写路由**（V 系自动分流进 RewriteBacklog/RetconBacklog→立案，且自动派发豁免断言）；②**冻结卷风格可回滚**（style retcon 全链 Rollback 后 voice 行回冻结态、事实层不动）。结论记入本节（3 行内）。
 - **验收**：双联断言全绿 + 结论写入本文件。
 - **依赖**：T4.2。
-- **结论**：（待 T5.1 执行时填写）
+- **结论**：①全绿——`TestP2Acceptance_DriftAutoRouteAndExempt`（V 系自动进 RewriteBacklog + 派发豁免只重写 I 系章）与 `TestP2Acceptance_DriftRetconFiling`（frozen V 系进 RetconBacklog→自动立案 kind=style）；②全绿——retcon `TestStyleRollbackChainOnlyTouchesVoice`（style 案全链 Rollback 后 voice 行回冻结态、事实层不动）。
 
 ### T5.2 全量门禁
 
