@@ -171,6 +171,11 @@ func setupTestApp(t *testing.T) *App {
 		_, err := app.snapshots.Restore(ctx, snapshotID)
 		return err
 	})
+	// 风格案（kind=style）回滚只还原 voice_dimensions——与 handler.go 装配同形。
+	app.retcons.SetStyleRestorer(func(ctx context.Context, _, snapshotID int64) error {
+		_, err := app.snapshots.RestoreStyle(ctx, snapshotID)
+		return err
+	})
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, timelineStore.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, storyarcStore.ChapterDeletionBlockers),

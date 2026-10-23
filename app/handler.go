@@ -366,6 +366,11 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		_, err := a.snapshots.Restore(ctx, snapshotID)
 		return err
 	})
+	// 风格案（kind=style，P2 T4.2）回滚只还原 voice_dimensions，事实层零触碰。
+	a.retcons.SetStyleRestorer(func(ctx context.Context, _, snapshotID int64) error {
+		_, err := a.snapshots.RestoreStyle(ctx, snapshotID)
+		return err
+	})
 	chapterDeletionGuard := deletion.NewGuard(
 		deletion.For(deletion.EntityChapter, a.timeline.ChapterDeletionBlockers),
 		deletion.For(deletion.EntityChapter, a.storyarc.ChapterDeletionBlockers),

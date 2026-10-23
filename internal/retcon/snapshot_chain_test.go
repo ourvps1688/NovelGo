@@ -167,3 +167,130 @@ func TestRollbackChainRestoresVoiceDimensions(t *testing.T) {
 		t.Error("回滚后仍存在快照后新增的 voice 行")
 	}
 }
+
+// TestStyleRollbackChainOnlyTouchesVoice 是 P2 T4.2 的风格案全链验收：
+// candidate→approved→editing→recorded→rolled_back（KindStyle），Rollback 按 kind
+// 路由到 RestoreStyle——voice 行回冻结态，事实层（characters）编辑保持不动。
+// 全量 Restorer 同时接线：若误路由它，character 改动会被一并回滚，断言即失败。
+func TestStyleRollbackChainOnlyTouchesVoice(t *testing.T) {
+	ctx := context.Background()
+	db := openChainDB(t)
+
+	vol := volume.Volume{NovelID: 1, Name: "第一卷", SortOrder: 1, Frozen: true}
+	if err := db.Create(&vol).Error; err != nil {
+		t.Fatalf("seed volume: %v", err)
+	}
+	seeds := []voice.Entry{
+		{NovelID: 1, Dimension: string(voice.DimRhythm), Content: "先结论后铺垫", Source: string(voice.SourceManual)},
+		{NovelID: 1, Dimension: string(voice.DimSentenceFingerprint), Content: "短句为主", Source: string(voice.SourceManual)},
+	}
+	for i := range seeds {
+		if err := db.Create(&seeds[i]).Error; err != nil {
+			t.Fatalf("seed voice: %v", err)
+		}
+	}
+	hero := character.Character{NovelID: 1, Name: "林七"}
+	if err := db.Create(&hero).Error; err != nil {
+		t.Fatalf("seed character: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	snaps := snapshot.NewService(db, volume.NewStore(db, logger), chapter.NewStore(db, logger))
+	svc := newTestService(db)
+	svc.SetCommitSnapshot(func(ctx context.Context, novelID, volumeID int64) (int64, error) {
+		snap, err := snaps.Commit(ctx, novelID, volumeID)
+		if err != nil {
+			return 0, err
+		}
+		return snap.ID, nil
+	})
+	svc.SetDiffSummary(func(ctx context.Context, snapshotID int64) (string, error) {
+		delta, err := snaps.DiffAgainstCurrent(ctx, snapshotID)
+		if err != nil {
+			return "", err
+		}
+		return snapshot.FormatDelta(delta), nil
+	})
+	// 两个执行体同时接线：fact 走全量 Restore，style 案必须路由到 RestoreStyle。
+	svc.SetRestorer(func(ctx context.Context, _, snapshotID int64) error {
+		_, err := snaps.Restore(ctx, snapshotID)
+		return err
+	})
+	svc.SetStyleRestorer(func(ctx context.Context, _, snapshotID int64) error {
+		_, err := snaps.RestoreStyle(ctx, snapshotID)
+		return err
+	})
+
+	c, err := svc.CreateCandidate(ctx, CreateInput{NovelID: 1, VolumeID: volID(vol.ID),
+		Kind: KindStyle, Origin: OriginPipeline, IssueID: "V1", Title: "文风回改"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if c.Kind != KindStyle {
+		t.Fatalf("kind = %q, want style", c.Kind)
+	}
+	if _, err := svc.Approve(ctx, c.ID, "author", "批准文风回改"); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if _, err := svc.BeginControlledEdit(ctx, c.ID, vol.ID, "author"); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+
+	// 受控编辑窗口内：voice 行改动 + 事实层（character.Name）改动。
+	var rhythm voice.Entry
+	if err := db.Where("novel_id = ? AND dimension = ?", 1, voice.DimRhythm).First(&rhythm).Error; err != nil {
+		t.Fatalf("load rhythm: %v", err)
+	}
+	rhythm.Content = "先铺垫后结论"
+	if err := db.Save(&rhythm).Error; err != nil {
+		t.Fatalf("edit rhythm: %v", err)
+	}
+	extra := voice.Entry{NovelID: 1, Dimension: string(voice.DimTabooWords), Content: "禁用突然/忽然", Source: string(voice.SourceManual)}
+	if err := db.Create(&extra).Error; err != nil {
+		t.Fatalf("edit add taboo: %v", err)
+	}
+	if err := db.Model(&character.Character{}).Where("id = ?", hero.ID).
+		Update("name", "林七·改").Error; err != nil {
+		t.Fatalf("edit character: %v", err)
+	}
+
+	recorded, err := svc.RecordWithDiff(ctx, c.ID, "author")
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if recorded.Status != StatusRecorded {
+		t.Fatalf("status = %q, want recorded", recorded.Status)
+	}
+
+	rolled, err := svc.Rollback(ctx, recorded.ID, "author", "文风改道，撤销回改")
+	if err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if rolled.Status != StatusRolledBack {
+		t.Errorf("status = %q, want rolled_back", rolled.Status)
+	}
+
+	// voice 行随 RestoreStyle 回冻结态：改动还原、新增丢弃。
+	var after voice.Entry
+	if err := db.Where("novel_id = ? AND dimension = ?", 1, voice.DimRhythm).First(&after).Error; err != nil {
+		t.Fatalf("reload rhythm: %v", err)
+	}
+	if after.Content != "先结论后铺垫" {
+		t.Errorf("rhythm content 未回滚: %q", after.Content)
+	}
+	var n int64
+	if err := db.Model(&voice.Entry{}).Count(&n).Error; err != nil {
+		t.Fatalf("count voice: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("voice_dimensions 行数 = %d, want 2（新增行已丢弃）", n)
+	}
+	// 事实层不动：character.Name 保持受控编辑后的值（若误走全量 Restore 会被回滚）。
+	var got character.Character
+	if err := db.First(&got, hero.ID).Error; err != nil {
+		t.Fatalf("reload character: %v", err)
+	}
+	if got.Name != "林七·改" {
+		t.Errorf("style 案回滚误动事实层: character.name = %q, want %q", got.Name, "林七·改")
+	}
+}

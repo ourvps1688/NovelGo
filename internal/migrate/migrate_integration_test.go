@@ -113,6 +113,8 @@ func TestRunMigratesOldestSupportedDatabaseEndToEnd(t *testing.T) {
 		`CREATE TABLE writing_log (id INTEGER PRIMARY KEY, date TEXT NOT NULL, novel_id INTEGER NOT NULL DEFAULT 0, chapter_id INTEGER NOT NULL DEFAULT 0, word_delta INTEGER NOT NULL, created_at DATETIME)`,
 		`CREATE INDEX idx_writing_log_chapter_id ON writing_log(chapter_id)`,
 		`CREATE TABLE character_relations (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, source_character_id INTEGER NOT NULL, target_character_id INTEGER NOT NULL, relation_describe TEXT NOT NULL, description TEXT, chapter_id INTEGER, is_current BOOLEAN NOT NULL, created_at DATETIME)`,
+		// v1.7.1 前的 retcon_cases（无 kind 列）：存量案须回填 fact（全量回滚路由不变）。
+		`CREATE TABLE retcon_cases (id INTEGER PRIMARY KEY, novel_id INTEGER NOT NULL, volume_id INTEGER, origin TEXT NOT NULL DEFAULT 'author', issue_id TEXT, target_scope TEXT, dimension TEXT, direction TEXT, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'candidate', decision_note TEXT, decided_by TEXT, decided_at DATETIME, rollback_snapshot_id INTEGER, diff_summary TEXT, applied_by TEXT, applied_at DATETIME, rolled_back_by TEXT, rolled_back_at DATETIME, created_at DATETIME, updated_at DATETIME)`,
 	} {
 		execSQL(query)
 	}
@@ -125,6 +127,7 @@ func TestRunMigratesOldestSupportedDatabaseEndToEnd(t *testing.T) {
 	execSQL(`INSERT INTO reader_perspectives (id, novel_id, type, content, planted_chapter, revealed_chapter) VALUES (1, 1, 'known', 'p1', 1, 0), (2, 2, 'suspense', 'p2', 99, 1)`)
 	execSQL(`INSERT INTO writing_log (id, date, novel_id, chapter_id, word_delta) VALUES (1, '2026-01-01', 1, 2, 100), (2, '2026-01-01', 1, 0, -50)`)
 	execSQL(`INSERT INTO character_relations (id, novel_id, source_character_id, target_character_id, relation_describe, chapter_id, is_current) VALUES (1, 1, 1, 2, '朋友', 3, 1), (2, 1, 1, 2, '旧识', 0, 0)`)
+	execSQL(`INSERT INTO retcon_cases (id, novel_id, origin, issue_id, title, status) VALUES (1, 1, 'pipeline', 'I1', '硬矛盾', 'candidate')`)
 
 	novelDir := filepath.Join(dataDir, "novels", "1")
 	writeLegacyFile(t, novelDir, "chapters/001.md", "chapter one")
@@ -158,6 +161,7 @@ func TestRunMigratesOldestSupportedDatabaseEndToEnd(t *testing.T) {
 		{"writing daily legacy counts", `SELECT COUNT(*) FROM writing_log WHERE date = '2026-01-01' AND novel_id = 1 AND word_delta = 50 AND words_added = 100 AND words_deleted = 50`},
 		{"character relation ID", `SELECT COUNT(*) FROM character_relations WHERE id = 1 AND chapter_id = 3`},
 		{"character relation zero", `SELECT COUNT(*) FROM character_relations WHERE id = 2 AND chapter_id IS NULL`},
+		{"retcon 存量案 kind 回填 fact", `SELECT COUNT(*) FROM retcon_cases WHERE id = 1 AND kind = 'fact'`},
 	} {
 		if n := count(assertion.query); n == 0 {
 			t.Fatalf("迁移数据断言失败: %s", assertion.name)
@@ -231,8 +235,8 @@ func TestRunMigratesOldestSupportedDatabaseEndToEnd(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM writing_log`); n != 1 {
 		t.Fatalf("重复迁移后应只有一条写作日汇总: got %d", n)
 	}
-	if n := count(`SELECT COUNT(*) FROM migrate_state WHERE status = 'done'`); n != 11 {
-		t.Fatalf("状态丢失后应重建全部迁移状态: got %d, want 11", n)
+	if n := count(`SELECT COUNT(*) FROM migrate_state WHERE status = 'done'`); n != 12 {
+		t.Fatalf("状态丢失后应重建全部迁移状态: got %d, want 12", n)
 	}
 }
 

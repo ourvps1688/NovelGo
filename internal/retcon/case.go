@@ -18,6 +18,14 @@ const (
 	OriginAuthor   = "author"
 )
 
+// retcon 案件的类型（Kind 枚举，P2 T4.2，单源禁改）：
+// fact=回改既定事实（缺省，Rollback 走全量 Restore）；
+// style=文风回改（Rollback 走 RestoreStyle，只还原 voice_dimensions，事实层不动）。
+const (
+	KindFact  = "fact"
+	KindStyle = "style"
+)
+
 // RetconCase 是一条 retcon 案件：对某已冻结前卷发起的「回改既定事实」申请，
 // 经作者显式审批后受控执行。状态机见 state.go，写入由 store.go 承担。
 type RetconCase struct {
@@ -27,6 +35,10 @@ type RetconCase struct {
 	VolumeID *int64 `gorm:"column:volume_id;index" json:"volume_id,omitempty"`
 	// Origin 来源枚举（OriginPipeline/OriginAuthor）。
 	Origin string `gorm:"column:origin;not null;default:author" json:"origin"`
+	// Kind 类型枚举（KindFact/KindStyle，P2 T4.2）：决定 Rollback 回滚执行体路由——
+	// fact=全量 Restore（缺省，存量案回填 fact 行为逐字不变）；style=RestoreStyle
+	// 只还原 voice_dimensions。状态机不感知本列（kind 迁移零触碰状态机）。
+	Kind string `gorm:"column:kind;not null;default:fact" json:"kind"`
 	// IssueID 源体检 issue 编号（pipeline 候选，供去重与回溯；author 候选可空）。
 	IssueID string `gorm:"column:issue_id" json:"issue_id,omitempty"`
 	// 三枚举字段（与 issue 契约同名同义，见 pipeline/store.go）。
@@ -67,7 +79,9 @@ type CreateInput struct {
 	NovelID  int64  `json:"novel_id"`
 	VolumeID *int64 `json:"volume_id,omitempty"`
 	// Origin 缺省按 OriginAuthor；流水线沉淀显式传 OriginPipeline。
-	Origin      string `json:"origin,omitempty"`
+	Origin string `json:"origin,omitempty"`
+	// Kind 缺省按 KindFact；文风漂移（V 系）立案显式传 KindStyle。
+	Kind        string `json:"kind,omitempty"`
 	IssueID     string `json:"issue_id,omitempty"`
 	TargetScope string `json:"target_scope,omitempty"`
 	Dimension   string `json:"dimension,omitempty"`

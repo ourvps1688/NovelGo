@@ -1624,6 +1624,11 @@ func (s *Service) persistRetconCandidates(ctx context.Context, novelID int64, it
 			Direction:   it.Direction,
 			Description: it.Desc,
 		}
+		// 文风漂移（V 系）立案带 style（P2 T4.2）：Rollback 只还原 voice 行，
+		// 事实层零触碰；其余（I/D/T 系）缺省 fact，全量回滚路由不变。
+		if isStyleExempt(it.ID) {
+			in.Kind = retcon.KindStyle
+		}
 		if _, err := s.retconGate.CreateCandidate(ctx, in); err != nil {
 			s.logger.Warn("retcon 闸门：候选沉淀失败", "novel_id", novelID, "issue_id", it.ID, "err", err)
 		}

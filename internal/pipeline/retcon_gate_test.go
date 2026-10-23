@@ -71,6 +71,35 @@ func TestHandoffPersistsRetconCandidates(t *testing.T) {
 	require.Len(t, rows3, 3, "终态后同一 issue 应可再立新案")
 }
 
+// TestHandoffPersistsStyleCandidateKind 验证 P2 T4.2 kind 路由：文风漂移（V 系）
+// 立案带 kind=style（Rollback 只还原 voice 行），常规（I 系）立案缺省 fact。
+func TestHandoffPersistsStyleCandidateKind(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	novelID := int64(802)
+	gate := retconGateOn(t, svc, db)
+
+	runID := startS3Run(t, svc, novelID, "")
+	ctxt := GateContext{RetconBacklog: []RewriteItem{
+		{ID: "V1", Level: "P1", Desc: "文风漂移：节奏基线偏离",
+			TargetScope: TargetScopeFrozenVolume, Dimension: "none", Direction: DirectionRetconCandidate},
+		{ID: "I2", Level: "P1", Desc: "硬矛盾：需让已死角色复活",
+			TargetScope: TargetScopeFrozenVolume, Dimension: "character", Direction: DirectionRetconCandidate},
+	}}
+	svc.handoffRetconToUser(ctx, runID, novelID, ctxt)
+
+	rows, err := gate.ListByNovel(ctx, novelID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	byIssue := map[string]retcon.RetconCase{}
+	for _, r := range rows {
+		byIssue[r.IssueID] = r
+	}
+	require.Equal(t, retcon.KindStyle, byIssue["V1"].Kind, "V 系立案应带 style")
+	require.Equal(t, retcon.KindFact, byIssue["I2"].Kind, "I 系立案应缺省 fact")
+}
+
 // TestHandoffRetconCandidateDegradesWithoutGate 验证降级：未注入 retconGate 时
 // 交回照常执行（暂停+广播），不沉淀也不报错。
 func TestHandoffRetconCandidateDegradesWithoutGate(t *testing.T) {

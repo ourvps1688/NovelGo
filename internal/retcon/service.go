@@ -14,6 +14,11 @@ const titleFallbackRunes = 80
 // 未接入时 Rollback 拒绝执行（绝不「名义回滚」骗状态）。
 type RestorerFunc func(ctx context.Context, novelID, snapshotID int64) error
 
+// StyleRestorerFunc 是风格案（KindStyle）的回滚执行体：只还原 voice_dimensions
+// 到回滚点快照（P2 T4.2 接入 snapshot.RestoreStyle），事实层零触碰。与 RestorerFunc
+// 同签名但语义独立，由 Rollback 按 Kind 路由（存量 fact 案仍走全量 Restorer）。
+type StyleRestorerFunc func(ctx context.Context, novelID, snapshotID int64) error
+
 // CommitSnapshotFunc 把当前台账固化为版本化快照并返回其 id（回滚点/留痕固化用，
 // 3.2 接入 snapshot.Commit）。
 type CommitSnapshotFunc func(ctx context.Context, novelID, volumeID int64) (int64, error)
@@ -27,6 +32,7 @@ type DiffSummaryFunc func(ctx context.Context, snapshotID int64) (string, error)
 type Service struct {
 	store          *Store
 	restorer       RestorerFunc
+	styleRestorer  StyleRestorerFunc
 	commitSnapshot CommitSnapshotFunc
 	diffSummary    DiffSummaryFunc
 }
@@ -38,6 +44,10 @@ func NewService(store *Store) *Service {
 
 // SetRestorer 注入回滚执行体（3.2 接入快照 Restore）。
 func (s *Service) SetRestorer(r RestorerFunc) { s.restorer = r }
+
+// SetStyleRestorer 注入风格案回滚执行体（P2 T4.2 接入 snapshot.RestoreStyle）。
+// 未接入时风格案 Rollback 拒绝执行（绝不「名义回滚」骗状态）。
+func (s *Service) SetStyleRestorer(r StyleRestorerFunc) { s.styleRestorer = r }
 
 // SetCommitSnapshot 注入回滚点/留痕快照固化执行体（3.2 接入 snapshot.Commit）。
 func (s *Service) SetCommitSnapshot(fn CommitSnapshotFunc) { s.commitSnapshot = fn }
@@ -67,6 +77,14 @@ func (s *Service) CreateCandidate(ctx context.Context, in CreateInput) (*RetconC
 	if origin == "" {
 		origin = OriginAuthor
 	}
+	// Kind 缺省 fact（存量案行为逐字不变）；只接受枚举单源两值，非法值拒绝（宁缺勿错）。
+	kind := in.Kind
+	if kind == "" {
+		kind = KindFact
+	}
+	if kind != KindFact && kind != KindStyle {
+		return nil, errors.New("retcon: kind 只支持 " + KindFact + "/" + KindStyle)
+	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		title = truncateRunes(strings.TrimSpace(in.Description), titleFallbackRunes)
@@ -94,6 +112,7 @@ func (s *Service) CreateCandidate(ctx context.Context, in CreateInput) (*RetconC
 		NovelID:     in.NovelID,
 		VolumeID:    in.VolumeID,
 		Origin:      origin,
+		Kind:        kind,
 		IssueID:     in.IssueID,
 		TargetScope: in.TargetScope,
 		Dimension:   in.Dimension,
@@ -181,19 +200,28 @@ func (s *Service) Record(ctx context.Context, id int64, actor, diffSummary strin
 
 // Rollback 回滚（recorded→rolled_back，终态）：先经回滚执行体把台账还原到回滚点快照，
 // 还原成功后才落状态（绝不「名义回滚」骗状态）。执行体未接入（3.2 前）拒绝执行。
+// 执行体按 Kind 路由（P2 T4.2）：style 案走 StyleRestorer（只还原 voice 行），
+// fact/存量空 kind 案走全量 Restorer（行为逐字不变）。
 // 回滚成功后（落状态前）再固化一份快照，让「最新快照=既定事实注入源」跟上回滚后的 canon。
 func (s *Service) Rollback(ctx context.Context, id int64, actor, note string) (*RetconCase, error) {
-	if s.restorer == nil {
-		return nil, ErrNoRestorer
-	}
 	cur, err := s.store.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	// 两个钩子虽同签名但具名类型不同，经底层类型变量路由（fact/存量空 kind→全量）。
+	var restore func(ctx context.Context, novelID, snapshotID int64) error
+	if cur.Kind == KindStyle {
+		restore = s.styleRestorer
+	} else {
+		restore = s.restorer
+	}
+	if restore == nil {
+		return nil, ErrNoRestorer
+	}
 	if cur.RollbackSnapshotID == nil {
 		return nil, ErrRollbackPointRequired
 	}
-	if err := s.restorer(ctx, cur.NovelID, *cur.RollbackSnapshotID); err != nil {
+	if err := restore(ctx, cur.NovelID, *cur.RollbackSnapshotID); err != nil {
 		return nil, err
 	}
 	// 还原已生效（Restore 幂等，失败重试安全）；固化失败则不落状态，避免状态与事实脱节。
