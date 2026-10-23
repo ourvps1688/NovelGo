@@ -36,7 +36,7 @@
 - 交互阶段（S0/S1/S2 生成/S3）resume 后不自动派发，后端广播「由界面交互推进」note，向导在「当前阶段」下展示。
 - 阶段条组件（Rail/Bar）收到 finished/aborted 的 stage 事件即隐藏；GetByNovel 取最新非终态 run，注意清理僵尸 run 避免旧 run 顶替。
 
-## S5 修复有界化（2026-10-21，待 push）
+## S5 修复有界化（2026-10-21）
 - 杜绝无限重试三道闸：`GateContext.FixBatchFailures` 同 run 内批次连续失败计数，达 `fixBatchFailureCap=3` 转 `StatusAwaitingGate`（Options=[continue,abort]）交用户裁决，不再原样重派；派发前 `fixProviderIdleTrip=10`（近 10 分钟 idle 超时 ≥10）供应商熔断不派发；批次成功清零计数。
 - 体检端强制 issue 原子化（>5 台账或 >2 章必须拆分，禁 meta-issue）；修复端 `fixPrompt`/技能加「超限主动 skip」护栏。
 - 前端：fix_done(ok:false) 把残留 fixing→pending（usePipeline.ts）+ FixProgressView 视图层兜底（ok===false||!running 时 fixing 按 pending 展示）。
@@ -81,3 +81,9 @@
 - PipelineWizard 底部常驻三面板：VolumeManagePanel（冻结/解冻 SetVolumeFrozen+AuditSeriesBible 前置自检）、RetconPanel+RetconCaseDialog（按状态机自适应：裁决理由必填/固化回滚点/DeltaView diff/留痕收口/回滚危险确认，actor="author"）、PatrolReportPanel（patrol_report 只读+control("patrol")）。
 - 前向适配提示=IssueTags.tsx 共享标签（direction/scope/dimension），挂全部 issue 行；usePipeline 加 consistency_patrol 订阅+patrolTick，ControlCmd+"patrol"。
 - 坑：巡检失败不广播事件（降级设计勿改），pending 靠按钮可重试兜底；set-state-in-effect 告警用渲染期重置（prev 值比较）而非 effect；`cmd | tail` 掩盖退出码用 `${PIPESTATUS[0]}`。
+
+## P0 上下文装配器（2026-10-23 全部完成，WBS=p0-context-assembler-implementation-wbs.md）
+- 统一上下文总线 `internal/contextasm`：`ContextBlocks{Facts,Voice,Intent}` 尾接提示词末尾，顺序 Facts→Voice→Intent；块文案单源 blocks.go。purpose 矩阵：rewrite=三块全注 / audit·fix·patrol=Facts+Voice / chat=仅 Voice。注入纪律四条（有则注入/无则降级逐字一致[最高验收]/预算截断 Voice·Intent 8KB/坏数据宁缺勿错）。`PersonaMarker` 禁改（chat 去重前缀）。
+- provider 口径：只返回正文，块头/引导语/尾注由装配器渲染。Intent 定源=book-pitch 落库产物（novels+preference_items 五类 category，同类取最新）→当前卷纲正文→空；voice=persona 心智文本（provider 保证含诚实边界声明）。
+- golden 基线范式：改造前输出固化 `internal/pipeline/testdata/p0_baseline_*.txt` 逐字比对（empty/facts 两档×五构造器），降级零变化机械可验。A/B 真实双臂（rewrite_voice_ab_e2e_test.go）证明 voice 开文风锚定生效、关则旧行为。
+- 坑：单发 E2E 模拟 S3 重写不能拿 chapter-rewrite 技能当 system prompt（工具循环导向，模型输出工具调用文本）；模型选择避开 flash/lite 优先 reasoner→chat→pro；gofmt 需 LF 归一化后查（CRLF 全量误报）；真实 LLM E2E 无 key Skip（NOVELGO_EVAL_KEY/dev 配置），高负载偶发瞬态失败复跑即可。
