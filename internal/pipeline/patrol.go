@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+
+	"github.com/novelgo/novelgo/internal/contextasm"
 )
 
 // ── 全书一致性巡检（WBS 3.3「张力报告」）────────────────────────────────
@@ -44,7 +46,7 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	bg := s.appCtx
 	out, err := s.skillRunner(bg, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
-		Prompt:    patrolPrompt(novelID, s.establishedFactsText(bg, novelID)),
+		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol).Facts),
 		MaxTurns:  12,
 		SessionID: "pipeline:patrol:" + strconv.FormatInt(novelID, 10),
 	})

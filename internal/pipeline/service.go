@@ -65,6 +65,13 @@ type Service struct {
 	// 注入 S4/S5/S6/章节重写提示词作为校验与前向修复依据。由 app 层注入
 	// internal/snapshot.Service.EstablishedFactsText；nil 或出错时降级为不注入（旧行为）。
 	bibleProvider func(ctx context.Context, novelID int64) (string, error)
+	// voiceProvider 返回创作心智正文（PersonaHonestyNote 由 provider 端拼进正文，P0 WBS §0.7），
+	// 注入重写/体检/修复/巡检提示词作为文风锚定块。由 app 层用
+	// agentcfg.BuildPersonaSystemText 实现；nil 或出错时降级为不注入。
+	voiceProvider func(ctx context.Context, novelID int64) (string, error)
+	// intentProvider 返回创作意图正文（卖点定位），rewrite 路径注入意图锚定块（P0 WBS §4）。
+	// T4.1 定源后由 app 层注入；nil 或出错时降级为不注入。
+	intentProvider func(ctx context.Context, novelID int64) (string, error)
 	// retconGate 是 retcon 审批闸门（WBS 3.1，internal/retcon）：S5 交回的写保护/retcon
 	// 候选沉淀为持久化候选案（状态机起点），供作者显式审批后受控回改冻结卷。
 	// 未注入时跳过沉淀（降级为只暂停交回），不影响安全出口流转。
@@ -148,24 +155,35 @@ func (s *Service) SetBibleProvider(fn func(ctx context.Context, novelID int64) (
 	s.bibleProvider = fn
 }
 
+// SetVoiceProvider 注入「创作心智」文本提供者（由 app 层用
+// agentcfg.BuildPersonaSystemText 实现；persona 未配置/解析失败返回空串即降级）。
+// 未注入/出错时降级为不注入。
+func (s *Service) SetVoiceProvider(fn func(ctx context.Context, novelID int64) (string, error)) {
+	s.voiceProvider = fn
+}
+
+// SetIntentProvider 注入「创作意图」文本提供者（T4.1 定源后由 app 层接入）。
+// 未注入/出错时降级为不注入。
+func (s *Service) SetIntentProvider(fn func(ctx context.Context, novelID int64) (string, error)) {
+	s.intentProvider = fn
+}
+
 // SetRetconGate 注入 retcon 审批闸门（WBS 3.1，由 app 层构造 internal/retcon.Service）。
 // 未注入时 S5 交回候选只暂停不沉淀（降级），闸门上线后由 app 统一注入。
 func (s *Service) SetRetconGate(gate *retcon.Service) {
 	s.retconGate = gate
 }
 
-// establishedFactsText 取「已冻结卷既定事实」注入块；未注入 / 无快照 / 出错均返回空串，
-// 提示词与未接快照时逐字一致（向后兼容）。
-func (s *Service) establishedFactsText(ctx context.Context, novelID int64) string {
-	if s.bibleProvider == nil {
-		return ""
-	}
-	text, err := s.bibleProvider(ctx, novelID)
+// buildBlocks 按 purpose×块矩阵（P0 WBS §0.5）装配三块上下文（Facts/Voice/Intent）。
+// provider 未注入 / 返回空 / 出错 → 对应块降级为空，提示词与未接该块时逐字一致（向后兼容）；
+// 聚合错误只记日志不阻断。Facts 语义与旧 establishedFactsText 完全同构。
+func (s *Service) buildBlocks(ctx context.Context, novelID int64, purpose contextasm.Purpose) contextasm.ContextBlocks {
+	blocks, err := contextasm.NewAssembler(s.bibleProvider, s.voiceProvider, s.intentProvider).
+		Build(ctx, novelID, purpose)
 	if err != nil {
-		s.logger.Warn("既定事实注入：读取冻结快照失败，降级为不注入", "novel_id", novelID, "err", err)
-		return ""
+		s.logger.Warn("上下文装配：部分块降级为不注入", "novel_id", novelID, "err", err)
 	}
-	return text
+	return blocks
 }
 
 // StartPipeline 启动一次新流水线，并广播阶段事件。
@@ -811,7 +829,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
 	}
 	auditSkill := "signability-audit"
-	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID), s.establishedFactsText(ctx, novelID))
+	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID),
+		s.buildBlocks(ctx, novelID, contextasm.PurposeAudit).Facts)
 	if ctxt.AuditKind == "blueprint" {
 		auditSkill = "blueprint-audit"
 		auditPrompt = blueprintAuditPrompt(novelID)
@@ -1249,7 +1268,8 @@ func (s *Service) executeFix(runID string, novelID int64) {
 
 		// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
 		fixSkill := "signability-fix"
-		fixPromptText := fixPrompt(novelID, batch, auditData.Summary, s.establishedFactsText(ctx, novelID))
+		fixPromptText := fixPrompt(novelID, batch, auditData.Summary,
+			s.buildBlocks(ctx, novelID, contextasm.PurposeFix).Facts)
 		if ctxt.AuditKind == "blueprint" {
 			fixSkill = "blueprint-fix"
 			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
@@ -1593,7 +1613,8 @@ func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, ite
 
 // executeChapterRewrite 对单章派发章节重写 agent（chapter-rewrite 技能），按 body issue 整章重写。
 func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter) error {
-	prompt := chapterRewritePrompt(novelID, item, ch, s.establishedFactsText(ctx, novelID))
+	prompt := chapterRewritePrompt(novelID, item, ch,
+		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite).Facts)
 	_, err := s.skillRunner(ctx, "chapter-rewrite", SkillInput{
 		NovelID:   novelID,
 		Prompt:    prompt,
@@ -1704,7 +1725,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 
 	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
-		Prompt:    finalAuditPrompt(novelID, s.establishedFactsText(ctx, novelID)),
+		Prompt:    finalAuditPrompt(novelID, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit).Facts),
 		MaxTurns:  16,
 		SessionID: "pipeline:" + runID + ":final",
 	})
