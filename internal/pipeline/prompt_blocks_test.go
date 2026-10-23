@@ -12,6 +12,7 @@ package pipeline
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/novelgo/novelgo/internal/chapter"
@@ -26,7 +27,9 @@ func readP0Baseline(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "p0_baseline_"+name+".txt"))
 	require.NoError(t, err, "缺少 golden 基线 %s（T2.2 改造前输出）", name)
-	return string(b)
+	// 归一化 CRLF→LF：Windows checkout（autocrlf）可能把基线检出为 CRLF，
+	// 而构造器输出恒为 LF；逐字比对前统一换行（.gitattributes 另有 eol=lf 双保险）。
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 // p0PromptCase 一个提示词构造器的固定输入（与基线抓取时一致）。
