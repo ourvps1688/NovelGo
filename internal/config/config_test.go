@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/novelgo/novelgo/internal/testsupport"
@@ -9,8 +10,11 @@ import (
 func TestExpandTilde_WithHome(t *testing.T) {
 	home := testsupport.RequireEnv(t, "HOME")
 	result := expandTilde("~/data")
-	if result != home+"/data" {
-		t.Errorf("expected %s, got %s", home+"/data", result)
+	// 期望值用 filepath.Join（expandTilde 内部经 filepath.Clean/Join），
+	// Windows 反斜杠分隔符下硬拼 "/" 会误报。
+	want := filepath.Join(home, "data")
+	if result != want {
+		t.Errorf("expected %s, got %s", want, result)
 	}
 }
 
