@@ -15,6 +15,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/agent"
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/contextasm"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/skill"
@@ -2239,15 +2240,13 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 }
 
 // bibleBlock 把「已冻结卷既定事实」文本拼为提示词尾部注入块（WBS 2.3）；空串返回空，
-// 提示词与未接快照时逐字一致。文本块内容由 internal/snapshot.BibleText 渲染。
+// 提示词与未接快照时逐字一致。块文案单源在 internal/contextasm（P0 WBS §6），
+// 本函数仅保留 "\n\n" 前缀并薄委托，输出与旧实现逐字一致。
 func bibleBlock(bibleText string) string {
 	if bibleText == "" {
 		return ""
 	}
-	return "\n\n【已冻结卷既定事实（系列圣经快照）】\n" + bibleText + "\n" +
-		"以上是已冻结（定稿）卷在最近一次冻结时固化的系列圣经，是本次校验/修复的**既定事实依据**：\n" +
-		"与之冲突的一律改本卷及后续来适配它（前向修复），**不得**为消解冲突回改已冻结卷；" +
-		"与之不冲突的部分以正文与台账工具读到的现状为准。"
+	return "\n\n" + contextasm.RenderFacts(bibleText)
 }
 
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
