@@ -3,9 +3,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createElement } from "react";
 import { render, screen, act } from "@testing-library/react";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, relative, dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createInstance, type i18n as I18n } from "i18next";
 import zhCN from "@/i18n/locales/zh-CN.json";
 import en from "@/i18n/locales/en.json";
@@ -76,11 +75,21 @@ function leaves(obj: object, prefix = ""): Map<string, string> {
 }
 
 // ── grep 断言辅助：src 源码剥离注释后查散装组词（禁变体） ──
-// 定位 src 目录：优先 import.meta.dirname（vitest Node 环境可用），fileURL 兜底
-const SELF_DIR =
-  (import.meta as { dirname?: string }).dirname ??
-  dirname(fileURLToPath(import.meta.url));
-const SRC_DIR = resolve(SELF_DIR, "..");
+// 定位 frontend/src：vitest 下 import.meta 形态不稳，按候选逐一探测（防真空扫描）
+function findSrcDir(): string {
+  const selfDir = (import.meta as { dirname?: string }).dirname ?? ".";
+  const candidates = [
+    resolve(process.cwd(), "src"),
+    resolve(process.cwd(), "frontend/src"),
+    resolve(dirname(selfDir), ".."),
+    resolve(dirname(selfDir), "..", ".."),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(resolve(dir, "components/chat/ChatPanel.tsx"))) return dir;
+  }
+  throw new Error(`src dir not found in candidates: ${candidates.join(", ")}`);
+}
+const SRC_DIR = findSrcDir();
 // 与 i18n-check.mjs 同一口径：业务文案数据文件非 UI 文案，不入叙案断言
 const ALLOWLIST = new Set([
   "genreTemplates.ts",
@@ -256,6 +265,12 @@ describe("五落点渲染同一组词（WBS T2.1 验收①）", () => {
 
 describe("grep 断言：UI 代码无散装组词变体（WBS T2.1 验收②）", () => {
   it("src 非注释代码不含「上限/下限」及英文组词散装句子", () => {
+    const files = collectSourceFiles(SRC_DIR);
+    // 覆盖度防真空扫描：已知关键文件必须在扫描清单内
+    const rels = files.map((f) => relative(SRC_DIR, f).replaceAll("\\", "/"));
+    expect(rels).toContain("components/chat/ChatPanel.tsx");
+    expect(rels).toContain("lib/factory.ts");
+    expect(rels.length).toBeGreaterThan(50);
     expect(scanForGroupWordViolations()).toEqual([]);
   });
 });

@@ -378,6 +378,10 @@ export function GetVersion() {
   return window['go']['app']['App']['GetVersion']();
 }
 
+export function GetVoiceLedger(arg1) {
+  return window['go']['app']['App']['GetVoiceLedger'](arg1);
+}
+
 export function GetVolumes(arg1) {
   return window['go']['app']['App']['GetVolumes'](arg1);
 }
@@ -640,4 +644,8 @@ export function UpdateTimelineEntry(arg1, arg2, arg3) {
 
 export function UpdateVolume(arg1, arg2, arg3) {
   return window['go']['app']['App']['UpdateVolume'](arg1, arg2, arg3);
+}
+
+export function UpsertVoiceDimension(arg1) {
+  return window['go']['app']['App']['UpsertVoiceDimension'](arg1);
 }

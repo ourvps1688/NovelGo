@@ -2101,6 +2101,8 @@
     "lower": "signability floor"
   },
   "emptyHint": {
-    "voiceExtraction": "Extract mindset from reference books to preserve your style and raise the $t(narrative.upper)"
+    "voiceExtraction": "Extract mindset from reference books to preserve your style and raise the $t(narrative.upper)",
+    "goExtract": "Extract now",
+    "dismiss": "Don't show again this session"
   }
 }

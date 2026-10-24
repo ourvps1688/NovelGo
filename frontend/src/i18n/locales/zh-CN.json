@@ -2062,6 +2062,8 @@
     "lower": "签约下限"
   },
   "emptyHint": {
-    "voiceExtraction": "可提取参考书心智以保持文风，抬高$t(narrative.upper)"
+    "voiceExtraction": "可提取参考书心智以保持文风，抬高$t(narrative.upper)",
+    "goExtract": "去提取",
+    "dismiss": "本次不再提示"
   }
 }

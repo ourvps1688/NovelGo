@@ -22,6 +22,7 @@ import {
 } from "./types";
 import ChatInput from "./ChatInput";
 import ChatControls from "./ChatControls";
+import VoiceExtractionHint from "./VoiceExtractionHint";
 import type { PersonaSelection } from "./usePersonaSetting";
 import DeleteSessionDialog from "./DeleteSessionDialog";
 import MessageBubble from "./MessageBubble";
@@ -1592,6 +1593,9 @@ export default function ChatPanel({
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* T2.2 挂点①：创作自由区重写动作处（写/重写请求都从这里发出）——非阻断漏斗 hint */}
+      <VoiceExtractionHint novelID={novelId} />
 
       <ChatInput
         novelId={novelId}

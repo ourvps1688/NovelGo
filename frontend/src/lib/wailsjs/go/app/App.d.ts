@@ -29,6 +29,7 @@ import {writingconfig} from '../models';
 import {imp} from '../models';
 import {skill} from '../models';
 import {search} from '../models';
+import {voice} from '../models';
 
 export function ApproveRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
 
@@ -218,6 +219,8 @@ export function GetTimelineEntries(arg1:number):Promise<Array<timeline.TimelineE
 
 export function GetVersion():Promise<string>;
 
+export function GetVoiceLedger(arg1:number):Promise<Array<app.VoiceDimensionView>>;
+
 export function GetVolumes(arg1:number):Promise<Array<volume.Volume>>;
 
 export function GetWritingActivity(arg1:number):Promise<Array<writing.DailyActivity>>;
@@ -349,3 +352,5 @@ export function UpdateStyleSample(arg1:app.UpdateStyleSampleInput):Promise<style
 export function UpdateTimelineEntry(arg1:number,arg2:number,arg3:app.UpdateTimelineEntryInput):Promise<void>;
 
 export function UpdateVolume(arg1:number,arg2:number,arg3:string):Promise<void>;
+
+export function UpsertVoiceDimension(arg1:app.UpsertVoiceDimensionInput):Promise<voice.Entry>;

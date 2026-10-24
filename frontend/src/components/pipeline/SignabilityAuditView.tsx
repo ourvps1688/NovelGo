@@ -26,6 +26,7 @@ import type {
 import PipelineGateCard from "./PipelineGateCard";
 import StageActivityPanel from "./StageActivityPanel";
 import { IssueScopeTags } from "./IssueTags";
+import VoiceExtractionHint from "@/components/chat/VoiceExtractionHint";
 
 // 体检结果类型（AuditIssue / AuditData）的契约单源在 @/types/pipeline（对齐后端
 // internal/pipeline/contract.go），此处不再手写副本。
@@ -495,6 +496,9 @@ function FixProgressView({
                       : t("pipeline.fixProgress.done")}
         </span>
       </div>
+
+      {/* T2.2 挂点②：rewrite_handoff 提示处——未提取心智的书在重写交接口提示提取（非阻断） */}
+      {fixProgress?.rewriteHandoff ? <VoiceExtractionHint /> : null}
 
       {fixProgress?.ok === false && fixProgress?.error ? (
         <p className="rounded border border-danger bg-danger/10 px-3 py-2 text-danger-foreground text-sm">
