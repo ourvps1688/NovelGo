@@ -123,7 +123,7 @@
     "factory": {
       "absorb": {
         "title": "Absorb Factory",
-        "feeds": "Feeds the style ceiling"
+        "feeds": "Feeds the $t(narrative.upper)"
       },
       "create": {
         "title": "Create Factory",
@@ -131,7 +131,7 @@
       },
       "quality": {
         "title": "Quality Factory",
-        "feeds": "Feeds the signability floor"
+        "feeds": "Feeds the $t(narrative.lower)"
       },
       "base": {
         "title": "Infrastructure",
@@ -2094,5 +2094,13 @@
         "patrol": "Patrol: tension report"
       }
     }
+  },
+  "narrative": {
+    "tagline": "The pipeline guarantees the signability floor; mindset extraction raises the style ceiling",
+    "upper": "style ceiling",
+    "lower": "signability floor"
+  },
+  "emptyHint": {
+    "voiceExtraction": "Extract mindset from reference books to preserve your style and raise the $t(narrative.upper)"
   }
 }

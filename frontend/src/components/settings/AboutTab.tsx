@@ -92,6 +92,14 @@ export default function AboutTab() {
         {t("settings.aboutIntro")}
       </p>
 
+      {/* 一句话定位（T2.1 落点⑤）：单源 narrative.tagline */}
+      <p
+        data-testid="narrative-tagline"
+        className="mt-2 text-xs font-medium leading-5 text-primary/80"
+      >
+        {t("narrative.tagline")}
+      </p>
+
       {/* 核心特性 */}
       <h4 className="mt-6 flex items-center gap-1.5 text-xs font-medium text-foreground">
         <Info className="w-3.5 h-3.5 text-muted-foreground" />

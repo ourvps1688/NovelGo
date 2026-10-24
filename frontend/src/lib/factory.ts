@@ -93,7 +93,7 @@ export function factoryTitleKey(factory: FactoryId): string {
   return `shell.factory.${factory}.title`;
 }
 
-/** 「喂给谁」叙案短语 i18n key（T2.1 叙案统一挂点）。 */
+/** 「喂给谁」叙案短语 i18n key（T2.1 叙案统一：组词经 $t(narrative.*) 嵌套引单源，禁变体）。 */
 export function factoryFeedsKey(factory: FactoryId): string {
   return `shell.factory.${factory}.feeds`;
 }

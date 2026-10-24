@@ -125,8 +125,16 @@ export default function InitView({ error: startupError }: Props) {
           {t("init.welcome")}
         </h1>
 
-        <p className="text-base text-muted-foreground mb-8">
+        <p className="text-base text-muted-foreground mb-2">
           {t("init.subtitle")}
+        </p>
+
+        {/* 叙案（T2.1 落点① onboarding）：北极星一句话定位，单源 narrative.tagline */}
+        <p
+          data-testid="narrative-tagline"
+          className="text-sm text-muted-foreground/80 mb-8"
+        >
+          {t("narrative.tagline")}
         </p>
 
         {/* 主题选择 */}

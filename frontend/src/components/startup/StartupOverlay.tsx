@@ -34,6 +34,13 @@ export default function StartupOverlay({
         <p className="text-sm text-muted-foreground">
           {failed ? t("startup.failedMessage") : t("startup.preparingMessage")}
         </p>
+        {/* 叙案（T2.1 落点① onboarding）：单源 narrative.tagline */}
+        <p
+          data-testid="narrative-tagline"
+          className="mt-3 text-xs text-muted-foreground/80"
+        >
+          {t("narrative.tagline")}
+        </p>
         {failed && error && (
           <p className="mt-4 max-h-32 overflow-auto rounded-md bg-destructive/10 px-3 py-2 text-left text-sm text-destructive">
             {error}

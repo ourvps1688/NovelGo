@@ -10,7 +10,11 @@ export default function JourneyAbsorb() {
       data-testid="journey-absorb"
       className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background"
     >
-      <JourneyHeader panelId="journey-absorb" titleKey="journey.absorb.title" />
+      <JourneyHeader
+        panelId="journey-absorb"
+        titleKey="journey.absorb.title"
+        subtitleKey="narrative.tagline"
+      />
       <div className="grid grid-cols-1 gap-3 px-6 pb-8 pt-2 sm:grid-cols-2 xl:grid-cols-3">
         <JourneyCard titleKey="journey.absorb.stages.import" />
         <JourneyCard titleKey="journey.absorb.stages.extract" />

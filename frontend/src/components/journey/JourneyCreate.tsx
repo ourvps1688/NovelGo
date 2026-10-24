@@ -13,7 +13,11 @@ export default function JourneyCreate() {
       data-testid="journey-create"
       className="flex-1 min-w-0 overflow-y-auto overscroll-contain bg-background"
     >
-      <JourneyHeader panelId="journey-create" titleKey="journey.create.title" />
+      <JourneyHeader
+        panelId="journey-create"
+        titleKey="journey.create.title"
+        subtitleKey="narrative.tagline"
+      />
       <div className="grid grid-cols-1 gap-3 px-6 pb-8 pt-2 sm:grid-cols-2 xl:grid-cols-3">
         {/* 主卡：一跳回原工作面（T1.2 验收②，行为勿删） */}
         <JourneyCard

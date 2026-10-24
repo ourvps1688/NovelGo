@@ -119,7 +119,7 @@
     "factory": {
       "absorb": {
         "title": "吸收工厂",
-        "feeds": "喂给文风上限"
+        "feeds": "喂给$t(narrative.upper)"
       },
       "create": {
         "title": "创作工厂",
@@ -127,7 +127,7 @@
       },
       "quality": {
         "title": "质检工厂",
-        "feeds": "喂给签约下限"
+        "feeds": "喂给$t(narrative.lower)"
       },
       "base": {
         "title": "基础设施",
@@ -2055,5 +2055,13 @@
         "patrol": "巡检：张力报告"
       }
     }
+  },
+  "narrative": {
+    "tagline": "流水线保证签约下限，心智提取抬高文风上限",
+    "upper": "文风上限",
+    "lower": "签约下限"
+  },
+  "emptyHint": {
+    "voiceExtraction": "可提取参考书心智以保持文风，抬高$t(narrative.upper)"
   }
 }
