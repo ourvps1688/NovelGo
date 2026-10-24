@@ -2093,7 +2093,8 @@
         "freeze": "Volume freeze: fact + style snapshots",
         "patrol": "Patrol: tension report"
       },
-      "writingConfig": "Writing score config"
+      "writingConfig": "Writing score config",
+      "panelNav": "Panel quick links"
     }
   },
   "narrative": {
