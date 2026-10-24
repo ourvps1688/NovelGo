@@ -45,5 +45,8 @@
 - 埋点映射备忘：重写=闸门 modify（聊天写/重写不可区分不计入）、体检=align_full/audit_now/finish_book、retcon 立案=ApproveRetconCase（立案在后端 handoff 出口）。降级逐字一致是最高验收；TestRewriteVoiceABE2E 为真实 LLM E2E 瞬态（复跑绿收口）。
 
 ## 流水线重构提案 + 章纲任务卡（2026-10-25）
-- 提案 docs/future/pipeline-core-redesign-proposal.md（未排期部分：R0 观测→R1 修复工单化→R2 章节 CI→R2b 全书补强→R3 任务队列→R4 双编排合一）；核心诊断 F1 全书批审 O(n²)/F2 修复乘法/F3 发现滞后/F4 状态袋+裸 goroutine/F5 LLM 文本驱动控制流/F6 双编排器。
+- 提案 docs/future/pipeline-core-redesign-proposal.md（R1 修复工单化→R2 章节 CI→R2b 全书补强→R3 任务队列→R4 双编排合一 未排期）；核心诊断 F1 全书批审 O(n²)/F2 修复乘法/F3 发现滞后/F4 状态袋+裸 goroutine/F5 LLM 文本驱动控制流/F6 双编排器。
 - **已落地：章纲任务卡四件套**（钩子/爽点/人设时刻/推进）= timeline.ChapterTaskCard 表（一章一卡 unique，Validate 四件套 TrimSpace 非空缺一拒收）+ MCP `upsert_chapter_task_card`/`get_chapter_task_card` + get_timeline 注入（缺失立卡提示只推不拦）+ identity 立卡前置/写后对卡核验 + review/signability/fix 白名单（blueprint 不接）。规划数据不进 snapshot。AutoMigrate 加表 done=12 不动。
+- **已落地：R0 观测**（提案例行第一步）= activity `exec_run_stats`（耗时/turn/状态/归属 run，纯本地零内容）+ dispatchSkill 单点埋测（观测失败零影响）+ SummarizeExecStats/GetPipelineExecStats 聚合取数。
+- **已落地：任务卡补充闭环** = ①大纲审批×任务卡联动核验（outlineTaskCardLink 三态：有卡=审批载荷带四件套+审批卡渲染+对卡核验提示 / 缺卡=立卡提示 / 整本零卡=零打扰；只报告不拦截）②ChapterID 回填钩子（chapter.SetCreatedHook 进程级单例→timeline.BindChapterID 只填未绑定、同事务原子、创建回滚随滚；Place 移动不触发）。
+- 勿回退坑：LF 归一化只对本次改动文件做（全树 find+sed 会误伤 50+ 无关文件；差集 checkout 还原）。
