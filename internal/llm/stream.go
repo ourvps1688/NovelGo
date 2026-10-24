@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -203,35 +202,14 @@ func (c *Client) ChatStream(
 
 		resp, err := c.http.Do(req)
 		if err != nil {
-			// 判断是否首字节超时（ResponseHeaderTimeout 触发）
-			isTimeout := false
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Timeout() {
-				isTimeout = true
-			}
-
-			msg := "网络连接失败，请检查网络后重试"
-			retryable := true
-			if isTimeout {
-				msg = "服务器响应超时（首字节超过 10m），请稍后重试"
+			// 网络错误分类走重试矩阵单源（retry_matrix.go），此处只负责日志。
+			if isTimeoutErr(err) {
 				c.logger.Warn("llm first byte timeout", "err", err, "url", req.URL.String())
 			} else {
-				// 非超时网络错误：区分永久性（DNS NXDOMAIN / 连接拒绝）与瞬时性（EOF / reset）
-				var dnsErr *net.DNSError
-				var opErr *net.OpError
-				if (errors.As(err, &dnsErr) && dnsErr.IsNotFound) ||
-					(errors.As(err, &opErr) && errors.Is(opErr.Err, syscall.ECONNREFUSED)) {
-					retryable = false
-					msg = "网络连接被拒绝或域名无法解析，请检查网络配置"
-				}
-				c.logger.Warn("llm network error", "err", err, "url", req.URL.String(), "retryable", retryable)
+				c.logger.Warn("llm network error", "err", err, "url", req.URL.String())
 			}
 
-			ch <- StreamEvent{Type: EventError, Error: &APIError{
-				StatusCode: 0,
-				Message:    msg,
-				Retryable:  retryable,
-			}}
+			ch <- StreamEvent{Type: EventError, Error: apiErrorFromNetErr(err)}
 			return
 		}
 		defer resp.Body.Close()
@@ -248,19 +226,9 @@ func (c *Client) ChatStream(
 				"status", resp.StatusCode,
 				"body", bodyStr,
 				"url", req.URL.String())
-			msg := parseDefaultError(errBody).Error()
-			if p.ParseError != nil {
-				msg = p.ParseError(errBody).Error()
-			}
-			// 解析 Retry-After header（HTTP 429/503 等场景）
-			// 支持两种格式：秒数（"120"）或 HTTP-date（"Wed, 21 Oct 2026 07:28:00 GMT"）
-			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-			ch <- StreamEvent{Type: EventError, Error: &APIError{
-				StatusCode: resp.StatusCode,
-				Message:    msg,
-				Retryable:  statusRetryable(resp.StatusCode),
-				RetryAfter: retryAfter,
-			}}
+			// 错误分类（Retryable/Retry-After/消息解析）走重试矩阵单源（retry_matrix.go）。
+			ch <- StreamEvent{Type: EventError, Error: apiErrorFromHTTP(
+				resp.StatusCode, errBody, p.ParseError, resp.Header.Get("Retry-After"))}
 			return
 		}
 

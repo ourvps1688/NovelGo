@@ -57,7 +57,8 @@ func (c *Client) callToolNonStream(
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, &APIError{StatusCode: 0, Message: "网络连接失败，请检查网络后重试", Retryable: true}
+		// 网络错误分类走重试矩阵单源（retry_matrix.go）：永久性（DNS/连接拒绝）判不可重试。
+		return nil, apiErrorFromNetErr(err)
 	}
 	defer resp.Body.Close()
 
@@ -67,11 +68,8 @@ func (c *Client) callToolNonStream(
 	}
 
 	if resp.StatusCode >= 400 {
-		msg := parseDefaultError(respBody).Error()
-		if p.ParseError != nil {
-			msg = p.ParseError(respBody).Error()
-		}
-		return nil, &APIError{StatusCode: resp.StatusCode, Message: msg, Retryable: statusRetryable(resp.StatusCode)}
+		// 错误分类（Retryable/Retry-After/消息解析）走重试矩阵单源（retry_matrix.go）。
+		return nil, apiErrorFromHTTP(resp.StatusCode, respBody, p.ParseError, resp.Header.Get("Retry-After"))
 	}
 
 	var result struct {

@@ -63,7 +63,9 @@ func (c *Client) GenerateText(
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		// 网络错误分类走重试矩阵单源（retry_matrix.go）：裸 error 升级为 *APIError，
+		// agent 层才能按 Retryable 判定走既有退避重试（永久性网络错误仍判不可重试）。
+		return "", apiErrorFromNetErr(err)
 	}
 	defer resp.Body.Close()
 
@@ -78,11 +80,8 @@ func (c *Client) GenerateText(
 	}
 
 	if resp.StatusCode >= 400 {
-		msg := parseDefaultError(respBody).Error()
-		if p.ParseError != nil {
-			msg = p.ParseError(respBody).Error()
-		}
-		return "", &APIError{StatusCode: resp.StatusCode, Message: msg, Retryable: statusRetryable(resp.StatusCode)}
+		// 错误分类（Retryable/Retry-After/消息解析）走重试矩阵单源（retry_matrix.go）。
+		return "", apiErrorFromHTTP(resp.StatusCode, respBody, p.ParseError, resp.Header.Get("Retry-After"))
 	}
 
 	var result struct {
