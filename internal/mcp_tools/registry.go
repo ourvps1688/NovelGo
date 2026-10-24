@@ -10,6 +10,7 @@ func RegisterAllTools(r *Registry) {
 	RegisterReaderPerspectiveTools(r)
 	RegisterLocationTools(r)
 	RegisterTimelineTools(r)
+	RegisterTaskCardTools(r)
 	RegisterStoryArcTools(r)
 	RegisterVolumeTools(r)
 	RegisterRWTools(r)

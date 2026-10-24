@@ -28,6 +28,7 @@ var mainAgentTools = []string{
 	"create_location_relation", "update_location_relation",
 	"get_timeline", "create_timeline_entry", "update_timeline_entry",
 	"update_chapter_plan",
+	"upsert_chapter_task_card", "get_chapter_task_card",
 	"get_story_arcs", "create_story_arc", "update_story_arc",
 	"create_arc_node", "update_arc_node",
 	"get_reader_perspective", "create_reader_perspective_entry", "update_reader_perspective_entry",
@@ -48,6 +49,7 @@ var reviewAgentTools = []string{
 	"get_locations", "get_timeline", "get_story_arcs",
 	"get_reader_perspective",
 	"search_story_memory", "read",
+	"get_chapter_task_card", // 对卡审读：核对正文是否兑现任务卡四件套
 }
 
 var memoryAgentTools = []string{
@@ -97,6 +99,7 @@ var signabilityAgentTools = []string{
 	"get_story_arcs",
 	"get_reader_perspective",
 	"search_story_memory",
+	"get_chapter_task_card", // 对卡验收：体检时可对照任务卡核对兑现
 }
 
 // fixAgentTools：修复执行员（S5 阶段）白名单——按 issue 清单改稿与补台账。
@@ -114,9 +117,10 @@ var fixAgentTools = []string{
 	"get_story_arcs",
 	"get_reader_perspective",
 	"search_story_memory",
-	"edit",                // 改章节正文 / 写卷纲（volumes/id_{id}.md）
-	"update_chapter_plan", // 修章细纲
-	"create_volume",       // 补卷
+	"edit",                                              // 改章节正文 / 写卷纲（volumes/id_{id}.md）
+	"update_chapter_plan",                               // 修章细纲
+	"upsert_chapter_task_card", "get_chapter_task_card", // 修/查章纲任务卡（重写后校准卡）
+	"create_volume", // 补卷
 	"create_character", "update_character", "update_character_relationship",
 	"create_location", "update_location", "create_location_relation", "update_location_relation",
 	"create_timeline_entry", "update_timeline_entry",
@@ -246,7 +250,9 @@ const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，
 
 2. **搜集上下文** — 调用只读工具（get_*）获取最新数据。不要依赖快照或记忆——快照只是概要，工具返回的才是真相。**读写卷纲（volumes/id_{卷id}.md）前必须先调用 list_volumes 获取真实卷 ID，禁止猜测序号。**
 
-3. **大纲先行** — 当用户要求创作新章节时，必须先产出大纲提交给用户审批。使用 edit 工具（必须用 edit 工具写入，不能直接把大纲输出给用户）将大纲写入 outlines/ 下的新建通道，系统会弹出审批窗口。审批通过后系统会创建章节记录并返回 chapter_id 与该大纲的物理路径，后续写正文、改大纲都用返回的 chapter_id。大纲为 markdown 格式，应包含以下部分：
+3. **大纲先行** — 当用户要求创作新章节时，必须**先立章纲任务卡，再产出大纲**提交给用户审批：
+   - **立卡（强制）** — 调用 upsert_chapter_task_card 为本章立结构化任务卡（四件套：钩子任务=本章埋/收哪个坑+章尾断章钩设计；爽点任务=爽点类型与情绪落点；人设时刻=哪位角色的高光/反差；推进任务=推进哪条主线/卷纲功能位）。四件套齐全才可落库，缺一机器拒收。任务卡是"本章为什么写"的机器可验契约，是生成质量的上限来源。
+   - 使用 edit 工具（必须用 edit 工具写入，不能直接把大纲输出给用户）将大纲写入 outlines/ 下的新建通道，系统会弹出审批窗口。审批通过后系统会创建章节记录并返回 chapter_id 与该大纲的物理路径，后续写正文、改大纲都用返回的 chapter_id。大纲为 markdown 格式，应包含以下部分：
    - **章节标题** — 本章标题，只写标题即可，不要带第x章（正文部分同样如此）。
    - **基调与字数** — 整体氛围和预估字数
    - **场景设计** — 本章场景及其叙事目的
@@ -254,7 +260,7 @@ const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，
    - **重点角色** — 登场的关键角色及其本章作用
    - **伏笔操作** — 本章需要埋下/推进/回收的伏笔
    - **章末钩子** — 结尾留下的悬念或期待
-   各部分自由撰写，不要求固定字段格式，但以上内容应尽量覆盖。审批通过后据此完成正文。审批未通过时，根据系统注入的用户反馈进行修正后重新提交。
+   各部分自由撰写，不要求固定字段格式，但以上内容应尽量覆盖。**大纲的伏笔操作/章末钩子/爽点设计须与任务卡一致**（任务卡是纲要的纲要；方向调整时先更新任务卡再改大纲）。审批通过后据此完成正文。审批未通过时，根据系统注入的用户反馈进行修正后重新提交。
    用户审批通过时，你需要根据大纲中涉及到的信息自行搜集需要的上下文。
 
 4. **执行创作** — 用户批准大纲后，使用 edit 工具，将正文写入大纲创建时返回的 body_path（即 chapters/id_{chapter_id}.md，chapter_id 用大纲通道返回的那个）。严禁再用 chapters/new.md——那会创建出一个重复的新章节，而不是在原章节写正文。格式要求：
@@ -265,6 +271,7 @@ const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，
 	   - **标点规范（中文）**：使用标准标点（，。：“”‘’；、！？）。**正文绝对禁用破折号「——」**——系统会直接拒绝任何包含破折号的正文提交；停顿用逗号或省略号，转折、强调直接用文字表达，并列用顿号。
 
 5. **写后质检（强制，每章必做）** — 正文写入后，立即按以下清单逐项核对，**先不要汇报完成**；任何一项不达标**先修复再进入状态维护**，全部通过才继续：
+   - **对卡核验**：用 get_chapter_task_card 取本章任务卡，逐项核对四件套是否在正文中兑现——钩子任务（埋/收的坑落了没有、章尾断章钩成不成立）、爽点任务（承诺的爽点/情绪落点给没给）、人设时刻（该角色的高光/反差立没立住）、推进任务（主线/卷纲功能位推没推进）。未兑现的先补齐；创作中方向确需调整时，先调 upsert_chapter_task_card 更新任务卡再继续（卡与文必须一致，不许文卡两张皮）。
    - **字数门槛**：以 get_chapter / 章节列表返回的 word_count 真实字数为准（不要估算）。目标字数优先级：① 本章大纲「基调与字数」写的预估字数；② 本书「签约约束解析」块（已去冲突，平台卡节奏优先于题材卡字数下限；若未选平台卡则用题材卡下限）；③ 都没有则默认 2000 字。注：已选平台卡时单章字数以「签约约束解析」块为准，题材卡内的字数下限行不单独生效。实际字数低于目标 70% 视为不达标必须扩写；达到 70% 为软通过，但「达标」指达到目标本身。缺口按「目标−当前 + 约 15% 缓冲」**一次性补足**：只读一次 word_count 算缺口，用一次 edit 补齐，禁止「补一点→重读→再补」的多轮循环；扩写须是有叙事功能的增量（推进情节/深化场景/兑现伏笔），严禁凑数注水。
    - **推进与功能**：至少推进一条主线（情节/关系/认知），章内至少一个状态改变（主角处境/角色关系/读者认知）。
    - **情绪流与爽点**：情绪曲线有完整起伏（压抑→释放、危机→化解）。对照「创作约束」核对爽点密度（爽文每章≥1~2 明确爽点，非爽文检查等效满足感节点）；章末必须有钩子（新悬念/危机升级/反转预告）。

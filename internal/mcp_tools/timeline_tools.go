@@ -91,6 +91,7 @@ func (t *GetTimelineTool) executeContext(ctx context.Context, a *GetTimelineArgs
 	}
 
 	formatted := formatTimelineContext(plans, history, anomalies, future, currentReadingNumber)
+	formatted += formatTaskCardContext(ctx, tc, currentReadingNumber)
 
 	return &ToolResult{
 		Success: true,
@@ -408,6 +409,37 @@ func formatTimelineContext(plans []timeline.ChapterPlan, history, anomalies, fut
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// formatTaskCardContext 渲染章纲任务卡块（get_timeline 写作上下文注入，「系统自动拼入」路径）：
+// 当前章与下一章的卡各一节；缺失时给立卡提示——写前把关的轻推力（只提示不拦截）。
+// 读取失败一律降级为缺失提示（宁缺勿错，失败=零报错）。
+func formatTaskCardContext(ctx context.Context, tc ToolContext, current int) string {
+	store := timeline.NewStore(tc.DB, tc.LoggerOrDefault())
+	load := func(n int) *timeline.ChapterTaskCard {
+		card, err := store.GetTaskCard(ctx, tc.NovelID, n)
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				tc.LoggerOrDefault().Warn("get_timeline：读取任务卡失败，降级为缺失提示", "reading_number", n, "err", err)
+			}
+			return nil
+		}
+		return card
+	}
+
+	var b strings.Builder
+	b.WriteString("\n\n### 章纲任务卡\n")
+	if card := load(current); card != nil {
+		b.WriteString(FormatTaskCard(card) + "（当前章）\n")
+	} else {
+		fmt.Fprintf(&b, "第 %d 章任务卡：尚未立卡（写前须调 upsert_chapter_task_card 立四件套任务卡）（当前章）\n", current)
+	}
+	if card := load(current + 1); card != nil {
+		b.WriteString(FormatTaskCard(card) + "（下一章）\n")
+	} else {
+		fmt.Fprintf(&b, "第 %d 章任务卡：尚未立卡（写下一章前须立卡）（下一章）\n", current+1)
+	}
+	return b.String()
 }
 
 func formatTimelineFull(entries []timeline.TimelineEntry) string {

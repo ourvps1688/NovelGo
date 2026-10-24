@@ -49,7 +49,7 @@ useWhen:
 3. **设定校验** — 调 `worldbuilding-design`：本章涉及的设定/力量体系/金手指，写前用 `search_settings`（语义优先，按本章将涉及的实体/矛盾/地点检索最相关设定，返回带 `setting_id` 的条目）核对一致性、防吃书；也可配合 `get_locations` / `search_story_memory`。需要修正时拿返回的 `setting_id` 调 `upsert_setting` 合并更新，勿新建重复条目。
 4. **读者认知态** — 用 `get_reader_perspective` 取当前读者已知/误知态，据此决定本 reveal 还是 withhold（与 `reader-immersion` 的"好奇心缺口"配合）。
 5. **前三章专项** — 若为新书第 1~3 章，调 `opening-chapters` 执行冷开场/前千字法则/首个甜头。
-6. **产出"本章功能卡"**：一句话写清——推进什么 + 埋什么钩子 + 给什么甜头；可 `upsert_preference` 固化，供写后核对。
+6. **立章纲任务卡** — 调 `upsert_chapter_task_card` 立结构化四件套（机器校验缺一拒收）：**钩子任务**（本章埋/收哪个坑 + 章尾断章钩设计）、**爽点任务**（爽点类型与情绪落点）、**人设时刻**（谁的高光/反差）、**推进任务**（主线/卷纲功能位）。这是"本章为什么写"的机器可验契约；阶段 3 写后按卡核验兑现，方向调整先改卡再改文。
 
 ## 阶段 2：写中代入（While Writing）
 
@@ -88,4 +88,4 @@ useWhen:
 
 ## 工具协同
 
-`get_chapter_list` · `update_chapter_plan` · `get_characters` · `get_story_arcs` · `get_timeline` · `search_story_memory` · `get_locations` · `get_reader_perspective` · `create_reader_perspective_entry` · `upsert_preference` · `search_settings` · `run_subagent` · `read`/`edit`
+`get_chapter_list` · `update_chapter_plan` · `upsert_chapter_task_card`/`get_chapter_task_card` · `get_characters` · `get_story_arcs` · `get_timeline` · `search_story_memory` · `get_locations` · `get_reader_perspective` · `create_reader_perspective_entry` · `upsert_preference` · `search_settings` · `run_subagent` · `read`/`edit`

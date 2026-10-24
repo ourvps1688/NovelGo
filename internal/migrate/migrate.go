@@ -97,6 +97,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&character.GroupMember{},
 		&timeline.TimelineEntry{},
 		&timeline.ChronologyAnchor{},
+		&timeline.ChapterTaskCard{},
 		&storyarc.StoryArc{},
 		&storyarc.ArcNode{},
 		&location.Location{},
