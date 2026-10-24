@@ -2082,9 +2082,11 @@
       "title": "Create Journey",
       "stages": {
         "intent": "Intent: book pitch & blueprint",
-        "writing": "Writing: free chat & pipeline",
+        "writingFree": "Writing: free chat",
+        "writingPipeline": "Writing: pipeline",
         "rewrite": "Rewrite"
-      }
+      },
+      "panelNav": "Panel quick links"
     },
     "quality": {
       "title": "Quality Journey",

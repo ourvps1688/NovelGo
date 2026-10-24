@@ -2043,9 +2043,11 @@
       "title": "创作旅程",
       "stages": {
         "intent": "意图：开书孵化与蓝图",
-        "writing": "写作：自由对话与流水线",
+        "writingFree": "写作：自由对话",
+        "writingPipeline": "写作：流水线",
         "rewrite": "重写"
-      }
+      },
+      "panelNav": "面板直达"
     },
     "quality": {
       "title": "质检旅程",
