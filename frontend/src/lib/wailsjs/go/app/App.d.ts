@@ -18,6 +18,7 @@ import {llm} from '../models';
 import {pattern} from '../models';
 import {storage} from '../models';
 import {git} from '../models';
+import {activity} from '../models';
 import {personasetting} from '../models';
 import {pipeline} from '../models';
 import {apperr} from '../models';
@@ -169,6 +170,8 @@ export function GetContent(arg1:number,arg2:string):Promise<string>;
 
 export function GetEnabledSkills(arg1:number):Promise<Array<string>>;
 
+export function GetFeatureUsage(arg1:number):Promise<Array<activity.FeatureUsageStat>>;
+
 export function GetFileDiff(arg1:number,arg2:string,arg3:string):Promise<git.FileDiff>;
 
 export function GetLLMConfig():Promise<llm.LLMConfigView>;
@@ -268,6 +271,8 @@ export function RebuildAggregated(arg1:app.RebuildAggregatedInput):Promise<app.R
 export function RebuildNovelIndex(arg1:number):Promise<void>;
 
 export function RecordCreativeActivity(arg1:number):Promise<void>;
+
+export function RecordFeatureUsage(arg1:string):Promise<void>;
 
 export function RecordRetconEdit(arg1:number,arg2:string):Promise<retcon.RetconCase>;
 

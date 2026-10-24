@@ -115,6 +115,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&writing.WritingLog{},
 		&activity.DailyActivity{},
 		&activity.DailyLLMUsage{},
+		&activity.FeatureUsage{},
 		&volume.Volume{},
 		&volume.VolumeSnapshot{},
 		&retcon.RetconCase{},

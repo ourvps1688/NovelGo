@@ -1,3 +1,22 @@
+export namespace activity {
+	
+	export class FeatureUsageStat {
+	    feature_key: string;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new FeatureUsageStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.feature_key = source["feature_key"];
+	        this.count = source["count"];
+	    }
+	}
+
+}
+
 export namespace agentcfg {
 	
 	export class PersonaRef {

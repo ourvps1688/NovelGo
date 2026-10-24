@@ -41,3 +41,18 @@ type DailyLLMUsage struct {
 }
 
 func (DailyLLMUsage) TableName() string { return "llm_usage_daily" }
+
+// FeatureUsage 按日期、功能键累计使用次数；只记 key+次数，不记用户内容（隐私纪律）。
+type FeatureUsage struct {
+	Date       string `gorm:"column:date;primaryKey;size:10"`
+	FeatureKey string `gorm:"column:feature_key;primaryKey"`
+	Count      int64  `gorm:"column:count;not null;default:0"`
+}
+
+func (FeatureUsage) TableName() string { return "feature_usage_daily" }
+
+// FeatureUsageStat 是近若干天按功能键聚合的只读消费面数据，按 Count 降序。
+type FeatureUsageStat struct {
+	FeatureKey string `gorm:"column:feature_key" json:"feature_key"`
+	Count      int64  `gorm:"column:count" json:"count"`
+}

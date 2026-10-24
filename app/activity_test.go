@@ -149,3 +149,36 @@ func TestRecordCreativeActivitySkipsUnavailableStorage(t *testing.T) {
 	require.NoError(t, a.db.Model(&activity.DailyActivity{}).Count(&count).Error)
 	require.Zero(t, count)
 }
+
+func TestRecordFeatureUsageAndQueryClosedLoop(t *testing.T) {
+	a := setupTestApp(t)
+	a.RecordFeatureUsage("panel.characters")
+	a.RecordFeatureUsage("panel.characters")
+	a.RecordFeatureUsage("action.freeze")
+	a.RecordFeatureUsage("")
+	a.RecordFeatureUsage("   ")
+	stats, err := a.GetFeatureUsage(30)
+	require.NoError(t, err)
+	require.Equal(t, []activity.FeatureUsageStat{
+		{FeatureKey: "panel.characters", Count: 2},
+		{FeatureKey: "action.freeze", Count: 1},
+	}, stats)
+	// days 非正按 30 天默认，闭环计数一致
+	stats, err = a.GetFeatureUsage(0)
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+}
+
+func TestRecordFeatureUsageSkipsUnavailableStorage(t *testing.T) {
+	require.NotPanics(t, func() { (&App{}).RecordFeatureUsage("panel.x") })
+	stats, err := (&App{}).GetFeatureUsage(30)
+	require.NoError(t, err)
+	require.Empty(t, stats)
+	a := setupTestApp(t)
+	require.NoError(t, a.db.Exec(`CREATE TRIGGER reject_feature BEFORE INSERT ON feature_usage_daily
+		BEGIN SELECT RAISE(ABORT, 'statistics unavailable'); END`).Error)
+	require.NotPanics(t, func() { a.RecordFeatureUsage("panel.x") })
+	var count int64
+	require.NoError(t, a.db.Model(&activity.FeatureUsage{}).Count(&count).Error)
+	require.Zero(t, count)
+}

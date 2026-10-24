@@ -26,7 +26,7 @@ func newTestStore(t *testing.T) (*Store, *gorm.DB) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	require.NoError(t, db.AutoMigrate(&DailyActivity{}, &DailyLLMUsage{}, &config.AppSettings{}, &storage.OperationLogRecord{}))
+	require.NoError(t, db.AutoMigrate(&DailyActivity{}, &DailyLLMUsage{}, &FeatureUsage{}, &config.AppSettings{}, &storage.OperationLogRecord{}))
 	s := NewStore(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	s.now = func() time.Time {
 		return time.Date(2027, 1, 1, 0, 30, 0, 0, time.FixedZone("UTC+8", 8*60*60))
@@ -143,6 +143,66 @@ func TestAddLLMUsageAccumulatesAllDimensions(t *testing.T) {
 	}
 }
 
+func TestAddFeatureUsageAccumulatesAndRejectsBadKeys(t *testing.T) {
+	s, db := newTestStore(t)
+	ctx := context.Background()
+	s.AddFeatureUsage(ctx, "")
+	s.AddFeatureUsage(ctx, "   ")
+	var count int64
+	require.NoError(t, db.Model(&FeatureUsage{}).Count(&count).Error)
+	require.Zero(t, count)
+	s.AddFeatureUsage(ctx, "panel.characters")
+	s.AddFeatureUsage(ctx, "panel.characters")
+	s.AddFeatureUsage(ctx, "action.freeze")
+	var rows []FeatureUsage
+	require.NoError(t, db.Order("feature_key").Find(&rows).Error)
+	require.Len(t, rows, 2)
+	require.Equal(t, "2027-01-01", rows[0].Date)
+	require.Equal(t, "action.freeze", rows[0].FeatureKey)
+	require.EqualValues(t, 1, rows[0].Count)
+	require.Equal(t, "panel.characters", rows[1].FeatureKey)
+	require.EqualValues(t, 2, rows[1].Count)
+	tomorrow := s.now().AddDate(0, 0, 1)
+	s.now = func() time.Time { return tomorrow }
+	s.AddFeatureUsage(ctx, "panel.characters")
+	require.NoError(t, db.Model(&FeatureUsage{}).Count(&count).Error)
+	require.EqualValues(t, 3, count)
+}
+
+func TestListFeatureUsageAggregatesRecentDays(t *testing.T) {
+	s, db := newTestStore(t)
+	ctx := context.Background()
+	for _, row := range []FeatureUsage{
+		{Date: "2026-12-28", FeatureKey: "panel.old", Count: 5},
+		{Date: "2026-12-30", FeatureKey: "panel.a", Count: 2},
+		{Date: "2026-12-31", FeatureKey: "panel.a", Count: 3},
+		{Date: "2027-01-01", FeatureKey: "panel.a", Count: 1},
+		{Date: "2027-01-01", FeatureKey: "panel.b", Count: 4},
+	} {
+		require.NoError(t, db.Create(&row).Error)
+	}
+	// days=3 窗口 = 2026-12-30 起（含今天），2026-12-28 在窗口外
+	stats, err := s.ListFeatureUsage(ctx, 3)
+	require.NoError(t, err)
+	require.Equal(t, []FeatureUsageStat{
+		{FeatureKey: "panel.a", Count: 6},
+		{FeatureKey: "panel.b", Count: 4},
+	}, stats)
+	// days 非正按 30 天默认，窗口外行纳入
+	stats, err = s.ListFeatureUsage(ctx, 0)
+	require.NoError(t, err)
+	require.Equal(t, []FeatureUsageStat{
+		{FeatureKey: "panel.a", Count: 6},
+		{FeatureKey: "panel.old", Count: 5},
+		{FeatureKey: "panel.b", Count: 4},
+	}, stats)
+	// 无数据 = 空表
+	require.NoError(t, db.Exec("DELETE FROM feature_usage_daily").Error)
+	stats, err = s.ListFeatureUsage(ctx, 30)
+	require.NoError(t, err)
+	require.Empty(t, stats)
+}
+
 func TestDailyCountersAccumulateConcurrently(t *testing.T) {
 	s, db := newTestStore(t)
 	var wg sync.WaitGroup
@@ -151,6 +211,7 @@ func TestDailyCountersAccumulateConcurrently(t *testing.T) {
 		wg.Go(func() {
 			s.AddActivity(context.Background(), ActivityDelta{ToolCalls: 1, CreativeSeconds: 10})
 			s.AddLLMUsage(context.Background(), "provider", "model", "chat", TokenUsage{InputTokens: 20, TotalTokens: 20})
+			s.AddFeatureUsage(context.Background(), "panel.characters")
 		})
 	}
 	wg.Wait()
@@ -163,6 +224,9 @@ func TestDailyCountersAccumulateConcurrently(t *testing.T) {
 	require.EqualValues(t, writes, usage.UsageCount)
 	require.EqualValues(t, writes*20, usage.InputTokens)
 	require.EqualValues(t, writes*20, usage.TotalTokens)
+	var feature FeatureUsage
+	require.NoError(t, db.First(&feature).Error)
+	require.EqualValues(t, writes, feature.Count)
 }
 
 func TestStatisticsFailuresOnlyWarn(t *testing.T) {
@@ -170,16 +234,18 @@ func TestStatisticsFailuresOnlyWarn(t *testing.T) {
 	var logs bytes.Buffer
 	s.logger = slog.New(slog.NewTextHandler(&logs, nil))
 	ctx := context.Background()
-	for _, table := range []string{"app_config", "activity_daily", "llm_usage_daily"} {
+	for _, table := range []string{"app_config", "activity_daily", "llm_usage_daily", "feature_usage_daily"} {
 		require.NoError(t, db.Exec("CREATE TRIGGER reject_"+table+" BEFORE INSERT ON "+table+" BEGIN SELECT RAISE(FAIL, 'statistics unavailable'); END").Error)
 	}
 	s.InitTracking(ctx)
 	s.AddActivity(ctx, ActivityDelta{ChaptersCreated: 1})
 	s.AddLLMUsage(ctx, "provider", "model", "chat", TokenUsage{TotalTokens: 10})
+	s.AddFeatureUsage(ctx, "panel.characters")
 	require.Contains(t, logs.String(), "初始化创作统计起点失败")
 	require.Contains(t, logs.String(), "记录每日创作统计失败")
 	require.Contains(t, logs.String(), "记录每日 Token 用量失败")
-	for _, model := range []any{&config.AppSettings{}, &DailyActivity{}, &DailyLLMUsage{}} {
+	require.Contains(t, logs.String(), "记录功能使用统计失败")
+	for _, model := range []any{&config.AppSettings{}, &DailyActivity{}, &DailyLLMUsage{}, &FeatureUsage{}} {
 		var count int64
 		require.NoError(t, db.Model(model).Count(&count).Error)
 		require.Zero(t, count)

@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -107,6 +108,45 @@ func (s *Store) AddLLMUsage(ctx context.Context, provider, model, purpose string
 	if err != nil {
 		s.logger.Warn("记录每日 Token 用量失败", "date", record.Date, "provider", provider, "model", model, "err", err)
 	}
+}
+
+// AddFeatureUsage 将一次功能使用记到当天；只记 key+次数，不记用户内容（隐私纪律）。
+// 空 key 拒收（宁缺勿错，不写脏数据）；写入失败只告警，与 AddActivity 同纪律。
+func (s *Store) AddFeatureUsage(ctx context.Context, featureKey string) {
+	if strings.TrimSpace(featureKey) == "" {
+		s.logger.Warn("忽略空功能键的功能使用统计")
+		return
+	}
+	record := FeatureUsage{Date: s.now().Format(time.DateOnly), FeatureKey: featureKey, Count: 1}
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "date"}, {Name: "feature_key"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"count": gorm.Expr("count + excluded.count"),
+		}),
+	}).Create(&record).Error
+	if err != nil {
+		s.logger.Warn("记录功能使用统计失败", "date", record.Date, "feature_key", featureKey, "err", err)
+	}
+}
+
+// ListFeatureUsage 返回近 days 天（含今天）按功能键聚合的使用次数，按次数降序。
+// days 非正时按 30 天；查询失败返回错误，由调用方静默降级为空表。
+func (s *Store) ListFeatureUsage(ctx context.Context, days int) ([]FeatureUsageStat, error) {
+	if days <= 0 {
+		days = 30
+	}
+	since := s.now().AddDate(0, 0, -(days - 1)).Format(time.DateOnly)
+	var stats []FeatureUsageStat
+	err := s.db.WithContext(ctx).Model(&FeatureUsage{}).
+		Select("feature_key, SUM(count) AS count").
+		Where("date >= ?", since).
+		Group("feature_key").
+		Order("count DESC, feature_key ASC").
+		Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+	return stats, nil
 }
 
 func nonNegative(values ...int64) bool {

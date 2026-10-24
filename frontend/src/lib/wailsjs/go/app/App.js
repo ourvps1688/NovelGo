@@ -278,6 +278,10 @@ export function GetEnabledSkills(arg1) {
   return window['go']['app']['App']['GetEnabledSkills'](arg1);
 }
 
+export function GetFeatureUsage(arg1) {
+  return window['go']['app']['App']['GetFeatureUsage'](arg1);
+}
+
 export function GetFileDiff(arg1, arg2, arg3) {
   return window['go']['app']['App']['GetFileDiff'](arg1, arg2, arg3);
 }
@@ -476,6 +480,10 @@ export function RebuildNovelIndex(arg1) {
 
 export function RecordCreativeActivity(arg1) {
   return window['go']['app']['App']['RecordCreativeActivity'](arg1);
+}
+
+export function RecordFeatureUsage(arg1) {
+  return window['go']['app']['App']['RecordFeatureUsage'](arg1);
 }
 
 export function RecordRetconEdit(arg1, arg2) {
