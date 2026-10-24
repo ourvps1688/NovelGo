@@ -56,6 +56,9 @@ export interface AuditIssue {
   target_scope?: string;
   dimension?: string;
   direction?: string;
+  // 结构化涉及章节（契约 chapter_ids，R1 起）：问题涉及章节的全局阅读序号数组，
+  // 修复作用域分组与章节定位依据；台账/全书级问题为 []，旧版数据缺省。
+  chapter_ids?: number[];
 }
 
 // 体检结果（与后端 pipeline.AuditData 对应）：verdict=pass|needs_fix；

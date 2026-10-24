@@ -124,6 +124,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&writingconfig.WritingConfig{},
 		&personasetting.PersonaSetting{},
 		&pipeline.PipelineRun{},
+		&pipeline.PipelineIssue{},
 		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}

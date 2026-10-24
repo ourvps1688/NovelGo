@@ -24,7 +24,7 @@ import (
 // 每次给 issue 契约增删字段或变更语义时 +1：executeFix 的版本门会拒绝低于该版本的体检
 // 结果（强制重跑体检），避免旧数据被新路由误读。未标版本（0，旧版数据）不触发版本门，
 // 回退字段嗅探——两道闸任一命中即判陈旧。
-const AuditSchemaVersion = 2
+const AuditSchemaVersion = 3
 
 // issueField 是 issue JSON 契约的一个字段定义。
 type issueField struct {
@@ -52,6 +52,8 @@ var issueContractFields = []issueField{
 	{Name: "direction", Enum: []string{DirectionForwardFix, DirectionRetconCandidate},
 		Sample: `"forward_fix|retcon_candidate"`, Full: true,
 		Doc: "direction 必填：forward_fix=前向修复（改当前卷及后续适配已定稿前卷，默认）；retcon_candidate=硬矛盾且无法前向消解、需回改已冻结前卷（将进人工审批闸门，慎用）。"},
+	{Name: "chapter_ids", Sample: `[1,2,3]`, Full: true,
+		Doc: "chapter_ids 必填：问题涉及章节的全局阅读序号数组（与 get_chapter_list 一致，如第6-10章填 [6,7,8,9,10]；无具体章节的台账/全书级问题填 []）。供修复按作用域分组与章节定位，不要只写在 desc 文本里。"},
 }
 
 // issueFieldGroup 是陈旧 run 判定的字段覆盖组：组内任一字段被任一 issue 携带即视为该组
@@ -149,14 +151,31 @@ func auditMissingContractGroups(audit AuditData) []string {
 
 // auditFieldCovered 判断任一 issue 是否携带指定 JSON 字段（按 struct json tag 反射匹配，
 // struct 即字段名事实源，契约表与之由测试强制同步）。
+// 注意：Value.String() 只对 string kind 返回零值判定——切片（如 chapter_ids）会返回
+// 「<[]int64 Value>」这类恒非空占位串，必须按 kind 分派，否则空切片被误判为已覆盖。
 func auditFieldCovered(audit AuditData, name string) bool {
 	for _, it := range audit.Issues {
 		v := reflect.ValueOf(it)
 		t := v.Type()
 		for i := 0; i < t.NumField(); i++ {
 			tag := strings.Split(t.Field(i).Tag.Get("json"), ",")[0]
-			if tag == name && v.Field(i).String() != "" {
-				return true
+			if tag != name {
+				continue
+			}
+			f := v.Field(i)
+			switch f.Kind() {
+			case reflect.String:
+				if f.String() != "" {
+					return true
+				}
+			case reflect.Slice, reflect.Map, reflect.Array:
+				if f.Len() > 0 {
+					return true
+				}
+			default:
+				if !f.IsZero() {
+					return true
+				}
 			}
 		}
 	}

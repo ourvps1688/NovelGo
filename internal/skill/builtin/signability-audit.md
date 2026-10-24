@@ -99,6 +99,7 @@ useWhen:
   - `"target_scope"`（问题落点的卷作用域）：`"active_volume"`=落点在当前活跃卷（可自动修，缺省安全值）；`"frozen_volume"`=落点在已冻结定稿卷（受写保护，不派自动修复）；`"none"`=全书级/不涉具体卷。
   - `"dimension"`（机器归属维度，series bible 四维）：`"character"`=角色 | `"locus_arc"`=地点·弧线 | `"timeline"`=时间线 | `"reader_pov"`=读者视角；**不属四维的纯质量问题**（节奏/爽点/文笔/开篇等）填 `"none"`。
   - `"direction"`（修复方向）：默认 `"forward_fix"`（前向修复：改当前卷及后续适配已定稿前卷，跨卷冲突也优先改本卷适配前卷）；仅**硬矛盾且无法前向消解**（改本卷怎么绕都绕不开）才标 `"retcon_candidate"`（需回改已冻结前卷，将进人工审批闸门，慎用）。
+- 每条 issue **必须**给出 `"chapter_ids"`（问题涉及章节的全局阅读序号数组，与 `get_chapter_list` 一致；「第 6-10 章」展开为 `[6,7,8,9,10]`）——流水线按它做修复作用域分组与章节定位，**不要只把章节写进 desc 文本**；台账/全书级问题（无具体章节）填 `[]`。
 - 最终回复末尾**必须**附 JSON 代码块（以 ` ```json ` 开头、以 ` ``` ` 结尾），格式严格如下（顶层 `schema_version` 照抄示例中的契约版本号，流水线据此判定体检数据新旧）：
 
 ```json
@@ -106,13 +107,13 @@ useWhen:
   "verdict": "pass" | "needs_fix",
   "score": 0,
   "summary": "一句话结论：能签 / 勉强 / 难签（附主要短板）",
-  "schema_version": 2,
+  "schema_version": 3,
   "issues": [
-    {"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},
-    {"id":"I2","level":"P1","area":"节奏爽点","desc":"第6-10章爽点断档","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},
-    {"id":"I3","level":"P1","area":"长线牵引","desc":"timeline#42 伏笔未回收","fix_type":"ledger","target_scope":"active_volume","dimension":"timeline","direction":"forward_fix"},
-    {"id":"I4","level":"P0","area":"设定自洽","desc":"本卷第12章与已冻结前卷第3章修为设定硬冲突，改本卷无法消解","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"retcon_candidate"},
-    {"id":"V1","level":"P1","area":"文风漂移·章节#12","desc":"第12章叙事腔调偏离文风契约（契约：冷硬克制；实际：轻浮网感吐槽腔）","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}
+    {"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[1,2,3]},
+    {"id":"I2","level":"P1","area":"节奏爽点","desc":"第6-10章爽点断档","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[6,7,8,9,10]},
+    {"id":"I3","level":"P1","area":"长线牵引","desc":"timeline#42 伏笔未回收","fix_type":"ledger","target_scope":"active_volume","dimension":"timeline","direction":"forward_fix","chapter_ids":[]},
+    {"id":"I4","level":"P0","area":"设定自洽","desc":"本卷第12章与已冻结前卷第3章修为设定硬冲突，改本卷无法消解","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"retcon_candidate","chapter_ids":[3,12]},
+    {"id":"V1","level":"P1","area":"文风漂移·章节#12","desc":"第12章叙事腔调偏离文风契约（契约：冷硬克制；实际：轻浮网感吐槽腔）","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[12]}
   ]
 }
 ```

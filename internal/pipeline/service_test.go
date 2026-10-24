@@ -1113,15 +1113,16 @@ func TestApplyFixReceipt(t *testing.T) {
 	out := "摘要…\n```json\n{\"fixed\":[\"I1\"],\"skipped\":[{\"id\":\"I2\",\"reason\":\"需正文重写\"}]}\n```"
 
 	var ctxt GateContext
-	fixedNow := applyFixReceipt(&ctxt, batch, out, slog.Default())
+	fixedNow, skippedNow := applyFixReceipt(&ctxt, batch, out, slog.Default())
 	require.Equal(t, []string{"I1"}, fixedNow, "只有回执确认的才算本批已修复")
 	require.Equal(t, "fixed", ctxt.FixStates["I1"])
 	require.Equal(t, "skipped", ctxt.FixStates["I2"], "skipped 记录断点，不再重试")
+	require.Equal(t, "需正文重写", skippedNow["I2"], "skipped 原因应回传（转人工工单留痕）")
 	require.Empty(t, ctxt.FixStates["I3"], "回执未提及的不落断点，后续轮次重试")
 
 	// 缺回执：整批兜底为 fixed（兼容旧行为，不卡死流水线）。
 	var ctxt2 GateContext
-	fixedNow2 := applyFixReceipt(&ctxt2, batch, "没有 JSON 的输出", slog.Default())
+	fixedNow2, _ := applyFixReceipt(&ctxt2, batch, "没有 JSON 的输出", slog.Default())
 	require.Len(t, fixedNow2, 3)
 	for _, it := range batch {
 		require.Equal(t, "fixed", ctxt2.FixStates[it.ID])

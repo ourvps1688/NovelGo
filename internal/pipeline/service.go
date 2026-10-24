@@ -933,12 +933,20 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），executeFix 会把
 	// 全部问题误判为「已修复」而静默跳过修复直接复评——表现为提示「修复完成，正在自动
 	// 复评」，实际上一个问题都没修（auto_run 下还会空转到 FixRounds 上限）。
+	// issue 工单表（R1）同语义整批替换：新体检=新问题清单，跨轮同号不共用断点。
+	if terr := s.store.ReplaceIssues(ctx, novelID, runID, ctxt.FixRounds, audit.Issues); terr != nil {
+		s.logger.Warn("S4 体检：issue 工单落表失败（非阻断）", "run_id", runID, "err", terr)
+	}
 	ctxt.FixStates = nil
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
 		updated = []byte(run.ContextJSON)
 	}
+	// 把含新体检结果的上下文同步进 run 对象：auto_run 分支的 Advance(ctx, run, ...)
+	// → enterFix / markAuditedJSON 持久化的正是 run.ContextJSON，若不刷新会在
+	// 自动裁决路径丢掉刚产出的体检结果（手动路径由下方 SetStageStatus 落 updated 无此问题）。
+	run.ContextJSON = string(updated)
 
 	// 守卫：若异步执行期间用户已推进（如点了 fix / continue），不覆盖新状态。
 	// 无论守卫结果如何，本执行体即将退出，先清除执行中标记。
@@ -1113,6 +1121,16 @@ func (s *Service) setDispatching(ctx context.Context, runID string, v bool) {
 	}
 }
 
+// syncIssueRow 同步一条 issue 工单（pipeline_issues）的状态流转。
+// 非阻断口径：工单表是结构化事实源，缺表/写失败只告警——JSON 副本（Audit/Backlog）
+// 仍是渲染与提示词载荷，修复闭环不因落表失败而中断。
+func (s *Service) syncIssueRow(ctx context.Context, novelID int64, runID, issueKey, status, skipReason string) {
+	if err := s.store.UpdateIssueStatus(ctx, novelID, runID, issueKey, status, skipReason); err != nil {
+		s.logger.Warn("issue 工单状态同步失败（非阻断）",
+			"run_id", runID, "issue", issueKey, "status", status, "err", err)
+	}
+}
+
 func (s *Service) executeFix(runID string, novelID int64) {
 	ctx := s.appCtx
 	run, err := s.store.GetByRunID(ctx, runID)
@@ -1200,10 +1218,11 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		}
 		retconBacklog = upsertRewriteItem(retconBacklog, RewriteItem{
 			ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
-			Chapters:    parseChapterRefs(it.Area, it.Desc),
+			Chapters:    issueChapterIDs(it),
 			TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction,
 		})
 		ctxt.FixStates[it.ID] = "retcon"
+		s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusRetcon, "")
 		isResolved[it.ID] = true
 	}
 	ctxt.RetconBacklog = retconBacklog
@@ -1228,9 +1247,10 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			Level:    it.Level,
 			Area:     it.Area,
 			Desc:     it.Desc,
-			Chapters: parseChapterRefs(it.Area, it.Desc),
+			Chapters: issueChapterIDs(it),
 		})
 		ctxt.FixStates[it.ID] = "rewrite"
+		s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusRewrite, "")
 	}
 	ctxt.RewriteBacklog = backlog
 	// 正文级路由落库：标记 rewrite + 沉淀重写清单（即便没有台账级问题待修也需持久化，供 G4 展示）。
@@ -1396,8 +1416,15 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			return
 		}
 		// 本批完成：解析修复回执并落库断点（仍 S5/running），供失败恢复与重启续修。
-		fixedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
+		fixedNow, skippedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
 		fixedIDs = append(fixedIDs, fixedNow...)
+		// 回执结果同步 issue 工单表（R1）：fixed 落状态，skipped 连原因一并留痕。
+		for _, id := range fixedNow {
+			s.syncIssueRow(ctx, novelID, runID, id, IssueStatusFixed, "")
+		}
+		for id, reason := range skippedNow {
+			s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
+		}
 		ctxt.FixBatchFailures = 0 // 批次成功即清零连续失败计数
 		if ctxtJSON, merr := json.Marshal(ctxt); merr == nil {
 			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(ctxtJSON)); serr != nil {
@@ -2131,7 +2158,7 @@ type fixReceipt struct {
 // 回执 fixed → "fixed"；skipped → "skipped"（记录原因，不再重试）；未提及 → 不落断点
 // （后续轮次重试）。输出缺少回执 JSON 时退化为旧行为（整批 "fixed"），保证兼容不卡死
 // 流水线。返回本批新标记为 fixed 的 id 列表（供前端 done_ids 累积）。
-func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log *slog.Logger) []string {
+func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log *slog.Logger) ([]string, map[string]string) {
 	fixedSet, skipReasons, found := parseFixReceipt(outText)
 	if !found {
 		log.Warn("S5 修复：本批修复输出缺少回执 JSON，按整批已修复处理（兼容回退）",
@@ -2141,6 +2168,7 @@ func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log 
 		ctxt.FixStates = map[string]string{}
 	}
 	fixedNow := make([]string, 0, len(batch))
+	skipped := make(map[string]string, len(batch))
 	for _, it := range batch {
 		switch {
 		case !found || fixedSet[it.ID]:
@@ -2148,13 +2176,14 @@ func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log 
 			fixedNow = append(fixedNow, it.ID)
 		case skipReasons[it.ID] != "":
 			ctxt.FixStates[it.ID] = "skipped"
+			skipped[it.ID] = skipReasons[it.ID]
 			log.Info("S5 修复：agent 上报无法修复，标记跳过",
 				"issue", it.ID, "reason", skipReasons[it.ID])
 		default:
 			// 回执未提及：不落断点，后续轮次重试。
 		}
 	}
-	return fixedNow
+	return fixedNow, skipped
 }
 
 // parseFixReceipt 从修复 agent 输出解析修复回执：{"fixed":["I1"],"skipped":[{"id":"I2","reason":"..."}]}。
@@ -2242,7 +2271,7 @@ func bodyIssuesOf(audit AuditData) []RewriteItem {
 			Level:       it.Level,
 			Area:        it.Area,
 			Desc:        it.Desc,
-			Chapters:    parseChapterRefs(it.Area, it.Desc),
+			Chapters:    issueChapterIDs(it),
 			TargetScope: it.TargetScope,
 			Dimension:   it.Dimension,
 			Direction:   it.Direction,
@@ -2265,7 +2294,7 @@ func retconItemsOf(audit AuditData) []RewriteItem {
 			Level:       it.Level,
 			Area:        it.Area,
 			Desc:        it.Desc,
-			Chapters:    parseChapterRefs(it.Area, it.Desc),
+			Chapters:    issueChapterIDs(it),
 			TargetScope: it.TargetScope,
 			Dimension:   it.Dimension,
 			Direction:   it.Direction,

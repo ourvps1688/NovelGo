@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"regexp"
@@ -83,7 +84,7 @@ func TestIssueContractEnumsAndDocs(t *testing.T) {
 // 核心只含 id/level/area/desc（蓝图/巡检不涉修复路由字段）。
 func TestAuditFormatLineTiers(t *testing.T) {
 	full := auditFormatLine(true, issueSampleDefault)
-	require.Contains(t, full, `"schema_version":2`, "全量契约应要求 schema_version")
+	require.Contains(t, full, fmt.Sprintf(`"schema_version":%d`, AuditSchemaVersion), "全量契约应要求 schema_version")
 	for _, name := range issueContractNames() {
 		require.Contains(t, full, `"`+name+`":`, "全量契约应含字段 %s", name)
 	}
@@ -152,6 +153,36 @@ func TestAuditStaleReason(t *testing.T) {
 		{ID: "I2", Level: "P1", Area: "b", Desc: "e", FixType: "ledger"},
 	}
 	require.Empty(t, auditStaleReason(partial), "字段组由不同 issue 分担覆盖应判可用（与旧守卫语义一致）")
+}
+
+// TestAuditFieldCoveredSliceKind 验证切片字段（chapter_ids）按 Len 判定覆盖：
+// 空切片不得被 Value.String() 的「<[]int64 Value>」占位串误判为已携带，
+// 否则字段嗅探对 slice 类型契约字段恒真、形同失效。
+func TestAuditFieldCoveredSliceKind(t *testing.T) {
+	empty := AuditData{Issues: []AuditIssue{{ID: "I1", Level: "P1", Area: "a", Desc: "d", ChapterIDs: []int64{}}}}
+	require.False(t, auditFieldCovered(empty, "chapter_ids"), "空切片不算携带")
+
+	filled := AuditData{Issues: []AuditIssue{{ID: "I1", Level: "P1", Area: "a", Desc: "d", ChapterIDs: []int64{3}}}}
+	require.True(t, auditFieldCovered(filled, "chapter_ids"), "非空切片算携带")
+
+	absent := AuditData{Issues: []AuditIssue{{ID: "I1", Level: "P1", Area: "a", Desc: "d"}}}
+	require.False(t, auditFieldCovered(absent, "chapter_ids"), "未输出不算携带")
+	require.False(t, auditFieldCovered(absent, "fix_type"), "string 零值不算携带")
+}
+
+// TestChapterIDsNotInStaleGroups 验证 chapter_ids 不进陈旧判定字段组（宁松勿杀）：
+// 结构化章节作用域有 issueChapterIDs 正则兜底（兼容读），LLM 未输出不得把新体检
+// 误判成陈旧而拒绝派发修复。
+func TestChapterIDsNotInStaleGroups(t *testing.T) {
+	for _, g := range issueContractGroups {
+		for _, f := range g.Fields {
+			require.NotEqual(t, "chapter_ids", f, "chapter_ids 不得进陈旧判定字段组（有正则兜底）")
+		}
+	}
+	a := AuditData{Verdict: "needs_fix", SchemaVersion: AuditSchemaVersion,
+		Issues: []AuditIssue{{ID: "I1", Level: "P0", Area: "a", Desc: "d",
+			FixType: "ledger", TargetScope: "active_volume", Dimension: "none", Direction: "forward_fix"}}}
+	require.Empty(t, auditStaleReason(a), "无 chapter_ids 也不判陈旧（正则兜底兼容读）")
 }
 
 // TestParseFreshAuditStampsSchemaVersion 验证版本号落地：新鲜产出（当前提示词契约）未 echo

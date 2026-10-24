@@ -154,6 +154,10 @@ type AuditIssue struct {
 	Dimension string `json:"dimension,omitempty"`
 	// Direction 修复方向：forward_fix（默认）/ retcon_candidate。
 	Direction string `json:"direction,omitempty"`
+	// ChapterIDs 问题涉及章节的全局阅读序号（契约 chapter_ids，R1 结构化作用域）：
+	// 修复作用域分组并行与章节定位的直接依据，替代从 area/desc 文本正则猜测（F5）。
+	// 空 = 无具体章节（台账/全书级）或旧数据未输出，消费方 issueChapterIDs 回退正则兜底。
+	ChapterIDs []int64 `json:"chapter_ids,omitempty"`
 }
 
 // issue 的 fix_type 枚举（契约单源见 contract.go）：
