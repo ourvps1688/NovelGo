@@ -2053,7 +2053,8 @@
         "fix": "修复与重写",
         "freeze": "卷末冻结：事实与风格双快照",
         "patrol": "巡检：张力报告"
-      }
+      },
+      "writingConfig": "写作评分配置"
     }
   },
   "narrative": {

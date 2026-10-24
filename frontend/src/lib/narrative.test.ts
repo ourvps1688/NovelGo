@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createElement } from "react";
 import { render, screen, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, relative, dirname, resolve } from "node:path";
 import { createInstance, type i18n as I18n } from "i18next";
@@ -38,6 +39,13 @@ vi.mock("@/lib/wailsjs/go/app/App", () => ({
   Initialize: vi.fn().mockResolvedValue(undefined),
   GetVersion: vi.fn().mockResolvedValue("0.0.0-test"),
   GetBuildHash: vi.fn().mockResolvedValue("deadbeef"),
+  // T3.1：JourneyQuality 挂载 WritingConfigTab（useWritingConfig 经此绑定取数）
+  GetWritingConfig: vi.fn().mockResolvedValue({
+    auto_score_enabled: true,
+    score_threshold: 60,
+    score_max_retries: 3,
+  }),
+  SaveWritingConfig: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/wailsjs/runtime/runtime", () => ({
@@ -236,12 +244,22 @@ describe("五落点渲染同一组词（WBS T2.1 验收①）", () => {
   });
 
   it("落点③ 三旅程视图头部渲染 tagline", () => {
+    // T3.1：JourneyQuality 挂载 WritingConfigTab（useQuery），需 QueryClientProvider
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     for (const Journey of [
       JourneyAbsorb,
       JourneyCreate,
       JourneyQuality,
     ] as const) {
-      const { unmount } = render(createElement(Journey));
+      const { unmount } = render(
+        createElement(
+          QueryClientProvider,
+          { client: qc },
+          createElement(Journey),
+        ),
+      );
       expect(screen.getByTestId("journey-subtitle").textContent).toBe(TAGLINE);
       unmount();
     }

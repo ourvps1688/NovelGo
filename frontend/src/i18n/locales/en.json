@@ -2092,7 +2092,8 @@
         "fix": "Fix & rewrite",
         "freeze": "Volume freeze: fact + style snapshots",
         "patrol": "Patrol: tension report"
-      }
+      },
+      "writingConfig": "Writing score config"
     }
   },
   "narrative": {
