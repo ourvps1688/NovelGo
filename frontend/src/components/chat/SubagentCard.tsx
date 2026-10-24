@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Loader2, CheckCircle2, XCircle, ChevronDown } from "lucide-react";
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  Timer,
+  Activity,
+} from "lucide-react";
 import type { TurnSegment } from "./types";
 import ThinkingBlock from "./ThinkingBlock";
 import MessageBubble from "./MessageBubble";
@@ -21,6 +28,20 @@ interface Props {
   } | null;
   // P1: 子 agent 最终失败原因（由 EventError 携带 sub_task_id 时设置）
   errorMessage?: string;
+  // P4 T1.3: 长跑可见性——首/末事件时刻（毫秒 epoch，AgentEvent.timestamp 派生，
+  // 事件协议零改动零后端）。缺时间戳则整块时钟不渲染（有则注入/无则降级）。
+  startedAtMs?: number;
+  lastActivityAtMs?: number;
+}
+
+// formatElapsed 把秒数格式化为 m:ss（≥1 小时 h:mm:ss），纯数值展示零 i18n。
+export function formatElapsed(totalSec: number): string {
+  const s = Math.max(0, Math.floor(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
 }
 
 function getAgentMeta(
@@ -38,6 +59,8 @@ export default memo(function SubagentCard({
   status,
   retrying,
   errorMessage,
+  startedAtMs,
+  lastActivityAtMs,
 }: Props) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(status !== "streaming");
@@ -46,6 +69,29 @@ export default memo(function SubagentCard({
   const isStreaming = status === "streaming";
   const isDone = status === "done";
   const isFailed = status === "failed";
+
+  // ── P4 T1.3 长跑可见性（只读）：已运行时钟 + 最近活动心跳 ──
+  // streaming 期间秒级刷新；完成/失败不启 interval（停表定格，以最后活动时刻为终点）。
+  // interval 随卸载/状态切换清理（防泄漏）；静默期只显示数值，零弹窗零报错。
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!isStreaming) return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isStreaming]);
+
+  const hasClock = startedAtMs !== undefined;
+  // 完成/失败态停表定格：终点=最近活动时刻，不再随时间走动。
+  const endMs = isStreaming ? nowMs : (lastActivityAtMs ?? nowMs);
+  const elapsedSec = hasClock
+    ? Math.max(0, Math.floor((endMs - (startedAtMs as number)) / 1000))
+    : undefined;
+  // 心跳只在 streaming 期间显示（「最近活动 Xs 前」，事件流入即归零刷新）。
+  const idleSec =
+    isStreaming && lastActivityAtMs !== undefined
+      ? Math.max(0, Math.floor((nowMs - lastActivityAtMs) / 1000))
+      : undefined;
 
   const accentCls =
     agentType === "review" ? "subagent-review" : "subagent-memory";
@@ -84,6 +130,31 @@ export default memo(function SubagentCard({
           />
           <span className="subagent-icon">{meta.emoji}</span>
           <span className="subagent-label">{meta.label}</span>
+
+          {/* P4 T1.3 长跑可见性：已运行时钟 + 最近活动心跳（只读数值，静默期零弹窗） */}
+          {hasClock && (
+            <span className="subagent-clock">
+              <Timer size={10} className="shrink-0" aria-hidden />
+              <span
+                data-testid="subagent-elapsed"
+                title={t("chat.subagentElapsed", {
+                  duration: formatElapsed(elapsedSec ?? 0),
+                })}
+              >
+                {formatElapsed(elapsedSec ?? 0)}
+              </span>
+              {idleSec !== undefined && (
+                <span
+                  className="subagent-idle"
+                  data-testid="subagent-idle"
+                  data-seconds={idleSec}
+                >
+                  <Activity size={9} className="shrink-0" aria-hidden />
+                  {t("chat.subagentLastActivity", { seconds: idleSec })}
+                </span>
+              )}
+            </span>
+          )}
 
           <span className="flex-1" />
 

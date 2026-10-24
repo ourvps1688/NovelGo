@@ -201,6 +201,8 @@
     "chatInterrupted": "Chat interrupted",
     "chatStopped": "Chat stopped",
     "retrying": "Retrying {{attempt}}/{{max}}",
+    "subagentElapsed": "Elapsed {{duration}}",
+    "subagentLastActivity": "Last activity {{seconds}}s ago",
     "loadMessagesFailed": "Failed to load messages",
     "startConversation": "Type a message to start a conversation",
     "chatError": "Chat error, please retry",

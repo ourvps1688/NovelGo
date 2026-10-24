@@ -19,6 +19,7 @@ import {
   emptySegment,
   filterSegmentsBySeq,
   rebuildTurns,
+  withEventTime,
 } from "./types";
 import ChatInput from "./ChatInput";
 import ChatControls from "./ChatControls";
@@ -442,7 +443,11 @@ export default function ChatPanel({
               );
               if (subIdx >= 0 && turn.segments[subIdx].retrying) {
                 const newSegs = [...turn.segments];
-                newSegs[subIdx] = { ...turn.segments[subIdx], retrying: null };
+                // P4 T1.3: 重试流恢复也是活动，刷新最近活动心跳
+                newSegs[subIdx] = withEventTime(
+                  { ...turn.segments[subIdx], retrying: null },
+                  event.timestamp,
+                );
                 return { ...turn, segments: newSegs };
               }
               return turn;
@@ -472,7 +477,11 @@ export default function ChatPanel({
                     s.type === "subagent" && s.taskId === event.sub_task_id,
                 );
                 if (subIdx < 0) return turn;
-                const subSeg = { ...turn.segments[subIdx] };
+                // P4 T1.3: 失败也是最后一次活动（停表时刻）
+                const subSeg = withEventTime(
+                  { ...turn.segments[subIdx] },
+                  event.timestamp,
+                );
                 subSeg.status = "failed";
                 subSeg.errorMessage = event.error || t("chat.chatError");
                 subSeg.retrying = null;
@@ -515,7 +524,11 @@ export default function ChatPanel({
                     s.type === "subagent" && s.taskId === event.sub_task_id,
                 );
                 if (subIdx < 0) return turn;
-                const subSeg = { ...turn.segments[subIdx] };
+                // P4 T1.3: 重试事件也计入最近活动心跳
+                const subSeg = withEventTime(
+                  { ...turn.segments[subIdx] },
+                  event.timestamp,
+                );
                 subSeg.segments = filterSegmentsBySeq(
                   subSeg.segments || [],
                   clearFromSeq,
@@ -566,24 +579,32 @@ export default function ChatPanel({
                     ...turn,
                     segments: [
                       ...turn.segments,
-                      {
-                        ...emptySegment(`subagent_${event.sub_task_id}`),
-                        type: "subagent",
-                        status: "streaming",
-                        agentType: "review" as const,
-                        taskId: event.sub_task_id,
-                        segments: [
-                          {
-                            ...emptySegment(`comp_${++counterRef.current}`),
-                            type: "compression",
-                            compressionPhase: phase,
-                          },
-                        ],
-                      },
+                      // P4 T1.3: 首事件定起算点（长跑可见性）
+                      withEventTime(
+                        {
+                          ...emptySegment(`subagent_${event.sub_task_id}`),
+                          type: "subagent",
+                          status: "streaming",
+                          agentType: "review" as const,
+                          taskId: event.sub_task_id,
+                          segments: [
+                            {
+                              ...emptySegment(`comp_${++counterRef.current}`),
+                              type: "compression",
+                              compressionPhase: phase,
+                            },
+                          ],
+                        },
+                        event.timestamp,
+                      ),
                     ],
                   };
                 }
-                const subSeg = { ...turn.segments[subIdx] };
+                // P4 T1.3: 压缩事件也计入最近活动心跳
+                const subSeg = withEventTime(
+                  { ...turn.segments[subIdx] },
+                  event.timestamp,
+                );
                 if (!subSeg.segments) subSeg.segments = [];
                 const subSegs = [...subSeg.segments];
                 const compIdx = subSegs.findIndex(
@@ -649,21 +670,29 @@ export default function ChatPanel({
             let updatedSegments = turn.segments;
             if (subIdx < 0) {
               // run_subagent 的 ToolCall 事件还没 apply，子 Agent 事件先到了——就地创建
-              const newSeg = {
-                ...emptySegment(`subagent_${event.sub_task_id}`),
-                type: "subagent" as const,
-                status: "streaming" as const,
-                agentType: "memory" as const,
-                taskId: event.sub_task_id,
-                segments: [],
-                finalText: "",
-                toolStatus: "executing" as const,
-                firstSeq: event.seq ?? 0,
-              };
+              // P4 T1.3: 首事件定起算点（长跑可见性）
+              const newSeg = withEventTime(
+                {
+                  ...emptySegment(`subagent_${event.sub_task_id}`),
+                  type: "subagent" as const,
+                  status: "streaming" as const,
+                  agentType: "memory" as const,
+                  taskId: event.sub_task_id,
+                  segments: [],
+                  finalText: "",
+                  toolStatus: "executing" as const,
+                  firstSeq: event.seq ?? 0,
+                },
+                event.timestamp,
+              );
               updatedSegments = [...turn.segments, newSeg];
               subIdx = updatedSegments.length - 1;
             }
-            const subSeg = { ...updatedSegments[subIdx] };
+            // P4 T1.3: 每次子 agent 事件都刷新最近活动心跳（长跑可见性）
+            const subSeg = withEventTime(
+              { ...updatedSegments[subIdx] },
+              event.timestamp,
+            );
             if (!subSeg.segments) subSeg.segments = [];
             const subSegs = [...subSeg.segments];
             const subSegId = `subseg_${++counterRef.current}`;
@@ -841,33 +870,43 @@ export default function ChatPanel({
                   (seg) => seg.type === "subagent" && seg.taskId === toolId,
                 );
                 if (subIdx >= 0) {
-                  segments[subIdx] = {
-                    ...segments[subIdx],
-                    agentType,
-                    status:
-                      toolStatus === "executing"
-                        ? "streaming"
-                        : toolStatus === "failed"
-                          ? "failed"
-                          : "done",
-                    toolStatus,
-                    errorMessage:
-                      toolStatus === "failed"
-                        ? event.error || ""
-                        : segments[subIdx].errorMessage,
-                  };
+                  // P4 T1.3: 完成/失败事件也计入心跳——停表时刻=最后活动时刻
+                  segments[subIdx] = withEventTime(
+                    {
+                      ...segments[subIdx],
+                      agentType,
+                      status:
+                        toolStatus === "executing"
+                          ? "streaming"
+                          : toolStatus === "failed"
+                            ? "failed"
+                            : "done",
+                      toolStatus,
+                      errorMessage:
+                        toolStatus === "failed"
+                          ? event.error || ""
+                          : segments[subIdx].errorMessage,
+                    },
+                    event.timestamp,
+                  );
                 } else {
-                  segments.push({
-                    ...emptySegment(`subagent_${toolId || segId}`),
-                    type: "subagent",
-                    status: "streaming",
-                    agentType,
-                    taskId: toolId,
-                    segments: [],
-                    finalText: "",
-                    toolStatus: "executing",
-                    firstSeq: event.seq ?? 0,
-                  });
+                  // P4 T1.3: 首事件定起算点（长跑可见性）
+                  segments.push(
+                    withEventTime(
+                      {
+                        ...emptySegment(`subagent_${toolId || segId}`),
+                        type: "subagent",
+                        status: "streaming",
+                        agentType,
+                        taskId: toolId,
+                        segments: [],
+                        finalText: "",
+                        toolStatus: "executing",
+                        firstSeq: event.seq ?? 0,
+                      },
+                      event.timestamp,
+                    ),
+                  );
                 }
                 // 移除同 toolId 的 tool segment（可能由空 toolName 的早期事件误创建）
                 const cleanSegs = toolId
@@ -1447,6 +1486,8 @@ export default function ChatPanel({
                             status={seg.status || "done"}
                             retrying={seg.retrying}
                             errorMessage={seg.errorMessage}
+                            startedAtMs={seg.startedAtMs}
+                            lastActivityAtMs={seg.lastActivityAtMs}
                           />
                         );
                       }

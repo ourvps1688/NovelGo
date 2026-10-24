@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   emptySegment,
   filterSegmentsBySeq,
+  parseTimeMs,
   rebuildTurns,
+  withEventTime,
   type TurnSegment,
 } from "./types";
 import type { session } from "@/lib/wailsjs/go/models";
@@ -217,5 +219,126 @@ describe("filterSegmentsBySeq for subagent segments (P1)", () => {
     const result = filterSegmentsBySeq(subagentSegments, 21);
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("sub_prev_tool");
+  });
+});
+
+// P4 T1.3: 子 agent 长跑可见性——心跳时间数据源（事件/消息时间戳派生，零后端）
+describe("withEventTime / parseTimeMs (P4 T1.3)", () => {
+  it("首事件定起算点，后续事件只刷新最近活动时刻", () => {
+    let seg = emptySegment("s1");
+    seg = withEventTime(seg, "2026-02-10T12:00:00Z");
+    expect(seg.startedAtMs).toBe(Date.parse("2026-02-10T12:00:00Z"));
+    expect(seg.lastActivityAtMs).toBe(seg.startedAtMs);
+    seg = withEventTime(seg, "2026-02-10T12:00:30Z");
+    expect(seg.startedAtMs).toBe(Date.parse("2026-02-10T12:00:00Z"));
+    expect(seg.lastActivityAtMs).toBe(Date.parse("2026-02-10T12:00:30Z"));
+  });
+
+  it("时间戳缺失/非法 → 原样返回（降级宁缺勿错，不污染字段）", () => {
+    const seg = emptySegment("s1");
+    expect(withEventTime(seg, undefined)).toBe(seg);
+    expect(withEventTime(seg, "not-a-date")).toBe(seg);
+    expect(parseTimeMs(null)).toBeUndefined();
+    expect(parseTimeMs("")).toBeUndefined();
+    expect(parseTimeMs(1770000000000)).toBe(1770000000000);
+    expect(parseTimeMs("2026-02-10T12:00:00Z")).toBe(
+      Date.parse("2026-02-10T12:00:00Z"),
+    );
+  });
+
+  it("rebuildTurns 从消息时间戳派生心跳（历史回放停表数据）", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "hello",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "main",
+      },
+      {
+        role: "assistant",
+        content: "part1",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "memory",
+        sub_task_id: "sub_1",
+        created_at: "2026-02-10T12:01:00Z",
+      },
+      {
+        role: "assistant",
+        content: "part2",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "memory",
+        sub_task_id: "sub_1",
+        created_at: "2026-02-10T12:02:00Z",
+      },
+      {
+        role: "assistant",
+        content: "done",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "main",
+        extra_metadata: JSON.stringify({
+          tool_displays: [
+            {
+              tool_name: "run_subagent",
+              tool_id: "sub_1",
+              display_text: "记忆分析",
+              activity_kind: "",
+              phase: "completed",
+            },
+          ],
+        }),
+      },
+    ] as unknown as session.Message[];
+    const turns = rebuildTurns(messages);
+    const sub = turns[0].segments.find((s) => s.type === "subagent");
+    expect(sub).toBeTruthy();
+    expect(sub?.startedAtMs).toBe(Date.parse("2026-02-10T12:01:00Z"));
+    expect(sub?.lastActivityAtMs).toBe(Date.parse("2026-02-10T12:02:00Z"));
+  });
+
+  it("rebuildTurns 无时间戳 → 心跳字段不注入（降级逐字一致）", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "hello",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "main",
+      },
+      {
+        role: "assistant",
+        content: "part1",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "memory",
+        sub_task_id: "sub_1",
+      },
+      {
+        role: "assistant",
+        content: "done",
+        turn_id: 1,
+        event_type: "message",
+        agent_type: "main",
+        extra_metadata: JSON.stringify({
+          tool_displays: [
+            {
+              tool_name: "run_subagent",
+              tool_id: "sub_1",
+              display_text: "记忆分析",
+              activity_kind: "",
+              phase: "completed",
+            },
+          ],
+        }),
+      },
+    ] as unknown as session.Message[];
+    const turns = rebuildTurns(messages);
+    const sub = turns[0].segments.find((s) => s.type === "subagent");
+    expect(sub).toBeTruthy();
+    expect(sub?.startedAtMs).toBeUndefined();
+    expect(sub?.lastActivityAtMs).toBeUndefined();
   });
 });

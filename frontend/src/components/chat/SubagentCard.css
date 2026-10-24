@@ -70,6 +70,24 @@
   font-weight: 500;
 }
 
+/* ── P4 T1.3 长跑可见性：时钟 + 最近活动心跳（只读数值，零弹窗） ── */
+.subagent-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.65rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.subagent-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  opacity: 0.75;
+}
+
 .subagent-memory .subagent-badge-running {
   color: var(--tag-amber-foreground);
   background: var(--tag-amber);

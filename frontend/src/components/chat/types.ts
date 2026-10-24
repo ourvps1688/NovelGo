@@ -79,6 +79,35 @@ export interface TurnSegment {
   // P1: 子 agent 最终失败原因（由 EventError 携带 sub_task_id 时设置）
   // 与 retrying.errorMessage 的区别：retrying=null 后丢失，errorMessage 持久保留
   errorMessage?: string;
+  // P4 T1.3: 子 agent 长跑可见性——自该 sub_task 首事件时刻起算 / 最近一次事件时刻
+  // （毫秒 epoch）。事件协议零改动（零后端）：直接从 AgentEvent.timestamp /
+  // session.Message.created_at 派生。时间戳缺失则不显示时钟（有则注入/无则降级）。
+  startedAtMs?: number;
+  lastActivityAtMs?: number;
+}
+
+// parseTimeMs 把事件/消息时间戳解析为毫秒 epoch；缺失或不可解析返回 undefined
+// （降级纪律：坏数据宁缺勿错，不注入假时间）。
+export function parseTimeMs(v: unknown): number | undefined {
+  if (v == null || v === "") return undefined;
+  const ms = typeof v === "number" ? v : Date.parse(String(v));
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+// withEventTime 把一次事件的发生时刻并入子 agent segment（长跑可见性的心跳数据源）：
+// 首事件定起算点 startedAtMs，此后每次事件刷新最近活动时刻 lastActivityAtMs。
+// 时间戳缺失/不可解析时原样返回（降级逐字一致，绝不污染既有字段）。
+export function withEventTime(
+  seg: TurnSegment,
+  timestamp: unknown,
+): TurnSegment {
+  const ms = parseTimeMs(timestamp);
+  if (ms === undefined) return seg;
+  return {
+    ...seg,
+    startedAtMs: seg.startedAtMs ?? ms,
+    lastActivityAtMs: ms,
+  };
 }
 
 export function emptySegment(id: string): TurnSegment {
@@ -224,6 +253,12 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
             subagentCache.set(subTaskId, seg);
             return seg;
           })();
+
+        // P4 T1.3: 从消息时间戳派生长跑可见性心跳（首事件定起算点，末事件定停表时刻）。
+        // 时间戳缺失时 withEventTime 原样返回，卡片不显示时钟（有则注入/无则降级）。
+        const timed = withEventTime(subSeg, msg.created_at);
+        subSeg.startedAtMs = timed.startedAtMs;
+        subSeg.lastActivityAtMs = timed.lastActivityAtMs;
 
         // 追加子 agent 的文本内容
         if ((msg.content || msg.thinking_content) && subSeg.segments) {
