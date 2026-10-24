@@ -190,6 +190,8 @@ export function GetNovels():Promise<Array<novel.Novel>>;
 
 export function GetPersonaSetting(arg1:number):Promise<personasetting.PersonaSetting>;
 
+export function GetPipelineExecStats(arg1:number):Promise<Array<activity.ExecStatSummary>>;
+
 export function GetPipelineState(arg1:number):Promise<pipeline.PipelineRun>;
 
 export function GetPlatform():Promise<Record<string, any>>;

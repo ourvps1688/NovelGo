@@ -1,5 +1,35 @@
 export namespace activity {
 	
+	export class ExecStatSummary {
+	    skill: string;
+	    runs: number;
+	    error_runs: number;
+	    tripped_runs: number;
+	    total_duration_ms: number;
+	    avg_duration_ms: number;
+	    max_duration_ms: number;
+	    total_turns: number;
+	    avg_turns: number;
+	    max_turns_used: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExecStatSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.skill = source["skill"];
+	        this.runs = source["runs"];
+	        this.error_runs = source["error_runs"];
+	        this.tripped_runs = source["tripped_runs"];
+	        this.total_duration_ms = source["total_duration_ms"];
+	        this.avg_duration_ms = source["avg_duration_ms"];
+	        this.max_duration_ms = source["max_duration_ms"];
+	        this.total_turns = source["total_turns"];
+	        this.avg_turns = source["avg_turns"];
+	        this.max_turns_used = source["max_turns_used"];
+	    }
+	}
 	export class FeatureUsageStat {
 	    feature_key: string;
 	    count: number;
