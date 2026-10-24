@@ -198,6 +198,12 @@ export const writingStatsKeys = {
   all: ["writing-stats"] as const,
 };
 
+// P4 T2.3：功能使用率消费面。GetFeatureUsage(days) 近 N 天本地聚合（纯本地不上传）。
+// 前缀 "feature-usage" 在 queryErrorToast.ts 静默口径白名单内（加载失败零报错）。
+export const featureUsageKeys = {
+  detail: (days: number) => ["feature-usage", days] as const,
+};
+
 // 写作评分配置：每本书独立的评分门禁开关（auto_score_enabled / score_threshold /
 // score_max_retries）。GetWritingConfig(novelId) 按书返回，queryKey 第二段用 novelId。
 // useSaveWritingConfig onSuccess invalidate 此 key，让 WritingConfigTab 自动 refetch。

@@ -1676,6 +1676,11 @@
     "chaptersCount": "章节 {{count}} 章",
     "yearCalendar": "{{year}} 年写作日历",
     "noWritingRecord": "还没有写作记录。开始写吧，每天的字数都会被记录下来。",
+    "featureUsage": {
+      "title": "功能使用率",
+      "hint": "近 30 天本地统计（只记功能与次数，不记内容）",
+      "count": "{{count}} 次"
+    },
     "mon": "一",
     "wed": "三",
     "fri": "五",

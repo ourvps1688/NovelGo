@@ -1715,6 +1715,12 @@
     "chaptersCount_other": "{{count}} chapters",
     "yearCalendar": "{{year}} Writing Calendar",
     "noWritingRecord": "No writing records yet. Start writing — every day's word count will be recorded.",
+    "featureUsage": {
+      "title": "Feature usage",
+      "hint": "Local stats for the last 30 days (feature keys and counts only)",
+      "count_one": "{{count}} time",
+      "count_other": "{{count}} times"
+    },
     "mon": "M",
     "wed": "W",
     "fri": "F",

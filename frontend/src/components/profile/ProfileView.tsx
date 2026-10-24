@@ -9,6 +9,7 @@ import { useWritingStats } from "./useWritingStats";
 import { useProfileSettings } from "./useProfileSettings";
 import { useSaveAvatar } from "./useSaveAvatar";
 import { useSaveUserName } from "./useSaveUserName";
+import FeatureUsageSection from "./FeatureUsageSection";
 
 export default function ProfileView() {
   const { t } = useTranslation();
@@ -221,6 +222,9 @@ export default function ProfileView() {
             <ContributionGrid data={activity} />
           </div>
         </section>
+
+        {/* 功能使用率（P4 T2.3）：有度量才显示，无数据/失败静默不渲染 */}
+        <FeatureUsageSection />
 
         {Object.keys(activity).length === 0 && (
           <div className="text-center py-12">

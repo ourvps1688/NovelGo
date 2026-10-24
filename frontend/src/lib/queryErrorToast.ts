@@ -54,6 +54,10 @@ const QUERY_ERROR_I18N: Record<string, string> = {
   "llm-config": "settings.llmConfigLoadFailed",
 };
 
+// 静默口径（P4 T2.3）：度量消费面加载失败=静默空态零报错（降级逐字一致）。
+// 这些 query 键前缀的错误不进 toast、不 console.error——统计失败业务零感知。
+const SILENT_QUERY_PREFIXES = new Set(["feature-usage"]);
+
 // 4a 全局 query 错误 toast 中间件。
 // 设计依据见 docs/feat/v1.4.0/refactor-plan/04a-query-error-toast.md。
 //
@@ -81,6 +85,8 @@ export function installQueryErrorToast(queryClient: QueryClient): () => void {
 
     // 查 i18n key：先按 queryKey 前缀查映射表，没匹配时 fallback 用 `${prefix}.loadFailed`
     const prefix = String(query.queryKey[0] ?? "");
+    // 静默口径（P4 T2.3）：度量消费面错误零提示零日志，业务零感知。
+    if (SILENT_QUERY_PREFIXES.has(prefix)) return;
     const i18nKey = QUERY_ERROR_I18N[prefix] ?? `${prefix}.loadFailed`;
     const label = i18n.exists(i18nKey)
       ? i18n.t(i18nKey)
