@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -281,7 +282,7 @@ func (s *Service) executeBlueprint(runID string, novelID int64) {
 		return
 	}
 
-	out, err := s.skillRunner(ctx, "story-blueprint", SkillInput{
+	out, err := s.dispatchSkill(ctx, "story-blueprint", SkillInput{
 		NovelID:   novelID,
 		Prompt:    blueprintPrompt(novelID),
 		MaxTurns:  12,
@@ -855,7 +856,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		auditPrompt = blueprintAuditPrompt(novelID)
 	}
 
-	out, err := s.skillRunner(ctx, auditSkill, SkillInput{
+	out, err := s.dispatchSkill(ctx, auditSkill, SkillInput{
 		NovelID: novelID,
 		Prompt:  auditPrompt,
 		// 只读体检需通读/抽样全书章节与台账（长篇动辄 70+ 章），12 轮在长篇上
@@ -1024,10 +1025,6 @@ const (
 	// 原样重派」地无限循环，改发闸门交用户裁决（继续=回复评重新评估 / 终止）。
 	// 批次成功完成即清零计数。
 	fixBatchFailureCap = 3
-	// fixProviderIdleTrip 是批次派发前的供应商熔断阈值：近 10 分钟 LLM 流式空闲超时
-	// 达到该次数说明 Provider 基本不可用（正常修复期间接近 0），此时不派发 agent
-	// 白烧 18 轮墙钟时间，直接按批次失败快速落入计数/闸门通道。
-	fixProviderIdleTrip = 10
 )
 
 // autoRewriteCap 是自动章节重写回路的单次运行最大轮数：达到上限后不再自动重写，
@@ -1304,21 +1301,16 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			fixSkill = "blueprint-fix"
 			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
 		}
-		// 供应商熔断：近 10 分钟流式空闲超时达到阈值说明 Provider 基本不可用
-		// （正常修复期间接近 0），此时不派发 agent 白烧 18 轮墙钟时间（每轮都可能
-		// 白等 3 分钟被看门狗取消），直接按批次失败快速落入计数/闸门通道。
-		var out SkillOutput
-		var batchErr error
-		if n := llm.RecentIdleTimeouts(10 * time.Minute); n >= fixProviderIdleTrip {
-			batchErr = fmt.Errorf("供应商熔断：近 10 分钟 LLM 流式空闲超时 %d 次，暂不派发修复 agent", n)
-		} else {
-			out, batchErr = s.skillRunner(ctx, fixSkill, SkillInput{
-				NovelID:   novelID,
-				Prompt:    fixPromptText,
-				MaxTurns:  18,
-				SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
-			})
-		}
+		// 派发前过供应商熔断判定（dispatchSkill 单源，WBS p4 §0.2）：近 10 分钟流式空闲
+		// 超时达到阈值说明 Provider 基本不可用（正常修复期间接近 0），此时不派发 agent
+		// 白烧 18 轮墙钟时间（每轮都可能白等 3 分钟被看门狗取消），直接按批次失败快速
+		// 落入计数/闸门通道（失败计数/闸门通道语义与既有 S5 熔断一致）。
+		out, batchErr := s.dispatchSkill(ctx, fixSkill, SkillInput{
+			NovelID:   novelID,
+			Prompt:    fixPromptText,
+			MaxTurns:  18,
+			SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
+		})
 		if batchErr != nil {
 			s.logger.Error("S5 修复执行失败", "run_id", runID, "batch", i+1, "err", batchErr)
 			s.setDispatching(ctx, runID, false)
@@ -1491,6 +1483,8 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 		total += len(chaptersByReading[item.ID])
 	}
 	index := 0
+	// rewriteLoop 标签专供供应商熔断「整循环中断」用（WBS p4 §0.2）。
+rewriteLoop:
 	for _, item := range dispatchable {
 		chaps := chaptersByReading[item.ID]
 		for _, ch := range chaps {
@@ -1505,6 +1499,12 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 					"run_id": runID, "novel_id": novelID, "phase": "failed",
 					"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber, "error": rerr.Error(),
 				})
+				if errors.Is(rerr, errProviderTripped) {
+					// 供应商熔断（WBS p4 §0.2）：中断整个逐章循环而非逐章失败刷屏——
+					// 只报本条失败进度，剩余章节不再派发；落地沿既有尾部通道（复评自身
+					// 也有熔断判定，会按其原有失败通道落 paused 等恢复）。
+					break rewriteLoop
+				}
 				// 单章失败不阻断其余章节；失败章节仍留在重写清单，由复评与重试上限约束。
 				continue
 			}
@@ -1675,7 +1675,7 @@ func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, ite
 func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter) error {
 	prompt := chapterRewritePrompt(novelID, item, ch,
 		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite))
-	_, err := s.skillRunner(ctx, "chapter-rewrite", SkillInput{
+	_, err := s.dispatchSkill(ctx, "chapter-rewrite", SkillInput{
 		NovelID:   novelID,
 		Prompt:    prompt,
 		MaxTurns:  18,
@@ -1705,7 +1705,7 @@ func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, b
 // 跑 blueprint-drift-check 技能比对「当前卷纲」与「已写章节」，返回人类可读结论；
 // 巡检失败只记日志并返回空串（不落库、不阻断复评主流程）。
 func (s *Service) runBlueprintDriftPatrol(ctx context.Context, runID string, novelID int64) string {
-	out, err := s.skillRunner(ctx, "blueprint-drift-check", SkillInput{
+	out, err := s.dispatchSkill(ctx, "blueprint-drift-check", SkillInput{
 		NovelID:   novelID,
 		Prompt:    driftPatrolPrompt(novelID),
 		MaxTurns:  8,
@@ -1784,7 +1784,7 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 	}
 	s.setDispatching(ctx, runID, true)
 
-	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
+	out, err := s.dispatchSkill(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
 		Prompt:    finalAuditPrompt(novelID, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
 		MaxTurns:  16,
@@ -2058,7 +2058,7 @@ func (s *Service) storeStockAudit(ctx context.Context, run *PipelineRun, data Au
 }
 
 func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, error) {
-	out, err := s.skillRunner(ctx, "signability-audit", SkillInput{
+	out, err := s.dispatchSkill(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
 		Prompt:    stockAuditPrompt(novelID),
 		MaxTurns:  14,

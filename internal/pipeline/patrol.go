@@ -44,7 +44,7 @@ func patrolPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 // （不落库、不广播、不阻断）——兜底巡检不给流水线添堵。
 func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelID int64) {
 	bg := s.appCtx
-	out, err := s.skillRunner(bg, "consistency-patrol", SkillInput{
+	out, err := s.dispatchSkill(bg, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)),
 		MaxTurns:  12,

@@ -1,0 +1,326 @@
+package pipeline
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/volume"
+	"github.com/stretchr/testify/require"
+)
+
+// ── 供应商熔断扩展（WBS p4 T1.2）────────────────────────────────
+//
+// 验收：①全派发点覆盖断言（源码锁定 skillRunner 调用点均过熔断判定）；
+// ②熔断触发零 agent 派发 + 各点失败通道语义不变；③未触发逐字一致（既有 pipeline 测试零回退）。
+
+// forceProviderTrip 把取数接缝钉在阈值之上，确定性触发熔断判定（测试专用）。
+func forceProviderTrip(t *testing.T) {
+	t.Helper()
+	orig := idleTimeoutCount
+	idleTimeoutCount = func(time.Duration) int { return fixProviderIdleTrip }
+	t.Cleanup(func() { idleTimeoutCount = orig })
+}
+
+// countSkillCalls 给 skillRunner 包一层计数桩（断言熔断触发时零 agent 派发）。
+func countSkillCalls(svc *Service) *int {
+	n := new(int)
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		*n++
+		return SkillOutput{Text: "ok"}, nil
+	}
+	return n
+}
+
+// TestProviderTrippedJudgment 锁定共享熔断判定语义（单源）：阈值/窗口常量、
+// 计数口径、以及降级纪律「判定自身异常 → 照常派发（绝不误熔断）」。
+func TestProviderTrippedJudgment(t *testing.T) {
+	orig := idleTimeoutCount
+	t.Cleanup(func() { idleTimeoutCount = orig })
+
+	var gotWindow time.Duration
+	idleTimeoutCount = func(window time.Duration) int {
+		gotWindow = window
+		return fixProviderIdleTrip - 1
+	}
+	tripped, n := providerTripped()
+	require.False(t, tripped, "低于阈值不应熔断")
+	require.Equal(t, fixProviderIdleTrip-1, n)
+	require.Equal(t, providerIdleWindow, gotWindow, "判定窗口应为单源常量 providerIdleWindow")
+
+	idleTimeoutCount = func(time.Duration) int { return fixProviderIdleTrip }
+	tripped, n = providerTripped()
+	require.True(t, tripped, "达到阈值应熔断（语义与 RecentIdleTimeouts >= fixProviderIdleTrip 一致）")
+	require.Equal(t, fixProviderIdleTrip, n)
+
+	// 降级纪律（最高验收）：判定自身异常 → 照常派发，宁缺勿错。
+	idleTimeoutCount = func(time.Duration) int { panic("count boom") }
+	tripped, n = providerTripped()
+	require.False(t, tripped, "判定自身异常必须照常派发（绝不误熔断）")
+	require.Equal(t, 0, n)
+
+	// 哨兵错误可被 errors.Is 识别，提示统一「疑似供应商挂起」口径且附近期超时次数。
+	err := providerTripErr(12)
+	require.ErrorIs(t, err, errProviderTripped)
+	require.Contains(t, err.Error(), "疑似供应商挂起")
+	require.Contains(t, err.Error(), "12 次", "提示应附近期空闲超时次数")
+}
+
+// TestSkillRunnerDispatchOnlyViaTripGuard 源码锁定（验收①）：internal/pipeline 生产代码里
+// s.skillRunner 的直接调用只允许出现在 dispatchSkill（熔断判定唯一入口）内——任何新增
+// 派发点必须走 dispatchSkill，天然过熔断判定（S2/S3/S4/S5/S6/G3/巡检全覆盖）。
+func TestSkillRunnerDispatchOnlyViaTripGuard(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	total := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, rerr := os.ReadFile(f)
+		require.NoError(t, rerr)
+		total += strings.Count(string(src), "s.skillRunner(")
+	}
+	require.Equal(t, 1, total,
+		"s.skillRunner( 直接调用只允许出现在 dispatchSkill 内（熔断判定唯一入口），实际 %d 处", total)
+}
+
+// TestProviderTripSkipsDispatchS2Blueprint 验收②：S2 蓝图熔断触发零派发，
+// 失败通道语义不变（保留 running + 广播错误阶段事件供前端重试），提示统一口径。
+func TestProviderTripSkipsDispatchS2Blueprint(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	forceProviderTrip(t)
+	calls := countSkillCalls(svc)
+
+	var notes []string
+	origStage := emitStage
+	emitStage = func(_ context.Context, p StagePayload) {
+		if p.Note != "" {
+			notes = append(notes, p.Note)
+		}
+	}
+	t.Cleanup(func() { emitStage = origStage })
+
+	run, err := svc.StartPipeline(ctx, 901, "new", nil, false)
+	require.NoError(t, err)
+	svc.executeBlueprint(run.RunID, 901)
+
+	require.Zero(t, *calls, "熔断触发必须零 agent 派发")
+	require.NotEmpty(t, notes)
+	require.Contains(t, notes[0], "蓝图生成失败", "S2 失败通道语义不变（running+错误事件）")
+	require.Contains(t, notes[0], "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	require.Equal(t, StatusRunning, got.Status, "S2 失败通道语义不变：保留 running 供前端重试")
+}
+
+// TestProviderTripSkipsDispatchS4Audit 验收②：S4 体检熔断触发零派发，
+// 失败通道语义不变（落 paused 可恢复）。
+func TestProviderTripSkipsDispatchS4Audit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	forceProviderTrip(t)
+	calls := countSkillCalls(svc)
+
+	var notes []string
+	origStage := emitStage
+	emitStage = func(_ context.Context, p StagePayload) {
+		if p.Note != "" {
+			notes = append(notes, p.Note)
+		}
+	}
+	t.Cleanup(func() { emitStage = origStage })
+
+	run, err := svc.StartPipeline(ctx, 902, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, ""))
+
+	svc.executeAudit(run.RunID, 902)
+
+	require.Zero(t, *calls, "熔断触发必须零 agent 派发")
+	require.NotEmpty(t, notes)
+	require.Contains(t, notes[0], "签约体检失败", "S4 失败通道语义不变（落 paused 可恢复）")
+	require.Contains(t, notes[0], "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
+	require.Contains(t, notes[0], "已暂停，点击恢复将重新体检")
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	require.Equal(t, StageS4, got.CurrentStage)
+	require.Equal(t, StatusPaused, got.Status, "S4 失败通道=落 paused")
+}
+
+// TestProviderTripSkipsDispatchS5Fix 验收②：S5 修复批次熔断触发零派发，
+// 失败通道语义不变（批次失败计数 → 落 paused，emitFixDone ok=false 附错误）。
+func TestProviderTripSkipsDispatchS5Fix(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	forceProviderTrip(t)
+	calls := countSkillCalls(svc)
+
+	var fixDoneErrs []string
+	origFixDone := emitFixDone
+	emitFixDone = func(_ context.Context, p map[string]any) {
+		if v, ok := p["error"].(string); ok {
+			fixDoneErrs = append(fixDoneErrs, v)
+		}
+	}
+	t.Cleanup(func() { emitFixDone = origFixDone })
+
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
+		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
+	run, err := svc.StartPipeline(ctx, 903, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	// 同步直调 executeFix：把 run 钉在 S5/running（enterFix 的等价前置状态）。
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
+
+	svc.executeFix(run.RunID, 903)
+
+	require.Zero(t, *calls, "熔断触发必须零 agent 派发（含修复批次）")
+	require.NotEmpty(t, fixDoneErrs)
+	require.Contains(t, fixDoneErrs[0], "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	require.Equal(t, StageS5, got.CurrentStage)
+	require.Equal(t, StatusPaused, got.Status, "S5 失败通道语义不变：首批失败（累计 1/3）落 paused")
+	var pausedCtxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &pausedCtxt))
+	require.Equal(t, 1, pausedCtxt.FixBatchFailures, "熔断走批次失败计数通道（语义不变）")
+}
+
+// TestProviderTripSkipsDispatchS6FinalAudit 验收②：S6 完本终检熔断触发零派发，
+// 失败通道语义不变（落 paused 可恢复）。
+func TestProviderTripSkipsDispatchS6FinalAudit(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	forceProviderTrip(t)
+	calls := countSkillCalls(svc)
+
+	var notes []string
+	origStage := emitStage
+	emitStage = func(_ context.Context, p StagePayload) {
+		if p.Note != "" {
+			notes = append(notes, p.Note)
+		}
+	}
+	t.Cleanup(func() { emitStage = origStage })
+
+	run, err := svc.StartPipeline(ctx, 904, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS6, StatusRunning, ""))
+
+	svc.executeFinalAudit(run.RunID, 904)
+
+	require.Zero(t, *calls, "熔断触发必须零 agent 派发")
+	require.NotEmpty(t, notes)
+	require.Contains(t, notes[0], "完本终检失败", "S6 失败通道语义不变（落 paused 可恢复）")
+	require.Contains(t, notes[0], "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	require.Equal(t, StageS6, got.CurrentStage)
+	require.Equal(t, StatusPaused, got.Status, "S6 失败通道=落 paused")
+}
+
+// TestProviderTripSkipsDispatchPatrols 验收②：三个非阻断派发点（G3 蓝图漂移巡检 /
+// 一致性巡检 / 全量体检）熔断触发零派发，各点失败通道语义不变（跳过不阻断 / 不广播 /
+// needs_fix+error 交上层）。
+func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	forceProviderTrip(t)
+	calls := countSkillCalls(svc)
+
+	// G3 蓝图漂移巡检：失败通道=记日志返回空串（非阻断）。
+	require.Empty(t, svc.runBlueprintDriftPatrol(ctx, "run-x", 905),
+		"G3 巡检熔断应走原失败通道：返回空串（非阻断）")
+
+	// 一致性巡检：失败通道=记日志跳过（不落库、不广播、不阻断）。
+	patrolEmitted := false
+	origPatrol := emitConsistencyPatrol
+	emitConsistencyPatrol = func(_ context.Context, _ map[string]any) { patrolEmitted = true }
+	t.Cleanup(func() { emitConsistencyPatrol = origPatrol })
+	svc.runConsistencyPatrol(ctx, "run-x", 905)
+	require.False(t, patrolEmitted, "一致性巡检失败语义不变：不广播")
+
+	// 全量体检：失败通道=needs_fix + error（由 runFullAlign 广播失败 note）。
+	data, serr := svc.runStockAudit(ctx, 905)
+	require.Error(t, serr)
+	require.Contains(t, serr.Error(), "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
+	require.Equal(t, "needs_fix", data.Verdict, "全量体检失败通道语义不变：needs_fix+error")
+
+	require.Zero(t, *calls, "三个巡检/体检派发点熔断时必须零 agent 派发")
+}
+
+// TestProviderTripBreaksRewriteLoop 验收② + WBS 风险条目：S3 逐章重写熔断应
+// **中断整个循环**而非逐章失败刷屏——只报一次失败进度、剩余章节零派发；
+// 落地沿既有尾部通道（复评自身也过熔断判定，落 paused 等恢复）。
+func TestProviderTripBreaksRewriteLoop(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, db.Create(&chapter.Chapter{
+			NovelID: 906, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
+		}).Error)
+	}
+	forceProviderTrip(t)
+	calls := countSkillCalls(svc)
+
+	var phases []string
+	var failedErr string
+	origProg := emitRewriteProgress
+	emitRewriteProgress = func(_ context.Context, p map[string]any) {
+		phase := fmt.Sprint(p["phase"])
+		phases = append(phases, phase)
+		if phase == "failed" {
+			failedErr = fmt.Sprint(p["error"])
+		}
+	}
+	t.Cleanup(func() { emitRewriteProgress = origProg })
+
+	run, err := svc.StartPipeline(ctx, 906, "new", nil, false)
+	require.NoError(t, err)
+	// 重写清单指向第 2/3/4 章（3 个可派发章节），同步直调 finishFixHandoffRewrite。
+	ctxt := GateContext{
+		AuditStage: StageS4,
+		RewriteBacklog: []RewriteItem{{
+			ID: "I1", Level: "P0", Area: "开篇过签力", Desc: "前三章未立人设，代入感弱",
+			Chapters: []int64{2, 3, 4},
+		}},
+	}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
+
+	svc.finishFixHandoffRewrite(ctx, run.RunID, 906, ctxt)
+
+	require.Zero(t, *calls, "熔断触发必须零 agent 派发（含逐章重写与复评）")
+	// 整循环中断而非逐章刷屏：只 1 条 starting + 1 条 failed（第 3/4 章不再进循环）。
+	require.Equal(t, []string{"starting", "failed"}, phases,
+		"熔断应中断整个逐章循环：只报一次失败进度，剩余章节不派发不刷屏")
+	require.Contains(t, failedErr, "疑似供应商挂起", "失败进度错误应带统一「疑似供应商挂起」口径")
+	// 落地沿既有尾部通道：复评自身也过熔断判定 → 落 paused 等恢复。
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	require.Equal(t, StatusPaused, got.Status, "熔断中断后应经复评失败通道落 paused（可恢复）")
+
+	// 哨兵可被 errors.Is 识别（循环据此做整循环中断的差异化落地）。
+	require.ErrorIs(t,
+		svc.executeChapterRewrite(ctx, run.RunID, 906, RewriteItem{ID: "I1"}, chapter.Chapter{ID: 1}),
+		errProviderTripped)
+}
