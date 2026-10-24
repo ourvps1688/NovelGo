@@ -54,3 +54,5 @@ github_pat.txt
 
 # Test-generated reports (written back to repo root by benchmarks)
 skill-llm-fallback-report.md
+
+node_modules/
