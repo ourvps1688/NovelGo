@@ -41,6 +41,10 @@ import BookPitchWorkflowView from "@/components/skill/BookPitchWorkflowView";
 import PipelineWizard from "@/components/pipeline/PipelineWizard";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
+import JourneyAbsorb from "@/components/journey/JourneyAbsorb";
+import JourneyCreate from "@/components/journey/JourneyCreate";
+import JourneyQuality from "@/components/journey/JourneyQuality";
+import { FactoryBreadcrumb } from "@/components/journey/JourneyHeader";
 import UpdateDialog from "@/components/update/UpdateDialog";
 import ErrorBoundary from "@/components/shared/ErrorBoundary";
 import { GetPlatform, ApproveTool } from "@/lib/wailsjs/go/app/App";
@@ -79,6 +83,14 @@ const THEME_ICON: Record<Theme, React.ReactNode> = {
 // 走 ContentPanel 的面板（activePanel 路由层）。ContentPanel 内部通过 tab 机制
 // 显示章节/skill/novelgo.md/diff/大纲，不经过 activePanel 路由。
 const CONTENT_PANEL_IDS = new Set<PanelId>(["chapters", "skills"]);
+
+// 三工厂旅程中枢（P3 T1.2）。旅程面板自带归属面包屑（JourneyHeader 内），
+// 其余功能面板由主区顶部 FactoryBreadcrumb 显示归属（面包屑不重复渲染）。
+const JOURNEY_PANEL_IDS = new Set<PanelId>([
+  "journey-absorb",
+  "journey-create",
+  "journey-quality",
+]);
 
 interface Props {
   initialNovelId: number;
@@ -221,7 +233,7 @@ export default function WorkspaceView({
       // 3.8 后续：删 switchToNovel wrapper，直接调 switchNovel + setActivePanel。
       // reset 由 effect 监听 activeNovelId 变化自动调。
       await switchNovel(res.novel_id);
-      setActivePanel("chapters");
+      setActivePanel("journey-create");
     },
     [queryClient, switchNovel, setActivePanel],
   );
@@ -305,7 +317,8 @@ export default function WorkspaceView({
       void switchNovel(nextID)
         .then(() => {
           if (useNovelStore.getState().activeNovelId === nextID) {
-            setActivePanel(nextID ? "chapters" : "novels");
+            // 进入书后默认落地 journey-create（P3 T1.2）；「继续写作」一跳回 chapters。
+            setActivePanel(nextID ? "journey-create" : "novels");
           }
         })
         .catch((err: unknown) => {
@@ -366,7 +379,7 @@ export default function WorkspaceView({
     try {
       // 3.8 后续：删 switchToNovel wrapper，直接调 switchNovel + setActivePanel。
       await switchNovel(n.id);
-      setActivePanel("chapters");
+      setActivePanel("journey-create");
     } catch (err) {
       console.error(err);
       toastError(toErrorMessage(err));
@@ -386,7 +399,7 @@ export default function WorkspaceView({
       setShowCreate(false);
       // 3.8 后续：删 switchToNovel wrapper，直接调 switchNovel + setActivePanel。
       await switchNovel(n.id);
-      setActivePanel("chapters");
+      setActivePanel("journey-create");
     } catch (err) {
       console.error(err);
       toastError(toErrorMessage(err));
@@ -523,119 +536,140 @@ export default function WorkspaceView({
                 />
               )}
 
-              {activePanel === "chapter-management" ? (
-                <ErrorBoundary>
-                  <ChapterManagementView
-                    key={activeNovelId}
-                    novelId={activeNovelId}
-                  />
-                </ErrorBoundary>
-              ) : activePanel === "novels" ? (
-                <BookshelfView
-                  onSelectNovel={handleSelectNovel}
-                  onSaveCover={handleSaveCover}
-                  onImportNovel={() => importNovel.startImport()}
-                  onStartBookPitch={() => {
-                    // 从书架进入孵化器：清空旧的孵化器会话，确保每次进入都是全新的开书流程。
-                    useBookPitchStore.getState().setIncubatorId(null);
-                    setActivePanel("bookpitch");
-                  }}
-                  onContinueBookPitch={() => {
-                    // 继续当前孵化器：切回孵化器小说并打开新书孵化面板。
-                    const id = useBookPitchStore.getState().incubatorId;
-                    if (id != null) {
-                      void switchNovel(id);
-                    }
-                    setActivePanel("bookpitch");
-                  }}
-                />
-              ) : (
-                CONTENT_PANEL_IDS.has(activePanel) && (
-                  <ContentPanel ref={contentRef} />
-                )
-              )}
+              {/* 主区=归属面包屑 + 面板内容列（T1.2）。面包屑 FACTORY_MAP 单源驱动；
+                  旅程面板自带面包屑（JourneyHeader）不重复渲染。 */}
+              <div className="flex flex-1 flex-col min-w-0">
+                {!JOURNEY_PANEL_IDS.has(activePanel) && (
+                  <FactoryBreadcrumb panelId={activePanel} />
+                )}
+                <div className="flex flex-1 min-h-0">
+                  {activePanel === "chapter-management" ? (
+                    <ErrorBoundary>
+                      <ChapterManagementView
+                        key={activeNovelId}
+                        novelId={activeNovelId}
+                      />
+                    </ErrorBoundary>
+                  ) : activePanel === "novels" ? (
+                    <BookshelfView
+                      onSelectNovel={handleSelectNovel}
+                      onSaveCover={handleSaveCover}
+                      onImportNovel={() => importNovel.startImport()}
+                      onStartBookPitch={() => {
+                        // 从书架进入孵化器：清空旧的孵化器会话，确保每次进入都是全新的开书流程。
+                        useBookPitchStore.getState().setIncubatorId(null);
+                        setActivePanel("bookpitch");
+                      }}
+                      onContinueBookPitch={() => {
+                        // 继续当前孵化器：切回孵化器小说并打开新书孵化面板。
+                        const id = useBookPitchStore.getState().incubatorId;
+                        if (id != null) {
+                          void switchNovel(id);
+                        }
+                        setActivePanel("bookpitch");
+                      }}
+                    />
+                  ) : (
+                    CONTENT_PANEL_IDS.has(activePanel) && (
+                      <ContentPanel ref={contentRef} />
+                    )
+                  )}
 
-              {/* Always mounted: pattern extraction is a long-running task, unmounting would interrupt progress listeners */}
-              <div
-                className={
-                  activePanel === "style-samples"
-                    ? "flex-1 flex flex-col min-h-0"
-                    : "hidden"
-                }
-              >
-                <ErrorBoundary>
-                  <ExtractWorkspaceView
-                    novelId={activeNovelId}
-                    focusSampleId={styleSampleFocusId}
-                    onFocusSampleHandled={() => setStyleSampleFocusId(null)}
-                  />
-                </ErrorBoundary>
+                  {/* Always mounted: pattern extraction is a long-running task, unmounting would interrupt progress listeners */}
+                  <div
+                    className={
+                      activePanel === "style-samples"
+                        ? "flex-1 flex flex-col min-h-0"
+                        : "hidden"
+                    }
+                  >
+                    <ErrorBoundary>
+                      <ExtractWorkspaceView
+                        novelId={activeNovelId}
+                        focusSampleId={styleSampleFocusId}
+                        onFocusSampleHandled={() => setStyleSampleFocusId(null)}
+                      />
+                    </ErrorBoundary>
+                  </div>
+                  {activePanel === "characters" ? (
+                    <ErrorBoundary>
+                      <CharacterListView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "locations" ? (
+                    <ErrorBoundary>
+                      <LocationListView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "storyarcs" ? (
+                    <ErrorBoundary>
+                      <ArcListView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "timeline" ? (
+                    <ErrorBoundary>
+                      <TimelineView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "reader" ? (
+                    <ErrorBoundary>
+                      <ReaderView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "preferences" ? (
+                    <ErrorBoundary>
+                      <PreferenceView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "novel-settings" ? (
+                    <ErrorBoundary>
+                      <NovelSettingView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "git" ? (
+                    <ErrorBoundary>
+                      <GitCommitView />
+                    </ErrorBoundary>
+                  ) : activePanel === "profile" ? (
+                    <ErrorBoundary>
+                      <ProfileView />
+                    </ErrorBoundary>
+                  ) : activePanel === "skill-matrix" ? (
+                    <ErrorBoundary>
+                      <SkillMatrixView
+                        novelId={activeNovelId}
+                        onOpenSkill={handleMatrixOpenSkill}
+                        search={skillMatrixSearch}
+                        sourceFilter={skillMatrixSourceFilter}
+                        modeFilter={skillMatrixModeFilter}
+                      />
+                    </ErrorBoundary>
+                  ) : activePanel === "signability" ? (
+                    <ErrorBoundary>
+                      <SignabilityWorkflowView novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "bookpitch" ? (
+                    <ErrorBoundary>
+                      <BookPitchWorkflowView
+                        novelId={activeNovelId}
+                        onCreated={async (id) => {
+                          await switchNovel(id);
+                          setActivePanel("journey-create");
+                        }}
+                      />
+                    </ErrorBoundary>
+                  ) : activePanel === "pipeline" ? (
+                    <ErrorBoundary>
+                      <PipelineWizard novelId={activeNovelId} />
+                    </ErrorBoundary>
+                  ) : activePanel === "journey-absorb" ? (
+                    <ErrorBoundary>
+                      <JourneyAbsorb />
+                    </ErrorBoundary>
+                  ) : activePanel === "journey-create" ? (
+                    <ErrorBoundary>
+                      <JourneyCreate />
+                    </ErrorBoundary>
+                  ) : activePanel === "journey-quality" ? (
+                    <ErrorBoundary>
+                      <JourneyQuality />
+                    </ErrorBoundary>
+                  ) : null}
+                </div>
               </div>
-              {activePanel === "characters" ? (
-                <ErrorBoundary>
-                  <CharacterListView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "locations" ? (
-                <ErrorBoundary>
-                  <LocationListView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "storyarcs" ? (
-                <ErrorBoundary>
-                  <ArcListView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "timeline" ? (
-                <ErrorBoundary>
-                  <TimelineView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "reader" ? (
-                <ErrorBoundary>
-                  <ReaderView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "preferences" ? (
-                <ErrorBoundary>
-                  <PreferenceView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "novel-settings" ? (
-                <ErrorBoundary>
-                  <NovelSettingView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "git" ? (
-                <ErrorBoundary>
-                  <GitCommitView />
-                </ErrorBoundary>
-              ) : activePanel === "profile" ? (
-                <ErrorBoundary>
-                  <ProfileView />
-                </ErrorBoundary>
-              ) : activePanel === "skill-matrix" ? (
-                <ErrorBoundary>
-                  <SkillMatrixView
-                    novelId={activeNovelId}
-                    onOpenSkill={handleMatrixOpenSkill}
-                    search={skillMatrixSearch}
-                    sourceFilter={skillMatrixSourceFilter}
-                    modeFilter={skillMatrixModeFilter}
-                  />
-                </ErrorBoundary>
-              ) : activePanel === "signability" ? (
-                <ErrorBoundary>
-                  <SignabilityWorkflowView novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : activePanel === "bookpitch" ? (
-                <ErrorBoundary>
-                  <BookPitchWorkflowView
-                    novelId={activeNovelId}
-                    onCreated={async (id) => {
-                      await switchNovel(id);
-                      setActivePanel("chapters");
-                    }}
-                  />
-                </ErrorBoundary>
-              ) : activePanel === "pipeline" ? (
-                <ErrorBoundary>
-                  <PipelineWizard novelId={activeNovelId} />
-                </ErrorBoundary>
-              ) : null}
 
               <div
                 style={{

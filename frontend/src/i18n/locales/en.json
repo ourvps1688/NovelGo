@@ -2065,5 +2065,34 @@
       "finished": "Pipeline finished.",
       "aborted": "Pipeline aborted."
     }
+  },
+  "journey": {
+    "continueWriting": "Continue Writing",
+    "continueWritingDesc": "Jump back to the chapters workspace and keep writing",
+    "absorb": {
+      "title": "Absorb Journey",
+      "stages": {
+        "import": "Import reference books",
+        "extract": "Extract patterns / mind / style",
+        "onboard": "Onboard into Voice & skill library"
+      }
+    },
+    "create": {
+      "title": "Create Journey",
+      "stages": {
+        "intent": "Intent: book pitch & blueprint",
+        "writing": "Writing: free chat & pipeline",
+        "rewrite": "Rewrite"
+      }
+    },
+    "quality": {
+      "title": "Quality Journey",
+      "stages": {
+        "audit": "Audit: 8-dimension score & style drift",
+        "fix": "Fix & rewrite",
+        "freeze": "Volume freeze: fact + style snapshots",
+        "patrol": "Patrol: tension report"
+      }
+    }
   }
 }

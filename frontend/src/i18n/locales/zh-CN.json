@@ -2026,5 +2026,34 @@
       "finished": "流水线已完成。",
       "aborted": "流水线已终止。"
     }
+  },
+  "journey": {
+    "continueWriting": "继续写作",
+    "continueWritingDesc": "回到章节工作面，接着写你的正文",
+    "absorb": {
+      "title": "吸收旅程",
+      "stages": {
+        "import": "导入参考书",
+        "extract": "提取套路 / 心智 / 风格",
+        "onboard": "入库 Voice 与技能库"
+      }
+    },
+    "create": {
+      "title": "创作旅程",
+      "stages": {
+        "intent": "意图：开书孵化与蓝图",
+        "writing": "写作：自由对话与流水线",
+        "rewrite": "重写"
+      }
+    },
+    "quality": {
+      "title": "质检旅程",
+      "stages": {
+        "audit": "体检：8 维评分与文风漂移",
+        "fix": "修复与重写",
+        "freeze": "卷末冻结：事实与风格双快照",
+        "patrol": "巡检：张力报告"
+      }
+    }
   }
 }

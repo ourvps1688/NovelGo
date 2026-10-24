@@ -4,6 +4,7 @@ import {
   ALL_SIDEBAR_PANEL_IDS,
   FACTORY_MAP,
   FACTORY_ORDER,
+  JOURNEY_BY_FACTORY,
   factoryFeedsKey,
   factoryOf,
   factoryTitleKey,
@@ -19,10 +20,12 @@ describe("factory map 单源（WBS §0.1）", () => {
 
   it("归属定案表逐项正确（喂给谁=消费方）", () => {
     // absorb：喂给文风上限
+    expect(FACTORY_MAP["journey-absorb"]).toBe("absorb");
     expect(FACTORY_MAP["style-samples"]).toBe("absorb");
     expect(FACTORY_MAP.skills).toBe("absorb");
     expect(FACTORY_MAP["skill-matrix"]).toBe("absorb");
     // create：喂给正文与真理层
+    expect(FACTORY_MAP["journey-create"]).toBe("create");
     expect(FACTORY_MAP.chapters).toBe("create");
     expect(FACTORY_MAP["chapter-management"]).toBe("create");
     expect(FACTORY_MAP.preferences).toBe("create");
@@ -34,6 +37,7 @@ describe("factory map 单源（WBS §0.1）", () => {
     expect(FACTORY_MAP.storyarcs).toBe("create");
     expect(FACTORY_MAP.timeline).toBe("create");
     // quality：喂给签约下限
+    expect(FACTORY_MAP["journey-quality"]).toBe("quality");
     expect(FACTORY_MAP.signability).toBe("quality");
     expect(FACTORY_MAP.pipeline).toBe("quality");
     expect(FACTORY_MAP.reader).toBe("quality");
@@ -61,5 +65,16 @@ describe("factory map 单源（WBS §0.1）", () => {
   it("i18n key 单源命名空间 shell.factory.*", () => {
     expect(factoryTitleKey("absorb")).toBe("shell.factory.absorb.title");
     expect(factoryFeedsKey("quality")).toBe("shell.factory.quality.feeds");
+  });
+
+  it("旅程中枢映射：三工厂各一，base 无旅程（T1.2）", () => {
+    expect(JOURNEY_BY_FACTORY.absorb).toBe("journey-absorb");
+    expect(JOURNEY_BY_FACTORY.create).toBe("journey-create");
+    expect(JOURNEY_BY_FACTORY.quality).toBe("journey-quality");
+    expect(JOURNEY_BY_FACTORY.base).toBeUndefined();
+    // 旅程 PanelId 自身归属与所属工厂一致
+    for (const [factory, journey] of Object.entries(JOURNEY_BY_FACTORY)) {
+      expect(FACTORY_MAP[journey!]).toBe(factory);
+    }
   });
 });

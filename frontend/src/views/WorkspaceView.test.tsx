@@ -27,6 +27,17 @@ function render(
   });
 }
 
+// T1.2: 进入书后默认落地=journey-create（旅程中枢）。测试主体在 chapters
+// 工作面时，统一经此助手一跳就位（等价「继续写作」）。
+async function renderAtChapters(
+  qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
+  render(<WorkspaceView initialNovelId={1} />, qc);
+  await screen.findByTestId("journey-create");
+  fireEvent.click(screen.getByText("btn-chapters"));
+  await screen.findByTestId("content-panel");
+}
+
 // 3.2: useNovelStore 是全局单例，跨测试用例有状态残留（同 useFocusStore 问题）。
 // 顶层 beforeEach 重置所有 5 个字段，避免上个用例的 activeNovelId/showCreateDialog 等影响下个用例。
 // initialNovelId 由 useLayoutEffect 在 mount 时同步覆盖，重置 activeNovelId=0 不影响 initialNovelId 测试。
@@ -151,6 +162,15 @@ vi.mock("@/components/shell/ActivityBar", () => ({
       <button onClick={() => onSelect("characters")}>btn-characters</button>
       <button onClick={() => onSelect("locations")}>btn-locations</button>
       <button onClick={() => onSelect("profile")}>btn-profile</button>
+      <button onClick={() => onSelect("journey-absorb")}>
+        btn-journey-absorb
+      </button>
+      <button onClick={() => onSelect("journey-create")}>
+        btn-journey-create
+      </button>
+      <button onClick={() => onSelect("journey-quality")}>
+        btn-journey-quality
+      </button>
     </div>
   ),
 }));
@@ -405,6 +425,16 @@ vi.mock("@/components/novel/NovelEditDialog", () => ({
 vi.mock("@/components/novel/NovelDeleteDialog", () => ({
   default: () => null,
 }));
+vi.mock("@/components/novel/NewBookWizard", () => ({
+  // 创建流程现走开书向导（showCreateDialog → NewBookWizard）；
+  // 向导内部完成创建后经 onCreated(id) 回到 WorkspaceView/NovelDialogs 接线。
+  default: (props: { open?: boolean; onCreated?: (id: number) => void }) =>
+    props.open ? (
+      <div data-testid="new-book-wizard">
+        <button onClick={() => props.onCreated?.(5)}>wizard-created</button>
+      </div>
+    ) : null,
+}));
 vi.mock("@/components/novel/ImportProgressDialog", () => ({
   default: () => null,
 }));
@@ -427,32 +457,31 @@ describe("WorkspaceView panel switching", () => {
     expect(await screen.findByTestId("bookshelf")).toBeInTheDocument();
   });
 
-  it("有小说时渲染内容面板（initialNovelId 非 0）", async () => {
+  it("有小说时默认落旅程中枢，「继续写作」一跳回内容面板（initialNovelId 非 0）", async () => {
     mockGetNovels.mockResolvedValue([{ id: 1, title: "测试小说" }]);
     render(<WorkspaceView initialNovelId={1} />);
+    expect(await screen.findByTestId("journey-create")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("journey.continueWriting"));
     expect(await screen.findByTestId("content-panel")).toBeInTheDocument();
   });
 
   it("点 characters 面板渲染角色列表", async () => {
     mockGetNovels.mockResolvedValue([{ id: 1, title: "测试小说" }]);
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("btn-characters"));
     expect(await screen.findByTestId("character-list")).toBeInTheDocument();
   });
 
   it("点 locations 面板渲染地点列表", async () => {
     mockGetNovels.mockResolvedValue([{ id: 1, title: "测试小说" }]);
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("btn-locations"));
     expect(await screen.findByTestId("location-list")).toBeInTheDocument();
   });
 
   it("章节管理使用宽屏主区域，离开时恢复侧栏与聊天显示", async () => {
     mockGetNovels.mockResolvedValue([{ id: 1, title: "测试小说" }]);
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
 
     fireEvent.click(screen.getByText("btn-chapter-management"));
     expect(await screen.findByTestId("chapter-management")).toBeVisible();
@@ -467,8 +496,7 @@ describe("WorkspaceView panel switching", () => {
 
   it("点 profile 面板隐藏 ChatPanel，返回后保留同一实例", async () => {
     mockGetNovels.mockResolvedValue([{ id: 1, title: "测试小说" }]);
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     const chatPanel = screen.getByTestId("chat-panel");
     fireEvent.click(screen.getByText("btn-profile"));
     expect(await screen.findByTestId("profile")).toBeInTheDocument();
@@ -491,8 +519,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("entity 跳转 characters 设置 focusId 并切面板", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-entity-characters"));
     const list = await screen.findByTestId("character-list");
     expect(list).toBeInTheDocument();
@@ -500,8 +527,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("entity 跳转 locations 设置 focusId", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-entity-locations"));
     expect(await screen.findByTestId("location-list")).toHaveAttribute(
       "data-focusid",
@@ -510,8 +536,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("entity 跳转 timeline 设置 focusEntryId", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-entity-timeline"));
     expect(await screen.findByTestId("timeline")).toHaveAttribute(
       "data-focusentryid",
@@ -520,8 +545,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("entity 跳转 storyarcs 设置 focusArcId", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-entity-storyarcs"));
     expect(await screen.findByTestId("arc-list")).toHaveAttribute(
       "data-focusarcid",
@@ -530,8 +554,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("entity 跳转 reader 设置 focusId", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-entity-reader"));
     expect(await screen.findByTestId("reader")).toHaveAttribute(
       "data-focusid",
@@ -540,8 +563,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("chapter 跳转有高亮调 openFileWithHighlight", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-chapter-highlight"));
     expect(contentRefSpies.openFileWithHighlight).toHaveBeenCalledWith(
       "path/ch1.md",
@@ -553,8 +575,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("从其他面板搜索章节时先挂载编辑器再打开并高亮", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("btn-profile"));
     expect(screen.queryByTestId("content-panel")).not.toBeInTheDocument();
 
@@ -569,8 +590,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("chapter 跳转无高亮(matchPos=-1)调 openFile", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-chapter-no-highlight"));
     expect(contentRefSpies.openFile).toHaveBeenCalledWith(
       "path/ch2.md",
@@ -580,8 +600,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("chapter 跳转 matchPos=0 仍调 openFileWithHighlight（position 0 合法）", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-chapter-pos0"));
     expect(contentRefSpies.openFileWithHighlight).toHaveBeenCalledWith(
       "path/ch3.md",
@@ -592,8 +611,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("卷纲入口将后端路径交给编辑器并更新侧栏选中目标", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-volume-outline"));
     expect(contentRefSpies.openFile).toHaveBeenCalledWith(
       "volumes/id_10.md",
@@ -606,8 +624,7 @@ describe("WorkspaceView search navigation", () => {
   });
 
   it("内容导航保留章节、故事状态及技能的打开参数", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
 
     fireEvent.click(screen.getByText("nav-select-chapter"));
     expect(contentRefSpies.openFile).toHaveBeenCalledWith(
@@ -660,8 +677,7 @@ describe("WorkspaceView approval bridge", () => {
   });
 
   it("approve waits for edit completion before opening the physical file", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("approve-btn"));
     await vi.waitFor(() => {
       expect(mockApproveTool).toHaveBeenCalledWith(
@@ -679,8 +695,7 @@ describe("WorkspaceView approval bridge", () => {
   });
 
   it("reject 调 ApproveTool(false) + handleDiffReject", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     fireEvent.click(screen.getByText("reject-btn"));
     await vi.waitFor(() => {
       expect(mockApproveTool).toHaveBeenCalledWith(
@@ -707,8 +722,7 @@ describe("WorkspaceView switchNovel state reset", () => {
   });
 
   it("恢复上次打开的小说时同步后端当前小说", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     await vi.waitFor(() => {
       expect(mockSetActiveNovel).toHaveBeenCalledWith({ novel_id: 1 });
     });
@@ -731,7 +745,7 @@ describe("WorkspaceView switchNovel state reset", () => {
     await act(async () => {
       confirm();
     });
-    expect(await screen.findByTestId("content-panel")).toBeInTheDocument();
+    expect(await screen.findByTestId("journey-create")).toBeInTheDocument();
     expect(useNovelStore.getState().activeNovelId).toBe(2);
   });
 
@@ -776,7 +790,7 @@ describe("WorkspaceView switchNovel state reset", () => {
     await act(async () => {
       confirm();
     });
-    await screen.findByTestId("content-panel");
+    await screen.findByTestId("journey-create");
     expect(useNovelStore.getState().activeNovelId).toBe(2);
   });
 
@@ -796,13 +810,12 @@ describe("WorkspaceView switchNovel state reset", () => {
     await act(async () => {
       confirm();
     });
-    await screen.findByTestId("content-panel");
+    await screen.findByTestId("journey-create");
     expect(useNovelStore.getState().activeNovelId).toBe(1);
   });
 
   it("切书失败保留旧小说和编辑状态并显示错误", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     useEditorStore.setState({ activeContent: "未保存正文", isDirty: true });
     mockSetActiveNovel.mockRejectedValueOnce(new Error("切书失败"));
     const errorSpy = vi
@@ -821,20 +834,20 @@ describe("WorkspaceView switchNovel state reset", () => {
     }
   });
 
-  it("侧栏选小说调 SetActiveNovel（ContentPanel 保持挂载）", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+  it("侧栏选小说调 SetActiveNovel 并落旅程中枢（进入书后默认 journey-create）", async () => {
+    await renderAtChapters();
     fireEvent.click(screen.getByText("nav-select-novel"));
     await vi.waitFor(() => {
       expect(mockSetActiveNovel).toHaveBeenCalledWith({ novel_id: 2 });
     });
-    // 切小说后 activePanel 仍为 chapters，content-panel 保持可见
-    expect(screen.getByTestId("content-panel")).toBeInTheDocument();
+    // 切小说后落 journey-create；「继续写作」一跳回新书章节工作面
+    expect(await screen.findByTestId("journey-create")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("journey.continueWriting"));
+    expect(await screen.findByTestId("content-panel")).toBeInTheDocument();
   });
 
   it("书架导入小说回调调 loadNovels + SetActiveNovel", async () => {
-    render(<WorkspaceView initialNovelId={1} />);
-    await screen.findByTestId("content-panel");
+    await renderAtChapters();
     // 切到书架触发导入（ContentPanel 卸载）
     fireEvent.click(screen.getByText("btn-novels"));
     expect(await screen.findByTestId("bookshelf")).toBeInTheDocument();
@@ -846,23 +859,68 @@ describe("WorkspaceView switchNovel state reset", () => {
     expect(mockGetNovels.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("dialog 创建小说调 CreateNovel + SetActiveNovel", async () => {
+  it("开书向导创建小说调 SetActiveNovel 并落旅程中枢", async () => {
     mockGetNovels.mockResolvedValue([]);
     render(<WorkspaceView initialNovelId={0} />);
     expect(await screen.findByTestId("bookshelf")).toBeInTheDocument();
-    // 打开创建 dialog
+    // 打开创建向导（showCreateDialog → NewBookWizard，创建流程在向导内）
     fireEvent.click(screen.getByText("shelf-create-novel"));
-    expect(await screen.findByTestId("novel-edit-dialog")).toBeInTheDocument();
-    // 保存
-    fireEvent.click(screen.getByText("dialog-save-novel"));
-    // SetActiveNovel 在 CreateNovel + loadNovels 之后，等它即覆盖全链路
+    expect(await screen.findByTestId("new-book-wizard")).toBeInTheDocument();
+    // 向导完成 → SetActiveNovel + 进入书后默认落 journey-create（T1.2）
+    fireEvent.click(screen.getByText("wizard-created"));
     await vi.waitFor(() => {
       expect(mockSetActiveNovel).toHaveBeenCalledWith({ novel_id: 5 });
     });
-    expect(mockCreateNovel).toHaveBeenCalledWith({
-      title: "新小说",
-      description: "描述",
-      genre: "",
-    });
+    expect(await screen.findByTestId("journey-create")).toBeInTheDocument();
+  });
+});
+
+describe("WorkspaceView 三工厂旅程骨架（WBS T1.2）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetNovels.mockResolvedValue([{ id: 1, title: "测试小说" }]);
+    mockGetPlatform.mockResolvedValue({ os: "linux" });
+    mockSetActiveNovel.mockResolvedValue(undefined);
+    mockApproveTool.mockResolvedValue(undefined);
+  });
+
+  it("默认落地=journey-create，「继续写作」一跳 chapters（验收②）", async () => {
+    render(<WorkspaceView initialNovelId={1} />);
+    expect(await screen.findByTestId("journey-create")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("journey.continueWriting"));
+    expect(await screen.findByTestId("content-panel")).toBeInTheDocument();
+  });
+
+  it("三个旅程面板可进入并渲染骨架（验收①）", async () => {
+    render(<WorkspaceView initialNovelId={1} />);
+    await screen.findByTestId("journey-create");
+    fireEvent.click(screen.getByText("btn-journey-absorb"));
+    expect(await screen.findByTestId("journey-absorb")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("btn-journey-quality"));
+    expect(await screen.findByTestId("journey-quality")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("btn-journey-create"));
+    expect(await screen.findByTestId("journey-create")).toBeInTheDocument();
+  });
+
+  it("功能面板顶部归属面包屑显示正确工厂（验收③）", async () => {
+    await renderAtChapters();
+    // chapters → 创作工厂
+    expect(screen.getByTestId("factory-breadcrumb")).toHaveAttribute(
+      "data-factory",
+      "create",
+    );
+    // novels → 基础设施
+    fireEvent.click(screen.getByText("btn-novels"));
+    await screen.findByTestId("bookshelf");
+    expect(screen.getByTestId("factory-breadcrumb")).toHaveAttribute(
+      "data-factory",
+      "base",
+    );
+    // 旅程面板面包屑在 JourneyHeader 内：唯一且归属 quality
+    fireEvent.click(screen.getByText("btn-journey-quality"));
+    await screen.findByTestId("journey-quality");
+    const crumbs = screen.getAllByTestId("factory-breadcrumb");
+    expect(crumbs).toHaveLength(1);
+    expect(crumbs[0]).toHaveAttribute("data-factory", "quality");
   });
 });

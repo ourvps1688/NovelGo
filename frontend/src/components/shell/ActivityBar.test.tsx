@@ -87,4 +87,17 @@ describe("ActivityBar 四工厂分组（WBS T1.1）", () => {
       expect(screen.queryByText(title)).toBeNull();
     }
   });
+
+  it("工厂组标题点击进入旅程中枢（T1.2 验收①：旅程面板可从 ActivityBar 进入）", () => {
+    const onSelect = vi.fn();
+    render(<ActivityBar onSelect={onSelect} />);
+    fireEvent.click(screen.getByText("吸收工厂"));
+    expect(onSelect).toHaveBeenCalledWith("journey-absorb");
+    fireEvent.click(screen.getByText("创作工厂"));
+    expect(onSelect).toHaveBeenCalledWith("journey-create");
+    fireEvent.click(screen.getByText("质检工厂"));
+    expect(onSelect).toHaveBeenCalledWith("journey-quality");
+    // base 无旅程中枢：标题不可点击
+    expect(screen.queryByRole("button", { name: /基础设施/ })).toBeNull();
+  });
 });

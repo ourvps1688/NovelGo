@@ -1,6 +1,6 @@
 // 三工厂归属映射单源（P3 WBS §0.1）。
 // 「喂给谁」是 P3 最高验收标准：任何功能入口的归属只能来自本文件，组件不得自造归属。
-import type { SidebarPanelId } from "@/types/panel";
+import type { PanelId, SidebarPanelId } from "@/types/panel";
 
 /** 工厂标识：吸收/创作/质检 + 基础设施。单源枚举（WBS §6 枚举单源）。 */
 export type FactoryId = "absorb" | "create" | "quality" | "base";
@@ -33,6 +33,9 @@ export const ALL_SIDEBAR_PANEL_IDS: readonly SidebarPanelId[] = [
   "signability",
   "bookpitch",
   "pipeline",
+  "journey-absorb",
+  "journey-create",
+  "journey-quality",
   "search",
 ] as const;
 
@@ -46,9 +49,11 @@ export const ALL_SIDEBAR_PANEL_IDS: readonly SidebarPanelId[] = [
  * Record 全键锁定：SidebarPanelId 增删必须同步归属，缺键不过编译。
  */
 export const FACTORY_MAP: Record<SidebarPanelId, FactoryId> = {
+  "journey-absorb": "absorb",
   "style-samples": "absorb",
   skills: "absorb",
   "skill-matrix": "absorb",
+  "journey-create": "create",
   chapters: "create",
   "chapter-management": "create",
   preferences: "create",
@@ -59,12 +64,23 @@ export const FACTORY_MAP: Record<SidebarPanelId, FactoryId> = {
   locations: "create",
   storyarcs: "create",
   timeline: "create",
+  "journey-quality": "quality",
   signability: "quality",
   pipeline: "quality",
   reader: "quality",
   novels: "base",
   search: "base",
   git: "base",
+};
+
+/**
+ * 工厂旅程中枢 PanelId（T1.2）。base 无旅程中枢。
+ * 旅程入口=工厂组标题点击（ActivityBar）；旅程视图默认落地=journey-create。
+ */
+export const JOURNEY_BY_FACTORY: Partial<Record<FactoryId, PanelId>> = {
+  absorb: "journey-absorb",
+  create: "journey-create",
+  quality: "journey-quality",
 };
 
 /** 归属查询。缺键兜底 base 不崩溃（§0.6 降级纪律：宁缺勿错）。 */

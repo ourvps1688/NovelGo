@@ -7,6 +7,12 @@ afterEach(() => {
   cleanup();
 });
 
+// jsdom 不实现 document.queryCommandSupported，monaco clipboard 模块
+// 加载期即调用它（存量环境缺口，补 polyfill 防 suite 加载期崩溃）。
+if (typeof document.queryCommandSupported !== "function") {
+  document.queryCommandSupported = () => false;
+}
+
 // Mock Wails runtime
 vi.mock("@/lib/wailsjs/runtime/runtime", () => ({
   EventsOn: vi.fn(),

@@ -76,7 +76,8 @@ export default function NovelDialogs() {
         onCreated={async (id) => {
           setShowCreateDialog(false);
           await switchNovel(id);
-          setActivePanel("chapters");
+          // 进入书后默认落地 journey-create（P3 T1.2）
+          setActivePanel("journey-create");
         }}
       />
       <NovelEditDialog

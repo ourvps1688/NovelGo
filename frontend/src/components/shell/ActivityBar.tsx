@@ -25,6 +25,7 @@ import type { SidebarPanelId } from "@/types/panel";
 import { usePanelStore } from "@/stores/usePanelStore";
 import {
   FACTORY_ORDER,
+  JOURNEY_BY_FACTORY,
   factoryFeedsKey,
   factoryOf,
   factoryTitleKey,
@@ -125,28 +126,46 @@ export default function ActivityBar({ onSelect }: Props) {
         )}
       </button>
 
-      {groups.map((group, gi) => (
-        <div key={group.factory}>
-          {gi > 0 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
-          {!collapsed && (
-            <div className="px-3 pt-1 pb-0.5">
-              <div className="text-xs font-semibold text-muted-foreground/80 truncate">
-                {t(factoryTitleKey(group.factory))}
-              </div>
-              <div className="text-[10px] leading-tight text-muted-foreground/50 truncate">
-                {t(factoryFeedsKey(group.factory))}
-              </div>
+      {groups.map((group, gi) => {
+        const journey = JOURNEY_BY_FACTORY[group.factory];
+        const heading = (
+          <>
+            <div className="text-xs font-semibold text-muted-foreground/80 truncate">
+              {t(factoryTitleKey(group.factory))}
             </div>
-          )}
-          {group.items.map((a) => {
-            const isActive = a.id === activeId;
-            return (
-              <button
-                key={a.id}
-                disabled={a.disabled}
-                onClick={() => onSelect(a.id)}
-                title={`${t(a.labelKey)}${a.disabled ? t("shell.comingSoon") : ""}`}
-                className={`relative flex h-10 items-center rounded-lg transition-all duration-200
+            <div className="text-[10px] leading-tight text-muted-foreground/50 truncate">
+              {t(factoryFeedsKey(group.factory))}
+            </div>
+          </>
+        );
+        return (
+          <div key={group.factory}>
+            {gi > 0 && <div className="w-6 h-px bg-border my-1 mx-auto" />}
+            {!collapsed &&
+              (journey ? (
+                // 组标题=旅程中枢入口（T1.2 验收①：旅程面板可从 ActivityBar 进入）
+                <button
+                  type="button"
+                  data-testid="factory-journey-entry"
+                  data-journey={journey}
+                  onClick={() => onSelect(journey)}
+                  title={t(factoryTitleKey(group.factory))}
+                  className="w-full rounded-md px-3 pt-1 pb-0.5 text-left transition-colors hover:bg-muted/60"
+                >
+                  {heading}
+                </button>
+              ) : (
+                <div className="px-3 pt-1 pb-0.5">{heading}</div>
+              ))}
+            {group.items.map((a) => {
+              const isActive = a.id === activeId;
+              return (
+                <button
+                  key={a.id}
+                  disabled={a.disabled}
+                  onClick={() => onSelect(a.id)}
+                  title={`${t(a.labelKey)}${a.disabled ? t("shell.comingSoon") : ""}`}
+                  className={`relative flex h-10 items-center rounded-lg transition-all duration-200
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring
                 ${
                   collapsed
@@ -160,24 +179,25 @@ export default function ActivityBar({ onSelect }: Props) {
                       ? "text-foreground bg-muted"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                 }`}
-              >
-                {isActive && !a.disabled && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
-                )}
-                <a.icon
-                  className="h-[18px] w-[18px] shrink-0"
-                  strokeWidth={1.75}
-                />
-                {!collapsed && (
-                  <span className="truncate text-sm font-medium">
-                    {t(a.labelKey)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      ))}
+                >
+                  {isActive && !a.disabled && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+                  )}
+                  <a.icon
+                    className="h-[18px] w-[18px] shrink-0"
+                    strokeWidth={1.75}
+                  />
+                  {!collapsed && (
+                    <span className="truncate text-sm font-medium">
+                      {t(a.labelKey)}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
     </nav>
   );
 }
