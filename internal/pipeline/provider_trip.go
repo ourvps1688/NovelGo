@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/llm"
 )
 
@@ -63,12 +64,31 @@ func providerTripErr(idleCount int) error {
 // 熔断 → 返回 errProviderTripped 哨兵错误、零 agent 派发，由各派发点按自身原有失败
 // 通道落地（各接各的，勿统一成一种）；未触发 → 照常派发（行为与判定引入前逐字一致）。
 //
+// R0 观测（pipeline-core-redesign-proposal.md §5）：每次派发在收口后记一条
+// activity.ExecStat 样本（skill/耗时/turn 数/状态/归属 run），纯本地、零行为变化——
+// 观测自身失败绝不影响派发结果（recordExecStat 内部兜底）。
+//
 // 源码纪律：internal/pipeline 生产代码里 s.skillRunner 的直接调用只允许出现在本方法内
 // （测试 TestSkillRunnerDispatchOnlyViaTripGuard 源码锁定）——任何新增派发点必须走
-// dispatchSkill，天然过熔断判定。
+// dispatchSkill，天然过熔断判定与 R0 观测。
 func (s *Service) dispatchSkill(ctx context.Context, name string, input SkillInput) (SkillOutput, error) {
 	if tripped, n := providerTripped(); tripped {
+		s.recordExecStat(ctx, activity.ExecStat{
+			NovelID: input.NovelID, RunID: input.RunID, Skill: name,
+			Turns: 0, MaxTurns: input.MaxTurns, Status: activity.ExecStatusTripped,
+		})
 		return SkillOutput{}, providerTripErr(n)
 	}
-	return s.skillRunner(ctx, name, input)
+	start := time.Now()
+	out, err := s.skillRunner(ctx, name, input)
+	status := activity.ExecStatusOK
+	if err != nil {
+		status = activity.ExecStatusError
+	}
+	s.recordExecStat(ctx, activity.ExecStat{
+		NovelID: input.NovelID, RunID: input.RunID, Skill: name,
+		DurationMS: time.Since(start).Milliseconds(),
+		Turns:      out.Turns, MaxTurns: input.MaxTurns, Status: status,
+	})
+	return out, err
 }

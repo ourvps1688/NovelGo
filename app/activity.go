@@ -28,3 +28,13 @@ func (a *App) GetFeatureUsage(days int) ([]activity.FeatureUsageStat, error) {
 	}
 	return a.activity.ListFeatureUsage(a.ctx, days)
 }
+
+// GetPipelineExecStats 返回近 days 天（含今天）按 skill 聚合的流水线执行体观测汇总
+// （R0 瓶颈分布取数口：耗时/轮数/turn 数，纯本地不上传）；days 非正时按 30 天。
+// 失败返回错误，由调用方静默降级为空表。
+func (a *App) GetPipelineExecStats(days int) ([]activity.ExecStatSummary, error) {
+	if a.activity == nil {
+		return []activity.ExecStatSummary{}, nil
+	}
+	return a.activity.SummarizeExecStats(a.ctx, days)
+}

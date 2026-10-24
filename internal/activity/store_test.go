@@ -26,7 +26,7 @@ func newTestStore(t *testing.T) (*Store, *gorm.DB) {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	require.NoError(t, db.AutoMigrate(&DailyActivity{}, &DailyLLMUsage{}, &FeatureUsage{}, &config.AppSettings{}, &storage.OperationLogRecord{}))
+	require.NoError(t, db.AutoMigrate(&DailyActivity{}, &DailyLLMUsage{}, &FeatureUsage{}, &ExecStat{}, &config.AppSettings{}, &storage.OperationLogRecord{}))
 	s := NewStore(db, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	s.now = func() time.Time {
 		return time.Date(2027, 1, 1, 0, 30, 0, 0, time.FixedZone("UTC+8", 8*60*60))

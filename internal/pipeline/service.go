@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/agent"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/contextasm"
@@ -86,6 +87,10 @@ type Service struct {
 	retconGate *retcon.Service
 	// orchestrator 是统一的阶段流转状态机（PR5 引入），ResumePipeline 委托它推进。
 	orchestrator *Orchestrator
+	// execStatSink 是 R0 观测样本的落库口（activity.ExecStat，纯本地不上传）：
+	// dispatchSkill 每次派发收口后记一条。为 nil 时跳过观测；观测自身失败
+	// 绝不影响派发结果（recordExecStat 内部兜底，零行为变化）。
+	execStatSink func(ctx context.Context, stat activity.ExecStat)
 }
 
 // NewService 构造流水线服务。
@@ -138,6 +143,9 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 		}
 		s.volumeAssigner = s.defaultVolumeAssigner
 		s.chapterStore = chapter.NewStore(s.store.db, s.logger)
+		// R0 观测默认落 activity 同族新表 exec_run_stats（纯本地不上传）。
+		execStats := activity.NewStore(s.store.db, s.logger)
+		s.execStatSink = execStats.AddExecStat
 		// stateSyncRunner 默认 nil：依赖 app 层注入（需要 agent.RunSubAgent）。
 		// 生产环境 app/handler.go 会注入；测试可注入 stub 或保持 nil（executeS0Align 跳过 statesync）。
 	}
@@ -192,6 +200,28 @@ func (s *Service) SetIntentProvider(fn func(ctx context.Context, novelID int64) 
 // 未注入时 S5 交回候选只暂停不沉淀（降级），闸门上线后由 app 统一注入。
 func (s *Service) SetRetconGate(gate *retcon.Service) {
 	s.retconGate = gate
+}
+
+// SetExecStatSink 注入/替换 R0 观测样本落库口（默认 activity exec_run_stats；
+// 测试可注入捕获桩以确定性断言观测行为）。
+func (s *Service) SetExecStatSink(fn func(ctx context.Context, stat activity.ExecStat)) {
+	s.execStatSink = fn
+}
+
+// recordExecStat 落一条 R0 观测样本。观测自身绝不影响业务行为：任何异常
+// （含 sink panic）吞掉只留 debug 日志，派发结果不受影响（零行为变化）。
+// 任务取消后的样本也照记（context.WithoutCancel）——失败样本正是瓶颈归因所需。
+func (s *Service) recordExecStat(ctx context.Context, stat activity.ExecStat) {
+	sink := s.execStatSink
+	if sink == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Debug("R0 观测记录异常（已忽略）", "skill", stat.Skill, "panic", r)
+		}
+	}()
+	sink(context.WithoutCancel(ctx), stat)
 }
 
 // buildBlocks 按 purpose×块矩阵（P0 WBS §0.5）装配三块上下文（Facts/Voice/Intent）。
@@ -287,6 +317,7 @@ func (s *Service) executeBlueprint(runID string, novelID int64) {
 		Prompt:    blueprintPrompt(novelID),
 		MaxTurns:  12,
 		SessionID: "pipeline:" + runID,
+		RunID:     runID,
 	})
 	if err != nil {
 		s.logger.Error("S2 蓝图执行失败", "run_id", runID, "err", err)
@@ -863,6 +894,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		// 会在读完全书前耗尽（「已达最大轮数」）。放宽到 24 轮。
 		MaxTurns:  24,
 		SessionID: "pipeline:" + runID + ":audit",
+		RunID:     runID,
 	})
 	if err != nil {
 		s.logger.Error("S4 体检执行失败", "run_id", runID, "err", err)
@@ -1310,6 +1342,7 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			Prompt:    fixPromptText,
 			MaxTurns:  18,
 			SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
+			RunID:     runID,
 		})
 		if batchErr != nil {
 			s.logger.Error("S5 修复执行失败", "run_id", runID, "batch", i+1, "err", batchErr)
@@ -1680,6 +1713,7 @@ func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novel
 		Prompt:    prompt,
 		MaxTurns:  18,
 		SessionID: "pipeline:" + runID + ":rewrite:" + uuid.NewString(),
+		RunID:     runID,
 	})
 	if err != nil {
 		return fmt.Errorf("章节重写（chapter_id=%d）失败: %w", ch.ID, err)
@@ -1710,6 +1744,7 @@ func (s *Service) runBlueprintDriftPatrol(ctx context.Context, runID string, nov
 		Prompt:    driftPatrolPrompt(novelID),
 		MaxTurns:  8,
 		SessionID: "pipeline:" + runID + ":drift",
+		RunID:     runID,
 	})
 	if err != nil {
 		s.logger.Warn("G3 蓝图巡检执行失败（非阻断，跳过）", "run_id", runID, "err", err)

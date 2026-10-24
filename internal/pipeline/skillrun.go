@@ -85,12 +85,17 @@ type SkillInput struct {
 	MaxTurns  int
 	// SessionID 用于多轮会话落库（选项 a）。为空时内部生成，便于审计与回放。
 	SessionID string
+	// RunID 是本次派发归属的流水线 run（R0 观测用：按 run 聚合 S5 修复轮数等）。
+	// 非 run 任务（如后台巡检）留空，不影响任何执行行为。
+	RunID string
 }
 
 // SkillOutput 是 RunSkill 的产物文本与结构化产物。
 type SkillOutput struct {
 	Text      string
 	Artifacts map[string]string
+	// Turns 是 agent loop 实耗轮数（R0 观测用）；失败路径也回填已消耗轮数。
+	Turns int
 }
 
 // RunSkill 把 builtin skill 正文作 system prompt，跑 internal/agent.Run 的多轮 agent loop 并返回产物。
@@ -148,7 +153,9 @@ func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llm
 
 	result, err := ag.Run(ctx, opts)
 	if err != nil {
-		return SkillOutput{}, fmt.Errorf("skill %q 执行失败: %w", name, err)
+		// 失败也回填已消耗轮数（R0 观测：失败前烧掉多少轮是瓶颈归因的关键数据）；
+		// 调用方按既有纪律只看 err，零行为变化。
+		return SkillOutput{Turns: result.TurnCount}, fmt.Errorf("skill %q 执行失败: %w", name, err)
 	}
-	return SkillOutput{Text: result.FinalText, Artifacts: map[string]string{}}, nil
+	return SkillOutput{Text: result.FinalText, Artifacts: map[string]string{}, Turns: result.TurnCount}, nil
 }

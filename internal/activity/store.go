@@ -149,6 +149,56 @@ func (s *Store) ListFeatureUsage(ctx context.Context, days int) ([]FeatureUsageS
 	return stats, nil
 }
 
+// AddExecStat 记录一次执行体派发的观测样本（R0 观测先行）：只记数字与状态，
+// 不记任何内容文本（隐私纪律：度量纯本地不上传）。写入失败只告警不抛错，
+// 与 AddFeatureUsage 同纪律——观测自身绝不影响业务行为（零行为变化）。
+func (s *Store) AddExecStat(ctx context.Context, stat ExecStat) {
+	if strings.TrimSpace(stat.Skill) == "" {
+		s.logger.Warn("忽略无 skill 名的执行体观测样本")
+		return
+	}
+	record := stat
+	// 与本包其余统计同口径：时间戳用 store 时钟（测试可钉住；autoCreateTime 只补零值）。
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = s.now()
+	}
+	err := s.db.WithContext(ctx).Create(&record).Error
+	if err != nil {
+		s.logger.Warn("记录执行体观测样本失败", "skill", stat.Skill, "run_id", stat.RunID, "err", err)
+	}
+}
+
+// SummarizeExecStats 返回近 days 天（含今天）按 skill 聚合的执行体观测汇总
+// （R0 瓶颈分布取数口），按总耗时降序。days 非正时按 30 天；
+// 查询失败返回错误，由调用方静默降级为空表。
+func (s *Store) SummarizeExecStats(ctx context.Context, days int) ([]ExecStatSummary, error) {
+	if days <= 0 {
+		days = 30
+	}
+	// 窗口起点=近 days 天前的本地零点（含今天），时间值绑定避免驱动格式差异。
+	dayStart := s.now().AddDate(0, 0, -(days - 1))
+	since := time.Date(dayStart.Year(), dayStart.Month(), dayStart.Day(), 0, 0, 0, 0, dayStart.Location())
+	var stats []ExecStatSummary
+	err := s.db.WithContext(ctx).Model(&ExecStat{}).
+		Select("skill, COUNT(*) AS runs, "+
+			"SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_runs, "+
+			"SUM(CASE WHEN status = 'tripped' THEN 1 ELSE 0 END) AS tripped_runs, "+
+			"SUM(duration_ms) AS total_duration_ms, "+
+			"CAST(AVG(duration_ms) AS INTEGER) AS avg_duration_ms, "+
+			"MAX(duration_ms) AS max_duration_ms, "+
+			"SUM(turns) AS total_turns, "+
+			"CAST(AVG(turns) AS INTEGER) AS avg_turns, "+
+			"MAX(turns) AS max_turns_used").
+		Where("created_at >= ?", since).
+		Group("skill").
+		Order("total_duration_ms DESC, skill ASC").
+		Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
 func nonNegative(values ...int64) bool {
 	for _, value := range values {
 		if value < 0 {
