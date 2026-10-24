@@ -52,16 +52,21 @@ export function useVoiceExtractionState(novelID: number): VoiceExtractionState {
   useEffect(() => {
     if (!novelID) return;
     let cancelled = false;
-    GetVoiceLedger(novelID)
-      .then((items) => {
-        if (cancelled) return;
-        const empty =
-          !items || items.length === 0 || items.every((it) => !it.present);
-        setVerdict({ id: novelID, unextracted: empty });
-      })
-      .catch(() => {
-        // 失败静默：宁缺勿错，绝不弹错误/提示。verdict 保持非当前 id → 派生 false。
-      });
+    try {
+      Promise.resolve(GetVoiceLedger(novelID))
+        .then((items) => {
+          if (cancelled) return;
+          // 坏数据（非数组）宁缺勿错：不置 verdict → 派生 false（零提示）
+          if (!Array.isArray(items)) return;
+          const empty = items.length === 0 || items.every((it) => !it.present);
+          setVerdict({ id: novelID, unextracted: empty });
+        })
+        .catch(() => {
+          // 失败静默：宁缺勿错，绝不弹错误/提示。verdict 保持非当前 id → 派生 false。
+        });
+    } catch {
+      // 同步抛错（绑定缺失等）同样静默：verdict 不动 → 派生 false。
+    }
     return () => {
       cancelled = true;
     };

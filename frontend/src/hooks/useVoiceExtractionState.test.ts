@@ -50,6 +50,22 @@ describe("useVoiceExtractionState（WBS T2.2 判定源）", () => {
     expect(result.current.unextracted).toBe(false);
   });
 
+  it("绑定返回非数组坏数据 → 静默 false（宁缺勿错，不误报未提取）", async () => {
+    getVoiceLedger.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useVoiceExtractionState(1));
+    await waitFor(() => expect(getVoiceLedger).toHaveBeenCalledWith(1));
+    expect(result.current.unextracted).toBe(false);
+  });
+
+  it("绑定同步抛错（绑定缺失等）→ 静默 false 不崩溃", async () => {
+    getVoiceLedger.mockImplementation(() => {
+      throw new TypeError("GetVoiceLedger is not a function");
+    });
+    const { result } = renderHook(() => useVoiceExtractionState(1));
+    await waitFor(() => expect(getVoiceLedger).toHaveBeenCalledWith(1));
+    expect(result.current.unextracted).toBe(false);
+  });
+
   it("无 novelID → 不查询且 false", () => {
     const { result } = renderHook(() => useVoiceExtractionState(0));
     expect(result.current.unextracted).toBe(false);

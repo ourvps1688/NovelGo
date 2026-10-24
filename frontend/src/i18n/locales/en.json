@@ -2075,7 +2075,8 @@
         "import": "Import reference books",
         "extract": "Extract patterns / mind / style",
         "onboard": "Onboard into Voice & skill library"
-      }
+      },
+      "panelNav": "Panel quick links"
     },
     "create": {
       "title": "Create Journey",

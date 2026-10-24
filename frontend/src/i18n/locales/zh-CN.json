@@ -2036,7 +2036,8 @@
         "import": "导入参考书",
         "extract": "提取套路 / 心智 / 风格",
         "onboard": "入库 Voice 与技能库"
-      }
+      },
+      "panelNav": "面板直达"
     },
     "create": {
       "title": "创作旅程",
