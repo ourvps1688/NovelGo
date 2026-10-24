@@ -179,10 +179,34 @@ function ApprovalBody({
     const rawType = (payload.change_type as string) || "";
     const changeType = changeTypeMap[rawType] || rawType || t("chat.modify");
     const reason = (payload.reason as string) || "";
+    const taskCard = payload.task_card as Record<string, unknown> | undefined;
+    const taskCardMissing = Boolean(payload.task_card_missing);
     return (
       <div>
         <div className="approval-summary">{changeType}</div>
         {reason && <div className="approval-reason">{reason}</div>}
+        {taskCard && (
+          <div className="approval-task-card">
+            <div className="approval-task-card-title">
+              {t("chat.taskCardLinked")}
+            </div>
+            <div>
+              {t("chat.taskCardHook")}：{String(taskCard.hook_task ?? "")}
+            </div>
+            <div>
+              {t("chat.taskCardBeat")}：{String(taskCard.beat_task ?? "")}
+            </div>
+            <div>
+              {t("chat.taskCardMoment")}：{String(taskCard.moment_task ?? "")}
+            </div>
+            <div>
+              {t("chat.taskCardAdvance")}：{String(taskCard.advance_task ?? "")}
+            </div>
+          </div>
+        )}
+        {taskCardMissing && (
+          <div className="approval-reason">{t("chat.taskCardMissing")}</div>
+        )}
       </div>
     );
   }

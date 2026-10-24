@@ -437,12 +437,25 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 		}
 	}
 
+	// 大纲审批 × 章纲任务卡联动核验（只报告不拦截）：审批载荷带本章任务卡四件套，
+	// 作者批准大纲时对照「本章为什么写」的契约核验；本书启用任务卡但本章缺卡时
+	// 提示先立卡。整本零卡（纯即兴写作）零打扰。
+	var taskCardExtra map[string]any
+	taskCardNote := ""
+	if ref.IsOutline {
+		taskCardExtra, taskCardNote = outlineTaskCardLink(ctx, tc, ref.ID, ref.IsNew)
+	}
+
 	// 审批（new 通道展示虚拟路径，已有章节展示物理路径）
 	payloadPath := physical
 	if ref.IsNew {
 		payloadPath = a.Path
 	}
-	feedback, res, err := requestApproval(ctx, tc, approvalPayload(payloadPath, current, proposed, a))
+	payload := approvalPayload(payloadPath, current, proposed, a)
+	for k, v := range taskCardExtra {
+		payload[k] = v
+	}
+	feedback, res, err := requestApproval(ctx, tc, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -546,6 +559,10 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	var injects []InjectMessage
 	if feedback != "" {
 		injects = append(injects, InjectMessage{Role: "user", Content: "用户通过了审批并反馈：" + feedback})
+	}
+	// 大纲 × 任务卡联动核验提示（对卡核验 / 先立卡；纯即兴写作为空零打扰）
+	if ref.IsOutline && taskCardNote != "" {
+		injects = append(injects, InjectMessage{Role: "user", Content: taskCardNote})
 	}
 	// 写后状态维护已由后端自动派发 statesync 子 Agent 处理（见 scheduleStateSync），
 	// 不再要求主 Agent 内联执行维护写工具——否则主 Agent 容易陷入「反复 get_* 确认」的

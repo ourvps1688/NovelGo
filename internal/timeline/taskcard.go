@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -25,7 +26,8 @@ import (
 //   - 四件套齐全才可落库（Validate 缺一拒收）：机器校验是本表存在的意义。
 //   - TargetReadingNumber 与 time_entries 的 target_reading_number 同口径：阅读序号锚点，
 //     未来章节尚无 ID 时也可立卡；章节重组后由 LLM 实时校准（与伏笔同一维护纪律）。
-//   - ChapterID 可空：立卡时尚无章节记录，审批建章后可回填（当前回填留待后续钩子）。
+//   - ChapterID 可空：立卡时尚无章节记录，审批建章后由章节创建回填钩子
+//     （chapter.SetCreatedHook → Store.BindChapterID）绑定。
 //   - 属规划数据而非系列圣经事实，不进 snapshot 冻结/审计范围。
 type ChapterTaskCard struct {
 	ID                  int64     `gorm:"column:id;primaryKey;autoIncrement"          json:"id"`
@@ -97,4 +99,48 @@ func (s *Store) GetTaskCard(ctx context.Context, novelID int64, readingNumber in
 		return nil, err
 	}
 	return &card, nil
+}
+
+// BindChapterID 回填任务卡的 chapter_id（ChapterID 回填钩子：章节创建后按阅读序号绑定）。
+// 只填「尚未绑定」的卡（chapter_id IS NULL）——回填语义，绝不覆盖既有绑定（宁缺勿错）。
+// tx 可空：传入时绑定与章节创建同事务（原子生效，创建回滚时绑定一并回滚）。
+// 绑定成功返回 true；该阅读序号无卡或已绑定返回 false。落库失败返回 error（调用方尽力降级）。
+func (s *Store) BindChapterID(ctx context.Context, tx *gorm.DB, novelID, chapterID int64, readingNumber int) (bool, error) {
+	if readingNumber < 1 || chapterID <= 0 {
+		return false, nil
+	}
+	db := s.DB
+	if tx != nil {
+		db = tx
+	}
+	res := db.WithContext(ctx).Model(&ChapterTaskCard{}).
+		Where("novel_id = ? AND target_reading_number = ? AND chapter_id IS NULL", novelID, readingNumber).
+		Update("chapter_id", chapterID)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}
+
+// GetTaskCardByChapterID 按已绑定的 chapter_id 取任务卡。
+// 未绑定 / 不存在时返回 gorm.ErrRecordNotFound（调用方可再按阅读序号兜底）。
+func (s *Store) GetTaskCardByChapterID(ctx context.Context, novelID, chapterID int64) (*ChapterTaskCard, error) {
+	var card ChapterTaskCard
+	if err := s.DB.WithContext(ctx).
+		Where("novel_id = ? AND chapter_id = ?", novelID, chapterID).
+		First(&card).Error; err != nil {
+		return nil, err
+	}
+	return &card, nil
+}
+
+// HasAnyTaskCard 判断本书是否已启用任务卡工作流（存在任一卡）。
+// 供「宁可漏拦」口径使用：纯即兴写作（整本零卡）不打扰。
+func (s *Store) HasAnyTaskCard(ctx context.Context, novelID int64) (bool, error) {
+	var n int64
+	if err := s.DB.WithContext(ctx).Model(&ChapterTaskCard{}).
+		Where("novel_id = ?", novelID).Limit(1).Count(&n).Error; err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }

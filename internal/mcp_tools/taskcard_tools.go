@@ -134,6 +134,94 @@ func FormatTaskCard(card *timeline.ChapterTaskCard) string {
 		card.TargetReadingNumber, card.HookTask, card.BeatTask, card.MomentTask, card.AdvanceTask)
 }
 
+// ── 大纲审批 × 章纲任务卡联动核验（只报告不拦截）────────────────
+//
+// 大纲是「本章为什么写」的第一次成文：审批那一刻把任务卡四件套带进审批载荷，
+// 作者对照契约核验（伏笔操作/章末钩子/爽点设计须与卡一致）；机器只报告不拦截。
+
+// outlineTaskCardLink 解析本章任务卡并产出大纲审批联动信息。
+// 新建大纲（尚无 chapter_id）走「下一章」阅读序号；已有章节优先按绑定 chapter_id，
+// 未绑定再按阅读序号兜底。返回：
+//   - payload：审批载荷增强——有卡时 {"task_card": 四件套}，缺卡但本书启用任务卡时
+//     {"task_card_missing": true}；整本零卡（纯即兴写作）返回 nil（零打扰，宁可漏拦）。
+//   - note：写后注入给主 Agent 的核验提示（有卡=对卡核验；缺卡=先立卡）；无提示时为空。
+//
+// 任何读取失败静默降级为「无卡且不提示」（降级逐字一致：失败=零提示零报错）。
+func outlineTaskCardLink(ctx context.Context, tc ToolContext, chapterID int64, isNew bool) (map[string]any, string) {
+	var card *timeline.ChapterTaskCard
+	if isNew {
+		card = taskCardForNextChapter(ctx, tc)
+	} else {
+		card = taskCardForChapter(ctx, tc, chapterID)
+	}
+	if card != nil {
+		return map[string]any{"task_card": taskCardApprovalPayload(card)},
+			"大纲已写入。请对照本章章纲任务卡核验一致性" +
+				"（钩子任务的埋/收坑与章尾断章钩、爽点任务、人设时刻、推进任务应与大纲吻合）；" +
+				"方向确需调整时，先调用 upsert_chapter_task_card 更新任务卡再改大纲，禁止卡文两张皮。"
+	}
+	if bookUsesTaskCards(ctx, tc) {
+		return map[string]any{"task_card_missing": true},
+			"本书已启用章纲任务卡，但本章尚未立卡。请先调用 upsert_chapter_task_card 为本章立四件套任务卡" +
+				"（钩子任务/爽点任务/人设时刻/推进任务），并保持大纲与卡一致。"
+	}
+	return nil, ""
+}
+
+// taskCardForChapter 解析某章的章纲任务卡：优先按已绑定 chapter_id，
+// 未绑定/查不到再按该章当前阅读序号兜底（chapter_id 回填钩子可能尚未生效）。
+// 任何失败静默降级为 nil（视作无卡）。
+func taskCardForChapter(ctx context.Context, tc ToolContext, chapterID int64) *timeline.ChapterTaskCard {
+	cardStore := timeline.NewStore(tc.DB, tc.LoggerOrDefault())
+	if card, err := cardStore.GetTaskCardByChapterID(ctx, tc.NovelID, chapterID); err == nil {
+		return card
+	}
+	readingNumber, err := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).GetReadingNumberByID(ctx, nil, tc.NovelID, chapterID)
+	if err != nil {
+		return nil
+	}
+	card, err := cardStore.GetTaskCard(ctx, tc.NovelID, readingNumber)
+	if err != nil {
+		return nil
+	}
+	return card
+}
+
+// taskCardForNextChapter 解析「下一章」（当前章数+1）的任务卡——
+// 新建大纲/章节尚无 chapter_id 时的联动入口。失败静默降级为 nil。
+func taskCardForNextChapter(ctx context.Context, tc ToolContext) *timeline.ChapterTaskCard {
+	n, err := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).CountByNovel(ctx, nil, tc.NovelID)
+	if err != nil {
+		return nil
+	}
+	card, err := timeline.NewStore(tc.DB, tc.LoggerOrDefault()).GetTaskCard(ctx, tc.NovelID, n+1)
+	if err != nil {
+		return nil
+	}
+	return card
+}
+
+// bookUsesTaskCards 判断本书是否已启用任务卡工作流（存在任一卡）。
+// 失败/坏数据一律静默 false（宁可漏拦：纯即兴写作零打扰）。
+func bookUsesTaskCards(ctx context.Context, tc ToolContext) bool {
+	ok, err := timeline.NewStore(tc.DB, tc.LoggerOrDefault()).HasAnyTaskCard(ctx, tc.NovelID)
+	if err != nil {
+		return false
+	}
+	return ok
+}
+
+// taskCardApprovalPayload 把任务卡四件套裁成审批联动载荷（随大纲审批展示给作者对照核验）。
+func taskCardApprovalPayload(card *timeline.ChapterTaskCard) map[string]any {
+	return map[string]any{
+		"target_reading_number": card.TargetReadingNumber,
+		"hook_task":             card.HookTask,
+		"beat_task":             card.BeatTask,
+		"moment_task":           card.MomentTask,
+		"advance_task":          card.AdvanceTask,
+	}
+}
+
 // RegisterTaskCardTools 注册章纲任务卡工具。
 func RegisterTaskCardTools(r *Registry) {
 	r.Register(&UpsertChapterTaskCardTool{})

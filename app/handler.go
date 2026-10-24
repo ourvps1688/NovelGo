@@ -343,6 +343,21 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.turnCommit = rollback.NewStore(db, a.logger)
 	a.writing = writing.NewStore(db, a.logger)
 	a.volume = volume.NewStore(db, a.logger)
+
+	// 6b. 章节创建回填钩子（R0 后补充闭环）：章节记录创建后按阅读序号把
+	// 章纲任务卡的 chapter_id 绑定上（同事务原子生效）。失败只告警不影响建章。
+	chapter.SetCreatedHook(func(ctx context.Context, tx *gorm.DB, novelID, chapterID int64, readingNumber int) {
+		bound, err := a.timeline.BindChapterID(ctx, tx, novelID, chapterID, readingNumber)
+		if err != nil {
+			a.logger.Warn("章纲任务卡 chapter_id 回填失败（不影响章节创建）",
+				"novel_id", novelID, "chapter_id", chapterID, "err", err)
+			return
+		}
+		if bound {
+			a.logger.Debug("章纲任务卡已回填 chapter_id",
+				"novel_id", novelID, "chapter_id", chapterID, "reading_number", readingNumber)
+		}
+	})
 	a.snapshots = snapshot.NewService(db, a.volume, a.chapter)
 	a.retcons = retcon.NewService(retcon.NewStore(db))
 	// retcon 受控编辑留痕（WBS 3.2）三执行体：回滚点固化=snapshot.Commit；差异摘要=

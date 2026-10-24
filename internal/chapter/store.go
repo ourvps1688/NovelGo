@@ -237,6 +237,9 @@ func (s *Store) Create(ctx context.Context, tx *gorm.DB, novelID int64, volumeID
 	if err != nil {
 		return nil, fmt.Errorf("chapter store: create: %w", err)
 	}
+	// 触发回填钩子（章纲任务卡 chapter_id 绑定等外围维护；失败零影响）。
+	// 传创建所处事务：绑定同事务原子生效，创建回滚时一并回滚。
+	s.notifyChapterCreated(ctx, tx, novelID, created.ID)
 	return created, nil
 }
 
@@ -310,6 +313,10 @@ func (s *Store) Place(ctx context.Context, tx *gorm.DB, input PlaceInput) (*Chap
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chapter store: place: %w", err)
+	}
+	// 仅「新建」触发回填钩子（SourceChapterID 为空=新建记录；移动既有章节不触发）。
+	if input.SourceChapterID == nil {
+		s.notifyChapterCreated(ctx, tx, input.NovelID, placed.ID)
 	}
 	return &placed, nil
 }
