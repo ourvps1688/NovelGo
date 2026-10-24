@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, CheckCircle, Play, ScanSearch } from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
+import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
 import SignabilityAuditView, { StockAuditPanel } from "./SignabilityAuditView";
@@ -170,7 +171,11 @@ export default function PipelineWizard({ novelId }: Props) {
                         type="button"
                         className="inline-flex w-fit items-center gap-1 rounded border px-3 py-1.5 text-sm"
                         title={t("pipeline.alignFullHint")}
-                        onClick={() => control("align_full")}
+                        onClick={() => {
+                          // 体检动作埋点（P4 T2.2）：失败静默零提示。
+                          trackFeature(ACTION_FEATURE_KEYS.audit);
+                          control("align_full");
+                        }}
                       >
                         <ScanSearch className="h-4 w-4" />
                         {t("pipeline.alignFull")}
@@ -198,7 +203,11 @@ export default function PipelineWizard({ novelId }: Props) {
             <PatrolReportPanel
               data={patrolReport}
               tick={patrolTick}
-              onRun={() => control("patrol")}
+              onRun={() => {
+                // 巡检动作埋点（P4 T2.2）：失败静默零提示。
+                trackFeature(ACTION_FEATURE_KEYS.patrol);
+                control("patrol");
+              }}
             />
           ) : null}
           <RetconPanel novelId={novelId} />

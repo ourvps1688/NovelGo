@@ -66,6 +66,7 @@ import { useCreateNovel } from "@/components/novel/useCreateNovel";
 import { useSaveCover } from "@/components/novel/useSaveCover";
 import { useBookPitchStore } from "@/stores/useBookPitchStore";
 import { novelKeys } from "@/lib/queryKeys";
+import { panelFeatureKey, trackFeature } from "@/lib/featureKeys";
 import { useQueryClient } from "@tanstack/react-query";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
@@ -153,6 +154,14 @@ export default function WorkspaceView({
   const setActivePanel = usePanelStore((s) => s.setActivePanel);
   const setSidebarPanel = usePanelStore((s) => s.setSidebarPanel);
   const setSidebarClosed = usePanelStore((s) => s.setSidebarClosed);
+  // 面板打开埋点（P4 T2.2）：以 activePanel 变化为准，同面板重复切换不刷量
+  // （值不变 effect 不重触发）；失败静默零提示（降级纪律，业务零感知）。
+  const trackedPanelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (trackedPanelRef.current === activePanel) return;
+    trackedPanelRef.current = activePanel;
+    trackFeature(panelFeatureKey(activePanel));
+  }, [activePanel]);
   // focusMap 外置到 useFocusStore（2.8）。各 View 自己订阅 focusId。
   // styleSampleFocusId 语义不同（null=已处理），保留本地 state。
   const focusEntity = useFocusStore((s) => s.focusEntity);

@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import type { GatePayload, GateDecision } from "@/types/pipeline";
+import { GATE_DECISION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 
 interface Props {
   gate: GatePayload;
@@ -86,7 +87,13 @@ export default function PipelineGateCard({ gate, onResume }: Props) {
               key={opt}
               type="button"
               className={c.variant}
-              onClick={() => onResume(opt as GateDecision)}
+              onClick={() => {
+                // 关键动作埋点（P4 T2.2）：仅 fix/audit_now/finish_book/modify
+                // 归入动作度量，流程控制不计入；失败静默零提示。
+                const key = GATE_DECISION_FEATURE_KEYS[opt];
+                if (key) trackFeature(key);
+                onResume(opt as GateDecision);
+              }}
             >
               {c.icon}
               {c.label}

@@ -9,6 +9,7 @@ import {
   GetContent,
 } from "@/lib/wailsjs/go/app/App";
 import { pattern } from "@/lib/wailsjs/go/models";
+import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import { useSaveContent } from "@/components/content/useSaveContent";
 import { isContentConflict } from "@/components/content/editorSaveQueue";
 import { reportAIFileChange } from "@/components/content/aiFileChanges";
@@ -295,6 +296,8 @@ export default function PatternSessionView({
     }
 
     try {
+      // 提取动作埋点（P4 T2.2）：失败静默零提示，不影响提取链路。
+      trackFeature(ACTION_FEATURE_KEYS.extract);
       let res: pattern.ExtractPatternAllResult;
       if (multi) {
         res = await ExtractPatternAll({

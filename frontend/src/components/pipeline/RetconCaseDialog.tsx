@@ -22,6 +22,7 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useVolumes } from "@/components/volume/useVolumes";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
+import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import { IssueScopeTags } from "./IssueTags";
 
 // retcon 裁决/执行人标识（单机单作者场景的固定署名，落 decided_by/applied_by/rolled_back_by 留痕）。
@@ -98,10 +99,12 @@ export default function RetconCaseDialog({
   }
 
   const approve = () =>
-    act(
-      () => ApproveRetconCase(current.id, RETCON_ACTOR, note.trim()),
-      "pipeline.retcon.approveOk",
-    );
+    act(() => {
+      // retcon 立案埋点（P4 T2.2）：立案在后端 handoff 出口沉淀候选案件，
+      // 前端以「批准立案」裁决为使用信号；失败静默零提示。
+      trackFeature(ACTION_FEATURE_KEYS.retcon);
+      return ApproveRetconCase(current.id, RETCON_ACTOR, note.trim());
+    }, "pipeline.retcon.approveOk");
   const reject = () =>
     act(
       () => RejectRetconCase(current.id, RETCON_ACTOR, note.trim()),

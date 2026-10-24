@@ -16,6 +16,7 @@ import {
   GetChapterContents,
 } from "@/lib/wailsjs/go/app/App";
 import { app } from "@/lib/wailsjs/go/models";
+import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { useCreateStyleProfile } from "@/components/preference/useCreateStyleProfile";
@@ -319,6 +320,8 @@ export default function StyleView({
     runningTaskIdRef.current = taskId;
 
     try {
+      // 提取动作埋点（P4 T2.2）：失败静默零提示，不影响提取链路。
+      trackFeature(ACTION_FEATURE_KEYS.extract);
       const res = await ExtractStyle({
         task_id: taskId,
         sample_ids: [...selected],

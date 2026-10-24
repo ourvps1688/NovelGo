@@ -2,6 +2,7 @@
 // 绝不内嵌/重排既有工作面（双速与闸门语义勿动，plan §6.1）。
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { journeyFeatureKey, trackFeature } from "@/lib/featureKeys";
 
 interface Props {
   /** i18n key：卡片标题 */
@@ -68,7 +69,11 @@ export default function JourneyCard({
     <button
       type="button"
       data-testid="journey-card"
-      onClick={onClick}
+      onClick={() => {
+        // 旅程卡点击埋点（P4 T2.2）：key 由 titleKey 单源派生；失败静默零提示。
+        trackFeature(journeyFeatureKey(titleKey));
+        onClick();
+      }}
       className={`${className} p-4 cursor-pointer`}
     >
       {body}

@@ -7,6 +7,7 @@ import { AuditSeriesBible, SetVolumeFrozen } from "@/lib/wailsjs/go/app/App";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useVolumes } from "@/components/volume/useVolumes";
 import { volumeKeys } from "@/lib/queryKeys";
+import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 
@@ -67,6 +68,8 @@ export default function VolumeManagePanel({ novelId }: { novelId: number }) {
         setFreezeTarget(null);
         return;
       }
+      // 冻结动作埋点（P4 T2.2）：冻结/解冻同属卷冻结操作；失败静默零提示。
+      trackFeature(ACTION_FEATURE_KEYS.freeze);
       await SetVolumeFrozen(novelId, target.id, true);
       toastSuccess(t("pipeline.volumeManage.frozenOk", { name: target.name }));
       setFreezeTarget(null);
@@ -83,6 +86,7 @@ export default function VolumeManagePanel({ novelId }: { novelId: number }) {
     if (!target) return;
     setBusy(true);
     try {
+      trackFeature(ACTION_FEATURE_KEYS.freeze);
       await SetVolumeFrozen(novelId, target.id, false);
       toastSuccess(
         t("pipeline.volumeManage.unfrozenOk", { name: target.name }),
