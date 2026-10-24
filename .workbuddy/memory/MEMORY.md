@@ -37,3 +37,9 @@
 - factory map 单源 frontend/src/lib/factory.ts（四工厂，全键覆盖断言）；旅程 PanelId×3+默认 journey-create；16 条目留次级导航+三旅程面板直达条（quality 含 reader）。勿回退：PanelId 零删除、双速勿合并、P0–P2 工件零触碰、theme token、desktop-first。规划=ultimate-form-integration-plan.md。
 - 叙案 i18n 单源 narrative.tagline 五落点；空态漏斗=GetVoiceLedger 全 false→重写入口 hint（失败/坏数据/同步抛错一律静默 false）+重写卡与吸收提取卡同语承接；WritingConfigTab 迁 journey-quality 设置区（组件零改动）、SettingsDialog 三 Tab。
 - 双验收 p3-acceptance.test.tsx（喂给谁逐入口+旅程链路+PanelId 零删除回归）；WBS §T5.1 结论已记。门禁全绿（四道闸+theme:check+go build/test）；P3 全程 internal/·*.go 零触碰。vitest 必须 `cd /d/workbuddyfiles/NovelGO/frontend &&` 内联（cwd 不跨调用）。
+
+## P4 可靠性与度量（全销 #191–#199，WBS=p4-reliability-metrics-implementation-wbs.md）
+- 重试矩阵单源 internal/llm/retry_matrix.go（agent 重试协议零改动）；熔断单源 internal/pipeline/provider_trip.go：dispatchSkill 唯一派发口（8 派发点，源码测试锁定 `s.skillRunner(` 恰 1 处）、判定异常照常派发、S3 循环熔断整循环中断不刷屏。
+- 长跑可见性纯前端：TurnSegment 时间戳派生（事件协议零改动）+SubagentCard 时钟/心跳、done/failed 停表定格、静默仅数值零弹窗、interval 卸载清理。
+- 度量纯本地不上传（隐私红线，grep 断言）：feature_usage_daily（AutoMigrate 不动版本化迁移，done=12）+featureKeys.ts 单源三类 key（panel.*/journey.*/action.*）+trackFeature 失败静默；消费面 FeatureUsageSection 有度量才显示、queryErrorToast 静默口径白名单 feature-usage。
+- 埋点映射备忘：重写=闸门 modify（聊天写/重写不可区分不计入）、体检=align_full/audit_now/finish_book、retcon 立案=ApproveRetconCase（立案在后端 handoff 出口）。降级逐字一致是最高验收；TestRewriteVoiceABE2E 为真实 LLM E2E 瞬态（复跑绿收口）。
