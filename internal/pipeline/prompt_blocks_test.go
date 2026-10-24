@@ -52,7 +52,7 @@ func p0PromptCases() []p0PromptCase {
 			return finalAuditPrompt(1, b)
 		}, contextasm.PurposeAudit},
 		{"fix", func(b contextasm.ContextBlocks) string {
-			return fixPrompt(1, issues, "摘要", b)
+			return fixPrompt(1, issues, "摘要", nil, b)
 		}, contextasm.PurposeFix},
 		{"chapter_rw", func(b contextasm.ContextBlocks) string {
 			return chapterRewritePrompt(1, item, ch, b)

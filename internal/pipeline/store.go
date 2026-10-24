@@ -128,6 +128,17 @@ type GateContext struct {
 	// 过大时会无限循环。累计达 fixBatchFailureCap 后改发闸门交用户裁决（继续=回复评
 	// 重新评估剩余问题 / 终止），封死「失败→恢复→原样重试」的死循环。
 	FixBatchFailures int `json:"fix_batch_failures,omitempty"`
+	// FixLog 是本轮修复日志（R1b）：已修复条目的一行改动摘要（来自修复回执的可选
+	// log 字段），按完成先后排列。同轮后续批次/并行组的修复提示词经 fixLogBlock 注入
+	// 「本轮修复日志」，消除独立会话的重复勘察（F2）。executeAudit 落新体检结果时随
+	// FixStates 一并重置（新一轮清单=新一轮日志）。
+	FixLog []FixLogEntry `json:"fix_log,omitempty"`
+}
+
+// FixLogEntry 是修复日志里的一条：issueID → 一行改动摘要（agent 回执 log 字段上报）。
+type FixLogEntry struct {
+	ID   string `json:"id"`
+	Note string `json:"note"`
 }
 
 // AuditIssue 是签约体检发现的一条问题。

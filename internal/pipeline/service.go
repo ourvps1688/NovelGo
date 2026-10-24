@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -938,6 +939,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		s.logger.Warn("S4 体检：issue 工单落表失败（非阻断）", "run_id", runID, "err", terr)
 	}
 	ctxt.FixStates = nil
+	// 修复日志（R1b）同轮语义：随断点一并重置，新清单=新修复日志。
+	ctxt.FixLog = nil
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
@@ -1098,6 +1101,92 @@ func planFixBatches(issues []AuditIssue) [][]AuditIssue {
 	return batches
 }
 
+// fixScopeGlobal 是作用域未知问题（无章节且维度 none）的共享 token：这类问题可能
+// 触碰任意台账条目，无法证明与谁互斥，全部收进同一组串行（宁缺勿错）。
+const fixScopeGlobal = "global"
+
+// fixGroupTokens 计算一条 issue 的作用域 token 集合（R1b 分组并行的原子单位）：
+//   - ch:<N>：问题涉及的每个章节（chapter_ids 结构化字段优先，issueChapterIDs 正则兜底）；
+//   - dim:<X>：机器归属维度（dimension 非 none/空），同一台账维度的修复可能互相碰；
+//   - 全空 → fixScopeGlobal（作用域未知，共享串行组）。
+//
+// token 集合有交集（直接或传递）的问题必须同组串行；不相交的组间可并行（写冲突天然规避）。
+func fixGroupTokens(it AuditIssue) []string {
+	chs := issueChapterIDs(it)
+	toks := make([]string, 0, len(chs)+1)
+	for _, n := range chs {
+		toks = append(toks, fmt.Sprintf("ch:%d", n))
+	}
+	if d := strings.TrimSpace(it.Dimension); d != "" && d != DimensionNone {
+		toks = append(toks, "dim:"+d)
+	}
+	if len(toks) == 0 {
+		toks = append(toks, fixScopeGlobal)
+	}
+	return toks
+}
+
+// planFixGroups 把待修问题按作用域分组（R1b，F2 根治）：issue 的作用域 token 集合
+// （fixGroupTokens）有交集（含传递相连，如 I1↔ch:3↔I2↔dim:character↔I3）的归入同组——
+// 组内条目可能触碰同一章节/同一台账维度，必须串行（组内再按 planFixBatches 切小批，
+// 保留 P0/P1 轮数预算语义）；token 集合不相交的组间可并行派发修复会话。
+// 组顺序按各组首条问题在输入中的出现次序（确定性，测试可断言）。
+func planFixGroups(issues []AuditIssue) [][]AuditIssue {
+	parent := make([]int, len(issues))
+	for i := range parent {
+		parent[i] = i
+	}
+	find := func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			// 小根合大根：根号=组内最小问题下标，组序即首现次序。
+			if ra < rb {
+				parent[rb] = ra
+			} else {
+				parent[ra] = rb
+			}
+		}
+	}
+	tokenOwner := make(map[string]int, len(issues))
+	for i, it := range issues {
+		for _, tok := range fixGroupTokens(it) {
+			if j, ok := tokenOwner[tok]; ok {
+				union(i, j)
+			} else {
+				tokenOwner[tok] = i
+			}
+		}
+	}
+	// 按根（=组内最小下标）归组，输出按根升序=首现次序；组内保持输入顺序。
+	index := make(map[int]int, len(issues))
+	groups := make([][]AuditIssue, 0, len(issues))
+	for i, it := range issues {
+		r := find(i)
+		gi, ok := index[r]
+		if !ok {
+			gi = len(groups)
+			index[r] = gi
+			groups = append(groups, nil)
+		}
+		groups[gi] = append(groups[gi], it)
+	}
+	return groups
+}
+
+// fixSweepFailure 记录一次修复 sweep 里某批次的失败（R1b 组间并行的收口依据）：
+// seq 是全局批次派发序号，供 run 级失败通道的消息与事件沿用既有 batch_index 语义。
+type fixSweepFailure struct {
+	seq int
+	err error
+}
+
 // setDispatching 更新 GateContext.Dispatching 标记（执行体派发/退出时调用），
 // 供 resume 区分「执行体仍存活（软暂停，会在批次/阶段边界感知状态变化）」与
 // 「无人执行（需重新派发）」。
@@ -1192,12 +1281,10 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		ctxt.FixStates = map[string]string{}
 	}
 	fixedIDs := make([]string, 0, len(ctxt.FixStates))
-	isFixed := make(map[string]bool, len(ctxt.FixStates))
 	isResolved := make(map[string]bool, len(ctxt.FixStates)) // fixed/skipped/rewrite 均不再进修复批次
 	for id, st := range ctxt.FixStates {
 		switch st {
 		case "fixed":
-			isFixed[id] = true
 			fixedIDs = append(fixedIDs, id)
 			isResolved[id] = true
 		case "skipped", "rewrite", "retcon":
@@ -1288,149 +1375,217 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
 		return
 	}
-	batches := planFixBatches(pending)
+	// R1b 作用域分组并行（F2 根治）：作用域 token（章节∪台账维度）相交的问题同组串行
+	// （组内沿用 planFixBatches 小批轮数预算），不相交的组间并行派发修复会话——写冲突
+	// 天然规避、互不拖慢。共享断点态（FixStates/FixLog）与 run 级失败计数由 mu 串行化；
+	// 单组失败只终止该组剩余批次，不拖死其它组，收口后按 run 级语义统一计数/暂停/发闸
+	// （与既有 S5 失败通道一致）。
+	groups := planFixGroups(pending)
+	totalBatches := 0
+	for _, g := range groups {
+		totalBatches += len(planFixBatches(g))
+	}
 
-	for i, batch := range batches {
-		// 批次间守卫：用户暂停/中止后在边界停下（软暂停语义），恢复时从剩余问题继续。
-		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-			(cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
-			s.logger.Info("S5 修复：状态已变更，批次边界停止", "batch", i+1, "stage", cur.CurrentStage, "status", cur.Status)
-			s.setDispatching(ctx, runID, false)
-			emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID,
-				"ok": false, "error": "修复已被暂停或中止，等待恢复"})
-			return
-		}
+	var (
+		mu           sync.Mutex
+		wg           sync.WaitGroup
+		batchSeq     int // 全局批次派发序号（fix_start 的 batch_index）
+		batchOK      int // 本 sweep 成功完成的批次数（run 级失败计数语义用）
+		failures     []fixSweepFailure
+		guardStopped bool
+	)
 
-		batchIDs := make(map[string]bool, len(batch))
-		for _, it := range batch {
-			batchIDs[it.ID] = true
-		}
-		batchIssues := make([]FixIssuePayload, 0, len(batch))
-		for _, it := range batch {
-			batchIssues = append(batchIssues, FixIssuePayload{
-				ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc, Status: "fixing",
-				TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction,
-			})
-		}
-		// 全量问题清单（含逐项状态）：前端在修复清单里给每个问题标注
-		// 待修复 / 正在修复 / 已修复，用户不用猜 LLM 做到哪了。
-		allIssues := make([]FixIssuePayload, 0, len(auditData.Issues))
-		for _, it := range auditData.Issues {
-			p := FixIssuePayload{ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
-				TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction}
-			switch {
-			case isFixed[it.ID]:
-				p.Status = "fixed"
-			case ctxt.FixStates[it.ID] == "skipped":
-				p.Status = "skipped"
-			case ctxt.FixStates[it.ID] == "rewrite":
-				p.Status = "rewrite"
-			case ctxt.FixStates[it.ID] == "retcon":
-				p.Status = "retcon"
-			case batchIDs[it.ID]:
-				p.Status = "fixing"
-			default:
-				p.Status = "pending"
-			}
-			allIssues = append(allIssues, p)
-		}
-		emitFixStart(ctx, map[string]any{
-			"run_id":      runID,
-			"novel_id":    novelID,
-			"issues":      batchIssues,
-			"all_issues":  allIssues,
-			"summary":     auditData.Summary,
-			"batch_index": i + 1,
-			"batch_total": len(batches),
-			"done_ids":    fixedIDs,
-		})
-
-		// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
-		fixSkill := "signability-fix"
-		fixPromptText := fixPrompt(novelID, batch, auditData.Summary,
-			s.buildBlocks(ctx, novelID, contextasm.PurposeFix))
-		if ctxt.AuditKind == "blueprint" {
-			fixSkill = "blueprint-fix"
-			fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary)
-		}
-		// 派发前过供应商熔断判定（dispatchSkill 单源，WBS p4 §0.2）：近 10 分钟流式空闲
-		// 超时达到阈值说明 Provider 基本不可用（正常修复期间接近 0），此时不派发 agent
-		// 白烧 18 轮墙钟时间（每轮都可能白等 3 分钟被看门狗取消），直接按批次失败快速
-		// 落入计数/闸门通道（失败计数/闸门通道语义与既有 S5 熔断一致）。
-		out, batchErr := s.dispatchSkill(ctx, fixSkill, SkillInput{
-			NovelID:   novelID,
-			Prompt:    fixPromptText,
-			MaxTurns:  18,
-			SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
-			RunID:     runID,
-		})
-		if batchErr != nil {
-			s.logger.Error("S5 修复执行失败", "run_id", runID, "batch", i+1, "err", batchErr)
-			s.setDispatching(ctx, runID, false)
-			// 透出供应商健康度：若近期频发流式空闲超时，提示用户这是 Provider 挂起而非代码问题，
-			// 避免误判为「修复功能坏了」。idle 超时由 llm 层空闲看门狗记录。
-			idleCount := llm.RecentIdleTimeouts(15 * time.Minute)
-			idleNote := ""
-			if idleCount > 0 {
-				idleNote = fmt.Sprintf("；近 15 分钟 LLM 流式空闲超时 %d 次（疑似供应商挂起，建议检查 Provider 或稍后重跑）", idleCount)
-			}
-			// 失败计数：连续失败达上限不再「暂停→恢复→原样重派」无限循环，
-			// 改发闸门交用户裁决（继续=回复评重新评估剩余问题 / 终止）。
-			ctxt.FixBatchFailures++
-			ctxtUpdated, merr := json.Marshal(ctxt)
-			if merr != nil {
-				ctxtUpdated = []byte(run.ContextJSON)
-			}
-			emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": false,
-				"error":                  batchErr.Error() + idleNote,
-				"batch_index":            i + 1,
-				"batch_total":            len(batches),
-				"provider_idle_timeouts": idleCount})
-			if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-				cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
-				if ctxt.FixBatchFailures >= fixBatchFailureCap {
-					// 达到失败上限：转人工裁决，等待闸门决策而非盲目重试。
-					if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusAwaitingGate, string(ctxtUpdated)); serr != nil {
-						s.logger.Error("S5 修复：失败转闸门落库失败", "err", serr)
-					}
-					emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-						Status: StatusAwaitingGate,
-						Note: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批），已转人工裁决",
-							ctxt.FixBatchFailures, i+1, len(batches))})
-					emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: StageS5, GateID: GateG4,
-						Summary: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批：%s%s）。已修复 %d 项保留。"+
-							"「继续」= 回到体检复评重新评估剩余问题（可拆分/降级难修项后再决定）；「终止」= 结束本流水线。",
-							ctxt.FixBatchFailures, i+1, len(batches), batchErr.Error(), idleNote, len(fixedIDs)),
-						Options: []string{"continue", "abort"}})
-				} else {
-					// 失败落地为 paused（保留已完成批次的断点），恢复时从剩余问题继续。
-					if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, string(ctxtUpdated)); serr != nil {
-						s.logger.Error("S5 修复：失败落暂停失败", "err", serr)
-					}
-					emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-						Status: StatusPaused,
-						Note: fmt.Sprintf("第 %d/%d 批修复失败（累计 %d/%d 次）：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）%s",
-							i+1, len(batches), ctxt.FixBatchFailures, fixBatchFailureCap, batchErr.Error(), len(fixedIDs), idleNote)})
+	for groupIdx, group := range groups {
+		wg.Add(1)
+		go func(groupIdx int, group []AuditIssue) {
+			defer wg.Done()
+			for _, batch := range planFixBatches(group) {
+				// 批次间守卫：用户暂停/中止后在批次边界停下（软暂停语义），恢复时从剩余问题继续。
+				// 单组看到状态变更即停，其余组在各自下个批次边界跟进；收口时统一广播一次。
+				if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+					(cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
+					s.logger.Info("S5 修复：状态已变更，批次边界停止", "run_id", runID, "group", groupIdx+1,
+						"batch", len(planFixBatches(group)), "stage", cur.CurrentStage, "status", cur.Status)
+					mu.Lock()
+					guardStopped = true
+					mu.Unlock()
+					return
 				}
+
+				batchIDs := make(map[string]bool, len(batch))
+				for _, it := range batch {
+					batchIDs[it.ID] = true
+				}
+				mu.Lock()
+				batchSeq++
+				seq := batchSeq
+				batchIssues := make([]FixIssuePayload, 0, len(batch))
+				for _, it := range batch {
+					batchIssues = append(batchIssues, FixIssuePayload{
+						ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc, Status: "fixing",
+						TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction,
+					})
+				}
+				// 全量问题清单（含逐项状态）：前端在修复清单里给每个问题标注
+				// 待修复 / 正在修复 / 已修复，用户不用猜 LLM 做到哪了。
+				allIssues := make([]FixIssuePayload, 0, len(auditData.Issues))
+				for _, it := range auditData.Issues {
+					p := FixIssuePayload{ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
+						TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction}
+					switch st := ctxt.FixStates[it.ID]; {
+					case st == "fixed":
+						p.Status = "fixed"
+					case st == "skipped":
+						p.Status = "skipped"
+					case st == "rewrite":
+						p.Status = "rewrite"
+					case st == "retcon":
+						p.Status = "retcon"
+					case batchIDs[it.ID]:
+						p.Status = "fixing"
+					default:
+						p.Status = "pending"
+					}
+					allIssues = append(allIssues, p)
+				}
+				fixedSnapshot := append([]string(nil), fixedIDs...)
+				// 本轮修复日志快照（R1b）：已修条目摘要注入本批提示词，消除重复勘察。
+				fixLogSnapshot := append([]FixLogEntry(nil), ctxt.FixLog...)
+				emitFixStart(ctx, map[string]any{
+					"run_id":      runID,
+					"novel_id":    novelID,
+					"issues":      batchIssues,
+					"all_issues":  allIssues,
+					"summary":     auditData.Summary,
+					"batch_index": seq,
+					"batch_total": totalBatches,
+					"done_ids":    fixedSnapshot,
+				})
+
+				// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
+				fixSkill := "signability-fix"
+				fixPromptText := fixPrompt(novelID, batch, auditData.Summary,
+					fixLogSnapshot, s.buildBlocks(ctx, novelID, contextasm.PurposeFix))
+				if ctxt.AuditKind == "blueprint" {
+					fixSkill = "blueprint-fix"
+					fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary, fixLogSnapshot)
+				}
+				mu.Unlock()
+
+				// 派发前过供应商熔断判定（dispatchSkill 单源，WBS p4 §0.2）：近 10 分钟流式空闲
+				// 超时达到阈值说明 Provider 基本不可用（正常修复期间接近 0），此时不派发 agent
+				// 白烧 18 轮墙钟时间（每轮都可能白等 3 分钟被看门狗取消），直接按批次失败快速
+				// 落入计数/闸门通道（失败计数/闸门通道语义与既有 S5 熔断一致）。
+				out, batchErr := s.dispatchSkill(ctx, fixSkill, SkillInput{
+					NovelID:   novelID,
+					Prompt:    fixPromptText,
+					MaxTurns:  18,
+					SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
+					RunID:     runID,
+				})
+				if batchErr != nil {
+					s.logger.Error("S5 修复执行失败", "run_id", runID, "group", groupIdx+1, "batch", seq, "err", batchErr)
+					// 单组失败只终止本组剩余批次（不拖死其它组），run 级失败计数/暂停/闸门
+					// 在全部组收口后统一处理。
+					mu.Lock()
+					failures = append(failures, fixSweepFailure{seq: seq, err: batchErr})
+					mu.Unlock()
+					return
+				}
+				// 本批完成：解析修复回执并落库断点（仍 S5/running），供失败恢复与重启续修。
+				mu.Lock()
+				fixedNow, skippedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
+				fixedIDs = append(fixedIDs, fixedNow...)
+				// 回执结果同步 issue 工单表（R1）：fixed 落状态，skipped 连原因一并留痕。
+				for _, id := range fixedNow {
+					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusFixed, "")
+				}
+				for id, reason := range skippedNow {
+					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
+				}
+				batchOK++
+				// 断点落库：保持 run 当前状态不变（用户并发暂停/中止不被覆盖回 running），
+				// 只刷新上下文断点（FixStates/FixLog），供失败恢复与重启续修。
+				if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil && cur.CurrentStage == StageS5 {
+					if ctxtJSON, merr := json.Marshal(ctxt); merr == nil {
+						if serr := s.store.SetStageStatus(ctx, runID, StageS5, cur.Status, string(ctxtJSON)); serr != nil {
+							s.logger.Error("S5 修复：批次断点落库失败", "err", serr)
+						}
+					}
+				}
+				mu.Unlock()
 			}
-			return
+		}(groupIdx, group)
+	}
+	wg.Wait()
+
+	// 收口（run 级语义，与既有失败通道一致）：守卫停止 > 失败计数/暂停/闸门 > 全部成功进复评。
+	if guardStopped {
+		s.setDispatching(ctx, runID, false)
+		emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID,
+			"ok": false, "error": "修复已被暂停或中止，等待恢复"})
+		return
+	}
+	if len(failures) > 0 {
+		// 失败计数（run 级「连续失败」语义，等价于串行时代的批末计数）：本 sweep 有批次
+		// 成功=有进展，计数重置为 1；全程零成功=连续失败 +1；全成功清零（在复评收口处）。
+		// 达 fixBatchFailureCap 后不再「暂停→恢复→原样重派」无限循环，改发闸门交用户裁决。
+		if batchOK > 0 {
+			ctxt.FixBatchFailures = 1
+		} else {
+			ctxt.FixBatchFailures++
 		}
-		// 本批完成：解析修复回执并落库断点（仍 S5/running），供失败恢复与重启续修。
-		fixedNow, skippedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
-		fixedIDs = append(fixedIDs, fixedNow...)
-		// 回执结果同步 issue 工单表（R1）：fixed 落状态，skipped 连原因一并留痕。
-		for _, id := range fixedNow {
-			s.syncIssueRow(ctx, novelID, runID, id, IssueStatusFixed, "")
+		errMsgs := make([]string, 0, len(failures))
+		for _, f := range failures {
+			errMsgs = append(errMsgs, f.err.Error())
 		}
-		for id, reason := range skippedNow {
-			s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
+		batchErrText := strings.Join(errMsgs, "；")
+		s.setDispatching(ctx, runID, false)
+		// 透出供应商健康度：若近期频发流式空闲超时，提示用户这是 Provider 挂起而非代码问题，
+		// 避免误判为「修复功能坏了」。idle 超时由 llm 层空闲看门狗记录。
+		idleCount := llm.RecentIdleTimeouts(15 * time.Minute)
+		idleNote := ""
+		if idleCount > 0 {
+			idleNote = fmt.Sprintf("；近 15 分钟 LLM 流式空闲超时 %d 次（疑似供应商挂起，建议检查 Provider 或稍后重跑）", idleCount)
 		}
-		ctxt.FixBatchFailures = 0 // 批次成功即清零连续失败计数
-		if ctxtJSON, merr := json.Marshal(ctxt); merr == nil {
-			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(ctxtJSON)); serr != nil {
-				s.logger.Error("S5 修复：批次断点落库失败", "err", serr)
+		ctxtUpdated, merr := json.Marshal(ctxt)
+		if merr != nil {
+			ctxtUpdated = []byte(run.ContextJSON)
+		}
+		emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": false,
+			"error":                  batchErrText + idleNote,
+			"batch_index":            failures[0].seq,
+			"batch_total":            totalBatches,
+			"failed_batches":         len(failures),
+			"provider_idle_timeouts": idleCount})
+		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
+			cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
+			if ctxt.FixBatchFailures >= fixBatchFailureCap {
+				// 达到失败上限：转人工裁决，等待闸门决策而非盲目重试。
+				if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusAwaitingGate, string(ctxtUpdated)); serr != nil {
+					s.logger.Error("S5 修复：失败转闸门落库失败", "err", serr)
+				}
+				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+					Status: StatusAwaitingGate,
+					Note: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批），已转人工裁决",
+						ctxt.FixBatchFailures, failures[0].seq, totalBatches)})
+				emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: StageS5, GateID: GateG4,
+					Summary: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批：%s%s）。已修复 %d 项保留。"+
+						"「继续」= 回到体检复评重新评估剩余问题（可拆分/降级难修项后再决定）；「终止」= 结束本流水线。",
+						ctxt.FixBatchFailures, failures[0].seq, totalBatches, batchErrText, idleNote, len(fixedIDs)),
+					Options: []string{"continue", "abort"}})
+			} else {
+				// 失败落地为 paused（保留已完成批次的断点），恢复时从剩余问题继续。
+				if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, string(ctxtUpdated)); serr != nil {
+					s.logger.Error("S5 修复：失败落暂停失败", "err", serr)
+				}
+				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
+					Status: StatusPaused,
+					Note: fmt.Sprintf("第 %d/%d 批修复失败（累计 %d/%d 次）：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）%s",
+						failures[0].seq, totalBatches, ctxt.FixBatchFailures, fixBatchFailureCap, batchErrText, len(fixedIDs), idleNote)})
 			}
 		}
+		return
 	}
 	s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
 }
@@ -2146,20 +2301,27 @@ var auditJSONRe = regexp.MustCompile("(?s)```json\\s*(.*?)```")
 
 // parseAudit 从 skill 输出文本解析结构化体检结果；失败则退化为单条 P0 issue。
 // fixReceipt 是修复 agent 在输出末尾上报的修复回执契约（由 fixPrompt/blueprintFixPrompt 要求）。
+// Log 是可选修复日志（R1b）：已修复条目的一行改动摘要，进 GateContext.FixLog 供同轮
+// 后续修复会话参照；旧回执无此字段照常解析（兼容读）。
 type fixReceipt struct {
 	Fixed   []string `json:"fixed"`
 	Skipped []struct {
 		ID     string `json:"id"`
 		Reason string `json:"reason"`
 	} `json:"skipped"`
+	Log []struct {
+		ID   string `json:"id"`
+		Note string `json:"note"`
+	} `json:"log"`
 }
 
 // applyFixReceipt 解析修复输出回执并把本批问题的断点状态写入 ctxt.FixStates：
 // 回执 fixed → "fixed"；skipped → "skipped"（记录原因，不再重试）；未提及 → 不落断点
 // （后续轮次重试）。输出缺少回执 JSON 时退化为旧行为（整批 "fixed"），保证兼容不卡死
-// 流水线。返回本批新标记为 fixed 的 id 列表（供前端 done_ids 累积）。
+// 流水线。回执可选 log 字段逐条 upsert 进 ctxt.FixLog（按 id 去重，保序）。
+// 返回本批新标记为 fixed 的 id 列表（供前端 done_ids 累积）与 skipped 原因映射。
 func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log *slog.Logger) ([]string, map[string]string) {
-	fixedSet, skipReasons, found := parseFixReceipt(outText)
+	fixedSet, skipReasons, logEntries, found := parseFixReceipt(outText)
 	if !found {
 		log.Warn("S5 修复：本批修复输出缺少回执 JSON，按整批已修复处理（兼容回退）",
 			"batch_size", len(batch))
@@ -2183,14 +2345,53 @@ func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log 
 			// 回执未提及：不落断点，后续轮次重试。
 		}
 	}
+	ctxt.FixLog = upsertFixLog(ctxt.FixLog, logEntries)
 	return fixedNow, skipped
 }
 
-// parseFixReceipt 从修复 agent 输出解析修复回执：{"fixed":["I1"],"skipped":[{"id":"I2","reason":"..."}]}。
-// 回执可能在 ```json 围栏或纯文本中，且 skipped 含嵌套对象——从每个 '{' 起用 json.Decoder
+// upsertFixLog 把回执 log 条目按 id upsert 进修复日志（保完成先后序，同 id 覆盖旧摘要）。
+// 空 id/空 note 的条目忽略（宁缺勿错，不入日志污染后续提示词）。
+func upsertFixLog(entries []FixLogEntry, add []FixLogEntry) []FixLogEntry {
+	for _, e := range add {
+		if e.ID == "" || e.Note == "" {
+			continue
+		}
+		replaced := false
+		for i := range entries {
+			if entries[i].ID == e.ID {
+				entries[i].Note = e.Note
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
+// fixLogBlock 渲染「本轮修复日志」提示词块（R1b 修复日志共享）：已修条目摘要按完成序
+// 注入同轮后续修复批次的提示词，消除独立会话的重复勘察（F2）。空日志渲染为空串——
+// 无日志时提示词与既有输出逐字一致（P0 降级纪律）。
+func fixLogBlock(entries []FixLogEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("【本轮修复日志（同轮已完成修复的条目摘要，供参照避免重复勘察/回退已修内容）】\n")
+	for _, e := range entries {
+		b.WriteString("- " + e.ID + "：" + e.Note + "\n")
+	}
+	return b.String()
+}
+
+// parseFixReceipt 从修复 agent 输出解析修复回执：{"fixed":["I1"],"skipped":[{"id":"I2","reason":"..."}],"
+// "log":[{"id":"I1","note":"..."}]}。
+// 回执可能在 ```json 围栏或纯文本中，且 skipped/log 含嵌套对象——从每个 '{' 起用 json.Decoder
 // 流式解码（容忍尾部文本），取最后一个合法且非空的回执。found=false 表示输出中没有回执，
-// 调用方退化为「整批已修复」的旧行为。
-func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string]string, found bool) {
+// 调用方退化为「整批已修复」的旧行为。log 为可选字段，旧回执/未上报时为空（兼容读）。
+func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string]string, logEntries []FixLogEntry, found bool) {
 	for i := strings.LastIndex(text, "{"); i >= 0; i = strings.LastIndex(text[:i], "{") {
 		var r fixReceipt
 		if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&r); err != nil {
@@ -2209,9 +2410,13 @@ func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string
 				skipReasons[sk.ID] = sk.Reason
 			}
 		}
-		return fixed, skipReasons, true
+		logEntries = make([]FixLogEntry, 0, len(r.Log))
+		for _, lg := range r.Log {
+			logEntries = append(logEntries, FixLogEntry{ID: lg.ID, Note: lg.Note})
+		}
+		return fixed, skipReasons, logEntries, true
 	}
-	return nil, nil, false
+	return nil, nil, nil, false
 }
 
 func parseAudit(text string) AuditData {
@@ -2414,23 +2619,27 @@ func blueprintAuditPrompt(novelID int64) string {
 }
 
 // blueprintFixPrompt 构造 S2 蓝图修复阶段的任务提示词，内嵌蓝图体检产出的 issue 清单 JSON。
-func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string) string {
+// fixLog 是同轮已完成修复的日志（R1b），经 fixLogBlock 注入供参照；空日志不注入（逐字同旧文）。
+func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string, fixLog []FixLogEntry) string {
 	data := AuditData{Verdict: "needs_fix", Summary: summary, Issues: issues}
 	b, _ := json.Marshal(data)
-	return fmt.Sprintf("本书 novel_id=%d。以下是蓝图体检本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复项），请逐条修复卷纲：\n%s\n\n"+
+	return fmt.Sprintf("本书 novel_id=%d。以下是蓝图体检本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复项），请逐条修复卷纲：\n%s\n\n%s"+
 		"按 blueprint-fix 方法论：P0 优先于 P1，用 edit（仅 volumes/id_{id}.md 卷纲）/create_volume 修复，"+
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
 		fixReceiptFormatLine()+"——"+
-		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。"+
+		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；"+
+		"log 可选逐条给出已修复项的一行改动摘要（同轮后续修复会话会参照它避免重复勘察）；"+
+		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。"+
 		"（注：蓝图级问题均为卷纲/设定层，不涉及正文章节重写，无需考虑 fix_type=body 的回流。）",
-		novelID, len(issues), b)
+		novelID, len(issues), b, fixLogBlock(fixLog))
 }
 
 // fixPrompt 构造一批待修问题的修复提示词：只传本批问题子集（均为未修复项），
-// 保证 agent 在有限轮数内聚焦逐条修复到位。blocks 尾部装配上下文块
-// （S5 前向修复以快照为唯一依据，WBS 2.3；P0 §0.5 fix=Facts+Voice）。
-func fixPrompt(novelID int64, issues []AuditIssue, summary string, blocks contextasm.ContextBlocks) string {
+// 保证 agent 在有限轮数内聚焦逐条修复到位。fixLog 是同轮已完成修复的日志（R1b），
+// 经 fixLogBlock 注入供参照，消除独立会话的重复勘察（F2）；空日志不注入（逐字同旧文）。
+// blocks 尾部装配上下文块（S5 前向修复以快照为唯一依据，WBS 2.3；P0 §0.5 fix=Facts+Voice）。
+func fixPrompt(novelID int64, issues []AuditIssue, summary string, fixLog []FixLogEntry, blocks contextasm.ContextBlocks) string {
 	data := AuditData{Verdict: "needs_fix", Summary: summary, Issues: issues}
 	b, _ := json.Marshal(data)
 	return fmt.Sprintf("本书 novel_id=%d。以下是本轮待修复的 issue 清单（JSON，共 %d 条，均为未修复的**台账/卷纲级（fix_type=ledger）**项）。"+
@@ -2441,14 +2650,15 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string, blocks contex
 		"若预计超过 5 条台账 entry 或 2 章正文（如「整池悬念治理」「批量伏笔改挂」这类工程级问题），**不要硬修**，"+
 		"直接把该 issue 放入回执的 skipped 并注明 reason=\"scope exceeds single-batch budget（建议拆分为原子 issue 或转人工/章节重写）\"，然后继续下一条。"+
 		"宁可如实上报跳过，也不要磨到对话轮数耗尽导致整批失败、已做工作全部作废。"+
-		"请仅对以下 ledger 级问题逐条修复：\n%s\n\n"+
+		"请仅对以下 ledger 级问题逐条修复：\n%s\n\n%s"+
 		"按 signability-fix 方法论：P0 优先于 P1，用 edit/update_chapter_plan/create_volume/台账写工具修复，"+
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
 		fixReceiptFormatLine()+"——"+
 		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）；"+
+		"log 可选逐条给出已修复项的一行改动摘要（同轮后续修复会话会参照它避免重复勘察）；"+
 		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
-		novelID, len(issues), b) + blocks.Render(contextasm.PurposeFix)
+		novelID, len(issues), b, fixLogBlock(fixLog)) + blocks.Render(contextasm.PurposeFix)
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。

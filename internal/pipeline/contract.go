@@ -125,8 +125,10 @@ func issueFieldRules() string {
 }
 
 // fixReceiptFormatLine 生成修复回执 JSON 格式串（fixPrompt / blueprintFixPrompt 共用）。
+// log 是可选的修复日志字段（R1b）：逐条给出已修复项的一行改动摘要，同轮后续修复会话
+// 会经「本轮修复日志」注入，消除重复勘察；省略不影响回执判定（兼容读旧回执）。
 func fixReceiptFormatLine() string {
-	return `{"fixed":["I.."],"skipped":[{"id":"I..","reason":"无法修复的原因"}]}`
+	return `{"fixed":["I.."],"skipped":[{"id":"I..","reason":"无法修复的原因"}],"log":[{"id":"I..","note":"一行改动摘要"}]}`
 }
 
 // auditMissingContractGroups 返回体检结果未覆盖的契约字段组（空 = 契约字段齐全）。

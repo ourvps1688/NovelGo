@@ -292,8 +292,8 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 	require.Contains(t, patrol, `"schema_version"`, "patrolPrompt 应要求 schema_version")
 	require.Contains(t, patrol, `"id":"T1"`, "张力报告提示词应使用巡检示例值 T1")
 	for name, p := range map[string]string{
-		"fixPrompt":          fixPrompt(1, nil, "", contextasm.ContextBlocks{}),
-		"blueprintFixPrompt": blueprintFixPrompt(1, nil, ""),
+		"fixPrompt":          fixPrompt(1, nil, "", nil, contextasm.ContextBlocks{}),
+		"blueprintFixPrompt": blueprintFixPrompt(1, nil, "", nil),
 	} {
 		require.Contains(t, p, fixReceiptFormatLine(), "%s 应引用契约修复回执格式串", name)
 	}

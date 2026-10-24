@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -288,25 +290,37 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 
+	// 分组（R1b）：I1/I2（dimension=none 无章节 → global 共享组）串行；I3（dimension=character
+	// → dim:character 组）与 global 组不相交 → 组间并行。
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"三处待修","issues":[` +
 		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
 		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
 		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失","fix_type":"ledger","target_scope":"active_volume","dimension":"character","direction":"forward_fix"}]}`
 	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
+	var fixMu sync.Mutex
 	var fixPrompts []string
 	var fixSessions []string
+	failI1Once := true // 首次遇到 I1 批次模拟 MaxTurns 耗尽失败（按内容定序，避免并行竞态）
 	var auditCalls int
 	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
 		switch name {
 		case "signability-audit":
 			// 初检结果由测试直接注入 ctxt.Audit，桩里的 audit 调用均为修复后的复评。
+			fixMu.Lock()
 			auditCalls++
+			fixMu.Unlock()
 			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
 		case "signability-fix":
+			fixMu.Lock()
 			fixPrompts = append(fixPrompts, input.Prompt)
 			fixSessions = append(fixSessions, input.SessionID)
-			if len(fixPrompts) == 1 {
-				// 首批（I1）模拟 MaxTurns 耗尽失败。
+			shouldFail := failI1Once && strings.Contains(input.Prompt, `"id":"I1"`)
+			if shouldFail {
+				failI1Once = false
+			}
+			fixMu.Unlock()
+			if shouldFail {
+				// I1 批次模拟 MaxTurns 耗尽失败（该组剩余批次不再派发）。
 				return SkillOutput{}, fmt.Errorf("skill \"signability-fix\" 执行失败: 已达最大轮数，对话结束")
 			}
 			return SkillOutput{Text: "已修复"}, nil
@@ -316,6 +330,7 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	}
 
 	// 捕获 fix_start 载荷，断言 FixIssuePayload 携带作用域三字段（供前端标签/写保护判路）。
+	// emitFixStart 由服务层持锁串行调用，此处无并发写。
 	var firstFixStart map[string]any
 	origFixStart := emitFixStart
 	emitFixStart = func(_ context.Context, p map[string]any) {
@@ -332,40 +347,61 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	require.NoError(t, merr)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
 
-	// fix → S5：首批失败应落地 paused（而非停在 running 无人执行）
+	// fix → S5：I1 批次失败应落地 paused（而非停在 running 无人执行）；
+	// 并行组（I3）已完成的修复断点保留。
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
 	waitForStageStatus(t, svc, run.RunID, StatusPaused)
 	got, _ := svc.store.GetByRunID(ctx, run.RunID)
 	require.Equal(t, StageS5, got.CurrentStage, "失败后应停在 S5")
 	var pausedCtxt GateContext
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &pausedCtxt))
-	require.Empty(t, pausedCtxt.FixStates, "首批失败，尚无已完成问题")
+	require.Equal(t, map[string]string{"I3": "fixed"}, pausedCtxt.FixStates,
+		"单组失败不拖死其它组：并行组的 I3 应已完成并保留断点，失败组的 I1/I2 不落断点")
+	require.Equal(t, 1, pausedCtxt.FixBatchFailures,
+		"run 级失败计数：sweep 有批次失败即计数（有成功批次=有进展，计数重置为 1）")
 	require.False(t, pausedCtxt.Dispatching, "执行体已退出，标记应清除")
 
-	// 恢复：从剩余问题继续（首批重试 + 第二批），最终复评通过
+	// 恢复：从剩余问题继续（I1 重试 + I2），最终复评通过
 	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "resume"))
 	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
 
 	got, _ = svc.store.GetByRunID(ctx, run.RunID)
 	require.Equal(t, StageS4, got.CurrentStage, "复评后应在 S4 闸门")
-	require.Equal(t, 1, auditCalls, "修复后应跑一次体检做复评（初检由测试直接注入）")
-	require.Len(t, fixPrompts, 3, "首批失败重试 + 第二批 = 3 次修复调用")
-	require.Contains(t, fixPrompts[0], "I1")
-	require.NotContains(t, fixPrompts[0], "I2", "P0 应独占一批")
-	require.Contains(t, fixPrompts[1], "I1", "恢复后首批应重试未完成的 I1")
-	require.Contains(t, fixPrompts[2], "I2")
-	require.Contains(t, fixPrompts[2], "I3")
-	require.NotContains(t, fixPrompts[2], "I1", "已修复项不应重复修复")
-	for i, sid := range fixSessions {
-		for j := i + 1; j < len(fixSessions); j++ {
-			require.NotEqual(t, sid, fixSessions[j], "每批应使用独立会话，避免历史挤占轮数")
+	fixMu.Lock()
+	auditCount := auditCalls
+	prompts := append([]string(nil), fixPrompts...)
+	sessions := append([]string(nil), fixSessions...)
+	fixMu.Unlock()
+	require.Equal(t, 1, auditCount, "修复后应跑一次体检做复评（初检由测试直接注入）")
+	require.Len(t, prompts, 4, "sweep1：I1 失败 + I3 成功；sweep2：I1 重试 + I2 = 4 次修复调用")
+	var i1Calls, i2Calls, i3Calls int
+	for _, p := range prompts {
+		hasI1, hasI2, hasI3 := strings.Contains(p, `"id":"I1"`), strings.Contains(p, `"id":"I2"`), strings.Contains(p, `"id":"I3"`)
+		switch {
+		case hasI1:
+			i1Calls++
+			require.False(t, hasI2 || hasI3, "P0 应独占一批（global 组内 planFixBatches 小批）")
+		case hasI2:
+			i2Calls++
+			require.False(t, hasI3, "I2（global 组）与 I3（dim:character 组）不同批")
+		case hasI3:
+			i3Calls++
+		}
+	}
+	require.Equal(t, 2, i1Calls, "I1 失败重试 = 2 次派发")
+	require.Equal(t, 1, i2Calls, "I2 成功后不应重复修复")
+	require.Equal(t, 1, i3Calls, "I3 成功后不应重复修复")
+	for i, sid := range sessions {
+		for j := i + 1; j < len(sessions); j++ {
+			require.NotEqual(t, sid, sessions[j], "每批应使用独立会话，避免历史挤占轮数")
 		}
 	}
 	var finalCtxt GateContext
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
 	// 复评落地时 executeAudit 会重置 FixStates（新一轮体检 = 全新问题清单，旧断点作废）。
-	// 批次断点正确性已由上方调用序列验证：恢复后首批重试 I1、已修项不重复修复。
+	// 批次断点正确性已由上方调用序列验证：恢复后重试 I1、已修项不重复修复。
 	require.Empty(t, finalCtxt.FixStates, "复评落地后旧修复断点应被重置")
+	require.Empty(t, finalCtxt.FixLog, "复评落地后修复日志应随断点一并重置")
 	require.Equal(t, 1, finalCtxt.FixRounds, "一次完整 sweep 递增一轮")
 
 	// fix_start 载荷应携带作用域三字段（batchIssues/allIssues 两处构造点均拷贝）。
@@ -380,6 +416,7 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	require.True(t, ok, "issues 应为 []FixIssuePayload")
 	require.NotEmpty(t, batch0)
 	require.Equal(t, TargetScopeActiveVolume, batch0[0].TargetScope, "批次清单也应携带 target_scope")
+	require.Equal(t, 3, firstFixStart["batch_total"], "batch_total 应为全部组的批次总数（global 组 2 + dim 组 1）")
 }
 
 // TestServiceBodyIssuesRoutedToRewriteBacklog 验证正文级（fix_type=body）问题被显式路由到
@@ -1082,35 +1119,41 @@ func TestServiceFixAllFixedSkipsToReaudit(t *testing.T) {
 	require.Equal(t, 0, fixCalls, "全部已修复时应跳过修复直接复评")
 }
 
-// TestParseFixReceipt 验证修复回执解析：围栏 JSON（含嵌套 skipped）、纯文本包围、缺失回执。
+// TestParseFixReceipt 验证修复回执解析：围栏 JSON（含嵌套 skipped/log）、纯文本包围、
+// 缺失回执、旧回执无 log 字段（兼容读）。
 func TestParseFixReceipt(t *testing.T) {
-	// 围栏 + 嵌套 skipped 对象（非贪婪正则会截断，必须用流式解码）。
-	text := "修复完成。\n```json\n{\"fixed\":[\"I1\",\"I2\"],\"skipped\":[{\"id\":\"I3\",\"reason\":\"正文级问题需章节重写\"}]}\n```\n以上。"
-	fixed, skips, found := parseFixReceipt(text)
+	// 围栏 + 嵌套 skipped/log 对象（非贪婪正则会截断，必须用流式解码）。
+	text := "修复完成。\n```json\n{\"fixed\":[\"I1\",\"I2\"],\"skipped\":[{\"id\":\"I3\",\"reason\":\"正文级问题需章节重写\"}]," +
+		"\"log\":[{\"id\":\"I1\",\"note\":\"补了开篇钩子\"}]}\n```\n以上。"
+	fixed, skips, logEntries, found := parseFixReceipt(text)
 	require.True(t, found)
 	require.True(t, fixed["I1"] && fixed["I2"])
 	require.False(t, fixed["I3"])
 	require.Equal(t, "正文级问题需章节重写", skips["I3"])
+	require.Equal(t, []FixLogEntry{{ID: "I1", Note: "补了开篇钩子"}}, logEntries, "log 应解析出修复日志条目")
 
-	// 无围栏、多个 JSON 块时应取含 fixed/skipped 的那个。
-	fixed2, skips2, found2 := parseFixReceipt(`概况 {"verdict":"pass"} 尾部 {"fixed":["I9"],"skipped":[]}`)
+	// 无围栏、多个 JSON 块时应取含 fixed/skipped 的那个；旧回执无 log 字段照常解析（兼容读）。
+	fixed2, skips2, logEntries2, found2 := parseFixReceipt(`概况 {"verdict":"pass"} 尾部 {"fixed":["I9"],"skipped":[]}`)
 	require.True(t, found2)
 	require.True(t, fixed2["I9"])
 	require.Empty(t, skips2)
+	require.Empty(t, logEntries2, "无 log 字段的旧回执应兼容解析为空日志")
 
 	// 缺失回执：found=false，调用方走整批已修复的兼容回退。
-	_, _, found3 := parseFixReceipt("我修好了所有问题，没有 JSON。")
+	_, _, _, found3 := parseFixReceipt("我修好了所有问题，没有 JSON。")
 	require.False(t, found3)
 }
 
-// TestApplyFixReceipt 验证回执落账：fixed/skipped/未提及三种去向；缺回执时整批兜底。
+// TestApplyFixReceipt 验证回执落账：fixed/skipped/未提及三种去向；缺回执时整批兜底；
+// 回执 log 字段 upsert 进修复日志（空 id/空 note 忽略，同 id 覆盖，保完成序）。
 func TestApplyFixReceipt(t *testing.T) {
 	batch := []AuditIssue{
 		{ID: "I1", Level: "P1", Area: "节奏", Desc: "a"},
 		{ID: "I2", Level: "P1", Area: "人设", Desc: "b"},
 		{ID: "I3", Level: "P1", Area: "合规", Desc: "c"},
 	}
-	out := "摘要…\n```json\n{\"fixed\":[\"I1\"],\"skipped\":[{\"id\":\"I2\",\"reason\":\"需正文重写\"}]}\n```"
+	out := "摘要…\n```json\n{\"fixed\":[\"I1\"],\"skipped\":[{\"id\":\"I2\",\"reason\":\"需正文重写\"}]," +
+		"\"log\":[{\"id\":\"I1\",\"note\":\"重排了第3章节奏\"},{\"id\":\"\",\"note\":\"无效条目\"}]}\n```"
 
 	var ctxt GateContext
 	fixedNow, skippedNow := applyFixReceipt(&ctxt, batch, out, slog.Default())
@@ -1119,14 +1162,26 @@ func TestApplyFixReceipt(t *testing.T) {
 	require.Equal(t, "skipped", ctxt.FixStates["I2"], "skipped 记录断点，不再重试")
 	require.Equal(t, "需正文重写", skippedNow["I2"], "skipped 原因应回传（转人工工单留痕）")
 	require.Empty(t, ctxt.FixStates["I3"], "回执未提及的不落断点，后续轮次重试")
+	require.Equal(t, []FixLogEntry{{ID: "I1", Note: "重排了第3章节奏"}}, ctxt.FixLog,
+		"回执 log 应进修复日志（空 id 条目忽略）")
+
+	// 同 id 再次上报：覆盖旧摘要不重复；新 id 追加（保完成序）。
+	out2 := `{"fixed":["I3"],"skipped":[],"log":[{"id":"I1","note":"摘要更新"},{"id":"I3","note":"补齐合规台账"}]}`
+	fixedNow2, _ := applyFixReceipt(&ctxt, batch, out2, slog.Default())
+	require.Equal(t, []string{"I3"}, fixedNow2)
+	require.Equal(t, []FixLogEntry{
+		{ID: "I1", Note: "摘要更新"},
+		{ID: "I3", Note: "补齐合规台账"},
+	}, ctxt.FixLog, "同 id upsert 覆盖、新 id 追加且保序")
 
 	// 缺回执：整批兜底为 fixed（兼容旧行为，不卡死流水线）。
-	var ctxt2 GateContext
-	fixedNow2, _ := applyFixReceipt(&ctxt2, batch, "没有 JSON 的输出", slog.Default())
-	require.Len(t, fixedNow2, 3)
+	var ctxt3 GateContext
+	fixedNow3, _ := applyFixReceipt(&ctxt3, batch, "没有 JSON 的输出", slog.Default())
+	require.Len(t, fixedNow3, 3)
 	for _, it := range batch {
-		require.Equal(t, "fixed", ctxt2.FixStates[it.ID])
+		require.Equal(t, "fixed", ctxt3.FixStates[it.ID])
 	}
+	require.Empty(t, ctxt3.FixLog, "无回执不应产生修复日志")
 }
 
 // TestServiceAuditResetsFixStatesOnNewAudit 回归测试：新一轮体检落地时必须重置旧修复
@@ -1202,14 +1257,34 @@ func TestServiceAuditFixLoopReAudit(t *testing.T) {
 	require.Equal(t, 1, auditCalls, "修复后应再跑一次体检做复评")
 }
 
+// gateRecorder 线程安全地收集闸门事件：emitGate 由执行体 goroutine 并发调用，
+// 测试侧无同步地读原切片在 -race 下是数据竞争（既往 -race 噪声源），统一加锁收口。
+type gateRecorder struct {
+	mu      sync.Mutex
+	entries []GatePayload
+}
+
+func (r *gateRecorder) record(p GatePayload) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, p)
+}
+
+// all 返回闸门事件快照（拷贝），供测试断言。
+func (r *gateRecorder) all() []GatePayload {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]GatePayload(nil), r.entries...)
+}
+
 // withCapturedGates 临时接管 emitGate，收集所有发出的闸门事件，测试结束后还原。
-func withCapturedGates(t *testing.T) *[]GatePayload {
+func withCapturedGates(t *testing.T) *gateRecorder {
 	t.Helper()
-	var captured []GatePayload
+	rec := &gateRecorder{}
 	orig := emitGate
-	emitGate = func(_ context.Context, p GatePayload) { captured = append(captured, p) }
+	emitGate = func(_ context.Context, p GatePayload) { rec.record(p) }
 	t.Cleanup(func() { emitGate = orig })
-	return &captured
+	return rec
 }
 
 // startS3Run 直接把流水线置为 S3 写作态（带给定 ContextJSON），跳过 S1/S2 异步路径以便精确控制。
@@ -1233,8 +1308,9 @@ func TestServiceMilestoneGateOffersAudit(t *testing.T) {
 	runID := startS3Run(t, svc, 500, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 
-	require.NotEmpty(t, *captured, "应弹出 G3b 里程碑闸")
-	last := (*captured)[len(*captured)-1]
+	require.NotEmpty(t, captured.all(), "应弹出 G3b 里程碑闸")
+	gates := captured.all()
+	last := gates[len(gates)-1]
 	require.Equal(t, StageS3, last.Stage)
 	require.Equal(t, GateG3b, last.GateID)
 	require.Contains(t, last.Options, "audit_now", "里程碑闸应提供进入体检选项")
@@ -1254,8 +1330,9 @@ func TestServiceVolumeBoundaryOffersAudit(t *testing.T) {
 	runID := startS3Run(t, svc, 501, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 
-	require.NotEmpty(t, *captured)
-	last := (*captured)[len(*captured)-1]
+	require.NotEmpty(t, captured.all())
+	gates := captured.all()
+	last := gates[len(gates)-1]
 	require.Equal(t, StageS3, last.Stage)
 	require.Equal(t, GateG3b, last.GateID)
 	require.Contains(t, last.Options, "audit_now", "卷边界应触发复检选项")
@@ -1274,8 +1351,9 @@ func TestServiceNonMilestoneGateNoAudit(t *testing.T) {
 	runID := startS3Run(t, svc, 502, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 
-	require.NotEmpty(t, *captured)
-	last := (*captured)[len(*captured)-1]
+	require.NotEmpty(t, captured.all())
+	gates := captured.all()
+	last := gates[len(gates)-1]
 	require.Equal(t, StageS3, last.Stage)
 	require.Equal(t, GateG3b, last.GateID)
 	require.ElementsMatch(t, []string{"continue", "abort"}, last.Options, "普通逐章闸不应提供 audit_now")
@@ -1355,8 +1433,9 @@ func TestServiceBlueprintAuditPass(t *testing.T) {
 	require.Contains(t, ctxt.BlueprintAudit, "pass", "蓝图体检结果应写入 BlueprintAudit 字段")
 
 	// 蓝图体检通过应落 G1（continue/modify/abort），而非 G1b 修复闸。
-	require.NotEmpty(t, *captured, "应弹出蓝图体检闸门")
-	last := (*captured)[len(*captured)-1]
+	require.NotEmpty(t, captured.all(), "应弹出蓝图体检闸门")
+	gates := captured.all()
+	last := gates[len(gates)-1]
 	require.Equal(t, GateG1, last.GateID, "蓝图体检通过应落 G1 确认闸")
 	require.ElementsMatch(t, []string{"continue", "modify", "abort"}, last.Options)
 
@@ -1443,8 +1522,9 @@ func TestServiceBlueprintAuditAutoRunSkipped(t *testing.T) {
 	require.Equal(t, StageS2, got.CurrentStage, "蓝图体检即使用 autoRun 也必须停 S2 等人工确认")
 	require.NotEqual(t, StageS5, got.CurrentStage, "蓝图体检不得被 auto_run 自动推进到 S5 修复")
 
-	require.NotEmpty(t, *captured)
-	last := (*captured)[len(*captured)-1]
+	require.NotEmpty(t, captured.all())
+	gates := captured.all()
+	last := gates[len(gates)-1]
 	require.Equal(t, GateG1b, last.GateID, "蓝图体检不通过应落 G1b 修复闸")
 	require.ElementsMatch(t, []string{"fix", "continue", "abort"}, last.Options)
 }
@@ -1518,7 +1598,8 @@ func TestServiceDriftPatrolAfterFix(t *testing.T) {
 	require.Contains(t, ctxt.DriftReport, "蓝图巡检", "巡检结论应落库 DriftReport")
 	require.Contains(t, ctxt.DriftReport, "章节#12", "巡检结论应包含冲突章节")
 
-	last := (*captured)[len(*captured)-1]
+	gates := captured.all()
+	last := gates[len(gates)-1]
 	require.Equal(t, GateG4, last.GateID, "复评仍落 G4 闸")
 	require.Contains(t, last.Summary, "蓝图巡检", "巡检结论应随复评闸门 summary 带给用户")
 }
