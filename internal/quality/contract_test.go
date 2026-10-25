@@ -25,12 +25,16 @@ func TestL1ReceiptFormatLineInSkillMD(t *testing.T) {
 var mdJSONKeyRe = regexp.MustCompile(`"([a-z_]+)":`)
 
 // extractMDFirstJSONBlock 提取 skill md 里第一个 ```json 围栏块内容。
+// 归一化 CRLF→LF 后再匹配：Windows checkout（autocrlf）会把 md 检出为 CRLF，
+// 围栏正则的 \n 锚点会失配（CI windows-latest 实测）；与 prompt_blocks_test
+// 的 readP0Baseline 同一纪律。
 func extractMDFirstJSONBlock(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err, "读取 skill md 失败")
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	re := regexp.MustCompile("(?s)```json[ \t]*\n(.*?)\n```")
-	m := re.FindStringSubmatch(string(raw))
+	m := re.FindStringSubmatch(text)
 	require.Len(t, m, 2, "skill md 应含 ```json 示例块")
 	return m[1]
 }

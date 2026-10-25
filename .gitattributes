@@ -6,3 +6,6 @@ third_party/** linguist-vendored
 
 # golden 基线逐字比对文件：检出必须恒为 LF（Windows autocrlf 会转 CRLF 导致断言失败）
 internal/pipeline/testdata/** text eol=lf
+
+# 内置技能 md 为契约/提示词源文件：检出必须恒为 LF（Windows autocrlf 转 CRLF 会让围栏提取正则失配，CI windows-latest 实测）
+internal/skill/builtin/** text eol=lf
