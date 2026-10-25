@@ -111,13 +111,13 @@ func TestVerifyPromptLedgerChangesBlock(t *testing.T) {
 	targets := []verifyTarget{{ID: "I1", Level: "P1", Area: "人设", Desc: "动机缺失", Chapters: []int64{3}}}
 	blocks := contextasm.ContextBlocks{Facts: "FACTS-MARKER"}
 
-	base := verifyPrompt(1, targets, nil, blocks)
-	require.Equal(t, base, verifyPrompt(1, targets, []string{}, blocks),
+	base := verifyPrompt(1, targets, nil, "", blocks)
+	require.Equal(t, base, verifyPrompt(1, targets, []string{}, "", blocks),
 		"空清单与 nil 逐字一致（降级零提示）")
 	require.NotContains(t, base, "【本轮台账变更清单", "无台账变更不渲染该块")
 
 	notes := []string{`台账变更 characters:1 name: "旧名"→"新名"（source=auto）`}
-	got := verifyPrompt(1, targets, notes, blocks)
+	got := verifyPrompt(1, targets, notes, "", blocks)
 	require.Contains(t, got, "【本轮台账变更清单（修复动过台账）】")
 	require.Contains(t, got, notes[0])
 	require.Contains(t, got, "下游影响", "要求核对台账修改的下游影响")

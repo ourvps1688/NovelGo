@@ -298,7 +298,7 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 		require.Contains(t, p, fixReceiptFormatLine(), "%s 应引用契约修复回执格式串", name)
 	}
 	// 增量复验回执（R1c）同走契约单源；复验提示词不携带 issue 全量字段（非体检契约）。
-	vp := verifyPrompt(1, nil, nil, contextasm.ContextBlocks{})
+	vp := verifyPrompt(1, nil, nil, "", contextasm.ContextBlocks{})
 	require.Contains(t, vp, verifyReceiptFormatLine(), "verifyPrompt 应引用契约复验回执格式串")
 	require.NotContains(t, vp, `"fix_type"`, "verifyPrompt 不应含体检 issue 契约字段")
 	require.NotContains(t, vp, `"schema_version"`, "verifyPrompt 不应要求 schema_version（复验不产体检结果）")

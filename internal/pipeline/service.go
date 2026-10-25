@@ -1819,6 +1819,12 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 		})
 	}
 
+	// R2b-8 修复传播检查（提案 §8.4 组件 C）：改动章节/台账条目取依赖闭包，闭包非空
+	// 且未超阈值时附「修复传播检查」块做定向 L1 复验；超阈值=结构性牵连，块不注入
+	// （不硬修），闸门 summary 明示升级人工/深审。空闭包=提示词逐字一致（降级零提示）。
+	ledgerNotes := ledgerChangeNotes(ctxt.FixLog)
+	prop := s.propagationCheck(ctx, novelID, targets, ctxt.FixLog)
+
 	var (
 		results   map[string]verifyResult
 		verifySum string
@@ -1827,7 +1833,7 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 	if len(targets) > 0 {
 		out, verr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
 			NovelID:   novelID,
-			Prompt:    verifyPrompt(novelID, targets, ledgerChangeNotes(ctxt.FixLog), s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
+			Prompt:    verifyPrompt(novelID, targets, ledgerNotes, prop.block(), s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
 			MaxTurns:  12,
 			SessionID: "pipeline:" + runID + ":verify:" + uuid.NewString(),
 			RunID:     runID,
@@ -1886,6 +1892,16 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 	}
 	if verifySum != "" {
 		line += "；复验小结：" + verifySum
+	}
+	// R2b-8 传播检查收口汇报：闭包规模/升级结论 + L0 全书规则扫描兜底计数
+	// （只报告不改写；空结果零提示，summary 与无该段逐字一致）。
+	if seg := prop.summary(); seg != "" {
+		line += "；" + seg
+	}
+	if len(targets) > 0 || len(ledgerNotes) > 0 {
+		if seg := s.l0RuleSweep(ctx, novelID); seg != "" {
+			line += "；" + seg
+		}
 	}
 	auditData.Summary += "；" + line
 	auditJSON, _ := json.Marshal(auditData)
@@ -3166,7 +3182,9 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string, fixLog []FixL
 // 复验回执契约由 contract.go 单源生成（verifyReceiptFormatLine）。
 // ledgerChanges 是本轮台账变更清单（R2b-7 §8.3-3）：非空时附「台账修改下游影响核对」
 // 块，空时提示词与旧文逐字一致（降级零提示）。
-func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string, blocks contextasm.ContextBlocks) string {
+// propagation 是「修复传播检查（依赖闭包定向复验）」块（R2b-8 §8.4，propagationVerifyBlock
+// 预渲染）：空串=不注入（提示词逐字一致）；超阈值升级时同样为空（不硬修）。
+func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string, propagation string, blocks contextasm.ContextBlocks) string {
 	b, _ := json.Marshal(targets)
 	text := fmt.Sprintf("本书 novel_id=%d。本轮为修复后的**增量复验**（L1，只验已修复项，不重审全书）："+
 		"以下是刚修复的问题清单（JSON，共 %d 条，含修过的作用域章节与修复摘要），请逐项定点复验修复是否真正生效：\n%s\n\n"+
@@ -3180,6 +3198,9 @@ func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string,
 		novelID, len(targets), b)
 	if len(ledgerChanges) > 0 {
 		text += ledgerChangeVerifyBlock(ledgerChanges)
+	}
+	if propagation != "" {
+		text += propagation
 	}
 	return text + blocks.Render(contextasm.PurposeAudit)
 }
