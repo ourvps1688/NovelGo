@@ -484,6 +484,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 注入 retcon 审批闸门（WBS 3.1）：S5 交回的写保护/retcon 候选沉淀为持久化候选案，
 	// 作者显式审批后才允许受控回改冻结卷（3.2 接快照 diff/Restore 留痕与回滚）。
 	a.pipeline.SetRetconGate(a.retcons)
+	// R3d GateContext 瘦身：一次性把存量胖 ContextJSON 的 9 大对象表化进
+	// gate_objects（幂等；失败只告警，读路径有胖 blob 兜底）。
+	a.pipeline.MigrateGateObjects()
 	// R3b 持久任务队列：先放弃进程退出残留的活跃任务（跨进程恢复仍走下面的
 	// RecoverInterruptedRuns 人工链路，外部恢复语义不变），再启动执行体消费。
 	a.pipeline.StartTaskQueue()

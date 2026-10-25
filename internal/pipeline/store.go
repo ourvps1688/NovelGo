@@ -229,8 +229,24 @@ func NewStore(db *gorm.DB) *Store {
 	return &Store{db: db}
 }
 
-// Create 写入一条新流水线记录。
+// Create 写入一条新流水线记录。ContextJSON 的 9 大对象拆行入表（R3d），
+// 调用方持有的 run 仍保持胖视图语义（不因落库被瘦身）。
 func (s *Store) Create(ctx context.Context, run *PipelineRun) error {
+	thin, objects := splitGateObjects(run.ContextJSON)
+	original := run.ContextJSON
+	defer func() { run.ContextJSON = original }()
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		run.ContextJSON = thin
+		if err := tx.WithContext(ctx).Create(run).Error; err != nil {
+			return err
+		}
+		return replaceGateObjects(ctx, tx, run.RunID, objects)
+	})
+	if err == nil {
+		return nil
+	}
+	// 降级：大对象表不可用（如表缺失）→ 按 R3d 前行为整袋胖 blob 落库。
+	run.ContextJSON = original
 	return s.db.WithContext(ctx).Create(run).Error
 }
 
@@ -243,6 +259,7 @@ func (s *Store) GetByNovel(ctx context.Context, novelID int64) (*PipelineRun, er
 	if err != nil {
 		return nil, err
 	}
+	s.hydrateGateObjects(ctx, []*PipelineRun{&run})
 	return &run, nil
 }
 
@@ -252,6 +269,7 @@ func (s *Store) GetByRunID(ctx context.Context, runID string) (*PipelineRun, err
 	if err := s.db.WithContext(ctx).Where("run_id = ?", runID).First(&run).Error; err != nil {
 		return nil, err
 	}
+	s.hydrateGateObjects(ctx, []*PipelineRun{&run})
 	return &run, nil
 }
 
@@ -266,6 +284,7 @@ func (s *Store) GetActiveVolumeRun(ctx context.Context, novelID, volumeID int64)
 	if err != nil {
 		return nil, err
 	}
+	s.hydrateGateObjects(ctx, []*PipelineRun{&run})
 	return &run, nil
 }
 
@@ -294,6 +313,7 @@ func (s *Store) ListActiveScopedChildren(ctx context.Context, parentRunID string
 	if err != nil {
 		return nil, err
 	}
+	s.hydrateGateObjects(ctx, runs)
 	return runs, nil
 }
 
@@ -303,30 +323,50 @@ func (s *Store) ListByStatus(ctx context.Context, status string) ([]*PipelineRun
 	if err := s.db.WithContext(ctx).Where("status = ?", status).Find(&runs).Error; err != nil {
 		return nil, err
 	}
+	s.hydrateGateObjects(ctx, runs)
 	return runs, nil
+}
+
+// writeContext 更新 run 的 context_json 与其余列：9 大对象拆行入表+落瘦身 blob
+// （同事务，整袋替换语义：传入上下文为全量，键缺即清）。大对象表不可用（如表缺失）
+// 时退回「整袋落胖 blob」的 R3d 前行为，并尽力清旧行避免表行遮蔽新值（降级零提示）。
+func (s *Store) writeContext(ctx context.Context, runID, contextJSON string, updates map[string]any) error {
+	thin, objects := splitGateObjects(contextJSON)
+	updates["context_json"] = thin
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := replaceGateObjects(ctx, tx, runID, objects); err != nil {
+			return err
+		}
+		return tx.WithContext(ctx).Model(&PipelineRun{}).
+			Where("run_id = ?", runID).
+			Updates(updates).Error
+	})
+	if err == nil {
+		return nil
+	}
+	// 降级：大对象表不可用（如表缺失）→ 按 R3d 前行为整袋落胖 blob。
+	_ = s.db.WithContext(ctx).Where("run_id = ?", runID).Delete(&GateObject{}).Error
+	updates["context_json"] = contextJSON
+	return s.db.WithContext(ctx).Model(&PipelineRun{}).
+		Where("run_id = ?", runID).
+		Updates(updates).Error
 }
 
 // SetStatus 仅更新状态与上下文（不改变阶段）。
 func (s *Store) SetStatus(ctx context.Context, runID, status, contextJSON string) error {
-	return s.db.WithContext(ctx).Model(&PipelineRun{}).
-		Where("run_id = ?", runID).
-		Updates(map[string]any{
-			"status":       status,
-			"context_json": contextJSON,
-			"updated_at":   time.Now(),
-		}).Error
+	return s.writeContext(ctx, runID, contextJSON, map[string]any{
+		"status":     status,
+		"updated_at": time.Now(),
+	})
 }
 
 // SetStageStatus 同时更新当前阶段与状态（阶段推进时用）。
 func (s *Store) SetStageStatus(ctx context.Context, runID, stage, status, contextJSON string) error {
-	return s.db.WithContext(ctx).Model(&PipelineRun{}).
-		Where("run_id = ?", runID).
-		Updates(map[string]any{
-			"current_stage": stage,
-			"status":        status,
-			"context_json":  contextJSON,
-			"updated_at":    time.Now(),
-		}).Error
+	return s.writeContext(ctx, runID, contextJSON, map[string]any{
+		"current_stage": stage,
+		"status":        status,
+		"updated_at":    time.Now(),
+	})
 }
 
 // SetAutoRun 切换流水线的 auto_run 开关（运行中由 ControlPipeline("set_auto") 调用）。
@@ -340,6 +380,8 @@ func (s *Store) SetAutoRun(ctx context.Context, runID string, autoRun bool) erro
 }
 
 // AppendGateDecision 把一次闸门决策追加进 ContextJSON 的 gates 列表。
+// 读到的是胖视图（GetByRunID 已合并大对象），写回经 writeContext 拆合——
+// 大对象不会因追加决策被就地覆盖丢失（R3d）。
 func (s *Store) AppendGateDecision(ctx context.Context, runID, gateID, decision, feedback string) error {
 	run, err := s.GetByRunID(ctx, runID)
 	if err != nil {
@@ -364,10 +406,7 @@ func (s *Store) AppendGateDecision(ctx context.Context, runID, gateID, decision,
 	if err != nil {
 		return err
 	}
-	return s.db.WithContext(ctx).Model(&PipelineRun{}).
-		Where("run_id = ?", runID).
-		Updates(map[string]any{
-			"context_json": string(b),
-			"updated_at":   time.Now(),
-		}).Error
+	return s.writeContext(ctx, runID, string(b), map[string]any{
+		"updated_at": time.Now(),
+	})
 }

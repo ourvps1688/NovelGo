@@ -21,7 +21,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("get sql db: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.AutoMigrate(&PipelineRun{}, &PipelineIssue{}); err != nil {
+	if err := db.AutoMigrate(&PipelineRun{}, &PipelineIssue{}, &GateObject{}); err != nil {
 		t.Fatalf("migrate pipeline_runs: %v", err)
 	}
 	return db
