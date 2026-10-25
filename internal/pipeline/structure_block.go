@@ -70,7 +70,10 @@ func (s *Service) structureBlock(ctx context.Context, novelID int64) string {
 	if findings, ok := s.reconcileFindings(ctx, novelID); ok {
 		groups = append(groups, findings)
 	}
-	return structure.RenderBlock(structure.MergeFindings(groups...))
+	merged := structure.MergeFindings(groups...)
+	// §9.4 命中率度量：结构告警产生（曝光口径，见 alert_metrics.go 单源注释）。
+	s.recordFeatureUsageN(ctx, featureAlertRaisedStruct, len(merged))
+	return structure.RenderBlock(merged)
 }
 
 // pinnedFindings 跑书写不变量比对批（pinned_invariants × characters 台账）。

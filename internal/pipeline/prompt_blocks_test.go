@@ -76,7 +76,7 @@ func p0PromptCases() []p0PromptCase {
 	ch := chapter.Chapter{ID: 9, ReadingNumber: 3, Title: "第三章"}
 	return []p0PromptCase{
 		{"signability", func(b contextasm.ContextBlocks) string {
-			return signabilityPrompt(1, "本次体检作用域=《第二卷》（volume_id=2）：只审；", "", "", b)
+			return signabilityPrompt(1, auditInput{scope: "本次体检作用域=《第二卷》（volume_id=2）：只审；"}, b)
 		}, contextasm.PurposeAudit},
 		{"final_audit", func(b contextasm.ContextBlocks) string {
 			return finalAuditPrompt(1, b)

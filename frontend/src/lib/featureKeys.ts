@@ -34,6 +34,14 @@ export const ACTION_FEATURE_KEYS = {
   /** retcon 立案：立案在后端 handoff 出口沉淀为候选案件，前端以「批准立案」
    *  裁决（candidate→approved 进入受控编辑）为使用信号 */
   retcon: "action.retcon",
+  /** 告警→真问题命中率（§9.4 校准取数，后端挂点记数，这里枚举锁 key 单源）：
+   *  raised=告警产生（曝光口径）｜confirmed=修复回执 fixed｜dismissed=修复回执
+   *  skipped。族：l2=体检 issue｜l1=L0/L1 档案发现｜struct=结构告警。 */
+  alertRaisedL2: "action.alert_raised.l2",
+  alertRaisedL1: "action.alert_raised.l1",
+  alertRaisedStruct: "action.alert_raised.struct",
+  alertConfirmedL2: "action.alert_confirmed.l2",
+  alertDismissedL2: "action.alert_dismissed.l2",
 } as const;
 
 export type ActionFeatureKey =

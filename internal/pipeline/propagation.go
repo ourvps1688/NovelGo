@@ -346,6 +346,8 @@ func (s *Service) l0RuleSweep(ctx context.Context, novelID int64) string {
 			byCheck[f.Check]++
 		}
 	}
+	// §9.4 命中率度量：L0 规则发现落档（曝光口径，见 alert_metrics.go 单源注释）。
+	s.recordFeatureUsageN(ctx, featureAlertRaisedL1, findings)
 	if checked == 0 {
 		return ""
 	}

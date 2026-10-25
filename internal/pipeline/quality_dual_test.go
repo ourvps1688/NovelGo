@@ -27,6 +27,7 @@ type dualRecorder struct {
 	quickCalls  int
 	quickText   string // 快审桩回执文本
 	quickErr    error  // 非 nil 时快审派发失败
+	fullText    string // 全量体检桩回执（空=默认 pass 零 issue）
 	keys        []string
 }
 
@@ -42,6 +43,9 @@ func (r *dualRecorder) runner(_ context.Context, name string, input SkillInput) 
 		return SkillOutput{Text: r.quickText}, nil
 	}
 	r.fullPrompt = input.Prompt
+	if r.fullText != "" {
+		return SkillOutput{Text: r.fullText}, nil
+	}
 	return SkillOutput{Text: "结论：\n```json\n" +
 		`{"verdict":"pass","score":31,"summary":"能签","issues":[]}` + "\n```"}, nil
 }
@@ -149,6 +153,7 @@ func TestQuickAuditDispatchFailSilent(t *testing.T) {
 }
 
 // TestNoLedgerDegradesZeroPrompt 无档案 → 全量提示词与无该块逐字一致、快审不跑、零度量。
+// milestone 口径=三层输入模式（focused），空块时与 focused 空块构造器输出逐字一致。
 func TestNoLedgerDegradesZeroPrompt(t *testing.T) {
 	rec := &dualRecorder{quickText: dualQuickPass}
 	svc, runID := newDualTest(t, 805, "milestone", false, rec)
@@ -156,24 +161,26 @@ func TestNoLedgerDegradesZeroPrompt(t *testing.T) {
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	// 逐字一致：与空块构造器输出（即改造前文案）完全相同。
-	expected := signabilityPrompt(805, "", "", "", contextasm.ContextBlocks{})
+	// 逐字一致：与空块构造器输出（focused 空块文案）完全相同。
+	expected := signabilityPrompt(805, auditInput{focused: true}, contextasm.ContextBlocks{})
 	require.Equal(t, expected, rec.fullPrompt, "无档案时提示词应与无该块逐字一致")
 	require.Equal(t, 0, rec.quickCalls, "无档案不得起快审轨")
 	require.Empty(t, rec.keys)
 }
 
-// TestNonMilestoneSkipsQuickAudit 非 milestone 口径（golden3/volume）：有档案也不
-// 注入汇总块、不起快审（milestone 口径专轨）。
-func TestNonMilestoneSkipsQuickAudit(t *testing.T) {
+// TestNonMilestoneInjectsLedgerButSkipsQuickAudit 非 milestone 口径（golden3/volume/final）：
+// R2b-9 §8.5 质量档案全序列=非蓝图 L2 常驻输入层（汇总块照常注入），但快审轨仍是
+// milestone 专轨（不起快审）；提示词为编辑部通读模式（非 focused）。
+func TestNonMilestoneInjectsLedgerButSkipsQuickAudit(t *testing.T) {
 	for _, reason := range []string{"golden3", "volume", "final"} {
 		rec := &dualRecorder{quickText: dualQuickPass}
 		svc, runID := newDualTest(t, 806, reason, true, rec)
 		svc.executeAudit(runID, 806)
 
 		rec.mu.Lock()
-		require.NotContains(t, rec.fullPrompt, "【质量档案汇总】", reason+" 不应注入汇总块")
-		require.Equal(t, 0, rec.quickCalls, reason+" 不应起快审轨")
+		require.Contains(t, rec.fullPrompt, "【质量档案汇总】", reason+" 汇总块=常驻输入层照常注入")
+		require.Contains(t, rec.fullPrompt, "**逐章通读全部已成稿章节**", reason+" 编辑部通读模式（非三层输入）")
+		require.Equal(t, 0, rec.quickCalls, reason+" 不应起快审轨（快审=milestone 专轨）")
 		require.Empty(t, rec.keys)
 		rec.mu.Unlock()
 	}

@@ -55,6 +55,23 @@ func (s *Service) qualityLedgerBlock(ctx context.Context, novelID int64) string 
 	return quality.RenderLedgerBlock(rows)
 }
 
+// keyChapterBlock 组装「关键章定向深读」清单块（R2b-9 §8.5 三层输入第三层）。
+// 信号=质量档案有未修复发现的章 + 黄金三章；无档案/读取失败/空清单 → 空串（零提示）。
+func (s *Service) keyChapterBlock(ctx context.Context, novelID int64) string {
+	if s.qualityStore == nil {
+		return ""
+	}
+	rows, err := s.qualityStore.ListByNovel(ctx, novelID)
+	if err != nil {
+		s.logger.Warn("关键章清单块：读取档案失败（降级零提示）", "novel_id", novelID, "err", err)
+		return ""
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	return quality.RenderKeyChapterBlock(quality.PickKeyChapters(rows, quality.GoldenThreeCount))
+}
+
 // ledgerQuickAuditPrompt 构造「档案汇总快审」提示词（快审轨的唯一输入=质量档案汇总块，
 // R2b-1 起同路追加「结构告警」块，空块逐字一致）。
 // 快审回执契约由 contract.go 单源生成（quickAuditFormatLine）。

@@ -73,7 +73,7 @@ func TestStructureBlockAllAuditReasons(t *testing.T) {
 
 		rec.mu.Lock()
 		require.Contains(t, rec.fullPrompt, "【结构告警】", reason+" 应注入结构告警块")
-		require.NotContains(t, rec.fullPrompt, "【质量档案汇总】", reason+" 不注入档案汇总块（milestone 专轨）")
+		require.NotContains(t, rec.fullPrompt, "【质量档案汇总】", reason+" 无档案=空块零提示（R2b-9 起汇总块为非蓝图常驻输入层，有档案即注入）")
 		require.Equal(t, 0, rec.quickCalls, reason+" 无档案不起快审轨")
 		rec.mu.Unlock()
 	}
@@ -96,8 +96,8 @@ func TestNoStructFindingsZeroPrompt(t *testing.T) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	require.NotContains(t, rec.fullPrompt, "【结构告警】")
-	require.Equal(t, signabilityPrompt(813, "", "", "", contextasm.ContextBlocks{}), rec.fullPrompt,
-		"零告警时提示词应与无该块逐字一致")
+	require.Equal(t, signabilityPrompt(813, auditInput{focused: true}, contextasm.ContextBlocks{}), rec.fullPrompt,
+		"零告警时提示词应与无该块逐字一致（milestone=三层输入模式）")
 }
 
 // TestStructureBlockMergesPinnedInvariantFindings R2b-2：书写不变量违例与伏笔告警
@@ -142,7 +142,7 @@ func TestStructureBlockNoPinnedViolationSilent(t *testing.T) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	require.NotContains(t, rec.fullPrompt, "【结构告警】", "无任何告警=空块零提示")
-	require.Equal(t, signabilityPrompt(816, "", "", "", contextasm.ContextBlocks{}), rec.fullPrompt,
+	require.Equal(t, signabilityPrompt(816, auditInput{}, contextasm.ContextBlocks{}), rec.fullPrompt,
 		"零告警时提示词应与无该块逐字一致")
 }
 
@@ -157,7 +157,7 @@ func TestStructureBlockFetchFailSilent(t *testing.T) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	require.NotContains(t, rec.fullPrompt, "【结构告警】")
-	require.Equal(t, signabilityPrompt(814, "", "", "", contextasm.ContextBlocks{}), rec.fullPrompt,
+	require.Equal(t, signabilityPrompt(814, auditInput{}, contextasm.ContextBlocks{}), rec.fullPrompt,
 		"取数失败时提示词应与无该块逐字一致")
 	run, err := svc.store.GetByRunID(t.Context(), runID)
 	require.NoError(t, err)

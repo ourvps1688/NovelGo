@@ -927,29 +927,43 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
 	}
 	auditSkill := "signability-audit"
-	// R2-4 双轨对照（milestone 口径）：档案存在时把「质量档案汇总」块追加进 L2 输入，
-	// 无档案=空块零提示（提示词与无该块逐字一致）。蓝图体检不涉章节档案，不注入。
+	// R2b-9 §8.5 三层输入：「质量档案汇总」块（第二层：质量档案全序列）升为非蓝图 L2
+	// 常驻输入层（原 R2-4 仅 milestone 注入）；无档案=空块零提示（提示词与无该块逐字
+	// 一致）。蓝图体检不涉章节档案，不注入。
 	var ledgerBlock string
-	if ctxt.AuditReason == "milestone" && ctxt.AuditKind != "blueprint" {
+	if ctxt.AuditKind != "blueprint" {
 		ledgerBlock = s.qualityLedgerBlock(ctx, novelID)
 	}
-	// R2b-1 结构告警块（§8.2 伏笔 lifecycle）：全量进非蓝图 L2 体检输入（§8.5 结构索引
-	// 全量），零告警/取数失败=空块零提示。蓝图体检不涉伏笔台账，不注入。
+	// R2b-1 结构告警块（§8.2 伏笔 lifecycle）：全量进非蓝图 L2 体检输入（§8.5 第一层：
+	// 结构索引全量），零告警/取数失败=空块零提示。蓝图体检不涉伏笔台账，不注入。
 	var structBlock string
 	if ctxt.AuditKind != "blueprint" {
 		structBlock = s.structureBlock(ctx, novelID)
 	}
-	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID), ledgerBlock, structBlock,
-		s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
+	// R2b-9 §8.5 输入模式：milestone 中途复检走「三层输入」（发现层=档案+结构告警，
+	// 验证层=关键章定向深读，不逐章通读全书）；卷收口（volume）/完本（final）/黄金三章
+	// 首检（golden3）保持「编辑部通读」（全书逐章通读，提示词逐字同旧文）。
+	focused := ctxt.AuditReason == "milestone" && ctxt.AuditKind != "blueprint"
+	var keyChapterBlock string
+	if focused {
+		keyChapterBlock = s.keyChapterBlock(ctx, novelID)
+	}
+	auditPrompt := signabilityPrompt(novelID, auditInput{
+		scope:       s.volumeScopeText(ctx, novelID, run.VolumeID),
+		ledger:      ledgerBlock,
+		structBlock: structBlock,
+		keyChapter:  keyChapterBlock,
+		focused:     focused,
+	}, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
 	if ctxt.AuditKind == "blueprint" {
 		auditSkill = "blueprint-audit"
 		auditPrompt = blueprintAuditPrompt(novelID)
 	}
-	// R2-4 快审轨：milestone 口径且档案存在时，与旧全量通读**并行**跑一次「档案汇总快审」
-	// （只读、不出 issue），归队后与全量裁决做只读对照记本地度量。裁决仍由全量通读把持。
-	// 快审输入与全量同路（R2b-1 结构告警块一并进快审输入，空块逐字一致）。
+	// R2-4 快审轨（milestone 专轨保持）：milestone 口径且档案存在时，与全量体检**并行**
+	// 跑一次「档案汇总快审」（只读、不出 issue），归队后与全量裁决做只读对照记本地度量。
+	// 裁决仍由全量体检把持。快审输入与全量同路（结构告警块一并进快审输入，空块逐字一致）。
 	var quickCh <-chan quickAuditResult
-	if ledgerBlock != "" {
+	if focused && ledgerBlock != "" {
 		ch := make(chan quickAuditResult, 1)
 		block, sBlock := ledgerBlock, structBlock
 		go func() {
@@ -1012,6 +1026,9 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	// issue 工单表（R1）同语义整批替换：新体检=新问题清单，跨轮同号不共用断点。
 	if terr := s.store.ReplaceIssues(ctx, novelID, runID, ctxt.FixRounds, audit.Issues); terr != nil {
 		s.logger.Warn("S4 体检：issue 工单落表失败（非阻断）", "run_id", runID, "err", terr)
+	} else {
+		// §9.4 命中率度量：L2 告警产生（曝光口径，见 alert_metrics.go 单源注释）。
+		s.recordFeatureUsageN(ctx, featureAlertRaisedL2, len(audit.Issues))
 	}
 	ctxt.FixStates = nil
 	// 修复日志（R1b）同轮语义：随断点一并重置，新清单=新修复日志。
@@ -1594,6 +1611,10 @@ func (s *Service) executeFix(runID string, novelID int64) {
 				for id, reason := range skippedNow {
 					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
 				}
+				// §9.4 命中率度量：修复回执流转=告警确认/未确认（body 级走 S3 重写
+				// 回路不经修复回执，不计入——见 alert_metrics.go 单源注释）。
+				s.recordFeatureUsageN(ctx, featureAlertConfirmedL2, len(fixedNow))
+				s.recordFeatureUsageN(ctx, featureAlertDismissedL2, len(skippedNow))
 				// 台账变更入账（R2b-7）：本批修复若动了台账，把履历增量落进修复日志
 				// （与回执 log 互补：不依赖 LLM 自报，同轮后续批次可见、复验核对下游）。
 				s.appendLedgerChangeLog(ctx, novelID, &ctxt, fixWatermark)
@@ -3100,24 +3121,51 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 		label, *volumeID)
 }
 
-// signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
-// ledgerBlock 是「质量档案汇总」块（R2-4，milestone 口径追加进 L2 输入）；structBlock 是
-// 「结构告警」块（R2b-1，伏笔 lifecycle 确定性检查，全量进 L2 输入）：空块不注入，
-// 输出与无该块逐字一致（降级零提示）。blocks 尾部装配上下文块（S4 依据前卷快照校验，
+// auditInput 是 L2 体检提示词的输入装配（R2b-9 §8.5 L2 深审重定位）。
+type auditInput struct {
+	// scope 是卷级作用域说明（以「；」结尾；空=全书口径）。
+	scope string
+	// ledger 是「质量档案汇总」块（§8.5 第二层：质量档案全序列，非蓝图恒注入）；
+	// 空=不注入，提示词与无该块逐字一致（降级零提示）。
+	ledger string
+	// structBlock 是「结构告警」块（§8.5 第一层：结构索引全量）；空=不注入（零提示）。
+	structBlock string
+	// keyChapter 是「关键章定向深读」块（§8.5 第三层）；空=不注入（零提示）。
+	keyChapter string
+	// focused 是三层输入模式（milestone 中途复检=降频后的常规 L2）：发现层=档案+结构
+	// 告警，验证层=关键章定向深读（抽样只验证不发现），不逐章通读全书。
+	// false=编辑部通读（卷收口/完本/黄金三章首检/用户主动：全书逐章通读，逐字同旧文）。
+	focused bool
+}
+
+// signabilityPrompt 构造 S4 签约体检阶段的任务提示词。
+// 输入装配语义见 auditInput；blocks 尾部装配上下文块（S4 依据前卷快照校验，
 // WBS 2.3；P0 §0.5 audit=Facts+Voice）。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
-func signabilityPrompt(novelID int64, scopeText, ledgerBlock, structBlock string, blocks contextasm.ContextBlocks) string {
+// focused=false（编辑部通读）的提示词与 R2b-9 之前逐字一致（降级零提示最高验收）；
+// focused=true（三层输入，§8.5）替换通读指令段为「发现层+验证层」语义。
+func signabilityPrompt(novelID int64, in auditInput, blocks contextasm.ContextBlocks) string {
+	readInstruction := "**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章）"
+	if in.focused {
+		readInstruction = "按**三层输入**体检（不必逐章通读全书）：发现层=下方「质量档案汇总」与「结构告警」" +
+			"（结构索引全量 + 质量档案全序列），先通读两块锁定疑点；验证层=下方「关键章定向深读」清单——" +
+			"对清单内章节用 read 逐字深读核验疑点（定向深读只负责验证发现层疑点是否成立，不负责发现新问题；" +
+			"深读中确证的硬伤照常入 issues 并注明章节）"
+	}
 	p := fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
-		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
+		"用 get_chapter_list 列出章节，"+readInstruction+"，逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
 		"文风漂移项（如有）走 V 系契约："+auditFormatLine(true, issueSampleStyle)+
 		"（id 从 V1 起编、level 恒 P1、不计入评分与 verdict）；"+
-		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText)
-	if ledgerBlock != "" {
-		p += "\n\n" + ledgerBlock
+		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, in.scope)
+	if in.ledger != "" {
+		p += "\n\n" + in.ledger
 	}
-	if structBlock != "" {
-		p += "\n\n" + structBlock
+	if in.structBlock != "" {
+		p += "\n\n" + in.structBlock
+	}
+	if in.keyChapter != "" {
+		p += "\n\n" + in.keyChapter
 	}
 	return p + blocks.Render(contextasm.PurposeAudit)
 }
