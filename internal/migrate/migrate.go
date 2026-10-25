@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/reader"
 	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/review"
@@ -125,6 +126,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&personasetting.PersonaSetting{},
 		&pipeline.PipelineRun{},
 		&pipeline.PipelineIssue{},
+		&quality.ChapterQuality{},
 		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}
