@@ -9,14 +9,20 @@ import (
 // （提案 §8.2「伏笔 lifecycle 表」：埋超预期收章未收=烂尾告警、收未埋=无源告警）。
 //
 // 三类告警：
-//   - 超期未收（CheckForeshadowOverdue）：pending 且 target>0 且当前进度已过预期收章；
+//   - 超期未收（CheckForeshadowOverdue）：pending 且 target>0 且当前进度已过预期收章+宽限；
 //   - 无收点规划（CheckForeshadowNoTarget）：pending 且 target<=0（没规划回收位置）；
 //   - 收未埋=无源（CheckForeshadowUnsourced）：resolved 且无埋设章记录。
+//
+// overdueGrace 是超期宽限章数（题材卡窗口 N，CheckerConfig.OverdueGrace）：
+// 超预期收章 N 章内不告警（防预期收章估算误差）；0=零宽限=现行行为，负数归 0。
 //
 // 确定性：按条目 ID 升序遍历、每条按固定检查顺序产出，同输入同输出；
 // abandoned（作者显式弃坑）与已回收条目不告警。nowReadingNumber<=0（尚无章节）
 // 时超期判定自然不触发，其余检查照常。
-func CheckForeshadowLifecycle(entries []ForeshadowEntry, nowReadingNumber int) []StructFinding {
+func CheckForeshadowLifecycle(entries []ForeshadowEntry, nowReadingNumber, overdueGrace int) []StructFinding {
+	if overdueGrace < 0 {
+		overdueGrace = 0
+	}
 	sorted := append([]ForeshadowEntry(nil), entries...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 
@@ -37,7 +43,7 @@ func CheckForeshadowLifecycle(entries []ForeshadowEntry, nowReadingNumber int) [
 			case e.TargetReadingNumber <= 0:
 				add(CheckForeshadowNoTarget,
 					fmt.Sprintf("伏笔「%s」待收但未规划回收位置，烂尾风险", e.Title), e.ID)
-			case nowReadingNumber > e.TargetReadingNumber:
+			case nowReadingNumber > e.TargetReadingNumber+overdueGrace:
 				add(CheckForeshadowOverdue,
 					fmt.Sprintf("伏笔「%s」预期第 %d 章前回收，当前进度第 %d 章仍待收，烂尾风险",
 						e.Title, e.TargetReadingNumber, nowReadingNumber), e.ID)

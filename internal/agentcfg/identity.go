@@ -31,6 +31,7 @@ var mainAgentTools = []string{
 	"update_chapter_plan",
 	"upsert_chapter_task_card", "get_chapter_task_card",
 	"upsert_pinned_invariant", "list_pinned_invariants",
+	"upsert_checker_config", "get_checker_config",
 	"get_story_arcs", "create_story_arc", "update_story_arc",
 	"create_arc_node", "update_arc_node",
 	"get_reader_perspective", "create_reader_perspective_entry", "update_reader_perspective_entry",

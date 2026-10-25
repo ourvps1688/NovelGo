@@ -61,14 +61,19 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 
 // runChapterL0 跑 L0 确定性检查并同步落档案（UpsertL0 只写 L0 列）。
 // 输入缺啥降级啥：无基线零漂移发现、阅读序号取不到发现不带作用域、题材取不到不豁免。
+// 题材卡参数（R2b-3）：章尾钩子必需/禁忌清单取本书检查器配置，未配置/读取失败回落缺省
+// （=现行行为，逐字一致）。
 func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content string) {
 	readingNumber, _ := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).
 		GetReadingNumberByID(ctx, nil, tc.NovelID, chapterID)
+	cfg := chapterCICheckerConfig(ctx, tc)
 	metrics, findings := quality.RunL0Checks(quality.L0Input{
-		Text:          content,
-		ReadingNumber: readingNumber,
-		Baseline:      chapterCIVoiceBaseline(ctx, tc),
-		Genre:         novelGenre(ctx, tc),
+		Text:             content,
+		ReadingNumber:    readingNumber,
+		Baseline:         chapterCIVoiceBaseline(ctx, tc),
+		Genre:            novelGenre(ctx, tc),
+		TailHookRequired: cfg.TailHookRequired,
+		TabooList:        cfg.Taboos(),
 	})
 	err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).UpsertL0(ctx, &quality.ChapterQuality{
 		NovelID:       tc.NovelID,
@@ -91,6 +96,18 @@ func chapterCIVoiceBaseline(ctx context.Context, tc ToolContext) map[string]floa
 		return nil
 	}
 	return voice.MergeMetrics(entries)
+}
+
+// chapterCICheckerConfig 装配本书检查器配置（题材卡机制化，R2b-3）。
+// 未配置返回缺省（GetCheckerConfig 内建）；读取失败同样回落缺省（降级零提示，
+// 绝不因配置缺失改变检查口径）。
+func chapterCICheckerConfig(ctx context.Context, tc ToolContext) *quality.CheckerConfig {
+	cfg, err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).GetCheckerConfig(ctx, tc.NovelID)
+	if err != nil {
+		tc.LoggerOrDefault().Debug("章节 CI 检查器配置读取失败（回落缺省）", "err", err, "novelID", tc.NovelID)
+		return quality.DefaultCheckerConfig(tc.NovelID)
+	}
+	return cfg
 }
 
 // runChapterL1 去抖到点后派发 L1 增量检查（回执落档案在派发链内完成）。

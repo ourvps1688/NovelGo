@@ -150,3 +150,56 @@ func TestRunL0ChecksDeterministic(t *testing.T) {
 	require.NotEmpty(t, f1)
 	assert.Equal(t, f1, f2)
 }
+
+// TestRunL0ChecksTailHookRequired 题材卡参数（R2b-3）：显式 false 跳过章尾钩子检查
+// （指标照常计算）；nil=缺省 true=现行行为逐字一致。
+func TestRunL0ChecksTailHookRequired(t *testing.T) {
+	body := cleanBody(20) + "他推开门走进院子。"
+
+	// nil（缺省）：照报缺钩（现行行为）。
+	_, findingsNil := RunL0Checks(L0Input{Text: body, TargetWords: 1})
+	assert.Contains(t, findingsByCheck(findingsNil), CheckTailHook, "nil=缺省 true=现行行为")
+
+	// 显式 false：跳过钩子检查（其余检查照常）。
+	f := false
+	mOff, findingsOff := RunL0Checks(L0Input{Text: body, TargetWords: 1, TailHookRequired: &f})
+	assert.False(t, mOff.HasTailHook, "指标照常计算")
+	assert.NotContains(t, findingsByCheck(findingsOff), CheckTailHook, "显式 false 跳过钩子检查")
+
+	// 显式 true：照报。
+	on := true
+	_, findingsOn := RunL0Checks(L0Input{Text: body, TargetWords: 1, TailHookRequired: &on})
+	assert.Contains(t, findingsByCheck(findingsOn), CheckTailHook)
+}
+
+// TestRunL0ChecksTaboo 题材卡禁忌清单（R2b-3）：命中逐词出发现、空清单不检查
+// （缺省逐字一致）、去重去空归一。
+func TestRunL0ChecksTaboo(t *testing.T) {
+	body := cleanBody(20) + "这一路虐主的展开让读者压抑。破墙的设定也冒了出来。"
+
+	// 空清单=不检查=现行行为。
+	_, findingsNone := RunL0Checks(L0Input{Text: body, TargetWords: 1})
+	assert.NotContains(t, findingsByCheck(findingsNone), CheckTaboo, "空清单不检查")
+
+	// 命中逐词出发现（清单序）。
+	_, findings := RunL0Checks(L0Input{Text: body, TargetWords: 1, TabooList: []string{"虐主", "破墙"}})
+	by := findingsByCheck(findings)
+	require.Len(t, by[CheckTaboo], 2)
+	assert.Contains(t, by[CheckTaboo][0].Desc, "「虐主」")
+	assert.Contains(t, by[CheckTaboo][1].Desc, "「破墙」")
+	assert.Contains(t, by[CheckTaboo][0].Desc, "题材卡")
+
+	// 去重去空归一：重复/空白词不重复报。
+	_, findingsDedup := RunL0Checks(L0Input{Text: body, TargetWords: 1,
+		TabooList: []string{" 虐主 ", "", "虐主", "  "}})
+	byDedup := findingsByCheck(findingsDedup)
+	require.Len(t, byDedup[CheckTaboo], 1, "去重去空后单条")
+
+	// 未命中零发现。
+	_, findingsMiss := RunL0Checks(L0Input{Text: body, TargetWords: 1, TabooList: []string{"系统流"}})
+	assert.NotContains(t, findingsByCheck(findingsMiss), CheckTaboo)
+
+	// 空正文不扫（空章路径不叠禁忌发现）。
+	_, findingsEmpty := RunL0Checks(L0Input{Text: "  ", TabooList: []string{"虐主"}})
+	assert.NotContains(t, findingsByCheck(findingsEmpty), CheckTaboo)
+}

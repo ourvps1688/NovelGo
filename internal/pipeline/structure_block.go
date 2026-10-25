@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
@@ -25,6 +26,20 @@ import (
 
 // categoryForeshadowing 是伏笔条目分类（time_entries.category 枚举之一）。
 const categoryForeshadowing = "foreshadowing"
+
+// checkerConfig 读取本书检查器配置（题材卡机制化，R2b-3）。
+// 未配置/读取失败一律回落缺省（Debug 日志），绝不因配置缺失改变检查口径。
+func (s *Service) checkerConfig(ctx context.Context, novelID int64) *quality.CheckerConfig {
+	if s.qualityStore == nil {
+		return quality.DefaultCheckerConfig(novelID)
+	}
+	cfg, err := s.qualityStore.GetCheckerConfig(ctx, novelID)
+	if err != nil {
+		s.logger.Debug("检查器配置读取失败（回落缺省）", "novel_id", novelID, "err", err)
+		return quality.DefaultCheckerConfig(novelID)
+	}
+	return cfg
+}
 
 // structureBlock 组装本书「结构告警」块（伏笔 lifecycle + 书写不变量确定性检查）。
 // 取数失败/零告警 → 空串（降级零提示）。
@@ -37,6 +52,7 @@ func (s *Service) structureBlock(ctx context.Context, novelID int64) string {
 		s.logger.Warn("结构告警块：读取章节进度失败（降级零提示）", "novel_id", novelID, "err", err)
 		return ""
 	}
+	grace := s.checkerConfig(ctx, novelID).OverdueGrace()
 	var groups [][]structure.StructFinding
 	if page, err := s.timelineStore.ListByNovel(ctx, novelID, timeline.ListByNovelOptions{
 		Category:   categoryForeshadowing,
@@ -44,7 +60,7 @@ func (s *Service) structureBlock(ctx context.Context, novelID int64) string {
 	}); err != nil {
 		s.logger.Warn("结构告警块：读取伏笔台账失败（跳过伏笔批）", "novel_id", novelID, "err", err)
 	} else {
-		groups = append(groups, structure.CheckForeshadowLifecycle(projectForeshadows(page.Items), now))
+		groups = append(groups, structure.CheckForeshadowLifecycle(projectForeshadows(page.Items), now, grace))
 	}
 	if findings, ok := s.pinnedFindings(ctx, novelID, now); ok {
 		groups = append(groups, findings)

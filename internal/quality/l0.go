@@ -23,6 +23,7 @@ const (
 	CheckTailHook     = "tail_hook"     // 章尾钩子存在性
 	CheckAIFlavor     = "ai_flavor"     // AI 味套话（词表单源 internal/text/deslop.go）
 	CheckStyleDrift   = "style_drift"   // 文风八键漂移（P2 口径复用）
+	CheckTaboo        = "taboo"         // 题材卡禁忌清单命中（R2b-3，novel 级配置）
 )
 
 // DefaultTargetWords 是单章默认目标字数（与 identity 写作纪律同一口径：
@@ -56,6 +57,12 @@ type L0Input struct {
 	Baseline map[string]float64
 	// Genre 是活动题材（AI 味题材豁免，见 text 的 exemptInWebNovel）；空=保守不豁免。
 	Genre string
+	// TailHookRequired 章尾钩子是否必需（题材卡参数，CheckerConfig.HookRequired 口径）：
+	// nil=缺省 true=现行行为（缺钩告警）；显式 false 时跳过章尾钩子检查。
+	TailHookRequired *bool
+	// TabooList 是题材卡禁忌清单（CheckerConfig.Taboos）：逐词确定性扫描正文，
+	// 空清单=不检查=现行行为（缺省逐字一致）。
+	TabooList []string
 }
 
 // RunL0Checks 对单章跑 L0 全套确定性检查，返回指标全集与 C 系发现清单。
@@ -92,11 +99,25 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 	}
 
 	metrics.HasTailHook = hasTailHook(body)
-	if strings.TrimSpace(body) != "" && !metrics.HasTailHook {
+	hookRequired := in.TailHookRequired == nil || *in.TailHookRequired
+	if hookRequired && strings.TrimSpace(body) != "" && !metrics.HasTailHook {
 		raw = append(raw, Finding{
 			Check: CheckTailHook,
 			Desc:  "章尾未见钩子信号（悬念问句/转折/突发标记），建议以悬念、未完事件或反转收尾",
 		})
+	}
+
+	// 题材卡禁忌清单（R2b-3）：逐词确定性扫描，命中即一条发现；空清单=不检查（现行行为）。
+	for _, term := range dedupeTerms(in.TabooList) {
+		if strings.TrimSpace(body) == "" {
+			break
+		}
+		if strings.Contains(body, term) {
+			raw = append(raw, Finding{
+				Check: CheckTaboo,
+				Desc:  fmt.Sprintf("正文命中题材卡禁忌词「%s」（题材卡优先级最高，请改写规避）", term),
+			})
+		}
 	}
 
 	// AI 味套话：词表单源 internal/text/deslop.go（不另立词表）。
@@ -129,6 +150,23 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 		out = append(out, f)
 	}
 	return metrics, out
+}
+
+// dedupeTerms 归一化词表：TrimSpace 去空去重，保持首次出现顺序（确定性）。
+// 输入侧（CheckerConfig.Validate）已归一，此处再兜一层——L0Input 是公开入参，
+// 调用方可能直接喂原始清单（宁缺勿错：空词跳过不产生空命中）。
+func dedupeTerms(terms []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(terms))
+	for _, t := range terms {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
 }
 
 // aiFlavorFinding 把一条去 AI 味命中投影为 C 系发现（rule 入 desc 供 Summary 归因）。

@@ -150,3 +150,27 @@ func TestRunChapterCIEmptyFindingsChecked(t *testing.T) {
 	assert.Equal(t, quality.L1StatusChecked, got.L1Status)
 	assert.Equal(t, "[]", got.L1Findings, "零发现=已查空清单（区别于未查）")
 }
+
+// TestScheduleChapterCIUsesCheckerConfig 题材卡机制化（R2b-3）：L0 消费本书检查器配置——
+// 章尾钩子显式关（跳过缺钩发现）+ 禁忌清单命中；未配置=缺省=现行行为。
+func TestScheduleChapterCIUsesCheckerConfig(t *testing.T) {
+	db, tc, ctx := setupCIEnv(t)
+	require.NoError(t, db.AutoMigrate(&quality.CheckerConfig{}))
+	f := false
+	require.NoError(t, db.Create(&quality.CheckerConfig{
+		NovelID: 1, TailHookRequired: &f, TabooList: `["虐主"]`,
+	}).Error)
+	ch := seedCIChapter(t, db, 6)
+
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "这一路虐主的展开让读者压抑。")
+
+	got, err := quality.NewStore(db, ciLogger()).GetByChapter(ctx, 1, 6)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	checks := map[string]bool{}
+	for _, f := range quality.ParseFindings(got.L0Findings) {
+		checks[f.Check] = true
+	}
+	assert.True(t, checks[quality.CheckTaboo], "禁忌命中应落发现")
+	assert.False(t, checks[quality.CheckTailHook], "tail_hook_required=false 应跳过缺钩发现")
+}

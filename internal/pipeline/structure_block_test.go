@@ -12,6 +12,7 @@ import (
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/stretchr/testify/require"
@@ -161,4 +162,22 @@ func TestStructureBlockFetchFailSilent(t *testing.T) {
 	run, err := svc.store.GetByRunID(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, StatusAwaitingGate, run.Status, "结构块取数失败不得影响体检落闸")
+}
+
+// TestStructureBlockOverdueGraceFromCheckerConfig R2b-3：题材卡窗口 N 参数化消费——
+// 检查器配置 window_n 宽限内超期不告警（其余告警照常）；缺省配置=零宽限（现行行为）。
+func TestStructureBlockOverdueGraceFromCheckerConfig(t *testing.T) {
+	rec := &dualRecorder{quickText: dualQuickPass}
+	svc, runID := newDualTest(t, 817, "volume", false, rec)
+	seedForeshadowData(t, svc.store.db, 817)
+	require.NoError(t, svc.store.db.AutoMigrate(&quality.CheckerConfig{}))
+	// now=2、超期伏笔 target=1：宽限 3 章内（2 <= 1+3）不告警。
+	require.NoError(t, svc.store.db.Create(&quality.CheckerConfig{NovelID: 817, WindowN: 3}).Error)
+	svc.executeAudit(runID, 817)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	require.NotContains(t, rec.fullPrompt, "foreshadow_overdue", "宽限内超期不告警")
+	require.Contains(t, rec.fullPrompt, "S1[foreshadow_no_target]", "其余告警照常、编号重排")
+	require.Contains(t, rec.fullPrompt, "S2[foreshadow_unsourced]")
 }
