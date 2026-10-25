@@ -22,9 +22,7 @@ const patrolJSONFixture = `{"verdict":"needs_fix","score":0,"summary":"发现 2 
 func capturePatrolEmit(t *testing.T) <-chan map[string]any {
 	t.Helper()
 	ch := make(chan map[string]any, 4)
-	old := emitConsistencyPatrol
-	emitConsistencyPatrol = func(_ context.Context, p map[string]any) { ch <- p }
-	t.Cleanup(func() { emitConsistencyPatrol = old })
+	t.Cleanup(swapEmitConsistencyPatrol(func(_ context.Context, p map[string]any) { ch <- p }))
 	return ch
 }
 

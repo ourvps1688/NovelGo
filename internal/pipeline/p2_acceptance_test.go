@@ -60,9 +60,7 @@ func TestP2Acceptance_DriftAutoRouteAndExempt(t *testing.T) {
 		}
 	}
 
-	oldProg := emitRewriteProgress
-	emitRewriteProgress = func(_ context.Context, _ map[string]any) {}
-	defer func() { emitRewriteProgress = oldProg }()
+	defer swapEmitRewriteProgress(func(_ context.Context, _ map[string]any) {})()
 
 	run, err := svc.StartPipeline(ctx, 471, "new", nil, false)
 	require.NoError(t, err)
@@ -104,9 +102,7 @@ func TestP2Acceptance_DriftRetconFiling(t *testing.T) {
 		`"target_scope":"frozen_volume","dimension":"none","direction":"retcon_candidate"}]}`
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
 	ctxtJSON, merr := json.Marshal(ctxt)

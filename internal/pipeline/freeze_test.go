@@ -155,13 +155,11 @@ func TestGFreezeFailureDoesNotBlockHandoff(t *testing.T) {
 	svc.SetVolumeFreezer(rec.freeze)
 
 	var notes []string
-	orig := emitStage
-	emitStage = func(_ context.Context, p StagePayload) {
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
 		if p.Note != "" {
 			notes = append(notes, p.Note)
 		}
-	}
-	t.Cleanup(func() { emitStage = orig })
+	}))
 
 	runID := startS3Run(t, svc, novelID, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))

@@ -102,13 +102,11 @@ func TestProviderTripSkipsDispatchS2Blueprint(t *testing.T) {
 	calls := countSkillCalls(svc)
 
 	var notes []string
-	origStage := emitStage
-	emitStage = func(_ context.Context, p StagePayload) {
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
 		if p.Note != "" {
 			notes = append(notes, p.Note)
 		}
-	}
-	t.Cleanup(func() { emitStage = origStage })
+	}))
 
 	run, err := svc.StartPipeline(ctx, 901, "new", nil, false)
 	require.NoError(t, err)
@@ -133,13 +131,11 @@ func TestProviderTripSkipsDispatchS4Audit(t *testing.T) {
 	calls := countSkillCalls(svc)
 
 	var notes []string
-	origStage := emitStage
-	emitStage = func(_ context.Context, p StagePayload) {
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
 		if p.Note != "" {
 			notes = append(notes, p.Note)
 		}
-	}
-	t.Cleanup(func() { emitStage = origStage })
+	}))
 
 	run, err := svc.StartPipeline(ctx, 902, "new", nil, false)
 	require.NoError(t, err)
@@ -168,13 +164,11 @@ func TestProviderTripSkipsDispatchS5Fix(t *testing.T) {
 	calls := countSkillCalls(svc)
 
 	var fixDoneErrs []string
-	origFixDone := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) {
+	t.Cleanup(swapEmitFixDone(func(_ context.Context, p map[string]any) {
 		if v, ok := p["error"].(string); ok {
 			fixDoneErrs = append(fixDoneErrs, v)
 		}
-	}
-	t.Cleanup(func() { emitFixDone = origFixDone })
+	}))
 
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
 		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
@@ -210,13 +204,11 @@ func TestProviderTripSkipsDispatchS6FinalAudit(t *testing.T) {
 	calls := countSkillCalls(svc)
 
 	var notes []string
-	origStage := emitStage
-	emitStage = func(_ context.Context, p StagePayload) {
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
 		if p.Note != "" {
 			notes = append(notes, p.Note)
 		}
-	}
-	t.Cleanup(func() { emitStage = origStage })
+	}))
 
 	run, err := svc.StartPipeline(ctx, 904, "new", nil, false)
 	require.NoError(t, err)
@@ -250,9 +242,7 @@ func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
 
 	// 一致性巡检：失败通道=记日志跳过（不落库、不广播、不阻断）。
 	patrolEmitted := false
-	origPatrol := emitConsistencyPatrol
-	emitConsistencyPatrol = func(_ context.Context, _ map[string]any) { patrolEmitted = true }
-	t.Cleanup(func() { emitConsistencyPatrol = origPatrol })
+	t.Cleanup(swapEmitConsistencyPatrol(func(_ context.Context, _ map[string]any) { patrolEmitted = true }))
 	svc.runConsistencyPatrol(ctx, "run-x", 905)
 	require.False(t, patrolEmitted, "一致性巡检失败语义不变：不广播")
 
@@ -283,15 +273,13 @@ func TestProviderTripBreaksRewriteLoop(t *testing.T) {
 
 	var phases []string
 	var failedErr string
-	origProg := emitRewriteProgress
-	emitRewriteProgress = func(_ context.Context, p map[string]any) {
+	t.Cleanup(swapEmitRewriteProgress(func(_ context.Context, p map[string]any) {
 		phase := fmt.Sprint(p["phase"])
 		phases = append(phases, phase)
 		if phase == "failed" {
 			failedErr = fmt.Sprint(p["error"])
 		}
-	}
-	t.Cleanup(func() { emitRewriteProgress = origProg })
+	}))
 
 	run, err := svc.StartPipeline(ctx, 906, "new", nil, false)
 	require.NoError(t, err)

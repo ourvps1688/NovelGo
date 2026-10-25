@@ -3191,18 +3191,98 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 	}
 }
 
-// 可替换的事件发射器，便于测试注入无操作实现。
+// ── 可替换的事件发射器（测试注入原子化，测试卫生）────────────────────────
+// 既往 var emitX 是可整体赋值的全局函数变量：测试注入与遗留执行体 goroutine 的
+// 并发调用构成数据竞争（go test -race 报警；测试隔离问题、生产零风险）。
+// 现改为「稳定 wrapper + 线程安全槽」：生产调用点 emitX(ctx, p) 零改动，
+// 测试经 swapEmitX 原子换入实现并按 LIFO 还原，注入/读取全程加锁无竞争。
+
+// emitterSlot 是一个事件发射器的可替换实现槽：emit 读锁取实现后调用
+// （不在锁内执行回调），swap 换入实现并返回还原函数。
+type emitterSlot[T any] struct {
+	mu sync.RWMutex
+	fn func(context.Context, T)
+}
+
+func newEmitterSlot[T any](def func(context.Context, T)) emitterSlot[T] {
+	return emitterSlot[T]{fn: def}
+}
+
+func (s *emitterSlot[T]) emit(ctx context.Context, p T) {
+	s.mu.RLock()
+	fn := s.fn
+	s.mu.RUnlock()
+	fn(ctx, p)
+}
+
+// swap 原子换入实现，返回还原函数（测试 t.Cleanup/defer 调用）。
+func (s *emitterSlot[T]) swap(f func(context.Context, T)) (restore func()) {
+	s.mu.Lock()
+	old := s.fn
+	s.fn = f
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		s.fn = old
+		s.mu.Unlock()
+	}
+}
+
+// 各发射器槽（默认实现=真实 wails 事件总线发射器）。
 var (
-	emitStage             = EmitStage
-	emitGate              = EmitGate
-	emitControlAck        = EmitControlAck
-	emitStockAudit        = EmitStockAudit
-	emitConsistencyPatrol = EmitConsistencyPatrol
-	emitFixStart          = EmitFixStart
-	emitFixDone           = EmitFixDone
-	emitRewriteBacklog    = EmitRewriteBacklog
-	emitRewriteProgress   = EmitRewriteProgress
+	emitStageSlot             = newEmitterSlot(EmitStage)
+	emitGateSlot              = newEmitterSlot(EmitGate)
+	emitControlAckSlot        = newEmitterSlot(EmitControlAck)
+	emitStockAuditSlot        = newEmitterSlot(EmitStockAudit)
+	emitConsistencyPatrolSlot = newEmitterSlot(EmitConsistencyPatrol)
+	emitFixStartSlot          = newEmitterSlot(EmitFixStart)
+	emitFixDoneSlot           = newEmitterSlot(EmitFixDone)
+	emitRewriteBacklogSlot    = newEmitterSlot(EmitRewriteBacklog)
+	emitRewriteProgressSlot   = newEmitterSlot(EmitRewriteProgress)
 )
+
+// 稳定 wrapper：调用点签名与用法零改动。
+func emitStage(ctx context.Context, p StagePayload)           { emitStageSlot.emit(ctx, p) }
+func emitGate(ctx context.Context, p GatePayload)             { emitGateSlot.emit(ctx, p) }
+func emitControlAck(ctx context.Context, p ControlAckPayload) { emitControlAckSlot.emit(ctx, p) }
+func emitStockAudit(ctx context.Context, p map[string]any)    { emitStockAuditSlot.emit(ctx, p) }
+func emitConsistencyPatrol(ctx context.Context, p map[string]any) {
+	emitConsistencyPatrolSlot.emit(ctx, p)
+}
+func emitFixStart(ctx context.Context, p map[string]any)        { emitFixStartSlot.emit(ctx, p) }
+func emitFixDone(ctx context.Context, p map[string]any)         { emitFixDoneSlot.emit(ctx, p) }
+func emitRewriteBacklog(ctx context.Context, p map[string]any)  { emitRewriteBacklogSlot.emit(ctx, p) }
+func emitRewriteProgress(ctx context.Context, p map[string]any) { emitRewriteProgressSlot.emit(ctx, p) }
+
+// swapEmitX 供测试原子注入实现并返回还原函数：
+// defer swapEmitX(f)() 或 t.Cleanup(swapEmitX(f))。
+func swapEmitStage(f func(context.Context, StagePayload)) func() {
+	return emitStageSlot.swap(f)
+}
+func swapEmitGate(f func(context.Context, GatePayload)) func() {
+	return emitGateSlot.swap(f)
+}
+func swapEmitControlAck(f func(context.Context, ControlAckPayload)) func() {
+	return emitControlAckSlot.swap(f)
+}
+func swapEmitStockAudit(f func(context.Context, map[string]any)) func() {
+	return emitStockAuditSlot.swap(f)
+}
+func swapEmitConsistencyPatrol(f func(context.Context, map[string]any)) func() {
+	return emitConsistencyPatrolSlot.swap(f)
+}
+func swapEmitFixStart(f func(context.Context, map[string]any)) func() {
+	return emitFixStartSlot.swap(f)
+}
+func swapEmitFixDone(f func(context.Context, map[string]any)) func() {
+	return emitFixDoneSlot.swap(f)
+}
+func swapEmitRewriteBacklog(f func(context.Context, map[string]any)) func() {
+	return emitRewriteBacklogSlot.swap(f)
+}
+func swapEmitRewriteProgress(f func(context.Context, map[string]any)) func() {
+	return emitRewriteProgressSlot.swap(f)
+}
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。
 func TimeNow() time.Time { return time.Now() }

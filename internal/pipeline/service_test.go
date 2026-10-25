@@ -19,15 +19,16 @@ import (
 
 // 测试中无 Wails runtime 上下文，将事件发射器替换为无操作，避免
 // "invalid context" 报错；真实运行仍走 wails 事件总线。
+// 经 swapEmitX 原子注入（还原函数丢弃=测试进程内恒为无操作，与既往全局赋值同语义）。
 func init() {
-	emitStage = func(_ context.Context, _ StagePayload) {}
-	emitGate = func(_ context.Context, _ GatePayload) {}
-	emitControlAck = func(_ context.Context, _ ControlAckPayload) {}
-	emitStockAudit = func(_ context.Context, _ map[string]any) {}
-	emitConsistencyPatrol = func(_ context.Context, _ map[string]any) {}
-	emitFixStart = func(_ context.Context, _ map[string]any) {}
-	emitFixDone = func(_ context.Context, _ map[string]any) {}
-	emitRewriteBacklog = func(_ context.Context, _ map[string]any) {}
+	swapEmitStage(func(_ context.Context, _ StagePayload) {})
+	swapEmitGate(func(_ context.Context, _ GatePayload) {})
+	swapEmitControlAck(func(_ context.Context, _ ControlAckPayload) {})
+	swapEmitStockAudit(func(_ context.Context, _ map[string]any) {})
+	swapEmitConsistencyPatrol(func(_ context.Context, _ map[string]any) {})
+	swapEmitFixStart(func(_ context.Context, _ map[string]any) {})
+	swapEmitFixDone(func(_ context.Context, _ map[string]any) {})
+	swapEmitRewriteBacklog(func(_ context.Context, _ map[string]any) {})
 }
 
 func TestServiceStartAndResume(t *testing.T) {
@@ -234,9 +235,7 @@ func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	ctx := context.Background()
 
 	var fixStarts int
-	origFixStart := emitFixStart
-	emitFixStart = func(_ context.Context, _ map[string]any) { fixStarts++ }
-	t.Cleanup(func() { emitFixStart = origFixStart })
+	t.Cleanup(swapEmitFixStart(func(_ context.Context, _ map[string]any) { fixStarts++ }))
 
 	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
 		switch name {
@@ -332,13 +331,11 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 	// 捕获 fix_start 载荷，断言 FixIssuePayload 携带作用域三字段（供前端标签/写保护判路）。
 	// emitFixStart 由服务层持锁串行调用，此处无并发写。
 	var firstFixStart map[string]any
-	origFixStart := emitFixStart
-	emitFixStart = func(_ context.Context, p map[string]any) {
+	t.Cleanup(swapEmitFixStart(func(_ context.Context, p map[string]any) {
 		if firstFixStart == nil {
 			firstFixStart = p
 		}
-	}
-	t.Cleanup(func() { emitFixStart = origFixStart })
+	}))
 
 	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
 	require.NoError(t, err)
@@ -498,9 +495,7 @@ func TestServiceFixHandoffRewriteWhenOnlyBodyIssues(t *testing.T) {
 	}
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	run, err := svc.StartPipeline(ctx, 407, "new", nil, false)
 	require.NoError(t, err)
@@ -550,9 +545,7 @@ func TestServiceFixRejectsStaleAuditWithoutFixType(t *testing.T) {
 	}
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	run, err := svc.StartPipeline(ctx, 408, "new", nil, false)
 	require.NoError(t, err)
@@ -602,9 +595,7 @@ func TestServiceFixRejectsStaleAuditWithoutScopeFields(t *testing.T) {
 	}
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	run, err := svc.StartPipeline(ctx, 409, "new", nil, false)
 	require.NoError(t, err)
@@ -657,13 +648,11 @@ func TestServiceFixWriteProtectsFrozenIssues(t *testing.T) {
 	}
 
 	var firstFixStart map[string]any
-	origFixStart := emitFixStart
-	emitFixStart = func(_ context.Context, p map[string]any) {
+	t.Cleanup(swapEmitFixStart(func(_ context.Context, p map[string]any) {
 		if firstFixStart == nil {
 			firstFixStart = p
 		}
-	}
-	t.Cleanup(func() { emitFixStart = origFixStart })
+	}))
 
 	run, err := svc.StartPipeline(ctx, 410, "new", nil, false)
 	require.NoError(t, err)
@@ -717,9 +706,7 @@ func TestServiceFixRetconHandoffWhenAllProtected(t *testing.T) {
 	}
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	run, err := svc.StartPipeline(ctx, 411, "new", nil, false)
 	require.NoError(t, err)
@@ -772,9 +759,7 @@ func TestServiceAutoRewriteSkipsProtectedBodyItems(t *testing.T) {
 	}
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	run, err := svc.StartPipeline(ctx, 412, "new", nil, false)
 	require.NoError(t, err)
@@ -852,9 +837,9 @@ func TestServiceAutoRewriteDispatch(t *testing.T) {
 		}
 	}
 
-	oldProg := emitRewriteProgress
-	emitRewriteProgress = func(_ context.Context, p map[string]any) { progress = append(progress, fmt.Sprint(p["phase"])) }
-	defer func() { emitRewriteProgress = oldProg }()
+	defer swapEmitRewriteProgress(func(_ context.Context, p map[string]any) {
+		progress = append(progress, fmt.Sprint(p["phase"]))
+	})()
 
 	run, err := svc.StartPipeline(ctx, 421, "new", nil, false)
 	require.NoError(t, err)
@@ -923,9 +908,7 @@ func TestServiceStyleExemptSkipsAutoRewrite(t *testing.T) {
 		}
 	}
 
-	oldProg := emitRewriteProgress
-	emitRewriteProgress = func(_ context.Context, _ map[string]any) {}
-	defer func() { emitRewriteProgress = oldProg }()
+	defer swapEmitRewriteProgress(func(_ context.Context, _ map[string]any) {})()
 
 	run, err := svc.StartPipeline(ctx, 431, "new", nil, false)
 	require.NoError(t, err)
@@ -978,9 +961,7 @@ func TestServiceStyleExemptHandoffNoLoop(t *testing.T) {
 	}
 
 	var fixDonePayload map[string]any
-	oldEmit := emitFixDone
-	emitFixDone = func(_ context.Context, p map[string]any) { fixDonePayload = p }
-	defer func() { emitFixDone = oldEmit }()
+	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
 
 	run, err := svc.StartPipeline(ctx, 432, "new", nil, false)
 	require.NoError(t, err)
@@ -1296,9 +1277,7 @@ func (r *gateRecorder) all() []GatePayload {
 func withCapturedGates(t *testing.T) *gateRecorder {
 	t.Helper()
 	rec := &gateRecorder{}
-	orig := emitGate
-	emitGate = func(_ context.Context, p GatePayload) { rec.record(p) }
-	t.Cleanup(func() { emitGate = orig })
+	t.Cleanup(swapEmitGate(func(_ context.Context, p GatePayload) { rec.record(p) }))
 	return rec
 }
 
