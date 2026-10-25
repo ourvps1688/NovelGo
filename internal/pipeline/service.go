@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/volume"
@@ -1470,6 +1471,9 @@ func (s *Service) executeFix(runID string, novelID int64) {
 	for _, g := range groups {
 		totalBatches += len(planFixBatches(g))
 	}
+	// 台账变更入账水位（R2b-7 §8.3-3）：本 sweep 起点的履历 id，批次收口后按增量
+	// 把「修台账本身」的变更落入修复日志（ledgerChangeWatermark 失败=-1=跳过入账）。
+	fixWatermark := s.ledgerChangeWatermark(ctx, novelID)
 
 	var (
 		mu           sync.Mutex
@@ -1590,6 +1594,9 @@ func (s *Service) executeFix(runID string, novelID int64) {
 				for id, reason := range skippedNow {
 					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
 				}
+				// 台账变更入账（R2b-7）：本批修复若动了台账，把履历增量落进修复日志
+				// （与回执 log 互补：不依赖 LLM 自报，同轮后续批次可见、复验核对下游）。
+				s.appendLedgerChangeLog(ctx, novelID, &ctxt, fixWatermark)
 				batchOK++
 				// 断点落库：保持 run 当前状态不变（用户并发暂停/中止不被覆盖回 running），
 				// 只刷新上下文断点（FixStates/FixLog），供失败恢复与重启续修。
@@ -1820,7 +1827,7 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 	if len(targets) > 0 {
 		out, verr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
 			NovelID:   novelID,
-			Prompt:    verifyPrompt(novelID, targets, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
+			Prompt:    verifyPrompt(novelID, targets, ledgerChangeNotes(ctxt.FixLog), s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
 			MaxTurns:  12,
 			SessionID: "pipeline:" + runID + ":verify:" + uuid.NewString(),
 			RunID:     runID,
@@ -2698,6 +2705,74 @@ func upsertFixLog(entries []FixLogEntry, add []FixLogEntry) []FixLogEntry {
 	return entries
 }
 
+// fixLogLedgerPrefix 是台账变更入账条目在修复日志里的 ID 前缀（"L:<履历id>"）：
+// 与 issue 系 ID（I/D/T/V/C）命名空间不相交，供 executeVerify 识别台账变更条目
+// 做「台账修改下游影响」核对（R2b-7 §8.3-3）。
+const fixLogLedgerPrefix = "L:"
+
+// ledgerChangeWatermark 返回本书 ledger_change_history 当前最大 id（修复 sweep 起点
+// 水位，R2b-7）。取数失败返回 -1：调用方跳过入账（宁缺勿错，不拉全量履历污染日志）。
+func (s *Service) ledgerChangeWatermark(ctx context.Context, novelID int64) int64 {
+	if s.store == nil || s.store.db == nil {
+		return -1
+	}
+	var maxID *int64
+	if err := s.store.db.WithContext(ctx).
+		Raw("SELECT MAX(id) FROM ledger_change_history WHERE novel_id = ?", novelID).Scan(&maxID).Error; err != nil {
+		s.logger.Debug("修复日志：读取台账履历水位失败（跳过台账变更入账）", "novel_id", novelID, "err", err)
+		return -1
+	}
+	if maxID == nil {
+		return 0
+	}
+	return *maxID
+}
+
+// appendLedgerChangeLog 把本轮修复产生的台账变更（ledger_change_history 水位增量）
+// 落入修复日志（R2b-7 §8.3-3「修台账本身进修复日志」）：不依赖修复回执自报，
+// 变更内容从履历确定性取。keep-first 幂等：同履历条目只入账一次（并行批次重复
+// 拉取不覆盖先前条目）；水位无效/取数失败 → 跳过（降级零提示）。
+func (s *Service) appendLedgerChangeLog(ctx context.Context, novelID int64, ctxt *GateContext, watermark int64) {
+	if s.store == nil || s.store.db == nil || watermark < 0 {
+		return
+	}
+	var rows []storage.LedgerChangeHistory
+	if err := s.store.db.WithContext(ctx).
+		Where("novel_id = ? AND id > ?", novelID, watermark).
+		Order("id ASC").Find(&rows).Error; err != nil {
+		s.logger.Debug("修复日志：读取台账变更履历失败（跳过入账）", "err", err)
+		return
+	}
+	seen := map[string]bool{}
+	for _, e := range ctxt.FixLog {
+		seen[e.ID] = true
+	}
+	for _, r := range rows {
+		id := fmt.Sprintf("%s%d", fixLogLedgerPrefix, r.ID)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ctxt.FixLog = upsertFixLog(ctxt.FixLog, []FixLogEntry{{
+			ID: id,
+			Note: fmt.Sprintf("台账变更 %s:%d %s: %q→%q（source=%s）",
+				r.EntryTable, r.EntryID, r.Field, r.Old, r.New, r.Source),
+		}})
+	}
+}
+
+// ledgerChangeNotes 从修复日志提取台账变更条目（ID 前缀 fixLogLedgerPrefix），
+// 供增量复验注入「台账修改下游影响核对」块（R2b-7）。无台账变更返回空切片。
+func ledgerChangeNotes(entries []FixLogEntry) []string {
+	var out []string
+	for _, e := range entries {
+		if strings.HasPrefix(e.ID, fixLogLedgerPrefix) {
+			out = append(out, e.Note)
+		}
+	}
+	return out
+}
+
 // fixLogBlock 渲染「本轮修复日志」提示词块（R1b 修复日志共享）：已修条目摘要按完成序
 // 注入同轮后续修复批次的提示词，消除独立会话的重复勘察（F2）。空日志渲染为空串——
 // 无日志时提示词与既有输出逐字一致（P0 降级纪律）。
@@ -3089,9 +3164,11 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string, fixLog []FixL
 // verifyPrompt 构造增量复验提示词（R1c）：只传刚修复项及其修过的作用域（L1 定点复验），
 // 不重审全书、不评分、不报新问题。blocks 尾部装配上下文块（P0 §0.5 audit=Facts+Voice）。
 // 复验回执契约由 contract.go 单源生成（verifyReceiptFormatLine）。
-func verifyPrompt(novelID int64, targets []verifyTarget, blocks contextasm.ContextBlocks) string {
+// ledgerChanges 是本轮台账变更清单（R2b-7 §8.3-3）：非空时附「台账修改下游影响核对」
+// 块，空时提示词与旧文逐字一致（降级零提示）。
+func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string, blocks contextasm.ContextBlocks) string {
 	b, _ := json.Marshal(targets)
-	return fmt.Sprintf("本书 novel_id=%d。本轮为修复后的**增量复验**（L1，只验已修复项，不重审全书）："+
+	text := fmt.Sprintf("本书 novel_id=%d。本轮为修复后的**增量复验**（L1，只验已修复项，不重审全书）："+
 		"以下是刚修复的问题清单（JSON，共 %d 条，含修过的作用域章节与修复摘要），请逐项定点复验修复是否真正生效：\n%s\n\n"+
 		"复验方法：只对清单内问题核对其**修过的作用域**（按 chapters 读相关章节段落 / 用 get_* 读对应台账条目，"+
 		"有 fix_note 时按它指引的改动点核对）；ok=true 仅当问题确已解决且没引入新矛盾，修歪了/只改了一半 → ok=false 并在 note 一行说明。"+
@@ -3100,7 +3177,24 @@ func verifyPrompt(novelID int64, targets []verifyTarget, blocks contextasm.Conte
 		verifyReceiptFormatLine()+"——"+
 		"verified 逐条给出清单内问题的复验判定（id 对应清单 issue id，ok 为 true/false，note 为一行复验结论）；"+
 		"summary 为一句话复验小结；未列入回执的项视为未复验，将在后续复验轮次再次核对，请如实上报。",
-		novelID, len(targets), b) + blocks.Render(contextasm.PurposeAudit)
+		novelID, len(targets), b)
+	if len(ledgerChanges) > 0 {
+		text += ledgerChangeVerifyBlock(ledgerChanges)
+	}
+	return text + blocks.Render(contextasm.PurposeAudit)
+}
+
+// ledgerChangeVerifyBlock 渲染「台账修改下游影响核对」块（R2b-7 §8.3-3）：复验除逐项
+// 定点外，同步核对本轮台账修改是否破坏下游既有事实（改 A 处台账导致 B 处不自洽）。
+func ledgerChangeVerifyBlock(notes []string) string {
+	var b strings.Builder
+	b.WriteString("\n\n【本轮台账变更清单（修复动过台账）】除逐项定点复验外，请同步核对这些台账修改的" +
+		"下游影响：用 get_* 读被改台账条目及其涉及的章节/关联条目，确认修改没有破坏下游既有事实；" +
+		"若发现某条台账修改导致下游不自洽，将其最相关的已修复问题标 ok=false 并在 note 一行说明：\n")
+	for _, n := range notes {
+		b.WriteString("- " + n + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。

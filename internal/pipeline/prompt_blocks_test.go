@@ -10,6 +10,7 @@ package pipeline
 //   ③ Facts+Voice → 空基线 + 尾部按 Facts→Voice 追加，前文一字不动。
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,35 @@ import (
 	"github.com/novelgo/novelgo/internal/contextasm"
 	"github.com/stretchr/testify/require"
 )
+
+// p0Update 演进重定格开关（维护用）：契约有意演进（如 fix_type Doc 增补）后运行
+//
+//	go test ./internal/pipeline/ -run TestP0BaselineRegen -p0-update
+//
+// 把五构造器 empty/facts 当前真实输出写回 testdata 基线；随后全量跑 golden 测试，
+// 复核 git diff 仅含预期演进再提交（P0 降级纪律不变：基线仍是「契约演进后的真实输出」，
+// 逐字对照验收方式不改）。
+var p0Update = flag.Bool("p0-update", false, "演进重定格 P0 golden 基线（仅配合 -run TestP0BaselineRegen 使用）")
+
+// writeP0Baseline 把构造器当前输出写回 golden 基线（LF 恒定，readP0Baseline 读时另有
+// CRLF→LF 归一化双保险）。
+func writeP0Baseline(t *testing.T, name, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join("testdata", "p0_baseline_"+name+".txt"),
+		[]byte(content), 0o644), "写基线 %s", name)
+}
+
+// TestP0BaselineRegen 演进重定格（平时跳过，须显式 -p0-update）：把五构造器
+// empty/facts 当前输出写回基线。用法见 p0Update 注释；重定格后 git diff 复核。
+func TestP0BaselineRegen(t *testing.T) {
+	if !*p0Update {
+		t.Skip("重定格基线需显式 -p0-update（契约有意演进后维护用）")
+	}
+	for _, tc := range p0PromptCases() {
+		writeP0Baseline(t, tc.name+"_empty", tc.make(contextasm.ContextBlocks{}))
+		writeP0Baseline(t, tc.name+"_facts", tc.make(contextasm.ContextBlocks{Facts: p0FactsMarker}))
+	}
+}
 
 // p0FactsMarker 与基线抓取时使用的既定事实正文一致。
 const p0FactsMarker = "MARKER-FACTS：左手有疤（快照出处：volume_id=1，snapshot_version=2）"

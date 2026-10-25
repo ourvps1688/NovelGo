@@ -14,6 +14,7 @@ func RegisterAllTools(r *Registry) {
 	RegisterInvariantTools(r)
 	RegisterCheckerConfigTools(r)
 	RegisterPowerLevelTools(r)
+	RegisterProvenanceTools(r)
 	RegisterStoryArcTools(r)
 	RegisterVolumeTools(r)
 	RegisterRWTools(r)

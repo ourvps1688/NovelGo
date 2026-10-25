@@ -6,7 +6,8 @@ package pipeline
 //
 // 告警来源（每批独立降级，宁缺勿错）：
 //   - 伏笔 lifecycle（R2b-1）：time_entries 伏笔投影 → 超期未收/无收点规划/收未埋；
-//   - 书写不变量（R2b-2）：pinned_invariants × characters 台账比对 → 违例告警。
+//   - 书写不变量（R2b-2）：pinned_invariants × characters 台账比对 → 违例告警；
+//   - 台账对账（R2b-7）：ledger_provenance 来源标注 × 来源章正文 → 来源失效/来源失支撑。
 //
 // 降级零提示全路径：进度读取失败 → 整块空串；单批取数失败/零告警 → 跳过该批
 // （其余批照常）；全部无告警 → 空块（提示词与无该块逐字一致）。只报告不改写
@@ -15,6 +16,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/character"
@@ -63,6 +65,9 @@ func (s *Service) structureBlock(ctx context.Context, novelID int64) string {
 		groups = append(groups, structure.CheckForeshadowLifecycle(projectForeshadows(page.Items), now, grace))
 	}
 	if findings, ok := s.pinnedFindings(ctx, novelID, now); ok {
+		groups = append(groups, findings)
+	}
+	if findings, ok := s.reconcileFindings(ctx, novelID); ok {
 		groups = append(groups, findings)
 	}
 	return structure.RenderBlock(structure.MergeFindings(groups...))
@@ -132,6 +137,141 @@ func projectCharacters(rows []character.Character) []structure.CharacterState {
 			Alive:             r.Alive,
 			CapabilityCeiling: r.CapabilityCeiling,
 		})
+	}
+	return out
+}
+
+// ── 台账对账批（R2b-7，提案 §8.3 组件 B）──────────────────────────────
+
+// reconcileLabelSpec 是台账表的对账标签列（标签列必填；别名列可空）。
+type reconcileLabelSpec struct{ labelCol, aliasCol string }
+
+// reconcileLabelColumns 是双向对账的表白名单：只有带可靠短标签的表参与对账
+// （宁缺勿错）；列名固定白名单，绝不接受外部输入拼 SQL。
+var reconcileLabelColumns = map[string]reconcileLabelSpec{
+	"characters":         {labelCol: "name", aliasCol: "aliases"},
+	"locations":          {labelCol: "name"},
+	"story_arcs":         {labelCol: "name"},
+	"time_entries":       {labelCol: "title"},
+	"chronology_anchors": {labelCol: "label"},
+}
+
+// reconcileRow 是一条带来源标注的台账条目定位。
+type reconcileRow struct {
+	table     string
+	id        int64
+	chapterID int64
+}
+
+// reconcileFindings 跑「正文↔台账双向对账」批（R2b-7）：对带 provenance 来源标注的
+// 台账条目做来源支撑核验（来源章是否仍存在、正文是否仍支撑条目）。
+// 冲突不预设谁对：可能台账过时/记错该修台账，也可能正文改坏该修正文（方向判断
+// 进 L1 契约 fix_type）。任一取数失败 → 跳过该批（ok=false，宁缺勿错）。
+func (s *Service) reconcileFindings(ctx context.Context, novelID int64) ([]structure.StructFinding, bool) {
+	if s.store == nil || s.store.db == nil || s.chapterStore == nil || s.chapterTextReader == nil {
+		return nil, false
+	}
+	provRows, err := storage.NewProvenanceStore(s.store.db).ListByNovel(ctx, novelID)
+	if err != nil {
+		s.logger.Debug("结构告警块：读取台账 provenance 失败（跳过对账批）", "novel_id", novelID, "err", err)
+		return nil, false
+	}
+	// 只有带来源标注的条目参与对账（无 provenance=不判，宁缺勿错）。
+	var sourced []reconcileRow
+	seenChapter := map[int64]bool{}
+	for _, p := range provRows {
+		if p.SourceChapterID == nil {
+			continue
+		}
+		sourced = append(sourced, reconcileRow{table: p.EntryTable, id: p.EntryID, chapterID: *p.SourceChapterID})
+		seenChapter[*p.SourceChapterID] = true
+	}
+	if len(sourced) == 0 {
+		return nil, true
+	}
+	chapterIDs := make([]int64, 0, len(seenChapter))
+	for id := range seenChapter {
+		chapterIDs = append(chapterIDs, id)
+	}
+	missing, err := s.chapterStore.MissingIDsByNovel(ctx, nil, novelID, chapterIDs)
+	if err != nil {
+		s.logger.Debug("结构告警块：核验来源章存在性失败（跳过对账批）", "novel_id", novelID, "err", err)
+		return nil, false
+	}
+	gone := map[int64]bool{}
+	for _, id := range missing {
+		gone[id] = true
+	}
+	texts := map[int64]string{}
+	for _, id := range chapterIDs {
+		if gone[id] {
+			continue
+		}
+		text, rerr := s.chapterTextReader(ctx, novelID, id)
+		if rerr != nil {
+			// 单章正文读取失败：该章条目不判支撑（宁缺勿错），其余照常。
+			s.logger.Debug("结构告警块：读取来源章正文失败（该条目不判支撑）", "chapter_id", id, "err", rerr)
+			continue
+		}
+		texts[id] = text
+	}
+	labels := s.reconcileLabels(ctx, novelID, sourced)
+	entries := make([]structure.ReconcileEntry, 0, len(sourced))
+	for _, row := range sourced {
+		ref := fmt.Sprintf("%s:%d", row.table, row.id)
+		lbs, ok := labels[ref]
+		if !ok {
+			continue // 表不在对账白名单/取数失败/条目已删：不参与（宁缺勿错）
+		}
+		entries = append(entries, structure.ReconcileEntry{
+			Ref:        ref,
+			Labels:     lbs,
+			Sourced:    true,
+			SourceGone: gone[row.chapterID],
+			SourceText: texts[row.chapterID],
+		})
+	}
+	return structure.CheckLedgerReconcile(entries), true
+}
+
+// reconcileLabels 按白名单表装配条目标签（名称/别名）。返回 "表名:id" → 标签集
+// （跨表同 id 互不覆盖）；仅包含在白名单表中查询到的条目（表不在白名单/查无此行/
+// 取数失败自然缺席）。
+func (s *Service) reconcileLabels(ctx context.Context, novelID int64, rows []reconcileRow) map[string][]string {
+	idsByTable := map[string][]int64{}
+	for _, r := range rows {
+		if _, ok := reconcileLabelColumns[r.table]; !ok {
+			continue
+		}
+		idsByTable[r.table] = append(idsByTable[r.table], r.id)
+	}
+	out := map[string][]string{}
+	for table, ids := range idsByTable {
+		spec := reconcileLabelColumns[table]
+		query := fmt.Sprintf("SELECT id, %s AS label", spec.labelCol)
+		if spec.aliasCol != "" {
+			query += ", " + spec.aliasCol + " AS aliases"
+		}
+		query += fmt.Sprintf(" FROM %s WHERE novel_id = ? AND id IN ?", table)
+		var found []struct {
+			ID      int64
+			Label   string
+			Aliases string
+		}
+		if err := s.store.db.WithContext(ctx).Raw(query, novelID, ids).Scan(&found).Error; err != nil {
+			s.logger.Debug("结构告警块：读取台账标签失败（跳过该表对账）", "table", table, "err", err)
+			continue
+		}
+		for _, f := range found {
+			labels := []string{f.Label}
+			if strings.TrimSpace(f.Aliases) != "" {
+				var aliases []string
+				if err := json.Unmarshal([]byte(f.Aliases), &aliases); err == nil {
+					labels = append(labels, aliases...)
+				} // 别名 JSON 坏数据按无别名（宁缺勿错）
+			}
+			out[fmt.Sprintf("%s:%d", table, f.ID)] = labels
+		}
 	}
 	return out
 }

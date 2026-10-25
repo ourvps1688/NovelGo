@@ -111,6 +111,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&session.Message{},
 		&storage.OperationLogRecord{},
 		&storage.LedgerChangeHistory{},
+		&storage.LedgerProvenance{},
 		&rollback.TurnCommit{},
 		&style.Sample{},
 		&style.Profile{},

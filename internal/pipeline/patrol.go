@@ -29,7 +29,8 @@ func patrolPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 		"用 get_chapter_list 列出全部章节，对照「已冻结卷既定事实」与当前台账（角色/关系/地点/时间线/弧线/读者认知）通读全书，"+
 		"只报**张力**（前向适配累计出来的漂移）：设定失真、承诺未兑现、读者认知被悄悄改写、时间线漂移、retcon 衔接裂缝；"+
 		"每条张力按落点标 target_scope、按四维标 dimension、给建议 direction（默认 forward_fix；仅硬矛盾且无法前向消解才 retcon_candidate）"+
-		"与 fix_type（预计动正文 body 还是台账/卷纲 ledger）；每条必须给具体证据，不报无据臆测，不报单章文笔/节奏类质量问题。"+
+		"与 fix_type（正文↔台账对账冲突**不预设谁对**：可能台账记错该修台账（ledger），也可能正文记错该修正文（body），按证据判方向）；"+
+		"每条必须给具体证据，不报无据臆测，不报单章文笔/节奏类质量问题。"+
 		"这是**只报告不改写**的兜底巡检：你不改任何数据，verdict 只是给作者的参考信号（有张力 → needs_fix，无 → pass），"+
 		"不会触发任何自动修复，改不改由作者定。"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+auditFormatLine(true, issueSamplePatrol)+"——"+issueFieldRules(),

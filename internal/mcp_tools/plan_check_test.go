@@ -17,6 +17,7 @@ import (
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/quality"
+	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 )
@@ -30,7 +31,7 @@ func openPlanCheckToolDB(t *testing.T) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &timeline.ChapterTaskCard{}, &timeline.ChapterPlan{},
 		&timeline.TimelineEntry{}, &structure.PinnedInvariant{}, &structure.PowerLevel{},
-		&character.Character{}, &quality.CheckerConfig{}))
+		&character.Character{}, &quality.CheckerConfig{}, &storage.LedgerProvenance{}))
 	return db
 }
 

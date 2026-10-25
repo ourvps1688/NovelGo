@@ -62,7 +62,7 @@ func setupLedgerTemporalDB(t *testing.T) *gorm.DB {
 		t.Fatalf("get sql.DB: %v", err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&LedgerTestEntry{}, &LedgerTestVolume{}, &LedgerTestPlain{}, &LedgerChangeHistory{}); err != nil {
+	if err := db.AutoMigrate(&LedgerTestEntry{}, &LedgerTestVolume{}, &LedgerTestPlain{}, &LedgerChangeHistory{}, &LedgerProvenance{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	if err := RegisterLedgerTemporalHooks(db); err != nil {

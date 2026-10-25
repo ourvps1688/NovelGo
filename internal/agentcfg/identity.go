@@ -33,6 +33,7 @@ var mainAgentTools = []string{
 	"upsert_pinned_invariant", "list_pinned_invariants",
 	"upsert_checker_config", "get_checker_config",
 	"upsert_power_level", "list_power_levels",
+	"upsert_ledger_provenance", "list_ledger_provenance",
 	"get_story_arcs", "create_story_arc", "update_story_arc",
 	"create_arc_node", "update_arc_node",
 	"get_reader_perspective", "create_reader_perspective_entry", "update_reader_perspective_entry",

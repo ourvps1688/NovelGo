@@ -42,7 +42,8 @@ var issueContractFields = []issueField{
 	{Name: "area", Sample: `"维度"`},
 	{Name: "desc", Sample: `"..."`},
 	{Name: "fix_type", Enum: []string{FixTypeBody, FixTypeLedger}, Sample: `"body|ledger"`, Full: true,
-		Doc: "fix_type 必填：body=正文级需章节重写（S5 修不动，将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。"},
+		Doc: "fix_type 必填：body=正文级需章节重写（S5 修不动，将回流 S3 重写回路）；ledger=台账/卷纲/单章 edit 可修。" +
+			"正文与台账冲突时不预设谁对——判定哪边记错：正文记错→body、台账记错→ledger。"},
 	{Name: "target_scope", Enum: []string{TargetScopeActiveVolume, TargetScopeFrozenVolume, TargetScopeNone},
 		Sample: `"active_volume|frozen_volume|none"`, Full: true,
 		Doc: "target_scope 必填：active_volume=问题落点在当前活跃卷；frozen_volume=问题落点在已冻结定稿卷（写保护）；none=全书级/不涉具体卷。"},

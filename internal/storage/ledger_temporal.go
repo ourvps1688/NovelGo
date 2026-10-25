@@ -225,6 +225,14 @@ func ledgerBeforeUpdate(db *gorm.DB) {
 	if len(changes) == 0 {
 		return
 	}
+	// 钉住护栏（R2b-7）：已钉住条目的语义修改，auto 写拒收（需走 retcon 级审批）。
+	// AddError 后 gorm:update 回调（if db.Error != nil { return }）不再执行 SQL——真拦截。
+	if entryID, ok := ledgerInt64(db, sch, newV, "ID"); ok {
+		if err := guardPinnedAuto(db, sch.Table, entryID, db.Statement.Context); err != nil {
+			db.AddError(err)
+			return
+		}
+	}
 	setLedgerChangedAt(db, sch)
 	db.InstanceSet("ledger_temporal:changes", changes)
 }
@@ -263,6 +271,19 @@ func ledgerBeforeDelete(db *gorm.DB) {
 	oldRow := fetchOldRow(db)
 	if oldRow == nil {
 		return
+	}
+	// 钉住护栏（R2b-7）：删除=语义修改，已钉住条目 auto 删拒收（需走 retcon 级审批）。
+	oldV := reflect.ValueOf(oldRow)
+	for oldV.Kind() == reflect.Pointer {
+		oldV = oldV.Elem()
+	}
+	if oldV.IsValid() {
+		if entryID, ok := ledgerInt64(db, sch, oldV, "ID"); ok {
+			if err := guardPinnedAuto(db, sch.Table, entryID, db.Statement.Context); err != nil {
+				db.AddError(err)
+				return
+			}
+		}
 	}
 	db.InstanceSet("ledger_temporal:delete_old", oldRow)
 }
