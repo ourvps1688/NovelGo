@@ -1,0 +1,88 @@
+package structure
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func ptrID(v int64) *int64 { return &v }
+
+// TestCheckForeshadowLifecycleThreeKinds 三类告警齐发 + 干净条目不告警。
+func TestCheckForeshadowLifecycleThreeKinds(t *testing.T) {
+	entries := []ForeshadowEntry{
+		{ID: 1, Title: "黑衣人身份", Status: "pending", TargetReadingNumber: 12, SourceChapterID: ptrID(3)},
+		{ID: 2, Title: "母亲死因", Status: "pending", TargetReadingNumber: 0},
+		{ID: 3, Title: "三年之约", Status: "resolved", TargetReadingNumber: 20, SourceChapterID: nil, ResolvedChapterID: ptrID(19)},
+		{ID: 4, Title: "干净伏笔", Status: "pending", TargetReadingNumber: 30, SourceChapterID: ptrID(5)},
+		{ID: 5, Title: "已收有源", Status: "resolved", SourceChapterID: ptrID(2), ResolvedChapterID: ptrID(8)},
+		{ID: 6, Title: "作者弃坑", Status: "abandoned", TargetReadingNumber: 0},
+	}
+	got := CheckForeshadowLifecycle(entries, 20)
+	require.Len(t, got, 3)
+
+	require.Equal(t, "S1", got[0].ID)
+	require.Equal(t, CheckForeshadowOverdue, got[0].Check)
+	require.Equal(t, int64(1), got[0].EntryID)
+	require.Contains(t, got[0].Desc, "黑衣人身份")
+	require.Contains(t, got[0].Desc, "预期第 12 章前回收")
+	require.Contains(t, got[0].Desc, "当前进度第 20 章")
+
+	require.Equal(t, "S2", got[1].ID)
+	require.Equal(t, CheckForeshadowNoTarget, got[1].Check)
+	require.Equal(t, int64(2), got[1].EntryID)
+
+	require.Equal(t, "S3", got[2].ID)
+	require.Equal(t, CheckForeshadowUnsourced, got[2].Check)
+	require.Equal(t, int64(3), got[2].EntryID)
+	require.Contains(t, got[2].Desc, "收未埋=无源")
+
+	for _, f := range got {
+		require.Equal(t, FindingLevelDefault, f.Level)
+	}
+}
+
+// TestCheckForeshadowLifecycleZeroFindings 零告警降级：空清单/全干净/仅弃坑 → 空清单。
+func TestCheckForeshadowLifecycleZeroFindings(t *testing.T) {
+	require.Empty(t, CheckForeshadowLifecycle(nil, 50))
+	require.Empty(t, CheckForeshadowLifecycle([]ForeshadowEntry{}, 50))
+	require.Empty(t, CheckForeshadowLifecycle([]ForeshadowEntry{
+		{ID: 1, Title: "在轨", Status: "pending", TargetReadingNumber: 30},
+		{ID: 2, Title: "已收", Status: "resolved", SourceChapterID: ptrID(1), ResolvedChapterID: ptrID(9)},
+		{ID: 3, Title: "弃坑", Status: "abandoned"},
+	}, 20))
+}
+
+// TestCheckForeshadowLifecycleDeterminism 确定性：乱序输入产出逐字一致（按条目 ID 定序编号）。
+func TestCheckForeshadowLifecycleDeterminism(t *testing.T) {
+	entries := []ForeshadowEntry{
+		{ID: 7, Title: "B", Status: "pending", TargetReadingNumber: 0},
+		{ID: 3, Title: "A", Status: "pending", TargetReadingNumber: 2, SourceChapterID: ptrID(1)},
+		{ID: 5, Title: "C", Status: "resolved"},
+	}
+	shuffled := []ForeshadowEntry{entries[1], entries[2], entries[0]}
+	a := CheckForeshadowLifecycle(entries, 9)
+	b := CheckForeshadowLifecycle(shuffled, 9)
+	require.Equal(t, a, b)
+	// 编号按条目 ID 升序：3 → 5 → 7。
+	require.Equal(t, []string{"S1", "S2", "S3"}, []string{a[0].ID, a[1].ID, a[2].ID})
+	require.Equal(t, []int64{3, 5, 7}, []int64{a[0].EntryID, a[1].EntryID, a[2].EntryID})
+}
+
+// TestCheckForeshadowLifecycleBoundary 超期边界：当前进度==预期收章不算超期，过一章才算；
+// 无章节进度（now=0）不触发超期，其余检查照常。
+func TestCheckForeshadowLifecycleBoundary(t *testing.T) {
+	entries := []ForeshadowEntry{
+		{ID: 1, Title: "临界", Status: "pending", TargetReadingNumber: 10, SourceChapterID: ptrID(1)},
+	}
+	require.Empty(t, CheckForeshadowLifecycle(entries, 10), "当章到期不算超期")
+	got := CheckForeshadowLifecycle(entries, 11)
+	require.Len(t, got, 1)
+	require.Equal(t, CheckForeshadowOverdue, got[0].Check)
+
+	// now=0：超期不触发，无收点照常告警。
+	mixed := append(entries, ForeshadowEntry{ID: 2, Title: "无收点", Status: "pending", TargetReadingNumber: 0})
+	got = CheckForeshadowLifecycle(mixed, 0)
+	require.Len(t, got, 1)
+	require.Equal(t, CheckForeshadowNoTarget, got[0].Check)
+}

@@ -55,24 +55,29 @@ func (s *Service) qualityLedgerBlock(ctx context.Context, novelID int64) string 
 	return quality.RenderLedgerBlock(rows)
 }
 
-// ledgerQuickAuditPrompt 构造「档案汇总快审」提示词（快审轨的唯一输入=质量档案汇总块）。
+// ledgerQuickAuditPrompt 构造「档案汇总快审」提示词（快审轨的唯一输入=质量档案汇总块，
+// R2b-1 起同路追加「结构告警」块，空块逐字一致）。
 // 快审回执契约由 contract.go 单源生成（quickAuditFormatLine）。
-func ledgerQuickAuditPrompt(novelID int64, ledgerBlock string) string {
+func ledgerQuickAuditPrompt(novelID int64, ledgerBlock, structBlock string) string {
+	input := ledgerBlock
+	if structBlock != "" {
+		input += "\n\n" + structBlock
+	}
 	return fmt.Sprintf("本书 novel_id=%d。这是一次**质量档案汇总快审**（双轨对照的快审轨，只读）："+
 		"**禁止**调用 get_chapter_list / read 等取正文工具，不得通读或抽读章节正文——只依据下方「质量档案汇总」"+
 		"（每章落盘后的 L0 确定性检查 + L1 增量检查记录）做汇总裁决，评估全书当前的整体质量风险"+
 		"（发现密度、未修复发现、L1 覆盖缺口、字数与章尾钩子等结构指标异常）。"+
 		"快审结论仅供双轨对照，不影响任何裁决与状态；档案全绿/零发现就如实报 pass，宁缺勿错。"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+quickAuditFormatLine()+"。\n\n%s",
-		novelID, ledgerBlock)
+		novelID, input)
 }
 
 // runLedgerQuickAudit 跑一次档案汇总快审并归队结果（快审轨，只读）。
 // 任何失败静默归队 ok=false（降级零提示零报错）。
-func (s *Service) runLedgerQuickAudit(ctx context.Context, runID string, novelID int64, ledgerBlock string) quickAuditResult {
+func (s *Service) runLedgerQuickAudit(ctx context.Context, runID string, novelID int64, ledgerBlock, structBlock string) quickAuditResult {
 	out, err := s.dispatchSkill(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
-		Prompt:    ledgerQuickAuditPrompt(novelID, ledgerBlock),
+		Prompt:    ledgerQuickAuditPrompt(novelID, ledgerBlock, structBlock),
 		MaxTurns:  quickAuditMaxTurns,
 		SessionID: "pipeline:" + runID + ":audit-quick",
 		RunID:     runID,

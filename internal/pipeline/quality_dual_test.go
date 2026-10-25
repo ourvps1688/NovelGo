@@ -157,7 +157,7 @@ func TestNoLedgerDegradesZeroPrompt(t *testing.T) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	// 逐字一致：与空块构造器输出（即改造前文案）完全相同。
-	expected := signabilityPrompt(805, "", "", contextasm.ContextBlocks{})
+	expected := signabilityPrompt(805, "", "", "", contextasm.ContextBlocks{})
 	require.Equal(t, expected, rec.fullPrompt, "无档案时提示词应与无该块逐字一致")
 	require.Equal(t, 0, rec.quickCalls, "无档案不得起快审轨")
 	require.Empty(t, rec.keys)
@@ -197,7 +197,7 @@ func TestParseQuickAudit(t *testing.T) {
 // TestLedgerQuickAuditPromptContract 快审提示词引用回执契约格式串（契约单源锁定）
 // 且以质量档案汇总块为输入。
 func TestLedgerQuickAuditPromptContract(t *testing.T) {
-	p := ledgerQuickAuditPrompt(9, "【质量档案汇总】…块…")
+	p := ledgerQuickAuditPrompt(9, "【质量档案汇总】…块…", "")
 	require.Contains(t, p, quickAuditFormatLine(), "快审提示词应引用契约格式串（单源）")
 	require.Contains(t, p, "【质量档案汇总】…块…")
 	require.Contains(t, p, "novel_id=9")

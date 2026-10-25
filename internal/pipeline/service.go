@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/volume"
 )
 
@@ -97,6 +98,9 @@ type Service struct {
 	// 「质量档案汇总」块进 L2 输入并驱动双轨快审对照（quality_dual.go）。为 nil 时
 	// 降级零提示（提示词与无该块逐字一致）。
 	qualityStore *quality.Store
+	// timelineStore 是伏笔台账（time_entries）的读取口：R2b-1 结构告警块的伏笔
+	// lifecycle 投影来源（structure_block.go）。为 nil 时降级零提示。
+	timelineStore *timeline.Store
 	// featureSink 是本地功能度量的落库口（feature_usage_daily，纯本地不上传）：
 	// 双轨快审对照结果（agree/diff）记一条。为 nil 时跳过；观测自身绝不影响业务行为。
 	featureSink func(ctx context.Context, featureKey string)
@@ -159,6 +163,8 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 		s.featureSink = execStats.AddFeatureUsage
 		// 章节质量档案读取口（milestone 档案汇总块 + 快审轨输入）。
 		s.qualityStore = quality.NewStore(s.store.db, s.logger)
+		// 伏笔台账读取口（R2b-1 结构告警块：伏笔 lifecycle 检查投影来源）。
+		s.timelineStore = timeline.NewStore(s.store.db, s.logger)
 		// stateSyncRunner 默认 nil：依赖 app 层注入（需要 agent.RunSubAgent）。
 		// 生产环境 app/handler.go 会注入；测试可注入 stub 或保持 nil（executeS0Align 跳过 statesync）。
 	}
@@ -920,7 +926,13 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	if ctxt.AuditReason == "milestone" && ctxt.AuditKind != "blueprint" {
 		ledgerBlock = s.qualityLedgerBlock(ctx, novelID)
 	}
-	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID), ledgerBlock,
+	// R2b-1 结构告警块（§8.2 伏笔 lifecycle）：全量进非蓝图 L2 体检输入（§8.5 结构索引
+	// 全量），零告警/取数失败=空块零提示。蓝图体检不涉伏笔台账，不注入。
+	var structBlock string
+	if ctxt.AuditKind != "blueprint" {
+		structBlock = s.structureBlock(ctx, novelID)
+	}
+	auditPrompt := signabilityPrompt(novelID, s.volumeScopeText(ctx, novelID, run.VolumeID), ledgerBlock, structBlock,
 		s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
 	if ctxt.AuditKind == "blueprint" {
 		auditSkill = "blueprint-audit"
@@ -928,12 +940,13 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	}
 	// R2-4 快审轨：milestone 口径且档案存在时，与旧全量通读**并行**跑一次「档案汇总快审」
 	// （只读、不出 issue），归队后与全量裁决做只读对照记本地度量。裁决仍由全量通读把持。
+	// 快审输入与全量同路（R2b-1 结构告警块一并进快审输入，空块逐字一致）。
 	var quickCh <-chan quickAuditResult
 	if ledgerBlock != "" {
 		ch := make(chan quickAuditResult, 1)
-		block := ledgerBlock
+		block, sBlock := ledgerBlock, structBlock
 		go func() {
-			ch <- s.runLedgerQuickAudit(ctx, runID, novelID, block)
+			ch <- s.runLedgerQuickAudit(ctx, runID, novelID, block, sBlock)
 		}()
 		quickCh = ch
 	}
@@ -2991,10 +3004,11 @@ func (s *Service) volumeScopeText(ctx context.Context, novelID int64, volumeID *
 }
 
 // signabilityPrompt 构造 S4 签约体检阶段的任务提示词。scopeText 非空时为卷级作用域说明（以「；」结尾）。
-// ledgerBlock 是「质量档案汇总」块（R2-4，milestone 口径追加进 L2 输入）：空块不注入，
+// ledgerBlock 是「质量档案汇总」块（R2-4，milestone 口径追加进 L2 输入）；structBlock 是
+// 「结构告警」块（R2b-1，伏笔 lifecycle 确定性检查，全量进 L2 输入）：空块不注入，
 // 输出与无该块逐字一致（降级零提示）。blocks 尾部装配上下文块（S4 依据前卷快照校验，
 // WBS 2.3；P0 §0.5 audit=Facts+Voice）。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
-func signabilityPrompt(novelID int64, scopeText, ledgerBlock string, blocks contextasm.ContextBlocks) string {
+func signabilityPrompt(novelID int64, scopeText, ledgerBlock, structBlock string, blocks contextasm.ContextBlocks) string {
 	p := fmt.Sprintf("本书 novel_id=%d。%s请基于 signability-audit 方法论，对已成稿章节做签约级体检："+
 		"用 get_chapter_list 列出章节，**逐章通读全部已成稿章节**（黄金三章逐字精读，其余分批评完，不得抽样跳章），逐维打分并举证；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
@@ -3004,6 +3018,9 @@ func signabilityPrompt(novelID int64, scopeText, ledgerBlock string, blocks cont
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, scopeText)
 	if ledgerBlock != "" {
 		p += "\n\n" + ledgerBlock
+	}
+	if structBlock != "" {
+		p += "\n\n" + structBlock
 	}
 	return p + blocks.Render(contextasm.PurposeAudit)
 }
