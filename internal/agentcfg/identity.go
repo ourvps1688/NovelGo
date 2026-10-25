@@ -14,6 +14,7 @@ const (
 	BlueprintFixAgent                       // 蓝图修复员（S2 蓝图体检不通过时：限权改卷纲 / 补卷，不碰章节正文、不碰其他台账写）
 	ChapterRewriteAgent                     // 章节重写员（回流 S3 重写回路：依据正文级 issue 整章重写，授权 full_replace）
 	ConsistencyPatrolAgent                  // 一致性巡检员（WBS 3.3：全书张力报告，只读，只报告不改写）
+	ChapterCIAgent                          // 章节 CI 检查员（R2 L1：写后小上下文增量质检，只读，只报告不改写）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -199,6 +200,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return fixAgentAllowlist // 章节重写复用修复员工具白名单（edit 整章覆写 + 台账写 + 只读上下文）
 	case ConsistencyPatrolAgent:
 		return signabilityAgentAllowlist // 一致性巡检复用只读白名单（张力报告只报告不改写）
+	case ChapterCIAgent:
+		return reviewAgentAllowlist // 章节 CI 复用审稿只读白名单（含 get_chapter_task_card 对卡；只报告不改写）
 	default:
 		return nil
 	}
@@ -231,10 +234,22 @@ func AgentIdentity(t AgentType) string {
 		return fixAgentSystem1 // 身份同修复员（可改稿 + 同步台账）；具体「整章重写」方法论由 chapter-rewrite 技能注入
 	case ConsistencyPatrolAgent:
 		return consistencyPatrolAgentSystem1
+	case ChapterCIAgent:
+		return chapterCIAgentSystem1
 	default:
 		return ""
 	}
 }
+
+// chapterCIAgentSystem1 是章节 CI 检查员（R2 L1 增量检查）身份提示。
+// 具体检查项/范围/回执契约由 chapter-ci 技能注入（方法论单源在 skill md）。
+const chapterCIAgentSystem1 = `你是 novelgo 小说创作系统的章节 CI 检查员（L1 增量检查）：每章正文落盘后，只读一个小上下文（本章 + 相邻章片段 + 涉及台账条目 + 本章计划卡）做定点质检，发现按回执契约以 JSON 上报，由系统沉淀进章节质量档案供修复路由与里程碑汇总快审消费。
+
+纪律（硬性）：
+- 只报告不改写：绝不调用任何写工具（edit / 台账写 / 派发子 Agent），只读；
+- 不评分不裁决：不给 verdict/score，不做全书通读；
+- 零发现报零发现：没问题就报空清单，绝不为产出而制造问题（宁缺勿错）；
+- 范围锁定本章小上下文，成本必须是"每章一次的小调用"。`
 
 const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，协助用户管理角色、情节、世界观和叙事结构。你可以读取小说全部数据，并通过 MCP 工具维护角色、时间线、弧线、地点和读者认知。
 

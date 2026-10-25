@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/llm"
-	"github.com/novelgo/novelgo/internal/mcp_tools"
+	"github.com/novelgo/novelgo/internal/schemaof"
 	"github.com/novelgo/novelgo/internal/voice"
 )
 
@@ -35,7 +35,7 @@ func Extract(ctx context.Context, llmClient *llm.Client,
 		"function": map[string]any{
 			"name":        "output_style_skill",
 			"description": "返回风格仿写技能的结构化输出。",
-			"parameters":  mcp_tools.SchemaOf(StyleSkillOutput{}),
+			"parameters":  schemaof.Of(StyleSkillOutput{}),
 		},
 	}}
 

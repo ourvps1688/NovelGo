@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/invopop/jsonschema"
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/approval"
 	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/schemaof"
 	"github.com/novelgo/novelgo/internal/search"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/storage"
@@ -390,63 +390,9 @@ func PageMeta[T any](r *storage.PageResult[T]) map[string]any {
 
 // ── JSON Schema 生成 ──────────────────────────────────
 
-// schemaReflector 是全局配置，RequiredFromJSONSchemaTags=true 配合 jsonschema tag 的 required 选项。
-// ExpandedStruct 让输出内联不含 $ref/$defs。
-var schemaReflector = &jsonschema.Reflector{
-	RequiredFromJSONSchemaTags: true,
-	ExpandedStruct:             true,
-}
-
 // SchemaOf 从带 jsonschema tag 的 struct 生成 OpenAI function calling 兼容的 JSON Schema。
-// 内部用 github.com/invopop/jsonschema 生成，取 type/properties/required 并将 $defs 内联到 $ref 位置。
+// 实现在叶子包 internal/schemaof（style/quality 等非 mcp_tools 消费方共用，破 import 环）；
+// 此处保留薄委托，mcp_tools 内部调用方零改动。
 func SchemaOf(v any) json.RawMessage {
-	s := schemaReflector.Reflect(v)
-
-	b, _ := json.Marshal(s)
-	var full map[string]any
-	_ = json.Unmarshal(b, &full)
-
-	clean := map[string]any{"type": full["type"]}
-	if props, ok := full["properties"]; ok {
-		clean["properties"] = props
-	}
-	if req, ok := full["required"]; ok {
-		clean["required"] = req
-	}
-	if defs, ok := full["$defs"]; ok {
-		clean["$defs"] = defs
-	}
-
-	resolved := inlineDefs(clean)
-	raw, _ := json.Marshal(resolved)
-	return raw
-}
-
-// inlineDefs 将 $defs 中的定义递归替换到 $ref 引用位置，消除跨节点跳转。
-func inlineDefs(schema map[string]any) map[string]any {
-	defs, _ := schema["$defs"].(map[string]any)
-	delete(schema, "$defs")
-	return resolveRefs(schema, defs).(map[string]any)
-}
-
-func resolveRefs(node any, defs map[string]any) any {
-	switch v := node.(type) {
-	case map[string]any:
-		if ref, ok := v["$ref"].(string); ok && defs != nil {
-			name := strings.TrimPrefix(ref, "#/$defs/")
-			if def, ok := defs[name].(map[string]any); ok {
-				return resolveRefs(def, defs)
-			}
-		}
-		for k, val := range v {
-			v[k] = resolveRefs(val, defs)
-		}
-		return v
-	case []any:
-		for i, val := range v {
-			v[i] = resolveRefs(val, defs)
-		}
-		return v
-	}
-	return node
+	return schemaof.Of(v)
 }

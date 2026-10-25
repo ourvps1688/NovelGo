@@ -526,6 +526,8 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	if !ref.IsOutline {
 		maintainChapterAfterEdit(ctx, tc, ch, current, proposed)
 		scheduleStateSync(ctx, tc, ch)
+		// 章节 CI（R2）：L0 确定性检查同步落档案 + L1 增量检查去抖派发
+		ScheduleChapterCI(ctx, tc, ch, proposed)
 		// 落库评分结果（评分门禁判分后在此写入章节记录；nil 表示未评分或评分被跳过）
 		if pendingScore != nil {
 			persistChapterScore(ctx, tc, ch, pendingScore)

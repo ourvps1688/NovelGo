@@ -160,6 +160,8 @@ func agentTypeFromString(s string) agentcfg.AgentType {
 		return agentcfg.SignabilityAgent
 	case "fix":
 		return agentcfg.FixAgent
+	case "chapterci":
+		return agentcfg.ChapterCIAgent
 	default:
 		return agentcfg.MainAgent
 	}
