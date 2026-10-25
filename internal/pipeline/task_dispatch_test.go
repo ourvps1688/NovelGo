@@ -219,6 +219,10 @@ func TestRecoverInterruptedLivenessByQueue(t *testing.T) {
 
 // TestRedispatchLivenessByQueue R3c 软暂停语义（替代 Dispatching 补丁布尔）：
 // 活跃任务在 = 执行体还活着（批次边界会继续），不重派；无活跃任务 = 重派新任务。
+//
+// 消费循环故意延后到第二阶段才 Start：第一阶段断言的是「redispatchIfNeeded
+// 不重派」，此时入队的活跃任务若被消费循环合法领取执行，探针计数就混入了
+// 与重派无关的执行语义（10ms 轮询窗口内的竞态，曾在 CI 上随机报红两次）。
 func TestRedispatchLivenessByQueue(t *testing.T) {
 	db := newQueueTestDB(t)
 	svc := newQueueService(t, db)
@@ -229,8 +233,6 @@ func TestRedispatchLivenessByQueue(t *testing.T) {
 		calls.Add(1)
 		return nil
 	})
-	svc.StartTaskQueue()
-	defer svc.StopTaskQueue()
 
 	run := newQueueRun(t, svc, "run-soft", StageS5, StatusRunning)
 
@@ -246,6 +248,8 @@ func TestRedispatchLivenessByQueue(t *testing.T) {
 	// 无活跃任务 → 按阶段重派（新任务，探针执行一次）。
 	_, err = svc.taskStore.AbandonActive(ctx, "test 清扫")
 	require.NoError(t, err)
+	svc.StartTaskQueue() // 消费循环至此才启动：只有重派的新任务会触发探针
+	defer svc.StopTaskQueue()
 	svc.redispatchIfNeeded(ctx, run)
 	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
 		"无活跃执行体时应重派")
