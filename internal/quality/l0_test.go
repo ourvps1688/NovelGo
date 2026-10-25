@@ -203,3 +203,79 @@ func TestRunL0ChecksTaboo(t *testing.T) {
 	_, findingsEmpty := RunL0Checks(L0Input{Text: "  ", TabooList: []string{"虐主"}})
 	assert.NotContains(t, findingsByCheck(findingsEmpty), CheckTaboo)
 }
+
+// TestRunL0ChecksNameDrift 称呼混用（R2b-5）：同一角色 ≥2 种称呼形式同章出现→告警
+// （命中形式保序、正名先于别名）；单一形式/被长形式吞没/短名/无台账零发现（缺省逐字一致）。
+func TestRunL0ChecksNameDrift(t *testing.T) {
+	chars := []L0Character{{Name: "林澈", Aliases: []string{"阿澈", "林公子"}}}
+
+	// 混用：正名+别名同章出现。
+	_, findings := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "林澈握紧了剑。阿澈知道这一战避无可避。", TargetWords: 1, Characters: chars,
+	})
+	by := findingsByCheck(findings)
+	require.Len(t, by[CheckNameDrift], 1)
+	assert.Contains(t, by[CheckNameDrift][0].Desc, "「林澈」")
+	assert.Contains(t, by[CheckNameDrift][0].Desc, "林澈、阿澈", "命中形式保序（正名先于别名）")
+
+	// 单一形式不告警。
+	_, one := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "林澈握紧了剑。", TargetWords: 1, Characters: chars,
+	})
+	assert.NotContains(t, findingsByCheck(one), CheckNameDrift)
+
+	// 长形式吞没短形式：只出现「林澈哥哥」不算混用（宁缺勿错）。
+	long := []L0Character{{Name: "林澈", Aliases: []string{"林澈哥哥"}}}
+	_, sub := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "林澈哥哥握紧了剑。", TargetWords: 1, Characters: long,
+	})
+	assert.NotContains(t, findingsByCheck(sub), CheckNameDrift)
+
+	// 短名（<2 rune）不参与匹配。
+	short := []L0Character{{Name: "林", Aliases: []string{"澈"}}}
+	_, none := RunL0Checks(L0Input{Text: cleanBody(3) + "林和澈都来了。", TargetWords: 1, Characters: short})
+	assert.NotContains(t, findingsByCheck(none), CheckNameDrift)
+
+	// 无台账输入=零发现（缺省=现行行为逐字一致）。
+	_, empty := RunL0Checks(L0Input{Text: cleanBody(3) + "林澈和阿澈都来了。", TargetWords: 1})
+	assert.NotContains(t, findingsByCheck(empty), CheckNameDrift)
+}
+
+// TestRunL0ChecksDeadAppearance 死人出镜（R2b-5）：已死角色名/别名在正文出现→告警
+// （每角色一条、正名先归因）；在世/未标注/未出现零告警。
+func TestRunL0ChecksDeadAppearance(t *testing.T) {
+	dead := false
+	alive := true
+	chars := []L0Character{
+		{Name: "赵铁衣", Aliases: []string{"铁衣"}, Alive: &dead},
+		{Name: "林澈", Aliases: []string{"阿澈"}, Alive: &alive},
+		{Name: "柳氏"}, // nil=未标注
+	}
+
+	// 已死角色出镜：正名+别名都命中也只报一条（正名先归因）。
+	_, findings := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "赵铁衣的传说仍在。铁衣若在，必不会坐视。", TargetWords: 1, Characters: chars,
+	})
+	by := findingsByCheck(findings)
+	require.Len(t, by[CheckDeadAppearance], 1, "同一角色多形式命中只报一条")
+	assert.Contains(t, by[CheckDeadAppearance][0].Desc, "「赵铁衣」")
+	assert.Contains(t, by[CheckDeadAppearance][0].Desc, "已死")
+
+	// 别名单独命中：按别名归因。
+	_, aliasOnly := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "铁衣的名字没人再提起。", TargetWords: 1, Characters: chars,
+	})
+	byAlias := findingsByCheck(aliasOnly)
+	require.Len(t, byAlias[CheckDeadAppearance], 1)
+	assert.Contains(t, byAlias[CheckDeadAppearance][0].Desc, "「铁衣」")
+
+	// 在世/未标注出镜不告警。
+	_, clean := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "林澈和阿澈、柳氏一起喝茶。", TargetWords: 1, Characters: chars,
+	})
+	assert.NotContains(t, findingsByCheck(clean), CheckDeadAppearance)
+
+	// 已死角色未出现不告警。
+	_, absent := RunL0Checks(L0Input{Text: cleanBody(3) + "路上没有行人。", TargetWords: 1, Characters: chars})
+	assert.NotContains(t, findingsByCheck(absent), CheckDeadAppearance)
+}

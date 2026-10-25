@@ -22,6 +22,45 @@ import (
 // planCheckCategoryForeshadowing 是伏笔条目分类（与 pipeline 侧同值）。
 const planCheckCategoryForeshadowing = "foreshadowing"
 
+// charLedgerRow 是 characters 表台账投影（正名/别名/生死态/战力天花板），
+// 供 L0（称呼混用/死人出镜）与 L1.5（写前对账）装配角色台账共用。
+type charLedgerRow struct {
+	ID                int64
+	Name              string
+	Aliases           []string
+	Alive             *bool
+	CapabilityCeiling string
+}
+
+// loadCharLedger 装配本书角色台账（按 id 升序，确定性遍历序）。
+// 失败返回 nil：降级零提示，角色类检查（称呼混用/死人出镜/别名展开）自然跳过。
+func loadCharLedger(ctx context.Context, tc ToolContext) []charLedgerRow {
+	if tc.DB == nil {
+		return nil
+	}
+	var rows []character.Character
+	if err := tc.DB.WithContext(ctx).Where("novel_id = ?", tc.NovelID).Order("id").Find(&rows).Error; err != nil {
+		return nil
+	}
+	out := make([]charLedgerRow, 0, len(rows))
+	for _, r := range rows {
+		var aliases []string
+		if strings.TrimSpace(r.Aliases) != "" {
+			if jerr := json.Unmarshal([]byte(r.Aliases), &aliases); jerr != nil {
+				aliases = nil
+			}
+		}
+		out = append(out, charLedgerRow{
+			ID:                r.ID,
+			Name:              r.Name,
+			Aliases:           aliases,
+			Alive:             r.Alive,
+			CapabilityCeiling: r.CapabilityCeiling,
+		})
+	}
+	return out
+}
+
 // planCheckWarnings 跑写前对账并渲染告警文本。空返回=零告警或降级（零提示）。
 // readingNumber 是本卡/计划对应章号（<=0 时跳过收章区间判定）；
 // hookText 是钩子任务全文（坑表对账作用域）；texts 是全部待禁忌/死亡对账文本。
@@ -60,24 +99,15 @@ func planCheckWarnings(ctx context.Context, tc ToolContext, readingNumber int, h
 		in.Invariants = pins
 	}
 
-	// 角色台账（失败=跳过别名展开，仅按不变量参数名匹配）。
-	var rows []character.Character
-	if err := tc.DB.WithContext(ctx).Where("novel_id = ?", tc.NovelID).Find(&rows).Error; err == nil {
-		for _, r := range rows {
-			var aliases []string
-			if strings.TrimSpace(r.Aliases) != "" {
-				if jerr := json.Unmarshal([]byte(r.Aliases), &aliases); jerr != nil {
-					aliases = nil
-				}
-			}
-			in.Characters = append(in.Characters, structure.CharacterState{
-				ID:                r.ID,
-				Name:              r.Name,
-				Aliases:           aliases,
-				Alive:             r.Alive,
-				CapabilityCeiling: r.CapabilityCeiling,
-			})
-		}
+	// 角色台账（失败=跳过别名展开与角色类检查，仅按不变量参数名匹配）。
+	for _, r := range loadCharLedger(ctx, tc) {
+		in.Characters = append(in.Characters, structure.CharacterState{
+			ID:                r.ID,
+			Name:              r.Name,
+			Aliases:           r.Aliases,
+			Alive:             r.Alive,
+			CapabilityCeiling: r.CapabilityCeiling,
+		})
 	}
 
 	// 题材卡配置（失败=回落缺省：零禁忌零宽限）。

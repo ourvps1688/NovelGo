@@ -160,3 +160,42 @@ func TestPlanCheckDegradesSilent(t *testing.T) {
 	require.NotContains(t, res.Data, "warnings", "坑表失败跳过该项，其余项无告警=零提示")
 	require.NotContains(t, res.Data, "error", "降级零报错")
 }
+
+// TestTaskCardUpsertCharacterLedgerChecks 角色台账检查（R2b-5）：称呼混用/死人出镜
+// 随回执告警返回（只报告不拦截）；角色台账取数失败静默跳过（零提示零报错）。
+func TestTaskCardUpsertCharacterLedgerChecks(t *testing.T) {
+	db := openPlanCheckToolDB(t)
+	tc := planCheckTc(db)
+	dead := false
+	require.NoError(t, db.Create(&character.Character{
+		NovelID: 1, Name: "赵铁衣", Aliases: `["铁衣","老赵"]`, Alive: &dead,
+	}).Error)
+
+	// 称呼混用（铁衣/老赵 两形式）+ 死人出镜：两类告警齐发，立卡照常成功。
+	res, err := (&UpsertChapterTaskCardTool{}).Execute(context.Background(), &UpsertChapterTaskCardArgs{
+		TargetReadingNumber: 5,
+		HookTask:            "本章铁衣托梦，老赵旧事重提。",
+		BeatTask:            "报恩爽点",
+		MomentTask:          "主角守住承诺",
+		AdvanceTask:         "离镇",
+	}, tc)
+	require.NoError(t, err)
+	require.True(t, res.Success, "只报告不拦截")
+	warnings, _ := res.Data["warnings"].(string)
+	require.Contains(t, warnings, "plan_name_drift", "铁衣/老赵 混用")
+	require.Contains(t, warnings, "plan_dead_appearance", "已死角色出镜")
+
+	// 角色台账取数失败：角色类检查静默跳过，零提示零报错。
+	require.NoError(t, db.Migrator().DropTable(&character.Character{}))
+	res, err = (&UpsertChapterTaskCardTool{}).Execute(context.Background(), &UpsertChapterTaskCardArgs{
+		TargetReadingNumber: 6,
+		HookTask:            "本章铁衣托梦，老赵旧事重提。",
+		BeatTask:            "报恩爽点",
+		MomentTask:          "主角守住承诺",
+		AdvanceTask:         "离镇",
+	}, tc)
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.NotContains(t, res.Data, "warnings", "台账失败跳过角色类检查=零提示")
+	require.NotContains(t, res.Data, "error", "降级零报错")
+}

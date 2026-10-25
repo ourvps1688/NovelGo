@@ -4,8 +4,9 @@ package quality
 //
 // 零 LLM、毫秒级、纯函数：单章正文 → 指标全集 + C 系发现清单。
 // 只报告不改写（P2 纪律）：发现恒 warning 级（P1）落档案，不触发修复路由、不返回错误。
-// 台账引用/时间线/冻结事实等需要台账输入的 L0 项属后续扩充（提案 §4.2/§9.2），
-// 本文件先落四项确定性检查：字数门槛、章尾钩子、AI 味套话、文风八键漂移。
+// 本文件落六项确定性检查：字数门槛、章尾钩子、AI 味套话、文风八键漂移、
+// 题材卡禁忌（R2b-3）、角色台账称呼混用/死人出镜（R2b-5，§9.2 表）。
+// 时间线/冻结事实等需要更多台账输入的 L0 项属后续扩充（提案 §4.2/§9.2）。
 
 import (
 	"fmt"
@@ -18,12 +19,14 @@ import (
 
 // L0 检查项标识单源（Summary.ByCheck 键与发现 Check 字段都取自此，禁两处各写一份）。
 const (
-	CheckEmptyChapter = "empty_chapter" // 空章
-	CheckWordCount    = "word_count"    // 字数偏短
-	CheckTailHook     = "tail_hook"     // 章尾钩子存在性
-	CheckAIFlavor     = "ai_flavor"     // AI 味套话（词表单源 internal/text/deslop.go）
-	CheckStyleDrift   = "style_drift"   // 文风八键漂移（P2 口径复用）
-	CheckTaboo        = "taboo"         // 题材卡禁忌清单命中（R2b-3，novel 级配置）
+	CheckEmptyChapter   = "empty_chapter"   // 空章
+	CheckWordCount      = "word_count"      // 字数偏短
+	CheckTailHook       = "tail_hook"       // 章尾钩子存在性
+	CheckAIFlavor       = "ai_flavor"       // AI 味套话（词表单源 internal/text/deslop.go）
+	CheckStyleDrift     = "style_drift"     // 文风八键漂移（P2 口径复用）
+	CheckTaboo          = "taboo"           // 题材卡禁忌清单命中（R2b-3，novel 级配置）
+	CheckNameDrift      = "name_drift"      // 称呼混用：同一角色 ≥2 种称呼形式同章出现（R2b-5）
+	CheckDeadAppearance = "dead_appearance" // 死人出镜：已死角色名/别名在正文出现（R2b-5）
 )
 
 // DefaultTargetWords 是单章默认目标字数（与 identity 写作纪律同一口径：
@@ -45,6 +48,22 @@ var tailHookSignals = []string{
 	"不对劲", "糟了", "不好了",
 }
 
+// l0MinNameRunes 是角色称呼最短匹配长度（rune）：单字名/单字别名噪声大，
+// 宁可漏拦不误报（只报告场景，漏一条无害、错一条误导）。
+const l0MinNameRunes = 2
+
+// L0Character 是角色台账投影（正名/别名/生死态），供称呼混用/死人出镜检查（R2b-5）。
+// 由 characters 表投影而来；各包自持投影，不跨包导出。
+type L0Character struct {
+	// Name 是角色正名。
+	Name string
+	// Aliases 是别名列表（调用方投影时已容错，坏数据按无别名）。
+	Aliases []string
+	// Alive 是生死态三态：nil=未标注，true=在世，false=已死
+	// （只把显式 false 当已死——未标注不算死，宁缺勿错）。
+	Alive *bool
+}
+
 // L0Input 是 L0 确定性检查的输入（全部确定性来源，零 LLM）。
 type L0Input struct {
 	// Text 是本章正文（调用方读不到正文时不应调用 RunL0Checks——降级=不跑）。
@@ -63,6 +82,9 @@ type L0Input struct {
 	// TabooList 是题材卡禁忌清单（CheckerConfig.Taboos）：逐词确定性扫描正文，
 	// 空清单=不检查=现行行为（缺省逐字一致）。
 	TabooList []string
+	// Characters 是角色台账投影（称呼混用/死人出镜检查，R2b-5）：
+	// 空=无台账=两项检查自然跳过零发现（缺省=现行行为逐字一致）。
+	Characters []L0Character
 }
 
 // RunL0Checks 对单章跑 L0 全套确定性检查，返回指标全集与 C 系发现清单。
@@ -116,6 +138,36 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 			raw = append(raw, Finding{
 				Check: CheckTaboo,
 				Desc:  fmt.Sprintf("正文命中题材卡禁忌词「%s」（题材卡优先级最高，请改写规避）", term),
+			})
+		}
+	}
+
+	// 角色台账检查（R2b-5，正向命中判定、宁缺勿错）：称呼混用先于死人出镜（固定顺序）。
+	// 无台账输入=两项自然跳过零发现（缺省=现行行为逐字一致）。
+	if strings.TrimSpace(body) != "" {
+		for _, c := range in.Characters {
+			matched := dropSubsumedForms(matchedForms(body, l0CharForms(c)))
+			if len(matched) < 2 {
+				continue
+			}
+			raw = append(raw, Finding{
+				Check: CheckNameDrift,
+				Desc: fmt.Sprintf("正文混用「%s」的多种称呼：%s（同一章内建议统一称呼，或确认别名表是否该更新）",
+					strings.TrimSpace(c.Name), strings.Join(matched, "、")),
+			})
+		}
+		for _, c := range in.Characters {
+			if c.Alive == nil || *c.Alive {
+				continue // 未标注/在世不判（只把显式已死当已死）
+			}
+			hit := firstMatchedForm(body, l0CharForms(c))
+			if hit == "" {
+				continue
+			}
+			raw = append(raw, Finding{
+				Check: CheckDeadAppearance,
+				Desc: fmt.Sprintf("已死角色「%s」在正文出镜（命中「%s」，台账生死态=已死；回忆/闪回请显式标注，若复活请先更新台账）",
+					strings.TrimSpace(c.Name), hit),
 			})
 		}
 	}
@@ -199,4 +251,60 @@ func hasTailHook(body string) bool {
 		}
 	}
 	return false
+}
+
+// l0CharForms 投影角色的称呼形式（正名+别名，TrimSpace 去空去重保序，过短跳过）。
+func l0CharForms(c L0Character) []string {
+	terms := append([]string{c.Name}, c.Aliases...)
+	out := make([]string, 0, len(terms))
+	seen := map[string]bool{}
+	for _, t := range terms {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] || len([]rune(t)) < l0MinNameRunes {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// matchedForms 返回正文中命中的称呼形式（保形式序：正名先于别名）。
+func matchedForms(body string, forms []string) []string {
+	var out []string
+	for _, f := range forms {
+		if strings.Contains(body, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// firstMatchedForm 返回正文中第一个命中的称呼形式（正名先于别名），未命中空串。
+func firstMatchedForm(body string, forms []string) string {
+	for _, f := range forms {
+		if strings.Contains(body, f) {
+			return f
+		}
+	}
+	return ""
+}
+
+// dropSubsumedForms 剔除被更长命中形式包含的短形式（「林澈」⊂「林澈哥哥」只算一种称呼）：
+// 长短并用的真实混用会漏报，但误报误导、漏报无害（宁缺勿错）。
+func dropSubsumedForms(matched []string) []string {
+	out := make([]string, 0, len(matched))
+	for i, f := range matched {
+		subsumed := false
+		for j, g := range matched {
+			if i != j && strings.Contains(g, f) {
+				subsumed = true
+				break
+			}
+		}
+		if !subsumed {
+			out = append(out, f)
+		}
+	}
+	return out
 }

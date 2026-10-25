@@ -215,3 +215,83 @@ func TestCheckChapterPlanDeterminismAndNumbering(t *testing.T) {
 	require.Contains(t, block, "（time_entries:1）")
 	require.NotContains(t, block, "（）", "空 Ref 不渲染空括号")
 }
+
+// TestCheckChapterPlanNameDrift 称呼混用（R2b-5 计划级同判）：同一角色 ≥2 种形式
+// 出现在计划文本（跨字段也算）→告警；单一形式/长形式吞没短形式/无台账零告警。
+func TestCheckChapterPlanNameDrift(t *testing.T) {
+	chars := []CharacterState{{ID: 7, Name: "林澈", Aliases: []string{"阿澈"}}}
+
+	// 跨字段混用（hook_task 用正名、beat_task 用别名）。
+	got := CheckChapterPlan(PlanCheckInput{
+		Texts: []PlanField{
+			{Name: "hook_task", Text: "本章林澈突破境界"},
+			{Name: "beat_task", Text: "阿澈反打脸"},
+		},
+		Characters: chars,
+	})
+	require.Len(t, got, 1)
+	require.Equal(t, CheckPlanNameDrift, got[0].Check)
+	require.Contains(t, got[0].Desc, "林澈、阿澈")
+	require.Equal(t, "characters:7", got[0].Ref)
+
+	// 单一形式不告警。
+	got = CheckChapterPlan(PlanCheckInput{
+		Texts:      []PlanField{{Name: "hook_task", Text: "本章林澈突破境界"}},
+		Characters: chars,
+	})
+	require.Empty(t, got)
+
+	// 长形式吞没短形式：只出现「林澈哥哥」不算混用（宁缺勿错）。
+	got = CheckChapterPlan(PlanCheckInput{
+		Texts:      []PlanField{{Name: "hook_task", Text: "林澈哥哥上门"}},
+		Characters: []CharacterState{{ID: 7, Name: "林澈", Aliases: []string{"林澈哥哥"}}},
+	})
+	require.Empty(t, got)
+
+	// 无台账不检查（缺省零告警）。
+	got = CheckChapterPlan(PlanCheckInput{
+		Texts: []PlanField{{Name: "hook_task", Text: "林澈和阿澈都来"}},
+	})
+	require.Empty(t, got)
+}
+
+// TestCheckChapterPlanDeadAppearance 死人出镜（R2b-5 计划级同判）：已死角色出镜→告警
+// （首命中字段归因、每角色一条）；在世/未标注不判；已死未出现不判。
+func TestCheckChapterPlanDeadAppearance(t *testing.T) {
+	dead := false
+	alive := true
+	chars := []CharacterState{
+		{ID: 1, Name: "赵铁衣", Aliases: []string{"铁衣"}, Alive: &dead},
+		{ID: 2, Name: "林澈", Aliases: []string{"阿澈"}, Alive: &alive},
+	}
+
+	// 已死角色跨字段出镜：只报一条，首命中字段归因。
+	got := CheckChapterPlan(PlanCheckInput{
+		Texts: []PlanField{
+			{Name: "hook_task", Text: "本章铁衣托梦"},
+			{Name: "beat_task", Text: "赵铁衣的旧部现身"},
+		},
+		Characters: chars,
+	})
+	require.Len(t, got, 1, "同一角色多字段命中只报一条")
+	require.Equal(t, CheckPlanDeadAppearance, got[0].Check)
+	require.Contains(t, got[0].Desc, "hook_task", "首命中字段归因")
+	require.Contains(t, got[0].Desc, "「铁衣」")
+	require.Equal(t, "characters:1", got[0].Ref)
+
+	// 在世/未标注出镜不判（该文本会另触发称呼混用，只断言不出死人出镜）。
+	got = CheckChapterPlan(PlanCheckInput{
+		Texts:      []PlanField{{Name: "hook_task", Text: "林澈和阿澈并肩作战"}},
+		Characters: chars,
+	})
+	for _, f := range got {
+		require.NotEqual(t, CheckPlanDeadAppearance, f.Check)
+	}
+
+	// 已死角色未出现不判。
+	got = CheckChapterPlan(PlanCheckInput{
+		Texts:      []PlanField{{Name: "hook_task", Text: "路人甲路过"}},
+		Characters: chars,
+	})
+	require.Empty(t, got)
+}

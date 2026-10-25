@@ -60,7 +60,8 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 }
 
 // runChapterL0 跑 L0 确定性检查并同步落档案（UpsertL0 只写 L0 列）。
-// 输入缺啥降级啥：无基线零漂移发现、阅读序号取不到发现不带作用域、题材取不到不豁免。
+// 输入缺啥降级啥：无基线零漂移发现、阅读序号取不到发现不带作用域、题材取不到不豁免、
+// 角色台账取不到=称呼/死人检查自然跳过（无台账零发现逐字一致，R2b-5）。
 // 题材卡参数（R2b-3）：章尾钩子必需/禁忌清单取本书检查器配置，未配置/读取失败回落缺省
 // （=现行行为，逐字一致）。
 func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content string) {
@@ -74,6 +75,7 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 		Genre:            novelGenre(ctx, tc),
 		TailHookRequired: cfg.TailHookRequired,
 		TabooList:        cfg.Taboos(),
+		Characters:       chapterCICharacters(ctx, tc),
 	})
 	err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).UpsertL0(ctx, &quality.ChapterQuality{
 		NovelID:       tc.NovelID,
@@ -108,6 +110,17 @@ func chapterCICheckerConfig(ctx context.Context, tc ToolContext) *quality.Checke
 		return quality.DefaultCheckerConfig(tc.NovelID)
 	}
 	return cfg
+}
+
+// chapterCICharacters 投影角色台账到 L0 输入（称呼混用/死人出镜，R2b-5）。
+// 取数失败=nil=角色类检查自然跳过（降级零提示，无台账=零发现逐字一致）。
+func chapterCICharacters(ctx context.Context, tc ToolContext) []quality.L0Character {
+	rows := loadCharLedger(ctx, tc)
+	out := make([]quality.L0Character, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, quality.L0Character{Name: r.Name, Aliases: r.Aliases, Alive: r.Alive})
+	}
+	return out
 }
 
 // runChapterL1 去抖到点后派发 L1 增量检查（回执落档案在派发链内完成）。

@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/quality"
@@ -173,4 +174,28 @@ func TestScheduleChapterCIUsesCheckerConfig(t *testing.T) {
 	}
 	assert.True(t, checks[quality.CheckTaboo], "禁忌命中应落发现")
 	assert.False(t, checks[quality.CheckTailHook], "tail_hook_required=false 应跳过缺钩发现")
+}
+
+// TestScheduleChapterCIUsesCharacterLedger 角色台账检查（R2b-5）：称呼混用/死人出镜
+// 进 L0 发现落档案；未标注生死的出镜不误报。
+func TestScheduleChapterCIUsesCharacterLedger(t *testing.T) {
+	db, tc, ctx := setupCIEnv(t)
+	require.NoError(t, db.AutoMigrate(&character.Character{}))
+	dead := false
+	alive := true
+	require.NoError(t, db.Create(&character.Character{NovelID: 1, Name: "赵铁衣", Aliases: `["铁衣"]`, Alive: &dead}).Error)
+	require.NoError(t, db.Create(&character.Character{NovelID: 1, Name: "林澈", Aliases: `["阿澈"]`, Alive: &alive}).Error)
+	ch := seedCIChapter(t, db, 7)
+
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "铁衣的传说仍在。阿澈与林澈并肩站在城头。")
+
+	got, err := quality.NewStore(db, ciLogger()).GetByChapter(ctx, 1, 7)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	checks := map[string]bool{}
+	for _, f := range quality.ParseFindings(got.L0Findings) {
+		checks[f.Check] = true
+	}
+	assert.True(t, checks[quality.CheckNameDrift], "林澈/阿澈 混用应落发现")
+	assert.True(t, checks[quality.CheckDeadAppearance], "已死的铁衣出镜应落发现")
 }

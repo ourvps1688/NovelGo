@@ -2,11 +2,13 @@ package structure
 
 // plan_check.go —— 章纲级写前检查 L1.5（R2b-4，提案 §9.1 写前把关核心层）。
 //
-// 章纲任务卡/章节计划 vs 坑表/书写不变量/题材卡禁忌的确定性对账：
+// 章纲任务卡/章节计划 vs 坑表/书写不变量/题材卡禁忌/角色台账的确定性对账：
 //   - plan_pit_missing   钩子任务挂的伏笔不在坑表（存在性对账）；
 //   - plan_pit_window    挂坑的预期收章与本章不符（预期收章区间对账）；
 //   - plan_taboo         计划文本命中题材卡禁忌；
-//   - plan_alive_violation 计划让承诺窗口内不死的角色死亡（书写不变量对账）。
+//   - plan_alive_violation 计划让承诺窗口内不死的角色死亡（书写不变量对账）；
+//   - plan_name_drift    同一角色多种称呼混用（角色台账对账，R2b-5）；
+//   - plan_dead_appearance 计划让已死角色出镜（角色台账对账，R2b-5）。
 //
 // 只报告不拦截（P2 纪律）：发现恒 P1 落工具回执告警，不拒收立卡/更新。
 // 确定性启发式、宁缺勿错：引号提取不到锚点/意图词不明/名称过短（<2 字）一律跳过，
@@ -24,10 +26,12 @@ import (
 
 // 写前对账检查项标识单源（发现 Check 字段取自此，禁两处各写一份）。
 const (
-	CheckPlanPitMissing = "plan_pit_missing"     // 钩子任务挂的伏笔不在坑表
-	CheckPlanPitWindow  = "plan_pit_window"      // 挂坑的预期收章区间不符
-	CheckPlanTaboo      = "plan_taboo"           // 计划文本命中题材卡禁忌
-	CheckPlanAlive      = "plan_alive_violation" // 计划让窗口内不死角色死亡
+	CheckPlanPitMissing     = "plan_pit_missing"     // 钩子任务挂的伏笔不在坑表
+	CheckPlanPitWindow      = "plan_pit_window"      // 挂坑的预期收章区间不符
+	CheckPlanTaboo          = "plan_taboo"           // 计划文本命中题材卡禁忌
+	CheckPlanAlive          = "plan_alive_violation" // 计划让窗口内不死角色死亡
+	CheckPlanNameDrift      = "plan_name_drift"      // 计划混用同一角色多种称呼（R2b-5）
+	CheckPlanDeadAppearance = "plan_dead_appearance" // 计划让已死角色出镜（R2b-5）
 )
 
 // planMinNameRunes 是对账名称最短长度（rune）：单字名/单字引号内容噪声大，
@@ -73,8 +77,8 @@ type PlanCheckInput struct {
 
 // CheckChapterPlan 对章纲任务卡/章节计划做写前确定性对账，返回 S 系告警清单。
 // 纯函数、从不返回错误：缺输入的检查自然跳过，整体最多零告警（降级纪律）。
-// 确定性：检查项固定顺序（存在性→区间→禁忌→不变量）、条目 ID 升序、
-// 文本字段给定序，同输入同输出。
+// 确定性：检查项固定顺序（存在性→区间→禁忌→不变量→称呼混用→死人出镜）、
+// 条目 ID 升序、文本字段给定序，同输入同输出。
 func CheckChapterPlan(in PlanCheckInput) []StructFinding {
 	grace := in.WindowGrace
 	if grace < 0 {
@@ -182,6 +186,43 @@ func CheckChapterPlan(in PlanCheckInput) []StructFinding {
 			}
 		}
 	}
+
+	// 5. 称呼混用（R2b-5 计划级同判）：同一角色正名/别名 ≥2 种形式出现在计划文本
+	//    （全卡合并扫描：同一章计划跨字段混用也算；不带字段归因）。
+	//    正向命中判定，不做「未知名字」检查（宁缺勿错）。
+	joined := joinPlanTexts(in.Texts)
+	for _, c := range in.Characters {
+		matched := dropSubsumedPlanForms(matchedPlanForms(joined, planCharForms(c)))
+		if len(matched) < 2 {
+			continue
+		}
+		add(CheckPlanNameDrift,
+			fmt.Sprintf("章纲计划混用「%s」的多种称呼：%s（同一章内建议统一称呼，或确认别名表是否该更新）",
+				strings.TrimSpace(c.Name), strings.Join(matched, "、")),
+			fmt.Sprintf("characters:%d", c.ID))
+	}
+
+	// 6. 死人出镜（R2b-5 计划级同判）：已死角色（Alive=false）的正名/别名出现在计划文本。
+	//    每角色只报一次（首命中字段归因）；nil=未标注、true=在世不判；
+	//    远期计划照判（死亡与章号无关）。回忆/闪回由作者显式标注，此处只报风险。
+	for _, c := range in.Characters {
+		if c.Alive == nil || *c.Alive {
+			continue
+		}
+		for _, f := range in.Texts {
+			text := strings.TrimSpace(f.Text)
+			if text == "" {
+				continue
+			}
+			if hit := matchPlanNames(text, planCharForms(c)); hit != "" {
+				add(CheckPlanDeadAppearance,
+					fmt.Sprintf("%s 计划让已死角色「%s」出镜（命中「%s」，台账生死态=已死；回忆/闪回请显式标注，若复活请先更新台账）",
+						f.Name, strings.TrimSpace(c.Name), hit),
+					fmt.Sprintf("characters:%d", c.ID))
+				break // 同一角色多字段命中只报一次（宁缺勿错）
+			}
+		}
+	}
 	return findings
 }
 
@@ -277,6 +318,64 @@ func matchPlanNames(text string, names []string) string {
 		}
 	}
 	return ""
+}
+
+// planCharForms 投影角色的称呼形式（正名+别名，TrimSpace 去空去重保序，
+// <planMinNameRunes 跳过——单字名噪声大，宁可漏拦不误报）。
+func planCharForms(c CharacterState) []string {
+	terms := append([]string{c.Name}, c.Aliases...)
+	out := make([]string, 0, len(terms))
+	seen := map[string]bool{}
+	for _, t := range terms {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] || len([]rune(t)) < planMinNameRunes {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// joinPlanTexts 合并全部计划文本（字段序，换行分隔）供跨字段称呼混用扫描。
+func joinPlanTexts(fields []PlanField) string {
+	var parts []string
+	for _, f := range fields {
+		if t := strings.TrimSpace(f.Text); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// matchedPlanForms 返回文本命中的称呼形式（保形式序：正名先于别名）。
+func matchedPlanForms(text string, forms []string) []string {
+	var out []string
+	for _, f := range forms {
+		if strings.Contains(text, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// dropSubsumedPlanForms 剔除被更长命中形式包含的短形式（「林澈」⊂「林澈哥哥」只算
+// 一种称呼）：长短并用的真实混用会漏报，但误报误导、漏报无害（宁缺勿错，与 L0 同口径）。
+func dropSubsumedPlanForms(matched []string) []string {
+	out := make([]string, 0, len(matched))
+	for i, f := range matched {
+		subsumed := false
+		for j, g := range matched {
+			if i != j && strings.Contains(g, f) {
+				subsumed = true
+				break
+			}
+		}
+		if !subsumed {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // containsAny 文本含任一信号词。
