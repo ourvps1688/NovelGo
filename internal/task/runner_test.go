@@ -133,6 +133,58 @@ func TestRunnerStopCancelsActiveTask(t *testing.T) {
 	}
 }
 
+func TestRunnerStartIdempotentAndStarted(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var calls atomic.Int32
+	r := NewRunner(s, testLogger(), WithPollInterval(10*time.Millisecond))
+	r.Register("audit", func(ctx context.Context, tk *Task) error {
+		calls.Add(1)
+		return nil
+	})
+	require.False(t, r.Started())
+	r.Start(ctx)
+	r.Start(ctx) // 幂等：重复启动不起第二个循环
+	require.True(t, r.Started())
+
+	_, _, err := s.Enqueue(ctx, Task{Kind: "audit", DedupKey: "audit:run-1"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"重复 Start 起了多个消费循环（任务被消费超过一次）")
+
+	r.Stop()
+	require.False(t, r.Started(), "Stop 后 Started=false（派发口降级依据）")
+	r.Start(ctx) // Stop 后不再启动
+	require.False(t, r.Started())
+}
+
+func TestRunnerPanicRecoveredAsFailure(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var calls atomic.Int32
+	r := NewRunner(s, testLogger(), WithPollInterval(10*time.Millisecond))
+	r.Register("audit", func(ctx context.Context, tk *Task) error {
+		calls.Add(1)
+		panic("boom-panic")
+	})
+	r.Start(ctx)
+	defer r.Stop()
+
+	tk, _, err := s.Enqueue(ctx, Task{Kind: "audit", DedupKey: "audit:run-1", MaxAttempts: 2})
+	require.NoError(t, err)
+
+	// panic 收口为失败：按 MaxAttempts 重试后 dead（进程不陪葬）。
+	waitTaskStatus(t, s.db, tk.ID, StatusDead)
+	require.Equal(t, int32(2), calls.Load())
+	var row Task
+	require.NoError(t, s.db.Take(&row, tk.ID).Error)
+	require.Contains(t, row.LastError, "handler panic")
+}
+
 func TestRunnerHeartbeatReclaimCancelsExecution(t *testing.T) {
 	s, advance := newTestStore(t)
 	ctx := context.Background()

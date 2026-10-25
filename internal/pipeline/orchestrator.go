@@ -43,7 +43,7 @@ func (o *Orchestrator) Advance(ctx context.Context, run *PipelineRun, decision s
 	}
 	// 全量对齐：后台异步执行（建卷+statesync+全本体检），不改变当前阶段。
 	if decision == "align_full" {
-		go o.svc.runFullAlign(ctx, run)
+		o.svc.dispatchExecutor(taskKindFullAlign, run.RunID, run.NovelID, func() { go o.svc.runFullAlign(ctx, run) })
 		return nil
 	}
 
@@ -73,7 +73,7 @@ func (o *Orchestrator) advanceS0(ctx context.Context, run *PipelineRun, _ string
 	if err := o.svc.setS3Running(ctx, run); err != nil {
 		return err
 	}
-	go o.svc.executeS0Align(ctx, run)
+	o.svc.dispatchExecutor(taskKindS0Align, run.RunID, run.NovelID, func() { go o.svc.executeS0Align(ctx, run) })
 	return nil
 }
 
@@ -83,7 +83,7 @@ func (o *Orchestrator) advanceS1(ctx context.Context, run *PipelineRun, _ string
 		return err
 	}
 	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS2, Status: StatusRunning})
-	go o.svc.executeBlueprint(run.RunID, run.NovelID)
+	o.svc.dispatchExecutor(taskKindBlueprint, run.RunID, run.NovelID, func() { go o.svc.executeBlueprint(run.RunID, run.NovelID) })
 	return nil
 }
 
@@ -105,7 +105,7 @@ func (o *Orchestrator) advanceS2(ctx context.Context, run *PipelineRun, decision
 			return err
 		}
 		emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS2, Status: StatusRunning})
-		go o.svc.executeBlueprint(run.RunID, run.NovelID)
+		o.svc.dispatchExecutor(taskKindBlueprint, run.RunID, run.NovelID, func() { go o.svc.executeBlueprint(run.RunID, run.NovelID) })
 		return nil
 	default:
 		// 未知决策回落到写作，避免卡死。

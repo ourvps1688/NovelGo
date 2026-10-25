@@ -25,6 +25,7 @@ import (
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/structure"
+	"github.com/novelgo/novelgo/internal/task"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/volume"
 )
@@ -109,6 +110,11 @@ type Service struct {
 	// featureSink 是本地功能度量的落库口（feature_usage_daily，纯本地不上传）：
 	// 双轨快审对照结果（agree/diff）记一条。为 nil 时跳过；观测自身绝不影响业务行为。
 	featureSink func(ctx context.Context, featureKey string)
+	// taskStore/taskRunner 是 R3b 持久任务队列（internal/task）：执行体派发从裸
+	// goroutine 迁入 task 表（dispatchExecutor，task_dispatch.go）。Runner 未启动 /
+	// 入队失败时 dispatchExecutor 降级走裸 goroutine（迁移前行为，语义不变）。
+	taskStore  *task.Store
+	taskRunner *task.Runner
 }
 
 // NewService 构造流水线服务。
@@ -131,6 +137,13 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 	}
 	if appCtx == nil {
 		s.appCtx = context.Background()
+	}
+	// R3b 持久任务队列：装配执行体派发/消费（消费循环由 StartTaskQueue 显式启动，
+	// 未启动时 dispatchExecutor 降级裸 goroutine）。db 为 nil 时不装配（测试桩）。
+	if db != nil {
+		s.taskStore = task.NewStore(db, nil)
+		s.taskRunner = task.NewRunner(s.taskStore, s.logger)
+		s.registerTaskHandlers()
 	}
 	if ag != nil && skillStore != nil && llmClient != nil && defaultProv != "" && defaultModel != "" {
 		s.skillRunner = func(ctx context.Context, name string, input SkillInput) (SkillOutput, error) {
@@ -435,7 +448,7 @@ func (s *Service) enterBlueprintAudit(ctx context.Context, run *PipelineRun) {
 	}
 	run.ContextJSON = string(updated)
 	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS2, Status: StatusRunning})
-	go s.executeAudit(run.RunID, run.NovelID)
+	s.dispatchExecutor(taskKindAudit, run.RunID, run.NovelID, func() { go s.executeAudit(run.RunID, run.NovelID) })
 }
 
 // summarizeVolumes 读取本书全部卷（create_volume 已落库），拼为前端可渲染的卷结构概览 JSON。
@@ -812,7 +825,7 @@ func (s *Service) freezeVolumeWithNote(ctx context.Context, novelID, volumeID in
 	// 即「卷末」，后台跑一次全书张力报告（只读非阻断，失败只记日志），落 book-run 供
 	// 巡检报告视图。runID 为空（无流水线归属）时跳过，可经控制指令 "patrol" 手动补跑。
 	if runID != "" {
-		go s.runConsistencyPatrol(ctx, runID, novelID)
+		s.dispatchExecutor(taskKindPatrol, runID, novelID, func() { go s.runConsistencyPatrol(ctx, runID, novelID) })
 	}
 }
 
@@ -884,7 +897,7 @@ func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason strin
 	target.CurrentStage = stage
 	target.ContextJSON = string(updated)
 	emitStage(ctx, StagePayload{RunID: target.RunID, NovelID: target.NovelID, Stage: stage, Status: StatusRunning})
-	go s.executeAudit(target.RunID, target.NovelID)
+	s.dispatchExecutor(taskKindAudit, target.RunID, target.NovelID, func() { go s.executeAudit(target.RunID, target.NovelID) })
 }
 
 // enterFix 置 S5 running 并异步执行 signability-fix 修复循环。
@@ -905,7 +918,7 @@ func (s *Service) enterFix(ctx context.Context, run *PipelineRun) {
 		return
 	}
 	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS5, Status: StatusRunning})
-	go s.executeFix(run.RunID, run.NovelID)
+	s.dispatchExecutor(taskKindFix, run.RunID, run.NovelID, func() { go s.executeFix(run.RunID, run.NovelID) })
 }
 
 // executeAudit 异步执行签约体检：跑 signability-audit（只读）→ 解析 issue 清单 →
@@ -2351,7 +2364,7 @@ func (s *Service) enterFinalAudit(ctx context.Context, run *PipelineRun) {
 	run.CurrentStage = StageS6
 	run.ContextJSON = string(updated)
 	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS6, Status: StatusRunning})
-	go s.executeFinalAudit(run.RunID, run.NovelID)
+	s.dispatchExecutor(taskKindFinalAudit, run.RunID, run.NovelID, func() { go s.executeFinalAudit(run.RunID, run.NovelID) })
 }
 
 // executeFinalAudit 异步执行完本级终检：跑 signability-audit 全本 → 解析 → 落 ContextJSON.Audit →
@@ -3319,11 +3332,11 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
 	case "align_full":
 		// 全量对齐：后台异步执行（建卷+statesync+全本体检），不阻塞控制指令返回。
-		go s.runFullAlign(ctx, run)
+		s.dispatchExecutor(taskKindFullAlign, run.RunID, run.NovelID, func() { go s.runFullAlign(ctx, run) })
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
 	case "patrol":
 		// 一致性巡检（WBS 3.3 张力报告）：后台异步执行，只读非阻断、不改写、不改变当前阶段。
-		go s.runConsistencyPatrol(ctx, runID, run.NovelID)
+		s.dispatchExecutor(taskKindPatrol, runID, run.NovelID, func() { go s.runConsistencyPatrol(ctx, runID, run.NovelID) })
 		emitControlAck(ctx, ControlAckPayload{RunID: runID, Cmd: cmd, Status: run.Status})
 	default:
 		return fmt.Errorf("未知控制命令 %q", cmd)
@@ -3410,21 +3423,21 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 		if ctxt.VerifyPending {
 			// R1c：修复后增量复验中断恢复——重派复验而非全量体检，避免误重置修复断点。
 			s.logger.Info("恢复：重新派发增量复验", "run_id", run.RunID, "stage", run.CurrentStage)
-			go s.executeVerify(run.RunID, run.NovelID)
+			s.dispatchExecutor(taskKindVerify, run.RunID, run.NovelID, func() { go s.executeVerify(run.RunID, run.NovelID) })
 			return
 		}
 		s.logger.Info("恢复：重新派发签约体检", "run_id", run.RunID, "stage", run.CurrentStage)
-		go s.executeAudit(run.RunID, run.NovelID)
+		s.dispatchExecutor(taskKindAudit, run.RunID, run.NovelID, func() { go s.executeAudit(run.RunID, run.NovelID) })
 	case StageS5:
 		s.logger.Info("恢复：重新派发 S5 修复（从剩余问题继续）", "run_id", run.RunID)
-		go s.executeFix(run.RunID, run.NovelID)
+		s.dispatchExecutor(taskKindFix, run.RunID, run.NovelID, func() { go s.executeFix(run.RunID, run.NovelID) })
 	case StageS6:
 		s.logger.Info("恢复：重新派发完本终检", "run_id", run.RunID)
-		go s.executeFinalAudit(run.RunID, run.NovelID)
+		s.dispatchExecutor(taskKindFinalAudit, run.RunID, run.NovelID, func() { go s.executeFinalAudit(run.RunID, run.NovelID) })
 	case StageS2:
 		if ctxt.AuditKind == "blueprint" {
 			s.logger.Info("恢复：重新派发蓝图体检", "run_id", run.RunID)
-			go s.executeAudit(run.RunID, run.NovelID)
+			s.dispatchExecutor(taskKindAudit, run.RunID, run.NovelID, func() { go s.executeAudit(run.RunID, run.NovelID) })
 		}
 	default:
 		// S0/S1/S2(生成)/S3：由用户交互或既有入口驱动（写作/蓝图生成由前端操作触发），无需自动派发。

@@ -315,6 +315,36 @@ func TestListActive(t *testing.T) {
 	require.Equal(t, StatusQueued, active[0].Status)
 }
 
+func TestAbandonActive(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	q, _, err := s.Enqueue(ctx, Task{Kind: "audit", DedupKey: "k:q"})
+	require.NoError(t, err)
+	r, _, err := s.Enqueue(ctx, Task{Kind: "audit", DedupKey: "k:r"})
+	require.NoError(t, err)
+	leased, err := s.Lease(ctx, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, q.ID, leased.ID)
+
+	n, err := s.AbandonActive(ctx, "interrupted: 进程退出中断")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n, "queued+running 两条活跃任务被放弃")
+
+	var row Task
+	require.NoError(t, s.db.Take(&row, q.ID).Error)
+	require.Equal(t, StatusDead, row.Status)
+	require.Contains(t, row.LastError, "进程退出中断")
+	row = Task{}
+	require.NoError(t, s.db.Take(&row, r.ID).Error)
+	require.Equal(t, StatusDead, row.Status)
+
+	// 清扫后同键可重开（人工恢复重派语义）。
+	_, existing, err := s.Enqueue(ctx, Task{Kind: "audit", DedupKey: "k:q"})
+	require.NoError(t, err)
+	require.False(t, existing)
+}
+
 func TestMaxAttemptsEffectiveAndIsActive(t *testing.T) {
 	require.Equal(t, DefaultMaxAttempts, (&Task{}).MaxAttemptsEffective())
 	require.Equal(t, DefaultMaxAttempts, (&Task{MaxAttempts: -1}).MaxAttemptsEffective())

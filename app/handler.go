@@ -484,6 +484,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 注入 retcon 审批闸门（WBS 3.1）：S5 交回的写保护/retcon 候选沉淀为持久化候选案，
 	// 作者显式审批后才允许受控回改冻结卷（3.2 接快照 diff/Restore 留痕与回滚）。
 	a.pipeline.SetRetconGate(a.retcons)
+	// R3b 持久任务队列：先放弃进程退出残留的活跃任务（跨进程恢复仍走下面的
+	// RecoverInterruptedRuns 人工链路，外部恢复语义不变），再启动执行体消费。
+	a.pipeline.StartTaskQueue()
 	// 启动恢复：把上次进程遗留的「running 僵尸运行」（执行 goroutine 已消亡）统一置为
 	// paused 并打中断标记，用户点「恢复」时按阶段重新派发执行体。见 RecoverInterruptedRuns。
 	a.pipeline.RecoverInterruptedRuns()

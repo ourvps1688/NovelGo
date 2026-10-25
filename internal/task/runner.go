@@ -7,6 +7,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type Runner struct {
 	active  map[int64]context.CancelFunc // 运行中任务的取消口（Stop 用）
 	wg      sync.WaitGroup
 	stopCh  chan struct{}
+	started bool
 	stopped bool
 }
 
@@ -73,10 +75,25 @@ func (r *Runner) Register(kind string, h Handler) {
 	r.handlers[kind] = h
 }
 
-// Start 启动消费循环（非阻塞；ctx 取消或 Stop 后退出）。
+// Start 启动消费循环（非阻塞；ctx 取消或 Stop 后退出）。幂等：重复调用只起一个循环
+// （OnStartup / RetryStartup 可能多次初始化）。
 func (r *Runner) Start(ctx context.Context) {
+	r.mu.Lock()
+	if r.started || r.stopped {
+		r.mu.Unlock()
+		return
+	}
+	r.started = true
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go r.loop(ctx)
+}
+
+// Started 报告消费循环是否在运行（派发口据此决定入队还是降级直派）。
+func (r *Runner) Started() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.started
 }
 
 // Stop 停止消费并等待运行中任务收口（运行中任务收到取消信号后自行退出，
@@ -88,6 +105,7 @@ func (r *Runner) Stop() {
 		return
 	}
 	r.stopped = true
+	r.started = false
 	close(r.stopCh)
 	for _, cancel := range r.active {
 		cancel()
@@ -180,7 +198,7 @@ func (r *Runner) execute(ctx context.Context, t *Task, handler Handler, cancel c
 	defer close(hbStop)
 	go r.heartbeatLoop(ctx, t, hbStop)
 
-	err := handler(ctx, t)
+	err := r.runHandler(ctx, t, handler)
 	// 终态落库用 WithoutCancel：handler 被取消（Stop/心跳回收）后状态仍要落盘，
 	// 否则任务滞留 running 只能等租约过期。
 	wctx := context.WithoutCancel(ctx)
@@ -198,6 +216,18 @@ func (r *Runner) execute(ctx context.Context, t *Task, handler Handler, cancel c
 	} else if !ok {
 		r.logger.Warn("任务队列：任务已被重领，放弃完成落库（防覆写）", "task_id", t.ID, "attempt", t.Attempt)
 	}
+}
+
+// runHandler 执行 handler 并把 panic 收口为 error（崩溃续跑语义：panic 的执行体
+// 按失败重试/放弃，不让整个进程陪葬——裸 goroutine 时代 panic 会拉垮全进程）。
+func (r *Runner) runHandler(ctx context.Context, t *Task, handler Handler) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			r.logger.Error("任务队列：执行体 panic（收口为失败重试）", "task_id", t.ID, "kind", t.Kind, "panic", p)
+			err = fmt.Errorf("handler panic: %v", p)
+		}
+	}()
+	return handler(ctx, t)
 }
 
 // heartbeatLoop 周期续租；续租失败（任务已被重领/回收）→ 取消执行上下文。

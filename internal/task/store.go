@@ -175,6 +175,20 @@ func (s *Store) Kill(ctx context.Context, id int64, attempt int, errText string)
 	return res.RowsAffected == 1, nil
 }
 
+// AbandonActive 把残留的活跃任务（queued/running）统一置 dead：这些任务属于已退出的
+// 进程，跨进程崩溃续跑由上层「人工恢复后重派」链路负责（外部恢复语义不变），
+// 本队列的租约续跑只在单进程生命周期内生效。应用启动、Runner 开始消费前调用。
+// reason 记入 last_error（仅定位用）。返回被放弃的任务数。
+func (s *Store) AbandonActive(ctx context.Context, reason string) (int64, error) {
+	res := s.db.WithContext(ctx).Model(&Task{}).
+		Where("status IN ?", []string{StatusQueued, StatusRunning}).
+		Updates(map[string]any{"status": StatusDead, "last_error": reason})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
 // ListByDedupKey 返回同幂等键的全部任务（升序，含历史，供观察/测试）。
 func (s *Store) ListByDedupKey(ctx context.Context, dedupKey string) ([]Task, error) {
 	var rows []Task
