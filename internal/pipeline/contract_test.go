@@ -216,7 +216,7 @@ func TestIssueSampleStyleWiring(t *testing.T) {
 	require.Contains(t, frag, `"fix_type"`, "V 系走全量契约（含 fix_type/三枚举）")
 	require.Contains(t, frag, `"target_scope"`, "V 系走全量契约")
 	for name, p := range map[string]string{
-		"signabilityPrompt": signabilityPrompt(1, "", contextasm.ContextBlocks{}),
+		"signabilityPrompt": signabilityPrompt(1, "", "", contextasm.ContextBlocks{}),
 		"finalAuditPrompt":  finalAuditPrompt(1, contextasm.ContextBlocks{}),
 	} {
 		require.Contains(t, p, frag, "%s 应引用 V 系全量契约 schema 片段", name)
@@ -268,7 +268,7 @@ func TestParseFreshAuditStyleIssues(t *testing.T) {
 func TestPromptSchemaSingleSource(t *testing.T) {
 	rules := issueFieldRules()
 	for name, p := range map[string]string{
-		"signabilityPrompt": signabilityPrompt(1, "", contextasm.ContextBlocks{}),
+		"signabilityPrompt": signabilityPrompt(1, "", "", contextasm.ContextBlocks{}),
 		"finalAuditPrompt":  finalAuditPrompt(1, contextasm.ContextBlocks{}),
 		"stockAuditPrompt":  stockAuditPrompt(1),
 	} {

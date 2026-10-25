@@ -138,6 +138,14 @@ func verifyReceiptFormatLine() string {
 	return `{"verified":[{"id":"I..","ok":true,"note":"一行复验结论"}],"summary":"一句话复验小结"}`
 }
 
+// quickAuditFormatLine 生成「档案汇总快审」回执 JSON 格式串（ledgerQuickAuditPrompt
+// 专用，R2-4 双轨对照）：快审只裁决 verdict（pass/needs_fix）+ 一句话 summary，
+// 不出 issue 清单（发现已沉淀在质量档案里）。verdict 与旧全量通读裁决做只读对照，
+// 异同记本地度量；快审结论不进任何裁决与状态（双轨切换另行决策）。
+func quickAuditFormatLine() string {
+	return `{"verdict":"pass|needs_fix","summary":"一句话汇总裁决结论"}`
+}
+
 // auditMissingContractGroups 返回体检结果未覆盖的契约字段组（空 = 契约字段齐全）。
 // 覆盖判定为「任一 issue 携带组内任一字段」，与旧 auditHasFixType/auditHasScopeFields
 // 语义一致。
