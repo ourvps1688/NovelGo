@@ -226,8 +226,9 @@ func TestServiceAuditContinueMarksAudited(t *testing.T) {
 
 // TestServiceAuditFixLoopReAudit 验证：G4 选 fix 后进入 S5 修复闭环，
 // 修复完成后自动回到 S4 复评，复评结果（pass）重写 ContextJSON.Audit。
-// TestServiceRecoverInterruptedAndResume 验证启动恢复闭环：
-// 1) status=running 的僵尸运行被 RecoverInterruptedRuns 置为 paused 并打 interrupted 标记（幂等）；
+// TestServiceRecoverInterruptedAndResume 验证启动恢复闭环（R3c：无补丁布尔，
+// 存活判据=队列活跃任务）：
+// 1) status=running 的僵尸运行被 RecoverInterruptedRuns 置为 paused（幂等）；
 // 2) resume 后按阶段重新派发执行体（S5 → executeFix → emitFixStart），最终回到 S4 闸门。
 func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	db := newTestDB(t)
@@ -254,14 +255,11 @@ func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning,
 		`{"audit":"{\"verdict\":\"needs_fix\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"总体\",\"desc\":\"开场灌水\"}]}","audit_stage":"S4"}`))
 
-	// 启动恢复：running → paused + interrupted 标记。
+	// 启动恢复：running → paused。
 	svc.RecoverInterruptedRuns()
 	got, err := svc.store.GetByRunID(ctx, run.RunID)
 	require.NoError(t, err)
 	require.Equal(t, StatusPaused, got.Status)
-	var ctxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
-	require.True(t, ctxt.Interrupted, "应打上中断标记")
 
 	// 幂等：再次恢复不应改变状态。
 	svc.RecoverInterruptedRuns()
@@ -274,11 +272,6 @@ func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	got, _ = svc.store.GetByRunID(ctx, run.RunID)
 	require.Equal(t, StageS4, got.CurrentStage, "复评应回到 audit_stage=S4 闸门")
 	require.Equal(t, 1, fixStarts, "恢复应重新派发一次修复（emitFixStart）")
-
-	// 恢复后 interrupted 标记应被清除。
-	var ctxt2 GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt2))
-	require.False(t, ctxt2.Interrupted, "派发后应清除中断标记")
 }
 
 // TestServiceFixBatchingAndResume 验证 S5 分批修复 + 失败恢复：
@@ -358,7 +351,6 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 		"单组失败不拖死其它组：并行组的 I3 应已完成并保留断点，失败组的 I1/I2 不落断点")
 	require.Equal(t, 1, pausedCtxt.FixBatchFailures,
 		"run 级失败计数：sweep 有批次失败即计数（有成功批次=有进展，计数重置为 1）")
-	require.False(t, pausedCtxt.Dispatching, "执行体已退出，标记应清除")
 
 	// 恢复：从剩余问题继续（I1 重试 + I2），最终复评通过
 	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "resume"))

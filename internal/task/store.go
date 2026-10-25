@@ -175,6 +175,19 @@ func (s *Store) Kill(ctx context.Context, id int64, attempt int, errText string)
 	return res.RowsAffected == 1, nil
 }
 
+// HasActiveForRun 报告该 run 是否有活跃任务（queued/running，任一 kind）：
+// 执行体存活的租约语义判据（R3c 用它替代 GateContext.Dispatching 补丁布尔）。
+func (s *Store) HasActiveForRun(ctx context.Context, runID string) (bool, error) {
+	var n int64
+	err := s.db.WithContext(ctx).Model(&Task{}).
+		Where("run_id = ? AND status IN ?", runID, []string{StatusQueued, StatusRunning}).
+		Count(&n).Error
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // AbandonActive 把残留的活跃任务（queued/running）统一置 dead：这些任务属于已退出的
 // 进程，跨进程崩溃续跑由上层「人工恢复后重派」链路负责（外部恢复语义不变），
 // 本队列的租约续跑只在单进程生命周期内生效。应用启动、Runner 开始消费前调用。

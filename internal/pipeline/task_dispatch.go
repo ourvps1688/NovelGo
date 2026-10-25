@@ -65,6 +65,23 @@ func (s *Service) StopTaskQueue() {
 	}
 }
 
+// hasActiveTask 是执行体存活的租约语义判据（task 表活跃任务，R3c）：
+// RecoverInterruptedRuns / redispatchIfNeeded 用它替代 GateContext.Dispatching
+// 补丁布尔。队列不可用（表缺失/读失败）时按「无活跃」处理——两条链路的降级
+// 行为与布尔时代一致（Recover 照常暂停僵尸；resume 照常重派，dispatchExecutor
+// 的活跃去重兜底防双执行体）。
+func (s *Service) hasActiveTask(ctx context.Context, runID string) bool {
+	if s.taskStore == nil {
+		return false
+	}
+	active, err := s.taskStore.HasActiveForRun(ctx, runID)
+	if err != nil {
+		s.logger.Debug("任务队列：活跃任务查询失败（按无活跃处理）", "run_id", runID, "err", err)
+		return false
+	}
+	return active
+}
+
 // dispatchExecutor 把执行体派发进持久任务队列（dedup=kind:run_id 活跃去重）。
 // 队列不可用时降级调 legacy（迁移前的裸 goroutine 行为，逐字保留）。
 func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy func()) {

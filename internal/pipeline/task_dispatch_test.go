@@ -183,3 +183,73 @@ func TestDispatchAuditHandlerWiring(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond, "audit 执行体链路未收口")
 	require.False(t, fallback, "队列可用时不降级")
 }
+
+// newQueueRun 直建 run 行（避免 StartPipeline 的异步派发副作用）。
+func newQueueRun(t *testing.T, svc *Service, runID, stage, status string) *PipelineRun {
+	t.Helper()
+	run := &PipelineRun{
+		RunID: runID, NovelID: 9, CurrentStage: stage, Status: status, ContextJSON: "{}",
+	}
+	require.NoError(t, svc.store.Create(context.Background(), run))
+	return run
+}
+
+// TestRecoverInterruptedLivenessByQueue R3c 存活判据（替代 Interrupted 补丁布尔）：
+// 有活跃任务 = 执行体真活着，跳过暂停；无活跃任务 = 僵尸照旧置 paused。
+func TestRecoverInterruptedLivenessByQueue(t *testing.T) {
+	db := newQueueTestDB(t)
+	svc := newQueueService(t, db)
+	ctx := context.Background()
+	run := newQueueRun(t, svc, "run-live", StageS5, StatusRunning)
+
+	_, _, err := svc.taskStore.Enqueue(ctx, task.Task{
+		Kind: taskKindFix, DedupKey: taskKindFix + ":" + run.RunID, RunID: run.RunID, NovelID: run.NovelID})
+	require.NoError(t, err)
+	svc.RecoverInterruptedRuns()
+	got, err := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, err)
+	require.Equal(t, StatusRunning, got.Status, "活跃任务在队列 → 执行体活着，跳过暂停")
+
+	_, err = svc.taskStore.AbandonActive(ctx, "test 清扫")
+	require.NoError(t, err)
+	svc.RecoverInterruptedRuns()
+	got, _ = svc.store.GetByRunID(ctx, run.RunID)
+	require.Equal(t, StatusPaused, got.Status, "无活跃任务 → 僵尸运行照旧置 paused")
+}
+
+// TestRedispatchLivenessByQueue R3c 软暂停语义（替代 Dispatching 补丁布尔）：
+// 活跃任务在 = 执行体还活着（批次边界会继续），不重派；无活跃任务 = 重派新任务。
+func TestRedispatchLivenessByQueue(t *testing.T) {
+	db := newQueueTestDB(t)
+	svc := newQueueService(t, db)
+	ctx := context.Background()
+	var calls atomic.Int32
+	// 覆盖 fix handler 为探针，避免真跑执行体（Register 后注册覆盖）。
+	svc.taskRunner.Register(taskKindFix, func(_ context.Context, tk *task.Task) error {
+		calls.Add(1)
+		return nil
+	})
+	svc.StartTaskQueue()
+	defer svc.StopTaskQueue()
+
+	run := newQueueRun(t, svc, "run-soft", StageS5, StatusRunning)
+
+	_, _, err := svc.taskStore.Enqueue(ctx, task.Task{
+		Kind: taskKindFix, DedupKey: taskKindFix + ":" + run.RunID, RunID: run.RunID, NovelID: run.NovelID})
+	require.NoError(t, err)
+	svc.redispatchIfNeeded(ctx, run)
+	rows, err := svc.taskStore.ListByDedupKey(ctx, taskKindFix+":"+run.RunID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "活跃执行体不重派（软暂停等边界继续）")
+	require.Zero(t, calls.Load(), "探针未被触发")
+
+	// 无活跃任务 → 按阶段重派（新任务，探针执行一次）。
+	_, err = svc.taskStore.AbandonActive(ctx, "test 清扫")
+	require.NoError(t, err)
+	svc.redispatchIfNeeded(ctx, run)
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"无活跃执行体时应重派")
+	rows, err = svc.taskStore.ListByDedupKey(ctx, taskKindFix+":"+run.RunID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "重派产生新任务（旧任务已终态不占键）")
+}

@@ -98,15 +98,10 @@ type GateContext struct {
 	// 建议性报告，只报告不改写、绝不进自动修复路由（区别于 Audit/StockAudit），改不改由作者定。
 	// 卷末（G_freeze 冻结成功）自动一次 + 控制指令 "patrol" 手动触发，供巡检报告视图只读展示。
 	PatrolReport string `json:"patrol_report,omitempty"`
-	// Interrupted 标记该运行是否因应用重启被启动恢复机制暂停（执行 goroutine 已随旧进程消亡，
-	// DB 状态却停留在 running）。恢复（ControlPipeline resume）时据此按当前阶段重新派发
-	// 执行体（体检/修复），派发后清除该标记，避免正常暂停的运行被重复派发。
-	Interrupted bool `json:"interrupted,omitempty"`
-	// Dispatching 标记当前阶段的执行体（体检/修复 agent goroutine）是否存活。
-	// 派发时置 true、退出时置 false；恢复（resume）据此区分「软暂停」（执行体仍在，
-	// 会在批次/阶段边界感知状态变化并继续）与「无人执行」（需重新派发）。进程重启后
-	// 该标记失真（goroutine 必然已消亡），由 RecoverInterruptedRuns 统一清除。
-	Dispatching bool `json:"dispatching,omitempty"`
+	// （R3c 退役）Interrupted/Dispatching 两个补丁布尔已删除：执行体存活与中断恢复
+	// 改用任务队列的租约语义（task.Store.HasActiveForRun + kind:run_id 活跃去重，
+	// 见 task_dispatch.go）。旧 ContextJSON 里残留的 interrupted/dispatching 键
+	// 由 json.Unmarshal 忽略，无兼容问题。
 	// FixStates 记录 S5 修复各问题的完成状态（issueID → "fixed"/"skipped"/"rewrite"）。
 	// 分批修复每完成一批即落库，作为断点续修依据：修复失败暂停后恢复时跳过已完成问题；
 	// rewrite 标记正文级问题已被路由到 S3 重写回路，S5 不再重试（消除对修不动问题的空转）。

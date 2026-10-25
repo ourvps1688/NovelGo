@@ -932,7 +932,6 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		return
 	}
 	auditStage := run.CurrentStage // S4 / S4b / S6 / S2（蓝图体检）
-	s.setDispatching(ctx, runID, true)
 
 	// 提前解析上下文，按 AuditKind 选择体检技能与提示词（蓝图走 blueprint-audit，其余走 signability-audit）。
 	var ctxt GateContext
@@ -996,7 +995,6 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	})
 	if err != nil {
 		s.logger.Error("S4 体检执行失败", "run_id", runID, "err", err)
-		s.setDispatching(ctx, runID, false)
 		// 失败落地为 paused：恢复时按需重派发，避免状态停在 running 无人执行。
 		if serr := s.store.SetStageStatus(ctx, runID, auditStage, StatusPaused, run.ContextJSON); serr != nil {
 			s.logger.Error("S4 体检：失败落暂停失败", "err", serr)
@@ -1061,7 +1059,6 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 
 	// 守卫：若异步执行期间用户已推进（如点了 fix / continue），不覆盖新状态。
 	// 无论守卫结果如何，本执行体即将退出，先清除执行中标记。
-	s.setDispatching(ctx, runID, false)
 	cur, gerr := s.store.GetByRunID(ctx, runID)
 	if gerr == nil && (cur.CurrentStage != auditStage || cur.Status != StatusRunning) {
 		s.logger.Info("S4 体检：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
@@ -1300,28 +1297,9 @@ type fixSweepFailure struct {
 	err error
 }
 
-// setDispatching 更新 GateContext.Dispatching 标记（执行体派发/退出时调用），
-// 供 resume 区分「执行体仍存活（软暂停，会在批次/阶段边界感知状态变化）」与
-// 「无人执行（需重新派发）」。
-func (s *Service) setDispatching(ctx context.Context, runID string, v bool) {
-	run, err := s.store.GetByRunID(ctx, runID)
-	if err != nil {
-		return
-	}
-	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-	}
-	if ctxt.Dispatching == v {
-		return
-	}
-	ctxt.Dispatching = v
-	if updated, merr := json.Marshal(ctxt); merr == nil {
-		if err := s.store.SetStatus(ctx, runID, run.Status, string(updated)); err != nil {
-			s.logger.Warn("更新执行中标记失败（非阻断）", "run_id", runID, "err", err)
-		}
-	}
-}
+// （R3c 退役）执行体存活不再由 GateContext.Dispatching 自报：队列的 kind:run_id
+// 活跃去重即「活跃不重派、已退出即重派」（dispatchExecutor），存活判据见
+// task.Store.HasActiveForRun。
 
 // syncIssueRow 同步一条 issue 工单（pipeline_issues）的状态流转。
 // 非阻断口径：工单表是结构化事实源，缺表/写失败只告警——JSON 副本（Audit/Backlog）
@@ -1340,7 +1318,6 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		s.logger.Error("S5 修复：加载流水线失败", "run_id", runID, "err", err)
 		return
 	}
-	s.setDispatching(ctx, runID, true)
 
 	var ctxt GateContext
 	if run.ContextJSON != "" {
@@ -1365,7 +1342,6 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		if reason := auditStaleReason(auditData); reason != "" {
 			s.logger.Warn("S5 修复：检测到陈旧体检，拒绝派发",
 				"run_id", runID, "issues", len(auditData.Issues), "reason", reason)
-			s.setDispatching(ctx, runID, false)
 			emitFixDone(ctx, map[string]any{
 				"run_id":      runID,
 				"novel_id":    novelID,
@@ -1649,7 +1625,6 @@ func (s *Service) executeFix(runID string, novelID int64) {
 
 	// 收口（run 级语义，与既有失败通道一致）：守卫停止 > 失败计数/暂停/闸门 > 全部成功进复评。
 	if guardStopped {
-		s.setDispatching(ctx, runID, false)
 		emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID,
 			"ok": false, "error": "修复已被暂停或中止，等待恢复"})
 		return
@@ -1668,7 +1643,6 @@ func (s *Service) executeFix(runID string, novelID int64) {
 			errMsgs = append(errMsgs, f.err.Error())
 		}
 		batchErrText := strings.Join(errMsgs, "；")
-		s.setDispatching(ctx, runID, false)
 		// 透出供应商健康度：若近期频发流式空闲超时，提示用户这是 Provider 挂起而非代码问题，
 		// 避免误判为「修复功能坏了」。idle 超时由 llm 层空闲看门狗记录。
 		idleCount := llm.RecentIdleTimeouts(15 * time.Minute)
@@ -1725,7 +1699,6 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 	cur, gerr := s.store.GetByRunID(ctx, runID)
 	if gerr == nil && (cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
 		s.logger.Info("S5 修复：状态已变更，放弃复评", "stage", cur.CurrentStage, "status", cur.Status)
-		s.setDispatching(ctx, runID, false)
 		return
 	}
 
@@ -1775,10 +1748,8 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 	ctxtJSON, _ := json.Marshal(ctxt)
 	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusRunning, string(ctxtJSON)); err != nil {
 		s.logger.Error("S5 修复：复评前复位阶段失败", "err", err)
-		s.setDispatching(ctx, runID, false)
 		return
 	}
-	s.setDispatching(ctx, runID, false)
 	if fullReaudit {
 		s.executeAudit(runID, novelID)
 		return
@@ -1801,10 +1772,8 @@ func (s *Service) handbackManualNoVerify(ctx context.Context, runID string, nove
 	}
 	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(ctxtJSON)); err != nil {
 		s.logger.Error("S5 修复：全 skip 转人工落闸失败", "err", err)
-		s.setDispatching(ctx, runID, false)
 		return
 	}
-	s.setDispatching(ctx, runID, false)
 	emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": true,
 		"manual_handoff": true, "manual_count": skippedCount, "error": msg})
 	s.emitGateDecision(ctx, runID, novelID, auditStage,
@@ -1824,7 +1793,6 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 		return
 	}
 	auditStage := run.CurrentStage // 复位后的体检阶段（S4 / S4b）
-	s.setDispatching(ctx, runID, true)
 
 	var ctxt GateContext
 	if run.ContextJSON != "" {
@@ -1874,7 +1842,6 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 		})
 		if verr != nil {
 			s.logger.Error("S5 增量复验执行失败", "run_id", runID, "err", verr)
-			s.setDispatching(ctx, runID, false)
 			// 失败落地为 paused（VerifyPending 保持 true）：恢复时按增量复验重派发。
 			if serr := s.store.SetStageStatus(ctx, runID, auditStage, StatusPaused, run.ContextJSON); serr != nil {
 				s.logger.Error("S5 增量复验：失败落暂停失败", "err", serr)
@@ -1950,7 +1917,6 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 	run.ContextJSON = string(updated)
 
 	// 守卫：异步执行期间用户已推进则不覆盖；执行体退出前清执行中标记。
-	s.setDispatching(ctx, runID, false)
 	cur, gerr := s.store.GetByRunID(ctx, runID)
 	if gerr == nil && (cur.CurrentStage != auditStage || cur.Status != StatusRunning) {
 		s.logger.Info("S5 增量复验：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
@@ -2021,7 +1987,6 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 	// 守卫：若异步期间状态已变更（如用户中止），不重复处理。
 	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
 		(cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
-		s.setDispatching(ctx, runID, false)
 		return
 	}
 
@@ -2069,7 +2034,6 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 	// 自动重写：逐章派发章节重写 agent（每章独立会话，充足轮数预算）。
 	// 派发范围=可派发项（上方已过滤写保护与 V 系豁免；正常路径下 bodyIssuesOf 已把
 	// 写保护项分流进 RetconBacklog，此处兜底旧数据）。
-	s.setDispatching(ctx, runID, true)
 	total := 0
 	for _, item := range dispatchable {
 		total += len(chaptersByReading[item.ID])
@@ -2116,7 +2080,6 @@ rewriteLoop:
 			s.logger.Error("S5 重写：落库重写轮数失败", "err", serr)
 		}
 	}
-	s.setDispatching(ctx, runID, false)
 	s.logger.Info("S5 重写：自动重写完成，回到复评", "run_id", runID, "round", ctxt.RewriteRounds, "total", total)
 	s.executeAudit(runID, novelID)
 }
@@ -2161,7 +2124,6 @@ func (s *Service) handoffRewriteWithMsg(ctx context.Context, runID string, novel
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
 			Status: StatusPaused, Note: msg})
 	}
-	s.setDispatching(ctx, runID, false)
 }
 
 // handoffRetconToUser 把命中冻结卷写保护/retcon 候选的问题交回人工裁决：明确暂停当前
@@ -2194,7 +2156,6 @@ func (s *Service) handoffRetconToUser(ctx context.Context, runID string, novelID
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
 			Status: StatusPaused, Note: msg})
 	}
-	s.setDispatching(ctx, runID, false)
 }
 
 // persistRetconCandidates 把 RetconBacklog 逐项沉淀为持久化 retcon 候选案（WBS 3.1
@@ -2376,7 +2337,6 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 		s.logger.Error("S6 终检：加载流水线失败", "run_id", runID, "err", err)
 		return
 	}
-	s.setDispatching(ctx, runID, true)
 
 	out, err := s.dispatchSkill(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
@@ -2386,7 +2346,6 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 	})
 	if err != nil {
 		s.logger.Error("S6 终检执行失败", "run_id", runID, "err", err)
-		s.setDispatching(ctx, runID, false)
 		if serr := s.store.SetStageStatus(ctx, runID, StageS6, StatusPaused, run.ContextJSON); serr != nil {
 			s.logger.Error("S6 终检：失败落暂停失败", "err", serr)
 		}
@@ -2412,7 +2371,6 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 
 	// 守卫：若异步期间状态已变更（如用户中止），不覆盖新状态。
 	// 无论守卫结果如何，本执行体即将退出，先清除执行中标记。
-	s.setDispatching(ctx, runID, false)
 	cur, gerr := s.store.GetByRunID(ctx, runID)
 	if gerr == nil && (cur.CurrentStage != StageS6 || cur.Status != StatusRunning) {
 		s.logger.Info("S6 终检：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
@@ -3345,10 +3303,12 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 }
 
 // RecoverInterruptedRuns 应用启动时调用：扫描 status=running 的「僵尸运行」。
-// 流水线的执行体是内存 goroutine，随进程退出而消亡，但 DB 状态仍停留在 running——
-// 重启后用户会看到「修复中/体检中」却永远没有进展（也不报错）。此处统一置为 paused，
-// 并在 ContextJSON 打上 interrupted 标记；用户点「恢复」时按阶段重新派发执行体。
-// 已打过标记的运行跳过，保证幂等（OnStartup / RetryStartup 可能多次调用）。
+// 流水线的执行体随进程退出而消亡，但 DB 状态仍停留在 running——
+// 重启后用户会看到「修复中/体检中」却永远没有进展（也不报错）。此处统一置为 paused；
+// 用户点「恢复」时按阶段重新派发执行体（redispatchIfNeeded）。
+// 存活判据是任务队列的租约语义（R3c，替代 Interrupted/Dispatching 补丁布尔）：
+// 该 run 仍有活跃任务 = 执行体真活着，跳过不暂停。幂等（OnStartup / RetryStartup
+// 可能多次调用）由此覆盖：已暂停的运行不在 running 扫描里，活着的运行有活跃任务。
 func (s *Service) RecoverInterruptedRuns() {
 	ctx := s.appCtx
 	runs, err := s.store.ListByStatus(ctx, StatusRunning)
@@ -3357,21 +3317,11 @@ func (s *Service) RecoverInterruptedRuns() {
 		return
 	}
 	for _, run := range runs {
-		var ctxt GateContext
-		if run.ContextJSON != "" {
-			_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-		}
-		if ctxt.Interrupted {
+		if s.hasActiveTask(ctx, run.RunID) {
+			s.logger.Info("启动恢复：执行体仍有活跃任务在队列中，跳过暂停", "run_id", run.RunID)
 			continue
 		}
-		ctxt.Interrupted = true
-		ctxt.Dispatching = false // 进程已重启，旧执行体必然已消亡，清除失真标记
-		updated, merr := json.Marshal(ctxt)
-		if merr != nil {
-			s.logger.Error("启动恢复：序列化上下文失败", "run_id", run.RunID, "err", merr)
-			continue
-		}
-		if err := s.store.SetStatus(ctx, run.RunID, StatusPaused, string(updated)); err != nil {
+		if err := s.store.SetStatus(ctx, run.RunID, StatusPaused, run.ContextJSON); err != nil {
 			s.logger.Error("启动恢复：置暂停失败", "run_id", run.RunID, "err", err)
 			continue
 		}
@@ -3396,27 +3346,20 @@ func (s *Service) RecoverInterruptedRuns() {
 	}
 }
 
-// redispatchInterrupted 对带 interrupted 标记的已暂停运行，在恢复（resume）时按当前阶段
-// 重新派发执行体，并清除标记。体检（executeAudit）与修复（executeFix）均为幂等重入设计：
-// 它们从 DB 重新加载状态、末尾有「状态未变更」守卫，重复派发不会产生双写。
-// redispatchIfNeeded 在恢复（resume）后按需重新派发执行体。执行体是否存活以
-// GateContext.Dispatching 为准：标记为真说明 goroutine 仍在运行（软暂停，会在
-// 批次/阶段边界感知状态变化并继续），无需派发；否则按当前阶段重新派发
-// （体检/修复均为幂等重入设计）。应用重启遗留的中断标记（Interrupted）在此一并清除。
+// redispatchIfNeeded 在恢复（resume）后按需重新派发执行体。执行体存活以任务队列的
+// 活跃任务为准（R3c 租约语义，替代 GateContext.Dispatching 补丁布尔）：仍有活跃任务 =
+// 执行体还活着（软暂停，会在批次/阶段边界感知状态变化并继续），不重派；
+// 无活跃任务 = 无人执行，按当前阶段重新派发。体检（executeAudit）与修复（executeFix）
+// 均为幂等重入设计：从 DB 重新加载状态、末尾有「状态未变更」守卫，重复派发不产生双写；
+// dispatchExecutor 的 kind:run_id 活跃去重再兜底防双执行体。
 func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 	var ctxt GateContext
 	if run.ContextJSON != "" {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
 	}
-	if ctxt.Dispatching {
+	if s.hasActiveTask(ctx, run.RunID) {
 		s.logger.Info("恢复：执行体仍在运行（软暂停），等待其在边界继续", "run_id", run.RunID, "stage", run.CurrentStage)
 		return
-	}
-	ctxt.Interrupted = false
-	if updated, merr := json.Marshal(ctxt); merr == nil {
-		if err := s.store.SetStatus(ctx, run.RunID, StatusRunning, string(updated)); err != nil {
-			s.logger.Warn("恢复：清除中断标记失败（非阻断）", "run_id", run.RunID, "err", err)
-		}
 	}
 	switch run.CurrentStage {
 	case StageS4, StageS4b:
