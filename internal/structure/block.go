@@ -17,10 +17,10 @@ func RenderBlock(findings []StructFinding) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("【结构告警】长程结构索引层确定性检查（伏笔 lifecycle）产出的风险告警" +
+	b.WriteString("【结构告警】长程结构索引层确定性检查（伏笔 lifecycle / 书写不变量）产出的风险告警" +
 		"（只报告不改写，供体检汇总裁决参照；请对告警点做定向核验）：\n")
 	for _, f := range findings {
-		fmt.Fprintf(&b, "  - %s[%s] %s（time_entries:%d）\n", f.ID, f.Check, oneLine(f.Desc), f.EntryID)
+		fmt.Fprintf(&b, "  - %s[%s] %s（%s）\n", f.ID, f.Check, oneLine(f.Desc), f.Ref)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

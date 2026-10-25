@@ -23,11 +23,11 @@ func CheckForeshadowLifecycle(entries []ForeshadowEntry, nowReadingNumber int) [
 	var findings []StructFinding
 	add := func(check, desc string, entryID int64) {
 		findings = append(findings, StructFinding{
-			ID:      fmt.Sprintf("S%d", len(findings)+1),
-			Check:   check,
-			Level:   FindingLevelDefault,
-			Desc:    desc,
-			EntryID: entryID,
+			ID:    fmt.Sprintf("S%d", len(findings)+1),
+			Check: check,
+			Level: FindingLevelDefault,
+			Desc:  desc,
+			Ref:   fmt.Sprintf("time_entries:%d", entryID),
 		})
 	}
 	for _, e := range sorted {

@@ -42,14 +42,15 @@ type ForeshadowEntry struct {
 
 // StructFinding 是结构索引层的一条确定性告警（S 系命名空间，只报告不改写）。
 type StructFinding struct {
-	// ID 是本层稳定键：S 系（S1/S2/…），按检查产出顺序编号。
+	// ID 是本层稳定键：S 系（S1/S2/…），按检查产出顺序编号（跨检查器合并时由
+	// MergeFindings 重排，保证块内唯一且确定）。
 	ID string `json:"id"`
-	// Check 是检查项标识（CheckForeshadow*）。
+	// Check 是检查项标识（CheckForeshadow* / 不变量 kind）。
 	Check string `json:"check"`
 	// Level 是严重级：恒 P1（FindingLevelDefault）。
 	Level string `json:"level"`
 	// Desc 是告警描述（人读文案，只报告）。
 	Desc string `json:"desc"`
-	// EntryID 是涉及的台账条目 ID（time_entries.id）。
-	EntryID int64 `json:"entry_id"`
+	// Ref 是涉及的台账条目引用（"表名:id"，如 time_entries:3 / pinned_invariants:2）。
+	Ref string `json:"ref"`
 }

@@ -30,6 +30,7 @@ var mainAgentTools = []string{
 	"get_timeline", "create_timeline_entry", "update_timeline_entry",
 	"update_chapter_plan",
 	"upsert_chapter_task_card", "get_chapter_task_card",
+	"upsert_pinned_invariant", "list_pinned_invariants",
 	"get_story_arcs", "create_story_arc", "update_story_arc",
 	"create_arc_node", "update_arc_node",
 	"get_reader_perspective", "create_reader_perspective_entry", "update_reader_perspective_entry",
@@ -121,7 +122,8 @@ var fixAgentTools = []string{
 	"edit",                                              // 改章节正文 / 写卷纲（volumes/id_{id}.md）
 	"update_chapter_plan",                               // 修章细纲
 	"upsert_chapter_task_card", "get_chapter_task_card", // 修/查章纲任务卡（重写后校准卡）
-	"create_volume", // 补卷
+	"list_pinned_invariants", // 只读书写不变量（修复须遵守作者钉住的硬约束）
+	"create_volume",          // 补卷
 	"create_character", "update_character", "update_character_relationship",
 	"create_location", "update_location", "create_location_relation", "update_location_relation",
 	"create_timeline_entry", "update_timeline_entry",

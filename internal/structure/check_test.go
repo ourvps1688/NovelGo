@@ -23,18 +23,18 @@ func TestCheckForeshadowLifecycleThreeKinds(t *testing.T) {
 
 	require.Equal(t, "S1", got[0].ID)
 	require.Equal(t, CheckForeshadowOverdue, got[0].Check)
-	require.Equal(t, int64(1), got[0].EntryID)
+	require.Equal(t, "time_entries:1", got[0].Ref)
 	require.Contains(t, got[0].Desc, "黑衣人身份")
 	require.Contains(t, got[0].Desc, "预期第 12 章前回收")
 	require.Contains(t, got[0].Desc, "当前进度第 20 章")
 
 	require.Equal(t, "S2", got[1].ID)
 	require.Equal(t, CheckForeshadowNoTarget, got[1].Check)
-	require.Equal(t, int64(2), got[1].EntryID)
+	require.Equal(t, "time_entries:2", got[1].Ref)
 
 	require.Equal(t, "S3", got[2].ID)
 	require.Equal(t, CheckForeshadowUnsourced, got[2].Check)
-	require.Equal(t, int64(3), got[2].EntryID)
+	require.Equal(t, "time_entries:3", got[2].Ref)
 	require.Contains(t, got[2].Desc, "收未埋=无源")
 
 	for _, f := range got {
@@ -66,7 +66,7 @@ func TestCheckForeshadowLifecycleDeterminism(t *testing.T) {
 	require.Equal(t, a, b)
 	// 编号按条目 ID 升序：3 → 5 → 7。
 	require.Equal(t, []string{"S1", "S2", "S3"}, []string{a[0].ID, a[1].ID, a[2].ID})
-	require.Equal(t, []int64{3, 5, 7}, []int64{a[0].EntryID, a[1].EntryID, a[2].EntryID})
+	require.Equal(t, []string{"time_entries:3", "time_entries:5", "time_entries:7"}, []string{a[0].Ref, a[1].Ref, a[2].Ref})
 }
 
 // TestCheckForeshadowLifecycleBoundary 超期边界：当前进度==预期收章不算超期，过一章才算；

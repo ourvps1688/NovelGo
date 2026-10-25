@@ -32,6 +32,7 @@ import (
 	"github.com/novelgo/novelgo/internal/setting"
 	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/storyarc"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/style"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/voice"
@@ -127,6 +128,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&pipeline.PipelineRun{},
 		&pipeline.PipelineIssue{},
 		&quality.ChapterQuality{},
+		&structure.PinnedInvariant{},
 		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}

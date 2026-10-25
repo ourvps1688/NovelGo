@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/volume"
 )
@@ -101,6 +102,9 @@ type Service struct {
 	// timelineStore 是伏笔台账（time_entries）的读取口：R2b-1 结构告警块的伏笔
 	// lifecycle 投影来源（structure_block.go）。为 nil 时降级零提示。
 	timelineStore *timeline.Store
+	// structStore 是书写不变量（pinned_invariants）的读取口：R2b-2 不变量违例比对
+	// 来源（structure_block.go）。为 nil 时跳过该批（降级零提示）。
+	structStore *structure.Store
 	// featureSink 是本地功能度量的落库口（feature_usage_daily，纯本地不上传）：
 	// 双轨快审对照结果（agree/diff）记一条。为 nil 时跳过；观测自身绝不影响业务行为。
 	featureSink func(ctx context.Context, featureKey string)
@@ -165,6 +169,8 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 		s.qualityStore = quality.NewStore(s.store.db, s.logger)
 		// 伏笔台账读取口（R2b-1 结构告警块：伏笔 lifecycle 检查投影来源）。
 		s.timelineStore = timeline.NewStore(s.store.db, s.logger)
+		// 书写不变量读取口（R2b-2：不变量违例比对批来源）。
+		s.structStore = structure.NewStore(s.store.db)
 		// stateSyncRunner 默认 nil：依赖 app 层注入（需要 agent.RunSubAgent）。
 		// 生产环境 app/handler.go 会注入；测试可注入 stub 或保持 nil（executeS0Align 跳过 statesync）。
 	}

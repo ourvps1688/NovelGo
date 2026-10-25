@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -94,6 +96,52 @@ func TestNoStructFindingsZeroPrompt(t *testing.T) {
 	defer rec.mu.Unlock()
 	require.NotContains(t, rec.fullPrompt, "【结构告警】")
 	require.Equal(t, signabilityPrompt(813, "", "", "", contextasm.ContextBlocks{}), rec.fullPrompt,
+		"零告警时提示词应与无该块逐字一致")
+}
+
+// TestStructureBlockMergesPinnedInvariantFindings R2b-2：书写不变量违例与伏笔告警
+// 合并进同一结构告警块（S 系编号跨批连续）；无违例时不变量批零打扰。
+func TestStructureBlockMergesPinnedInvariantFindings(t *testing.T) {
+	rec := &dualRecorder{quickText: dualQuickPass}
+	svc, runID := newDualTest(t, 815, "volume", false, rec)
+	seedForeshadowData(t, svc.store.db, 815)
+	require.NoError(t, svc.store.db.AutoMigrate(&structure.PinnedInvariant{}, &character.Character{}))
+	dead := false
+	require.NoError(t, svc.store.db.Create(&character.Character{NovelID: 815, Name: "主角", Alive: &dead}).Error)
+	require.NoError(t, svc.store.db.Create(&structure.PinnedInvariant{NovelID: 815,
+		Kind: structure.KindAliveBefore, Statement: "主角第 50 章前不死",
+		ParamsJSON: `{"character":"主角","before_reading_number":50}`, Confirmed: true}).Error)
+	svc.executeAudit(runID, 815)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	// 伏笔批 3 条（S1–S3）+ 不变量批 1 条（S4），编号跨批连续。
+	require.Contains(t, rec.fullPrompt, "S3[foreshadow_unsourced]")
+	require.Contains(t, rec.fullPrompt, "S4[character_alive_before]")
+	require.Contains(t, rec.fullPrompt, "不变量「主角第 50 章前不死」违例")
+	require.Contains(t, rec.fullPrompt, "（pinned_invariants:1）")
+	require.NotContains(t, rec.fullPrompt, "S5[", "编号恰好到 S4")
+	require.Less(t, strings.Index(rec.fullPrompt, "S3[foreshadow_unsourced]"),
+		strings.Index(rec.fullPrompt, "S4[character_alive_before]"), "伏笔批在前、不变量批在后")
+}
+
+// TestStructureBlockNoPinnedViolationSilent 不变量无违例 → 该批零告警零打扰（伏笔批照常）。
+func TestStructureBlockNoPinnedViolationSilent(t *testing.T) {
+	rec := &dualRecorder{quickText: dualQuickPass}
+	svc, runID := newDualTest(t, 816, "volume", false, rec)
+	require.NoError(t, svc.store.db.AutoMigrate(&structure.PinnedInvariant{}, &character.Character{}, &chapter.Chapter{}))
+	alive := true
+	require.NoError(t, svc.store.db.Create(&chapter.Chapter{NovelID: 816, Title: "章", SortOrder: 1}).Error)
+	require.NoError(t, svc.store.db.Create(&character.Character{NovelID: 816, Name: "主角", Alive: &alive}).Error)
+	require.NoError(t, svc.store.db.Create(&structure.PinnedInvariant{NovelID: 816,
+		Kind: structure.KindAliveBefore, Statement: "主角全书不死",
+		ParamsJSON: `{"character":"主角","before_reading_number":0}`}).Error)
+	svc.executeAudit(runID, 816)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	require.NotContains(t, rec.fullPrompt, "【结构告警】", "无任何告警=空块零提示")
+	require.Equal(t, signabilityPrompt(816, "", "", "", contextasm.ContextBlocks{}), rec.fullPrompt,
 		"零告警时提示词应与无该块逐字一致")
 }
 
