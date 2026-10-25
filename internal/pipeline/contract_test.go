@@ -297,6 +297,15 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 	} {
 		require.Contains(t, p, fixReceiptFormatLine(), "%s 应引用契约修复回执格式串", name)
 	}
+	// 增量复验回执（R1c）同走契约单源；复验提示词不携带 issue 全量字段（非体检契约）。
+	vp := verifyPrompt(1, nil, contextasm.ContextBlocks{})
+	require.Contains(t, vp, verifyReceiptFormatLine(), "verifyPrompt 应引用契约复验回执格式串")
+	require.NotContains(t, vp, `"fix_type"`, "verifyPrompt 不应含体检 issue 契约字段")
+	require.NotContains(t, vp, `"schema_version"`, "verifyPrompt 不应要求 schema_version（复验不产体检结果）")
+	// skill md 示例与契约同步：signability-verify.md 必须原样引用复验回执格式串。
+	md, err := os.ReadFile("../skill/builtin/signability-verify.md")
+	require.NoError(t, err, "读取 signability-verify.md 失败")
+	require.Contains(t, string(md), verifyReceiptFormatLine(), "signability-verify.md 应原样引用契约复验回执格式串")
 }
 
 // ── skill md 示例 ↔ 契约同步 ────────────────────────────────────────────

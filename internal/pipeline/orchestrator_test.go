@@ -172,8 +172,10 @@ func TestOrchestratorS4S5ReAuditEdge(t *testing.T) {
 	}
 
 	// 卷边界复评阶段 S4b 进入 G4，选 fix → S5 修复 → 自动复评 → 回到 S4b。
-	runID := startS3Run(t, svc, 640, `{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4b"}`)
-	setRunStage(t, svc, runID, StageS4b, StatusRunning, `{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4b"}`)
+	// audit_reason=volume：卷收口口径修复后走全量复评（R1c：非 volume/final/蓝图才走增量复验），
+	// 本用例顺带锁定「volume 仍全量复评」回归。
+	runID := startS3Run(t, svc, 640, `{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4b","audit_reason":"volume"}`)
+	setRunStage(t, svc, runID, StageS4b, StatusRunning, `{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4b","audit_reason":"volume"}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "fix", ""))
 	waitForStageStatus(t, svc, runID, StatusAwaitingGate)
 	got, _ := svc.store.GetByRunID(ctx, runID)

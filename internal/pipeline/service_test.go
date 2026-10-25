@@ -342,7 +342,9 @@ func TestServiceFixBatchingAndResume(t *testing.T) {
 
 	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
 	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	// audit_reason=volume：卷收口口径修复后走全量复评（R1c 增量复验仅存 golden3/milestone），
+	// 保持本用例「修复后跑一次体检做复评」的断言口径。
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4, AuditReason: "volume"}
 	ctxtJSON, merr := json.Marshal(ctxt)
 	require.NoError(t, merr)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
@@ -1219,20 +1221,28 @@ func TestServiceAuditResetsFixStatesOnNewAudit(t *testing.T) {
 	require.Contains(t, finalCtxt.Audit, "复评仍有问题", "新体检结果应已落库")
 }
 
+// TestServiceAuditFixLoopReAudit 验证修复闭环收口后的 R1c 增量复验：非卷收口/完本口径
+// 修复后只对已修复项做 L1 定点复验（不再全量重审）——复验确认的销项（FixStates→verified、
+// 从体检清单摘除），闭环停在 S4 闸门。
 func TestServiceAuditFixLoopReAudit(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 
-	var auditCalls int
-	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
+	var auditCalls, verifyCalls int
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
+		`{"id":"I1","level":"P1","area":"节奏爽点","desc":"第3章拖沓","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[3]}]}`
+	verifyOut := `{"verified":[{"id":"I1","ok":true,"note":"第3章节奏已收紧"}],"summary":"1 项修复已确认"}`
 	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
 		switch name {
 		case "signability-audit":
 			auditCalls++
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
+			return SkillOutput{Text: "复评：\n```json\n{\"verdict\":\"pass\",\"score\":30,\"summary\":\"修复后通过\",\"issues\":[]}\n```"}, nil
+		case "signability-verify":
+			verifyCalls++
+			return SkillOutput{Text: "复验：\n```json\n" + verifyOut + "\n```"}, nil
 		case "signability-fix":
-			return SkillOutput{Text: "已按 issue 修复：强化开篇钩子、补人设记忆点"}, nil
+			return SkillOutput{Text: "已修复。\n```json\n{\"fixed\":[\"I1\"],\"skipped\":[]}\n```"}, nil
 		default:
 			return SkillOutput{Text: "ok"}, nil
 		}
@@ -1241,20 +1251,25 @@ func TestServiceAuditFixLoopReAudit(t *testing.T) {
 	run, err := svc.StartPipeline(ctx, 402, "new", nil, false)
 	require.NoError(t, err)
 	// 直接进入 S4（首轮体检已落库，G4 闸门待决策），准备选 fix → S5
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
-		`{"audit":"{\"verdict\":\"needs_fix\"}"}`))
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
 
-	// S4 选择 fix → 进入 S5 修复闭环，修复完成后自动回到 S4 复评
+	// S4 选择 fix → 进入 S5 修复闭环，修复完成后自动增量复验
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	// 异步链 executeFix → executeAudit 最终应停在 S4 awaiting_gate（复评结果）
+	// 异步链 executeFix → executeVerify 最终应停在 S4 awaiting_gate（复验结论）
 	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
 
 	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	require.Equal(t, StageS4, got.CurrentStage, "复评后应在 S4 闸门")
-	var ctxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
-	require.Contains(t, ctxt.Audit, "pass", "复评应反映修复后的 pass 结论")
-	require.Equal(t, 1, auditCalls, "修复后应再跑一次体检做复评")
+	require.Equal(t, StageS4, got.CurrentStage, "复验后应在 S4 闸门")
+	var ctxtFinal GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxtFinal))
+	require.Equal(t, "verified", ctxtFinal.FixStates["I1"], "复验确认的项应销项为 verified")
+	require.NotContains(t, ctxtFinal.Audit, `"id":"I1"`, "已复验确认的问题应从体检清单摘除（增量销项）")
+	require.Contains(t, ctxtFinal.Audit, "增量复验", "复验结论应落进体检摘要")
+	require.Equal(t, 1, verifyCalls, "修复后应跑一次增量复验")
+	require.Equal(t, 0, auditCalls, "非卷收口/完本/蓝图口径不再全量重审（R1c）")
 }
 
 // gateRecorder 线程安全地收集闸门事件：emitGate 由执行体 goroutine 并发调用，

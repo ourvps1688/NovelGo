@@ -133,12 +133,32 @@ type GateContext struct {
 	// 「本轮修复日志」，消除独立会话的重复勘察（F2）。executeAudit 落新体检结果时随
 	// FixStates 一并重置（新一轮清单=新一轮日志）。
 	FixLog []FixLogEntry `json:"fix_log,omitempty"`
+	// ManualBacklog 是「转人工工单」清单（R1c）：修复 agent 上报 skipped（无法自动修复
+	// 的工程级问题）即沉淀于此，由 G4/G终 闸门 summary 列出交作者人工处理，不再自动
+	// 重试（F2 尾部空转根治）。executeAudit 落新体检结果时随 FixStates 一并重置
+	// （新一轮体检=新一轮问题清单）；增量复验不触碰它。
+	ManualBacklog []ManualItem `json:"manual_backlog,omitempty"`
+	// VerifyPending 标记当前处于「修复后增量复验」流程（R1c）：finishFixAndReaudit
+	// 走增量复验分支前置 true，复验落地/收口置 false。进程重启后恢复（resume）据此
+	// 把 S4/S4b 的重派发指向增量复验而非全量体检，避免误用全量体检重置修复断点。
+	VerifyPending bool `json:"verify_pending,omitempty"`
 }
 
 // FixLogEntry 是修复日志里的一条：issueID → 一行改动摘要（agent 回执 log 字段上报）。
 type FixLogEntry struct {
 	ID   string `json:"id"`
 	Note string `json:"note"`
+}
+
+// ManualItem 是「转人工工单」的一条（R1c）：agent 修复时上报 skipped 的问题沉淀于此，
+// 带无法修复的原因，由闸门 summary 列出交作者人工处理，不再进自动修复/复验循环。
+type ManualItem struct {
+	ID       string  `json:"id"`
+	Level    string  `json:"level"`
+	Area     string  `json:"area"`
+	Desc     string  `json:"desc"`
+	Reason   string  `json:"reason"`             // agent 上报的无法修复原因（skipped reason）
+	Chapters []int64 `json:"chapters,omitempty"` // 涉及章节（issueChapterIDs 有效值），供人工定位
 }
 
 // AuditIssue 是签约体检发现的一条问题。

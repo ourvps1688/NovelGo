@@ -15,7 +15,7 @@ import (
 // 消费方：
 //   - 提示词：signabilityPrompt / finalAuditPrompt / stockAuditPrompt（全量契约）、
 //     blueprintAuditPrompt / driftPatrolPrompt（核心字段）、
-//     fixPrompt / blueprintFixPrompt（修复回执）
+//     fixPrompt / blueprintFixPrompt（修复回执）、verifyPrompt（增量复验回执）
 //   - skill md：signability-audit.md 输出格式节（示例 JSON）
 //   - 前端：types/pipeline.ts（AuditIssue / AuditData / FixIssuePayload / RewriteItem）
 //   - 陈旧 run 守卫：executeFix 按 issueContractGroups 嗅探 + schema_version 版本门
@@ -129,6 +129,13 @@ func issueFieldRules() string {
 // 会经「本轮修复日志」注入，消除重复勘察；省略不影响回执判定（兼容读旧回执）。
 func fixReceiptFormatLine() string {
 	return `{"fixed":["I.."],"skipped":[{"id":"I..","reason":"无法修复的原因"}],"log":[{"id":"I..","note":"一行改动摘要"}]}`
+}
+
+// verifyReceiptFormatLine 生成增量复验回执 JSON 格式串（verifyPrompt 专用，R1c）：
+// verified 逐条给出已修复项的复验判定（ok=true 确认修复生效 / false 未解决或修歪），
+// summary 是一句话复验小结。未列入回执的项视为未复验，留待后续复验轮次再次核对。
+func verifyReceiptFormatLine() string {
+	return `{"verified":[{"id":"I..","ok":true,"note":"一行复验结论"}],"summary":"一句话复验小结"}`
 }
 
 // auditMissingContractGroups 返回体检结果未覆盖的契约字段组（空 = 契约字段齐全）。

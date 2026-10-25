@@ -941,6 +941,9 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	ctxt.FixStates = nil
 	// 修复日志（R1b）同轮语义：随断点一并重置，新清单=新修复日志。
 	ctxt.FixLog = nil
+	// 转人工工单（R1c）与增量复验标记同轮语义：新一轮体检=新一轮问题清单。
+	ctxt.ManualBacklog = nil
+	ctxt.VerifyPending = false
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
@@ -1039,6 +1042,11 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 	// 闭合修复链路（否则这些问题既不在 S5 修复范围内，也无出口，修复链不完整）。
 	if len(bc.RewriteBacklog) > 0 {
 		summary += "；" + rewriteBacklogSummary(bc.RewriteBacklog)
+	}
+	// R1c 转人工工单（skip 即转人工）：被 skip 的问题沉淀在 ManualBacklog，
+	// 闸门 summary 列出交作者人工处理，不再每轮复评重现空转。
+	if len(bc.ManualBacklog) > 0 {
+		summary += "；" + manualBacklogSummary(bc.ManualBacklog)
 	}
 	gateID := GateG4
 	options := []string{"continue", "fix", "abort"}
@@ -1281,10 +1289,13 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		ctxt.FixStates = map[string]string{}
 	}
 	fixedIDs := make([]string, 0, len(ctxt.FixStates))
-	isResolved := make(map[string]bool, len(ctxt.FixStates)) // fixed/skipped/rewrite 均不再进修复批次
+	isResolved := make(map[string]bool, len(ctxt.FixStates)) // fixed/verified/skipped/rewrite 均不再进修复批次
 	for id, st := range ctxt.FixStates {
 		switch st {
 		case "fixed":
+			fixedIDs = append(fixedIDs, id)
+			isResolved[id] = true
+		case "verified": // R1c：已复验销项（修复确认生效），展示与 fixed 同口径
 			fixedIDs = append(fixedIDs, id)
 			isResolved[id] = true
 		case "skipped", "rewrite", "retcon":
@@ -1434,6 +1445,8 @@ func (s *Service) executeFix(runID string, novelID int64) {
 						TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction}
 					switch st := ctxt.FixStates[it.ID]; {
 					case st == "fixed":
+						p.Status = "fixed"
+					case st == "verified": // R1c 已复验销项，前端展示与已修复同口径
 						p.Status = "fixed"
 					case st == "skipped":
 						p.Status = "skipped"
@@ -1618,6 +1631,32 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 		auditStage = StageS4
 	}
 	ctxt.FixRounds++ // 递增修复轮数（供 auto_run 上限判断，避免无限自动修复）
+
+	// R1c 复评分流（提案 §4.3-4/5）：
+	//  ① 全 skip（本轮零修复确认、问题全部转人工）→ 不复验不重审，直接落闸交回用户——
+	//     否则复评/复验会把同一批「修不了」的问题反复端出来空转（F2 尾部根治）；
+	//  ② 全量复评（L2 深审）仅存于卷收口/完本终检/蓝图收口——审计型深审保留全书口径；
+	//  ③ 其余（golden3/milestone）→ 增量复验（L1）：只验已修复项及其修过的作用域。
+	fixedCount, skippedCount := 0, 0
+	for _, st := range ctxt.FixStates {
+		switch st {
+		case "fixed":
+			fixedCount++
+		case "skipped":
+			skippedCount++
+		}
+	}
+	fullReaudit := ctxt.AuditReason == "volume" || ctxt.AuditReason == "final" ||
+		ctxt.AuditKind == "blueprint" || auditStage == StageS6
+	if !fullReaudit && fixedCount == 0 && skippedCount > 0 {
+		s.handbackManualNoVerify(ctx, runID, novelID, ctxt, auditStage, skippedCount)
+		return
+	}
+
+	// 增量复验分支先置复验标记（随阶段复位一并落库）：中断恢复时据此重派复验而非全量体检。
+	if !fullReaudit {
+		ctxt.VerifyPending = true
+	}
 	ctxtJSON, _ := json.Marshal(ctxt)
 	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusRunning, string(ctxtJSON)); err != nil {
 		s.logger.Error("S5 修复：复评前复位阶段失败", "err", err)
@@ -1625,7 +1664,214 @@ func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID
 		return
 	}
 	s.setDispatching(ctx, runID, false)
-	s.executeAudit(runID, novelID)
+	if fullReaudit {
+		s.executeAudit(runID, novelID)
+		return
+	}
+	s.executeVerify(runID, novelID)
+}
+
+// handbackManualNoVerify 是 R1c「全 skip 不复验」的收口出口：本轮修复零修复确认、问题
+// 全部被 skip 转人工工单时，不再做任何复验/复评（做了也只会把同一批修不了的问题再端出来
+// 空转），直接把人工工单清单落 G4/G终 闸门交回用户裁决。闸门常落（不进 auto_run 自动
+// 裁决）——零修复确认意味着自动闭环没干活，必须交人看一眼。
+func (s *Service) handbackManualNoVerify(ctx context.Context, runID string, novelID int64, ctxt GateContext, auditStage string, skippedCount int) {
+	msg := fmt.Sprintf(
+		"本轮修复零修复确认：%d 项 agent 无法自动修复，已全部转人工工单（不再自动重试），未做复验——"+
+			"请人工处理后自行复检，或直接继续", skippedCount)
+	ctxt.VerifyPending = false
+	ctxtJSON, merr := json.Marshal(ctxt)
+	if merr != nil {
+		ctxtJSON = []byte("{}")
+	}
+	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(ctxtJSON)); err != nil {
+		s.logger.Error("S5 修复：全 skip 转人工落闸失败", "err", err)
+		s.setDispatching(ctx, runID, false)
+		return
+	}
+	s.setDispatching(ctx, runID, false)
+	emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": true,
+		"manual_handoff": true, "manual_count": skippedCount, "error": msg})
+	s.emitGateDecision(ctx, runID, novelID, auditStage,
+		AuditData{Verdict: "needs_fix", Summary: msg})
+}
+
+// executeVerify 是 R1c 的增量复验（L1）：修复收口后只对「已修复（fixed）项及其修过的作用域」
+// 做定点核验，替代全量重审（全量复评仅存 L2 深审：卷收口/完本/蓝图收口）。
+// 与 executeAudit 的关键区别（落地不整体清）：不整体清 FixStates/FixLog、不整批替换
+// issue 工单——复验通过的销项（FixStates→"verified"），未通过的退回待修，未提及的留待
+// 下轮再验；被 skip（转人工）的条目一律保持不再重试。
+func (s *Service) executeVerify(runID string, novelID int64) {
+	ctx := s.appCtx
+	run, err := s.store.GetByRunID(ctx, runID)
+	if err != nil {
+		s.logger.Error("S5 增量复验：加载流水线失败", "run_id", runID, "err", err)
+		return
+	}
+	auditStage := run.CurrentStage // 复位后的体检阶段（S4 / S4b）
+	s.setDispatching(ctx, runID, true)
+
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	// 防御：蓝图/完本口径绝不走增量复验（正常分流已挡，此处兜底回全量）。
+	if ctxt.AuditKind == "blueprint" || auditStage == StageS6 {
+		s.executeAudit(runID, novelID)
+		return
+	}
+	auditData := parseAudit(ctxt.Audit)
+
+	// 复验目标 = 已修复（"fixed"，尚未复验）项，带修过作用域与修复日志摘要。
+	fixNote := map[string]string{}
+	for _, e := range ctxt.FixLog {
+		fixNote[e.ID] = e.Note
+	}
+	targets := make([]verifyTarget, 0, len(auditData.Issues))
+	for _, it := range auditData.Issues {
+		if ctxt.FixStates[it.ID] != "fixed" {
+			continue
+		}
+		targets = append(targets, verifyTarget{
+			ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
+			Chapters: issueChapterIDs(it), FixNote: fixNote[it.ID],
+		})
+	}
+
+	var (
+		results   map[string]verifyResult
+		verifySum string
+		found     bool
+	)
+	if len(targets) > 0 {
+		out, verr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
+			NovelID:   novelID,
+			Prompt:    verifyPrompt(novelID, targets, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
+			MaxTurns:  12,
+			SessionID: "pipeline:" + runID + ":verify:" + uuid.NewString(),
+			RunID:     runID,
+		})
+		if verr != nil {
+			s.logger.Error("S5 增量复验执行失败", "run_id", runID, "err", verr)
+			s.setDispatching(ctx, runID, false)
+			// 失败落地为 paused（VerifyPending 保持 true）：恢复时按增量复验重派发。
+			if serr := s.store.SetStageStatus(ctx, runID, auditStage, StatusPaused, run.ContextJSON); serr != nil {
+				s.logger.Error("S5 增量复验：失败落暂停失败", "err", serr)
+			}
+			emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: auditStage, Status: StatusPaused,
+				Note: "增量复验失败：" + verr.Error() + "；已暂停，点击恢复将重新复验"})
+			return
+		}
+		results, verifySum, found = parseVerifyReceipt(out.Text)
+		if !found {
+			// 兼容回退（与修复回执同口径）：无回执按已修复确认处理，不卡死闭环。
+			s.logger.Warn("S5 增量复验：输出缺少回执 JSON，按已修复确认处理（兼容回退）",
+				"run_id", runID, "targets", len(targets))
+		}
+	}
+
+	// 落地（不整体清 FixStates/FixLog）：通过→销项（verified）；未通过→退回待修；
+	// 未提及→保持 fixed 留待下轮再验。skipped/rewrite/retcon 等其余断点一律不动。
+	confirmed, rejected, unverified := 0, 0, 0
+	for _, tg := range targets {
+		if !found { // 兼容回退：无回执按已修复确认处理
+			ctxt.FixStates[tg.ID] = "verified"
+			confirmed++
+			continue
+		}
+		res, ok := results[tg.ID]
+		switch {
+		case !ok:
+			unverified++
+		case res.OK:
+			ctxt.FixStates[tg.ID] = "verified"
+			confirmed++
+		default: // 未通过：退回待修
+			delete(ctxt.FixStates, tg.ID)
+			s.syncIssueRow(ctx, novelID, runID, tg.ID, IssueStatusPending, "")
+			rejected++
+		}
+	}
+
+	// 销项清单里确认修复的问题从体检结果 JSON 摘除（增量销项，非整体清）：前端体检视图
+	// 只剩未收口的问题。verdict/score 不动——复验不评分，不伪造未产出的判定（宁缺勿错）。
+	auditData.Issues = pruneVerifiedIssues(auditData.Issues, ctxt.FixStates)
+	line := fmt.Sprintf("增量复验（L1）：确认修复 %d 项", confirmed)
+	if rejected > 0 {
+		line += fmt.Sprintf("，%d 项未通过复验已退回待修", rejected)
+	}
+	if unverified > 0 {
+		line += fmt.Sprintf("，%d 项未复验留待下轮", unverified)
+	}
+	if verifySum != "" {
+		line += "；复验小结：" + verifySum
+	}
+	auditData.Summary += "；" + line
+	auditJSON, _ := json.Marshal(auditData)
+	ctxt.Audit = string(auditJSON)
+	ctxt.VerifyPending = false
+
+	updated, merr := json.Marshal(ctxt)
+	if merr != nil {
+		s.logger.Warn("S5 增量复验：序列化上下文失败", "err", merr)
+		updated = []byte(run.ContextJSON)
+	}
+	run.ContextJSON = string(updated)
+
+	// 守卫：异步执行期间用户已推进则不覆盖；执行体退出前清执行中标记。
+	s.setDispatching(ctx, runID, false)
+	cur, gerr := s.store.GetByRunID(ctx, runID)
+	if gerr == nil && (cur.CurrentStage != auditStage || cur.Status != StatusRunning) {
+		s.logger.Info("S5 增量复验：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
+		return
+	}
+
+	// 剩余待修 = 清单里仍未收口（无断点）的项：复验退回的 + 此前未处理的。
+	remaining := 0
+	for _, it := range auditData.Issues {
+		if ctxt.FixStates[it.ID] == "" {
+			remaining++
+		}
+	}
+	// auto_run 自动裁决（与 executeAudit 同构）：剩余待修→继续修（受上限约束）；全收口→继续。
+	if run.AutoRun && ctxt.AuditKind != "blueprint" {
+		if remaining == 0 {
+			if err := s.orchestrator.Advance(ctx, run, "continue"); err != nil {
+				s.logger.Error("S5 增量复验：自动继续推进失败", "err", err)
+			}
+			return
+		}
+		if ctxt.FixRounds >= autoFixCap {
+			if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
+				s.logger.Error("S5 增量复验：落库闸门状态失败", "err", err)
+				return
+			}
+			s.emitGateDecision(ctx, runID, novelID, auditStage, auditData)
+			return
+		}
+		if err := s.orchestrator.Advance(ctx, run, "fix"); err != nil {
+			s.logger.Error("S5 增量复验：自动进入修复闭环失败", "err", err)
+		}
+		return
+	}
+
+	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
+		s.logger.Error("S5 增量复验：落库闸门状态失败", "err", err)
+		return
+	}
+	s.emitGateDecision(ctx, runID, novelID, auditStage, auditData)
+}
+
+// pruneVerifiedIssues 从体检清单摘除已复验确认（FixStates="verified"）的问题（R1c 增量销项）。
+func pruneVerifiedIssues(issues []AuditIssue, fixStates map[string]string) []AuditIssue {
+	pruned := make([]AuditIssue, 0, len(issues))
+	for _, it := range issues {
+		if fixStates[it.ID] == "verified" {
+			continue
+		}
+		pruned = append(pruned, it)
+	}
+	return pruned
 }
 
 // finishFixHandoffRewrite 处理「本轮无台账级问题可修、但存在正文级重写清单」的情况：
@@ -2316,9 +2562,10 @@ type fixReceipt struct {
 }
 
 // applyFixReceipt 解析修复输出回执并把本批问题的断点状态写入 ctxt.FixStates：
-// 回执 fixed → "fixed"；skipped → "skipped"（记录原因，不再重试）；未提及 → 不落断点
-// （后续轮次重试）。输出缺少回执 JSON 时退化为旧行为（整批 "fixed"），保证兼容不卡死
-// 流水线。回执可选 log 字段逐条 upsert 进 ctxt.FixLog（按 id 去重，保序）。
+// 回执 fixed → "fixed"；skipped → "skipped"（记录原因，不再重试，R1c：同时沉淀进
+// 人工工单 ManualBacklog 转交作者）；未提及 → 不落断点（后续轮次重试）。
+// 输出缺少回执 JSON 时退化为旧行为（整批 "fixed"），保证兼容不卡死流水线。
+// 回执可选 log 字段逐条 upsert 进 ctxt.FixLog（按 id 去重，保序）。
 // 返回本批新标记为 fixed 的 id 列表（供前端 done_ids 累积）与 skipped 原因映射。
 func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log *slog.Logger) ([]string, map[string]string) {
 	fixedSet, skipReasons, logEntries, found := parseFixReceipt(outText)
@@ -2339,7 +2586,13 @@ func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log 
 		case skipReasons[it.ID] != "":
 			ctxt.FixStates[it.ID] = "skipped"
 			skipped[it.ID] = skipReasons[it.ID]
-			log.Info("S5 修复：agent 上报无法修复，标记跳过",
+			// R1c：skipped 即转人工工单——沉淀进 ManualBacklog（含无法修复原因与涉及
+			// 章节），由闸门 summary 列出交作者处理，不再进自动修复/复验循环。
+			ctxt.ManualBacklog = upsertManualItem(ctxt.ManualBacklog, ManualItem{
+				ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
+				Reason: skipReasons[it.ID], Chapters: issueChapterIDs(it),
+			})
+			log.Info("S5 修复：agent 上报无法修复，标记跳过并转人工工单",
 				"issue", it.ID, "reason", skipReasons[it.ID])
 		default:
 			// 回执未提及：不落断点，后续轮次重试。
@@ -2417,6 +2670,58 @@ func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string
 		return fixed, skipReasons, logEntries, true
 	}
 	return nil, nil, nil, false
+}
+
+// verifyReceipt 是增量复验 agent 在输出末尾上报的复验回执契约（由 verifyPrompt 要求，
+// 契约单源见 contract.go verifyReceiptFormatLine）。
+type verifyReceipt struct {
+	Verified []struct {
+		ID   string `json:"id"`
+		OK   bool   `json:"ok"`
+		Note string `json:"note"`
+	} `json:"verified"`
+	Summary string `json:"summary"`
+}
+
+// verifyResult 是一条复验结论：是否确认修复生效 + 一行复验结论。
+type verifyResult struct {
+	OK   bool
+	Note string
+}
+
+// verifyTarget 是增量复验清单里的一条：已修复项 + 修过的作用域 + 修复日志摘要。
+type verifyTarget struct {
+	ID       string  `json:"id"`
+	Level    string  `json:"level"`
+	Area     string  `json:"area"`
+	Desc     string  `json:"desc"`
+	Chapters []int64 `json:"chapters,omitempty"`
+	FixNote  string  `json:"fix_note,omitempty"`
+}
+
+// parseVerifyReceipt 从增量复验 agent 输出解析复验回执：
+// {"verified":[{"id":"I1","ok":true,"note":"..."}],"summary":"..."}。
+// 解析策略与 parseFixReceipt 同构（回执可能在 ```json 围栏或纯文本中，verified 含嵌套
+// 对象——从每个 '{' 起流式解码取最后一个合法回执）。found=false 表示输出中没有回执，
+// 调用方按「已修复确认」兼容回退（与修复回执缺省口径一致，不卡死闭环）。
+func parseVerifyReceipt(text string) (results map[string]verifyResult, summary string, found bool) {
+	for i := strings.LastIndex(text, "{"); i >= 0; i = strings.LastIndex(text[:i], "{") {
+		var r verifyReceipt
+		if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&r); err != nil {
+			continue
+		}
+		if len(r.Verified) == 0 {
+			continue
+		}
+		results = make(map[string]verifyResult, len(r.Verified))
+		for _, v := range r.Verified {
+			if v.ID != "" {
+				results[v.ID] = verifyResult{OK: v.OK, Note: v.Note}
+			}
+		}
+		return results, r.Summary, true
+	}
+	return nil, "", false
 }
 
 func parseAudit(text string) AuditData {
@@ -2519,6 +2824,17 @@ func upsertRewriteItem(list []RewriteItem, item RewriteItem) []RewriteItem {
 	return append(list, item)
 }
 
+// upsertManualItem 按 ID 去重写入/更新转人工工单项（R1c，同 upsertRewriteItem 语义）。
+func upsertManualItem(list []ManualItem, item ManualItem) []ManualItem {
+	for i, it := range list {
+		if it.ID == item.ID {
+			list[i] = item
+			return list
+		}
+	}
+	return append(list, item)
+}
+
 // parseChapterRefs 尽力从 area/desc 文本解析涉及的章节号，供 S3 写作回路定位待重写章节。
 // 识别「第 N 章」「第 N-M 章」区间与「#N」两种写法；解析失败或越界（≤0）忽略。
 var (
@@ -2569,6 +2885,30 @@ func rewriteBacklogSummary(items []RewriteItem) string {
 			sb.WriteString("；")
 		}
 		sb.WriteString(it.Area + "：" + it.Desc)
+	}
+	return sb.String()
+}
+
+// manualBacklogSummary 生成 G4/G终 闸门 summary 的「转人工工单」提示文案（R1c）：
+// 被 skip 的问题不再自动重试，逐条列出（含原因）交作者人工处理。
+func manualBacklogSummary(items []ManualItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "另有 %d 项已转人工工单（agent 无法自动修复，不再自动重试）", len(items))
+	for i, it := range items {
+		if i >= 3 {
+			sb.WriteString("等")
+			break
+		}
+		if i > 0 {
+			sb.WriteString("；")
+		}
+		sb.WriteString(it.Area + "：" + it.Desc)
+		if it.Reason != "" {
+			sb.WriteString("（" + it.Reason + "）")
+		}
 	}
 	return sb.String()
 }
@@ -2628,9 +2968,10 @@ func blueprintFixPrompt(novelID int64, issues []AuditIssue, summary string, fixL
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
 		fixReceiptFormatLine()+"——"+
-		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因；"+
+		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因——"+
+		"**skipped 项会立即转为人工工单交作者处理、不再自动重试**，确实修不了就如实上报 skipped，宁缺勿错；"+
 		"log 可选逐条给出已修复项的一行改动摘要（同轮后续修复会话会参照它避免重复勘察）；"+
-		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。"+
+		"未列入 fixed 也未列入 skipped 的视为未修复，将在后续轮次重试；不要把没修的标成已修。"+
 		"（注：蓝图级问题均为卷纲/设定层，不涉及正文章节重写，无需考虑 fix_type=body 的回流。）",
 		novelID, len(issues), b, fixLogBlock(fixLog))
 }
@@ -2655,10 +2996,28 @@ func fixPrompt(novelID int64, issues []AuditIssue, summary string, fixLog []FixL
 		"每条问题修复到位后再处理下一条，全部修复后给出不超过 15 行的修复摘要。"+
 		"最终回复末尾**必须**附一个 ```json 代码块上报修复回执，格式："+
 		fixReceiptFormatLine()+"——"+
-		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）；"+
+		"fixed 列出已修复到位的 issue id；skipped 列出确实无法修复的及原因（如属正文级问题需章节重写，台账修复无法覆盖）——"+
+		"**skipped 项会立即转为人工工单交作者处理、不再自动重试**，确实修不了就如实上报 skipped，宁缺勿错；"+
 		"log 可选逐条给出已修复项的一行改动摘要（同轮后续修复会话会参照它避免重复勘察）；"+
-		"未列入 fixed 的会被视为未修复并在后续轮次重试，请如实上报，不要把没修的标成已修。",
+		"未列入 fixed 也未列入 skipped 的视为未修复，将在后续轮次重试；不要把没修的标成已修。",
 		novelID, len(issues), b, fixLogBlock(fixLog)) + blocks.Render(contextasm.PurposeFix)
+}
+
+// verifyPrompt 构造增量复验提示词（R1c）：只传刚修复项及其修过的作用域（L1 定点复验），
+// 不重审全书、不评分、不报新问题。blocks 尾部装配上下文块（P0 §0.5 audit=Facts+Voice）。
+// 复验回执契约由 contract.go 单源生成（verifyReceiptFormatLine）。
+func verifyPrompt(novelID int64, targets []verifyTarget, blocks contextasm.ContextBlocks) string {
+	b, _ := json.Marshal(targets)
+	return fmt.Sprintf("本书 novel_id=%d。本轮为修复后的**增量复验**（L1，只验已修复项，不重审全书）："+
+		"以下是刚修复的问题清单（JSON，共 %d 条，含修过的作用域章节与修复摘要），请逐项定点复验修复是否真正生效：\n%s\n\n"+
+		"复验方法：只对清单内问题核对其**修过的作用域**（按 chapters 读相关章节段落 / 用 get_* 读对应台账条目，"+
+		"有 fix_note 时按它指引的改动点核对）；ok=true 仅当问题确已解决且没引入新矛盾，修歪了/只改了一半 → ok=false 并在 note 一行说明。"+
+		"**不要**全书通读、**不要**评分、**不要**报告清单外的新问题（新问题由后续全量体检/深审兜底）、**不要**做任何写操作。"+
+		"最终回复末尾**必须**附一个 ```json 代码块上报复验回执，格式："+
+		verifyReceiptFormatLine()+"——"+
+		"verified 逐条给出清单内问题的复验判定（id 对应清单 issue id，ok 为 true/false，note 为一行复验结论）；"+
+		"summary 为一句话复验小结；未列入回执的项视为未复验，将在后续复验轮次再次核对，请如实上报。",
+		novelID, len(targets), b) + blocks.Render(contextasm.PurposeAudit)
 }
 
 // ControlPipeline 处理运行控制指令：pause / resume / stop。
@@ -2802,6 +3161,12 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 	}
 	switch run.CurrentStage {
 	case StageS4, StageS4b:
+		if ctxt.VerifyPending {
+			// R1c：修复后增量复验中断恢复——重派复验而非全量体检，避免误重置修复断点。
+			s.logger.Info("恢复：重新派发增量复验", "run_id", run.RunID, "stage", run.CurrentStage)
+			go s.executeVerify(run.RunID, run.NovelID)
+			return
+		}
 		s.logger.Info("恢复：重新派发签约体检", "run_id", run.RunID, "stage", run.CurrentStage)
 		go s.executeAudit(run.RunID, run.NovelID)
 	case StageS5:

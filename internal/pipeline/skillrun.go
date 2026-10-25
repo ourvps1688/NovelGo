@@ -34,6 +34,8 @@ func skillAgentType(name string) agentcfg.AgentType {
 	switch name {
 	case "signability-audit":
 		return agentcfg.SignabilityAgent
+	case "signability-verify":
+		return agentcfg.SignabilityAgent // 增量复验只读（R1c）：复用只读体检白名单
 	case "signability-fix":
 		return agentcfg.FixAgent
 	case "blueprint-audit":
@@ -58,6 +60,8 @@ func skillAgentTypeString(name string) string {
 	switch name {
 	case "signability-audit":
 		return agentTypeSignability
+	case "signability-verify":
+		return agentTypeSignability // 增量复验（R1c）：同属只读体检 AgentType
 	case "signability-fix":
 		return agentTypeFix
 	case "blueprint-audit":
