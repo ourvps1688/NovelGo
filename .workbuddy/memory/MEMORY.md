@@ -45,7 +45,8 @@
 - 埋点映射备忘：重写=闸门 modify（聊天写/重写不可区分不计入）、体检=align_full/audit_now/finish_book、retcon 立案=ApproveRetconCase（立案在后端 handoff 出口）。降级逐字一致是最高验收；TestRewriteVoiceABE2E 为真实 LLM E2E 瞬态（复跑绿收口）。
 
 ## 流水线重构提案 + 章纲任务卡（2026-10-25）
-- 提案 docs/future/pipeline-core-redesign-proposal.md（R0/R1/R2 已全销，R2b 全书补强→R3 任务队列→R4 双编排合一 未排期）；核心诊断 F1 全书批审 O(n²)/F2 修复乘法/F3 发现滞后/F4 状态袋+裸 goroutine/F5 LLM 文本驱动控制流/F6 双编排器。
+- 提案 docs/future/pipeline-core-redesign-proposal.md（R0–R2/R2b-1..4 已全销，R2b 余量→R3 任务队列→R4 双编排合一 未排期）；核心诊断 F1 全书批审 O(n²)/F2 修复乘法/F3 发现滞后/F4 状态袋+裸 goroutine/F5 LLM 文本驱动控制流/F6 双编排器。
+- **已落地：R2b-1..4**（internal/structure 长程结构索引层，S 系恒 P1 只报告）：伏笔 lifecycle 三告警+结构告警块进非蓝图 L2/快审输入（空块逐字一致）；pinned_invariants 书写不变量（*bool 三态防 GORM 零值跳写）；novel_checker_configs 题材卡机制化（缺省=现行默认逐字一致）；CheckChapterPlan 章纲写前对账 L1.5（立卡/更新后置告警随回执只报告不拦截，坑表取数失败须整项跳过防误判全表缺失）。余量：人设/称呼/战力检查、§8.3 provenance 对账、§8.4 修复传播、§8.5 L2 重定位+命中率度量。
 - **已落地：章纲任务卡四件套**（钩子/爽点/人设时刻/推进）= timeline.ChapterTaskCard 表（一章一卡 unique，Validate 四件套 TrimSpace 非空缺一拒收）+ MCP `upsert_chapter_task_card`/`get_chapter_task_card` + get_timeline 注入（缺失立卡提示只推不拦）+ identity 立卡前置/写后对卡核验 + review/signability/fix 白名单（blueprint 不接）。规划数据不进 snapshot。AutoMigrate 加表 done=12 不动。
 - **已落地：R0 观测**（提案例行第一步）= activity `exec_run_stats`（耗时/turn/状态/归属 run，纯本地零内容）+ dispatchSkill 单点埋测（观测失败零影响）+ SummarizeExecStats/GetPipelineExecStats 聚合取数。
 - **已落地：R1 修复工单化三步（R1a/R1b/R1c）**：R1a=issue 落表 pipeline_issues+chapter_ids 结构化契约（F5 根治，正则降兜底）；R1b=作用域分组并行+FixLog 修复日志共享（F2 根治）；**R1c=修复后 L1 增量复验（executeVerify 只验 FixStates=fixed 及修过作用域，verifyReceiptFormatLine 契约单源+signability-verify 技能，verified 断点态不整体清 FixStates/FixLog）+ skip 即转人工工单（ManualBacklog 连原因→G4 summary，全 skip 不复验落闸，F2 尾部根治）+ VerifyPending 断点防中断误重置；全量复评仅存 volume/final/蓝图/S6**。R1 已全销（含 #210 emit* 发射器注入原子化：emitterSlot[T] 泛型槽+swapEmitX，-race 零竞争，测试卫生）。
