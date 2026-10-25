@@ -11,6 +11,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/storage"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 )
 
@@ -324,11 +325,24 @@ func (t *UpdateChapterPlanTool) Execute(ctx context.Context, args any, tc ToolCo
 		return nil, fmt.Errorf("save plan: %w", err)
 	}
 
+	// 写前对账 L1.5（R2b-4）：更新计划后置检查，只报告不拦截。
+	// 坑表/死亡对账只对 next（下一章有确定章号锚点）；near/far 仅禁忌扫描（宁缺勿错）。
+	readingNumber := 0
+	hookText := ""
+	texts := []structure.PlanField{{Name: "content", Text: plan.Content}}
+	if plan.Scope == "next" {
+		if n, err := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).CountByNovel(ctx, nil, tc.NovelID); err == nil {
+			readingNumber = n + 1
+			hookText = plan.Content
+		}
+	}
+	warnings := planCheckWarnings(ctx, tc, readingNumber, hookText, texts)
+
 	return &ToolResult{
 		Success: true,
-		Data: map[string]any{
+		Data: planCheckData(map[string]any{
 			"scope": plan.Scope,
-		},
+		}, warnings),
 	}, nil
 }
 

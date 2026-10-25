@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/timeline"
 )
 
@@ -62,11 +63,20 @@ func (t *UpsertChapterTaskCardTool) Execute(ctx context.Context, args any, tc To
 		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
 
+	// 写前对账 L1.5（R2b-4）：立卡后置检查，只报告不拦截（告警随回执返回）。
+	warnings := planCheckWarnings(ctx, tc, card.TargetReadingNumber, card.HookTask,
+		[]structure.PlanField{
+			{Name: "hook_task", Text: card.HookTask},
+			{Name: "beat_task", Text: card.BeatTask},
+			{Name: "moment_task", Text: card.MomentTask},
+			{Name: "advance_task", Text: card.AdvanceTask},
+		})
+
 	return &ToolResult{
 		Success: true,
-		Data: map[string]any{
+		Data: planCheckData(map[string]any{
 			"target_reading_number": card.TargetReadingNumber,
-		},
+		}, warnings),
 	}, nil
 }
 
