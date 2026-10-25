@@ -181,3 +181,28 @@ func TestStructureBlockOverdueGraceFromCheckerConfig(t *testing.T) {
 	require.Contains(t, rec.fullPrompt, "S1[foreshadow_no_target]", "其余告警照常、编号重排")
 	require.Contains(t, rec.fullPrompt, "S2[foreshadow_unsourced]")
 }
+
+// TestStructureBlockCeilingRealmLevelsMerged R2b-6：战力上限境界合流——账面天花板与
+// 钉住上限均为已登记境界名时按数值锚比对，超限违例进结构告警块；无等级表不判（缺省）。
+func TestStructureBlockCeilingRealmLevelsMerged(t *testing.T) {
+	rec := &dualRecorder{quickText: dualQuickPass}
+	svc, runID := newDualTest(t, 818, "volume", false, rec)
+	require.NoError(t, svc.store.db.AutoMigrate(&structure.PinnedInvariant{}, &structure.PowerLevel{},
+		&character.Character{}, &chapter.Chapter{}))
+	require.NoError(t, svc.store.db.Create(&chapter.Chapter{NovelID: 818, Title: "章", SortOrder: 1}).Error)
+	require.NoError(t, svc.store.db.Create(&character.Character{
+		NovelID: 818, Name: "主角", CapabilityCeiling: "元婴期"}).Error)
+	require.NoError(t, structure.NewStore(svc.store.db).UpsertPowerLevel(t.Context(),
+		&structure.PowerLevel{NovelID: 818, Name: "金丹期", Rank: 3}))
+	require.NoError(t, structure.NewStore(svc.store.db).UpsertPowerLevel(t.Context(),
+		&structure.PowerLevel{NovelID: 818, Name: "元婴期", Rank: 5}))
+	require.NoError(t, svc.store.db.Create(&structure.PinnedInvariant{NovelID: 818,
+		Kind: structure.KindCapabilityCeiling, Statement: "主角上限金丹期",
+		ParamsJSON: `{"character":"主角","ceiling":"金丹期"}`, Confirmed: true}).Error)
+	svc.executeAudit(runID, 818)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	require.Contains(t, rec.fullPrompt, "S1[capability_ceiling]")
+	require.Contains(t, rec.fullPrompt, "超过钉住上限（金丹期）", "境界名按数值锚比对（元婴 5 > 金丹 3）")
+}

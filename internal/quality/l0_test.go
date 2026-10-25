@@ -279,3 +279,56 @@ func TestRunL0ChecksDeadAppearance(t *testing.T) {
 	_, absent := RunL0Checks(L0Input{Text: cleanBody(3) + "路上没有行人。", TargetWords: 1, Characters: chars})
 	assert.NotContains(t, findingsByCheck(absent), CheckDeadAppearance)
 }
+
+// TestRunL0ChecksPowerOutcome 战力/境界数值序（R2b-6）：左弱右强语序+取胜动词=越级取胜
+// （无代价才报）；碾压级修饰=power_crush；反向语序/有代价/无等级表/未登记境界不报；
+// 同区域多动词命中只报一次。
+func TestRunL0ChecksPowerOutcome(t *testing.T) {
+	levels := []PowerLevelRef{{Name: "金丹期", Rank: 3}, {Name: "元婴期", Rank: 5}}
+
+	// 越级取胜未见代价。
+	_, findings := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "金丹期的他击败了元婴期的强敌。", TargetWords: 1, PowerLevels: levels,
+	})
+	by := findingsByCheck(findings)
+	require.Len(t, by[CheckPowerUpset], 1)
+	assert.Empty(t, by[CheckPowerCrush])
+	assert.Contains(t, by[CheckPowerUpset][0].Desc, "「金丹期」（rank 3）胜「元婴期」（rank 5）")
+	assert.Contains(t, by[CheckPowerUpset][0].Desc, "未见代价")
+
+	// 反向语序（高阶胜低阶）不违例。
+	_, rev := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "元婴期的他击败了金丹期的对手。", TargetWords: 1, PowerLevels: levels,
+	})
+	assert.NotContains(t, findingsByCheck(rev), CheckPowerUpset)
+	assert.NotContains(t, findingsByCheck(rev), CheckPowerCrush)
+
+	// 有代价的越级胜利不违例（规则只管「无代价」）。
+	_, cost := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "金丹期的他拼死击败了元婴期的强敌。", TargetWords: 1, PowerLevels: levels,
+	})
+	assert.NotContains(t, findingsByCheck(cost), CheckPowerUpset)
+
+	// 碾压级修饰 → power_crush（不叠报越级）。
+	_, crush := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "金丹期的他毫无悬念地碾压了元婴期的对手。", TargetWords: 1, PowerLevels: levels,
+	})
+	byCrush := findingsByCheck(crush)
+	require.Len(t, byCrush[CheckPowerCrush], 1)
+	assert.NotContains(t, byCrush, CheckPowerUpset, "碾压定级不叠报越级")
+
+	// 无等级表/境界未登记=零发现（缺省=现行行为逐字一致）。
+	text := cleanBody(3) + "金丹期的他击败了元婴期的强敌。"
+	_, noLevels := RunL0Checks(L0Input{Text: text, TargetWords: 1})
+	assert.NotContains(t, findingsByCheck(noLevels), CheckPowerUpset)
+	_, unregistered := RunL0Checks(L0Input{
+		Text: text, TargetWords: 1, PowerLevels: []PowerLevelRef{{Name: "炼气期", Rank: 1}},
+	})
+	assert.NotContains(t, findingsByCheck(unregistered), CheckPowerUpset)
+
+	// 同区域多动词命中只报一次（宁缺勿错）。
+	_, multi := RunL0Checks(L0Input{
+		Text: cleanBody(3) + "金丹期的他碾压并击败了元婴期的对手。", TargetWords: 1, PowerLevels: levels,
+	})
+	assert.Len(t, findingsByCheck(multi)[CheckPowerCrush], 1)
+}

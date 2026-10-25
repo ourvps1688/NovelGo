@@ -87,7 +87,14 @@ func (s *Service) pinnedFindings(ctx context.Context, novelID int64, now int) ([
 		s.logger.Warn("结构告警块：读取角色台账失败（跳过不变量批）", "novel_id", novelID, "err", err)
 		return nil, false
 	}
-	return structure.CheckPinnedInvariants(pins, projectCharacters(rows), now), true
+	// 境界等级表（R2b-6 合流）：取数失败=nil=上限只按数值比（缺省=现行行为逐字一致）。
+	var levels []structure.PowerLevel
+	if ls, err := s.structStore.ListPowerLevels(ctx, novelID); err == nil {
+		levels = ls
+	} else {
+		s.logger.Debug("结构告警块：读取境界等级表失败（上限回落数值比对）", "novel_id", novelID, "err", err)
+	}
+	return structure.CheckPinnedInvariants(pins, projectCharacters(rows), now, levels), true
 }
 
 // projectForeshadows 把台账伏笔条目投影为检查器输入（timeline → structure 适配，

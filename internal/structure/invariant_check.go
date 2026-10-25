@@ -14,11 +14,13 @@ import (
 // 判定口径：
 //   - character_alive_before：角色已标记死亡（Alive=false）且承诺窗口未过
 //     （before<=0=全书不死，或当前进度 < before）→ 违例；nil=未标注不算死亡。
-//   - capability_ceiling：账面天花板与钉住上限均为数值文本且账面 > 上限 → 违例；
-//     任一非数值（自由文本描述）跳过不判。
+//   - capability_ceiling：账面天花板与钉住上限可比且账面 > 上限 → 违例；
+//     两侧同为数值文本按数值比（现行口径），同为已登记境界名按境界数值锚比
+//     （R2b-6 合流）；混比/任一不可解析跳过不判（不同刻度不混比，宁缺勿错）。
+//     levels 为空=无境界表=只有数值可比（缺省=现行行为逐字一致）。
 //
 // 确定性：按不变量 ID 升序产出，同输入同输出。
-func CheckPinnedInvariants(invariants []PinnedInvariant, chars []CharacterState, nowReadingNumber int) []StructFinding {
+func CheckPinnedInvariants(invariants []PinnedInvariant, chars []CharacterState, nowReadingNumber int, levels []PowerLevel) []StructFinding {
 	sorted := append([]PinnedInvariant(nil), invariants...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	charsByID := append([]CharacterState(nil), chars...)
@@ -65,10 +67,9 @@ func CheckPinnedInvariants(invariants []PinnedInvariant, chars []CharacterState,
 			if c == nil {
 				continue
 			}
-			ledgerNum, ok1 := parseCeilingNumber(c.CapabilityCeiling)
-			pinNum, ok2 := parseCeilingNumber(params.Ceiling)
-			if !ok1 || !ok2 {
-				continue // 自由文本天花板不可比 → 跳过不判
+			ledgerNum, pinNum, ok := resolveCeilingPair(c.CapabilityCeiling, params.Ceiling, levels)
+			if !ok {
+				continue // 自由文本天花板/境界未登记/刻度混比 → 跳过不判
 			}
 			if ledgerNum > pinNum {
 				add(p, fmt.Sprintf("不变量「%s」违例：角色「%s」账面战力天花板（%s）超过钉住上限（%s）",
@@ -103,4 +104,22 @@ func parseCeilingNumber(s string) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// resolveCeilingPair 解析账面天花板与钉住上限两侧（R2b-6 合流）：
+// 同为数值文本按数值（现行口径逐字一致优先），否则同为已登记境界名按境界数值锚；
+// 刻度混比（数值 vs 境界名）/任一不可解析 → ok=false（宁缺勿错，不混刻度）。
+func resolveCeilingPair(ledger, pin string, levels []PowerLevel) (float64, float64, bool) {
+	if a, ok := parseCeilingNumber(ledger); ok {
+		if b, ok2 := parseCeilingNumber(pin); ok2 {
+			return a, b, true
+		}
+		return 0, 0, false // 数值 vs 非数值：不同刻度不混比
+	}
+	a, ok1 := RankOfLevel(levels, ledger)
+	b, ok2 := RankOfLevel(levels, pin)
+	if ok1 && ok2 {
+		return float64(a), float64(b), true
+	}
+	return 0, 0, false
 }

@@ -4,12 +4,14 @@ package quality
 //
 // 零 LLM、毫秒级、纯函数：单章正文 → 指标全集 + C 系发现清单。
 // 只报告不改写（P2 纪律）：发现恒 warning 级（P1）落档案，不触发修复路由、不返回错误。
-// 本文件落六项确定性检查：字数门槛、章尾钩子、AI 味套话、文风八键漂移、
-// 题材卡禁忌（R2b-3）、角色台账称呼混用/死人出镜（R2b-5，§9.2 表）。
+// 本文件落八项确定性检查：字数门槛、章尾钩子、AI 味套话、文风八键漂移、
+// 题材卡禁忌（R2b-3）、角色台账称呼混用/死人出镜（R2b-5，§9.2 表）、
+// 战力/境界数值序越级取胜/低阶碾压（R2b-6，§9.2 表）。
 // 时间线/冻结事实等需要更多台账输入的 L0 项属后续扩充（提案 §4.2/§9.2）。
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/style"
@@ -27,6 +29,8 @@ const (
 	CheckTaboo          = "taboo"           // 题材卡禁忌清单命中（R2b-3，novel 级配置）
 	CheckNameDrift      = "name_drift"      // 称呼混用：同一角色 ≥2 种称呼形式同章出现（R2b-5）
 	CheckDeadAppearance = "dead_appearance" // 死人出镜：已死角色名/别名在正文出现（R2b-5）
+	CheckPowerUpset     = "power_upset"     // 越级取胜未见代价（R2b-6，战力/境界数值序）
+	CheckPowerCrush     = "power_crush"     // 低境界碾压高境界（R2b-6，战力/境界数值序）
 )
 
 // DefaultTargetWords 是单章默认目标字数（与 identity 写作纪律同一口径：
@@ -52,6 +56,27 @@ var tailHookSignals = []string{
 // 宁可漏拦不误报（只报告场景，漏一条无害、错一条误导）。
 const l0MinNameRunes = 2
 
+// powerVerbWindow 是战斗结果动词两侧的境界扫描窗口（字节近似，启发式边界）。
+const powerVerbWindow = 48
+
+// powerOutcomeVerbs 是战斗结果动词（触发越级/碾压扫描的锚点，保守高精度表）。
+var powerOutcomeVerbs = []string{
+	"击败", "战胜", "斩杀", "击杀", "反杀", "力压", "胜过", "完胜",
+	"碾压", "秒杀", "完虐", "吊打", "虐杀", "单手镇压", "一指镇压",
+}
+
+// powerDominanceSignals 是碾压级取胜修饰词（窗口内命中即按「低阶碾压高阶」定级）。
+var powerDominanceSignals = []string{
+	"碾压", "秒杀", "完虐", "吊打", "虐杀", "毫无悬念", "不费吹灰", "单手", "一指",
+}
+
+// powerCostSignals 是取胜代价信号词（有代价的越级胜利不违例——规则只管「无代价」；
+// 误判为有代价=漏报无害，宁缺勿错）。
+var powerCostSignals = []string{
+	"代价", "重伤", "惨胜", "同归于尽", "燃烧", "断臂", "废掉", "垂死", "吐血",
+	"拼死", "付出", "陨落", "折损", "濒死", "自爆", "经脉尽断", "根基受损",
+}
+
 // L0Character 是角色台账投影（正名/别名/生死态），供称呼混用/死人出镜检查（R2b-5）。
 // 由 characters 表投影而来；各包自持投影，不跨包导出。
 type L0Character struct {
@@ -62,6 +87,13 @@ type L0Character struct {
 	// Alive 是生死态三态：nil=未标注，true=在世，false=已死
 	// （只把显式 false 当已死——未标注不算死，宁缺勿错）。
 	Alive *bool
+}
+
+// PowerLevelRef 是境界等级投影（境界名 + 数值锚，越大越强），
+// 供越级取胜/低阶碾压高阶检查（R2b-6）。由 power_levels 表投影而来。
+type PowerLevelRef struct {
+	Name string
+	Rank int
 }
 
 // L0Input 是 L0 确定性检查的输入（全部确定性来源，零 LLM）。
@@ -85,6 +117,9 @@ type L0Input struct {
 	// Characters 是角色台账投影（称呼混用/死人出镜检查，R2b-5）：
 	// 空=无台账=两项检查自然跳过零发现（缺省=现行行为逐字一致）。
 	Characters []L0Character
+	// PowerLevels 是境界等级投影（越级取胜/低阶碾压检查，R2b-6）：
+	// 空=无等级表=两项检查自然跳过零发现（缺省=现行行为逐字一致）。
+	PowerLevels []PowerLevelRef
 }
 
 // RunL0Checks 对单章跑 L0 全套确定性检查，返回指标全集与 C 系发现清单。
@@ -169,6 +204,21 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 				Desc: fmt.Sprintf("已死角色「%s」在正文出镜（命中「%s」，台账生死态=已死；回忆/闪回请显式标注，若复活请先更新台账）",
 					strings.TrimSpace(c.Name), hit),
 			})
+		}
+	}
+
+	// 战力/境界数值序（R2b-6，§9.2 战力/境界崩坏）：战斗结果动词两侧扫境界名，
+	// 左（胜方语序）境界数值锚低于右（负方语序）= 越级取胜；碾压级描写定级 power_crush，
+	// 否则无代价才报 power_upset（有代价的越级胜利不违例）。
+	// 无等级表=自然跳过零发现；反向语序（高阶胜低阶）不违例（宁缺勿错）。
+	skipUntil := 0
+	for _, hit := range powerVerbHits(body) {
+		if hit.pos < skipUntil {
+			continue // 同一区域多动词命中只报一次（宁缺勿错）
+		}
+		if f := powerOutcomeFinding(body, hit, in.PowerLevels); f != nil {
+			raw = append(raw, *f)
+			skipUntil = hit.pos + len(hit.verb) + powerVerbWindow
 		}
 	}
 
@@ -307,4 +357,82 @@ func dropSubsumedForms(matched []string) []string {
 		}
 	}
 	return out
+}
+
+// containsAny 文本含任一信号词（与 structure 同名小工具各包自持，不跨包导出）。
+func containsAny(text string, signals []string) bool {
+	for _, s := range signals {
+		if s != "" && strings.Contains(text, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// powerHit 是战斗结果动词在正文中的一处命中（字节位置）。
+type powerHit struct {
+	pos  int
+	verb string
+}
+
+// powerVerbHits 收集正文中的战斗结果动词命中（按位置升序，确定性遍历序）。
+func powerVerbHits(body string) []powerHit {
+	var hits []powerHit
+	for _, verb := range powerOutcomeVerbs {
+		rest, offset := body, 0
+		for {
+			i := strings.Index(rest, verb)
+			if i < 0 {
+				break
+			}
+			hits = append(hits, powerHit{pos: offset + i, verb: verb})
+			rest = rest[i+len(verb):]
+			offset += i + len(verb)
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].pos < hits[j].pos })
+	return hits
+}
+
+// powerOutcomeFinding 对单处战斗动词命中做越级取胜/低阶碾压判定（R2b-6）：
+// 动词前窗口弱境界（rank 小）vs 动词后窗口强境界（rank 大）= 越级取胜语序；
+// 碾压级修饰 → power_crush；否则有代价跳过、无代价 → power_upset。
+// 无命中/反向语序（高阶胜低阶）/境界未登记 → nil（宁缺勿错）。
+func powerOutcomeFinding(body string, hit powerHit, levels []PowerLevelRef) *Finding {
+	verbEnd := hit.pos + len(hit.verb)
+	start := hit.pos - powerVerbWindow
+	if start < 0 {
+		start = 0
+	}
+	end := verbEnd + powerVerbWindow
+	if end > len(body) {
+		end = len(body)
+	}
+	left, right := body[start:hit.pos], body[verbEnd:end]
+	for _, lo := range levels {
+		name := strings.TrimSpace(lo.Name)
+		if lo.Rank < 1 || name == "" || !strings.Contains(left, name) {
+			continue
+		}
+		for _, hi := range levels {
+			hname := strings.TrimSpace(hi.Name)
+			if hi.Rank < 1 || hname == "" || hi.Rank <= lo.Rank || !strings.Contains(right, hname) {
+				continue
+			}
+			window := body[start:end]
+			switch {
+			case containsAny(window, powerDominanceSignals):
+				return &Finding{Check: CheckPowerCrush,
+					Desc: fmt.Sprintf("正文出现低境界碾压高境界描写：「%s」（rank %d）碾压「%s」（rank %d）（战力/境界数值序违例，请补代价改写或调整境界表）",
+						name, lo.Rank, hname, hi.Rank)}
+			case containsAny(window, powerCostSignals):
+				return nil // 有代价的越级胜利不违例（规则只管「无代价」）
+			default:
+				return &Finding{Check: CheckPowerUpset,
+					Desc: fmt.Sprintf("正文出现越级取胜未见代价：「%s」（rank %d）胜「%s」（rank %d）（越级胜利需显式代价，请补代价标注或改写）",
+						name, lo.Rank, hname, hi.Rank)}
+			}
+		}
+	}
+	return nil
 }

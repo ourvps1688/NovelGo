@@ -130,6 +130,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&quality.ChapterQuality{},
 		&quality.CheckerConfig{},
 		&structure.PinnedInvariant{},
+		&structure.PowerLevel{},
 		&review.QualityAttempt{},
 		&engine.MigrateState{},
 	}

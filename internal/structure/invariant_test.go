@@ -75,7 +75,7 @@ func TestCheckPinnedInvariantsAliveBefore(t *testing.T) {
 	}
 	// now=20：主角死于承诺 50 章前（违例）；小七全书不死（违例，别名匹配）；
 	// 七爷别名匹配但第 3 章窗口已过（不判）；女主在世/反派未标注/路人不在台账（不判）。
-	got := CheckPinnedInvariants(pins, chars, 20)
+	got := CheckPinnedInvariants(pins, chars, 20, nil)
 	require.Len(t, got, 2)
 	require.Equal(t, "S1", got[0].ID)
 	require.Equal(t, KindAliveBefore, got[0].Check)
@@ -101,11 +101,52 @@ func TestCheckPinnedInvariantsCeiling(t *testing.T) {
 			ParamsJSON: `{"character":"主角","ceiling":"20000"}`},
 		{ID: 4, Kind: KindCustom, Statement: "全书不出现现代科技", ParamsJSON: "{}"},
 	}
-	got := CheckPinnedInvariants(pins, chars, 30)
+	got := CheckPinnedInvariants(pins, chars, 30, nil)
 	require.Len(t, got, 1, "仅数值可比且超限违例；自由文本与未超限不判；custom 不判")
 	require.Equal(t, KindCapabilityCeiling, got[0].Check)
 	require.Equal(t, "pinned_invariants:1", got[0].Ref)
 	require.Contains(t, got[0].Desc, "超过钉住上限（9000）")
+}
+
+// TestCheckPinnedInvariantsCeilingRealmLevels 战力上限境界合流（R2b-6）：
+// 两侧同为已登记境界名按数值锚比对；混比/未登记境界跳过；数值优先（现行口径不变）。
+func TestCheckPinnedInvariantsCeilingRealmLevels(t *testing.T) {
+	levels := []PowerLevel{
+		{ID: 1, Name: "金丹期", Rank: 3},
+		{ID: 2, Name: "元婴期", Rank: 5},
+	}
+	chars := []CharacterState{
+		{ID: 1, Name: "主角", CapabilityCeiling: "元婴期"},
+		{ID: 2, Name: "反派", CapabilityCeiling: "金丹期"},
+		{ID: 3, Name: "散人", CapabilityCeiling: "化神期"}, // 未登记境界
+		{ID: 4, Name: "怪杰", CapabilityCeiling: "9000"},
+	}
+	pins := []PinnedInvariant{
+		{ID: 1, Kind: KindCapabilityCeiling, Statement: "主角上限金丹期",
+			ParamsJSON: `{"character":"主角","ceiling":"金丹期"}`},
+		{ID: 2, Kind: KindCapabilityCeiling, Statement: "反派上限元婴期",
+			ParamsJSON: `{"character":"反派","ceiling":"元婴期"}`},
+		{ID: 3, Kind: KindCapabilityCeiling, Statement: "散人上限元婴期",
+			ParamsJSON: `{"character":"散人","ceiling":"元婴期"}`},
+		{ID: 4, Kind: KindCapabilityCeiling, Statement: "怪杰上限元婴期",
+			ParamsJSON: `{"character":"怪杰","ceiling":"元婴期"}`},
+		{ID: 5, Kind: KindCapabilityCeiling, Statement: "怪杰上限 8000",
+			ParamsJSON: `{"character":"怪杰","ceiling":"8000"}`},
+	}
+
+	// ① 境界名超限（元婴 5 > 金丹 3）=违例；② 未超限（金丹 3 < 元婴 5）不判；
+	// ③ 未登记境界跳过；④ 数值 vs 境界名混比跳过；⑤ 双数值照旧比（9000>8000 违例）。
+	got := CheckPinnedInvariants(pins, chars, 30, levels)
+	require.Len(t, got, 2)
+	require.Equal(t, "pinned_invariants:1", got[0].Ref)
+	require.Contains(t, got[0].Desc, "超过钉住上限（金丹期）")
+	require.Equal(t, "pinned_invariants:5", got[1].Ref)
+	require.Contains(t, got[1].Desc, "超过钉住上限（8000）")
+
+	// 无境界表=只有数值可比（缺省=现行行为逐字一致）：①③④ 跳过，仅 ⑤ 照旧违例。
+	got = CheckPinnedInvariants(pins, chars, 30, nil)
+	require.Len(t, got, 1)
+	require.Equal(t, "pinned_invariants:5", got[0].Ref)
 }
 
 // TestCheckPinnedInvariantsDeterminism 确定性：乱序输入产出逐字一致（按 ID 定序编号）。
@@ -115,8 +156,8 @@ func TestCheckPinnedInvariantsDeterminism(t *testing.T) {
 		{ID: 9, Kind: KindAliveBefore, Statement: "B", ParamsJSON: `{"character":"主角","before_reading_number":0}`},
 		{ID: 2, Kind: KindAliveBefore, Statement: "A", ParamsJSON: `{"character":"主角","before_reading_number":0}`},
 	}
-	a := CheckPinnedInvariants(pins, chars, 5)
-	b := CheckPinnedInvariants([]PinnedInvariant{pins[1], pins[0]}, chars, 5)
+	a := CheckPinnedInvariants(pins, chars, 5, nil)
+	b := CheckPinnedInvariants([]PinnedInvariant{pins[1], pins[0]}, chars, 5, nil)
 	require.Equal(t, a, b)
 	require.Equal(t, []string{"S1", "S2"}, []string{a[0].ID, a[1].ID})
 	require.Equal(t, []string{"pinned_invariants:2", "pinned_invariants:9"}, []string{a[0].Ref, a[1].Ref})

@@ -19,6 +19,7 @@ import (
 	"github.com/novelgo/novelgo/internal/mcp_tools"
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/quality"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/voice"
 	"github.com/novelgo/novelgo/internal/volume"
 )
@@ -198,4 +199,25 @@ func TestScheduleChapterCIUsesCharacterLedger(t *testing.T) {
 	}
 	assert.True(t, checks[quality.CheckNameDrift], "林澈/阿澈 混用应落发现")
 	assert.True(t, checks[quality.CheckDeadAppearance], "已死的铁衣出镜应落发现")
+}
+
+// TestScheduleChapterCIUsesPowerLevels 战力/境界数值序（R2b-6）：越级取胜未见代价
+// 进 L0 发现落档案；无等级表=零发现（缺省=现行行为）。
+func TestScheduleChapterCIUsesPowerLevels(t *testing.T) {
+	db, tc, ctx := setupCIEnv(t)
+	require.NoError(t, db.AutoMigrate(&structure.PowerLevel{}))
+	require.NoError(t, structure.NewStore(db).UpsertPowerLevel(ctx, &structure.PowerLevel{NovelID: 1, Name: "金丹期", Rank: 3}))
+	require.NoError(t, structure.NewStore(db).UpsertPowerLevel(ctx, &structure.PowerLevel{NovelID: 1, Name: "元婴期", Rank: 5}))
+	ch := seedCIChapter(t, db, 8)
+
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "金丹期的他击败了元婴期的强敌。")
+
+	got, err := quality.NewStore(db, ciLogger()).GetByChapter(ctx, 1, 8)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	checks := map[string]bool{}
+	for _, f := range quality.ParseFindings(got.L0Findings) {
+		checks[f.Check] = true
+	}
+	assert.True(t, checks[quality.CheckPowerUpset], "越级取胜未见代价应落发现")
 }

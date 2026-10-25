@@ -29,7 +29,8 @@ func openPlanCheckToolDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &timeline.ChapterTaskCard{}, &timeline.ChapterPlan{},
-		&timeline.TimelineEntry{}, &structure.PinnedInvariant{}, &character.Character{}, &quality.CheckerConfig{}))
+		&timeline.TimelineEntry{}, &structure.PinnedInvariant{}, &structure.PowerLevel{},
+		&character.Character{}, &quality.CheckerConfig{}))
 	return db
 }
 

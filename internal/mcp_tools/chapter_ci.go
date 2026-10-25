@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/skill"
+	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/voice"
 )
 
@@ -76,6 +77,7 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 		TailHookRequired: cfg.TailHookRequired,
 		TabooList:        cfg.Taboos(),
 		Characters:       chapterCICharacters(ctx, tc),
+		PowerLevels:      chapterCIPowerLevels(ctx, tc),
 	})
 	err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).UpsertL0(ctx, &quality.ChapterQuality{
 		NovelID:       tc.NovelID,
@@ -119,6 +121,23 @@ func chapterCICharacters(ctx context.Context, tc ToolContext) []quality.L0Charac
 	out := make([]quality.L0Character, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, quality.L0Character{Name: r.Name, Aliases: r.Aliases, Alive: r.Alive})
+	}
+	return out
+}
+
+// chapterCIPowerLevels 投影境界等级表到 L0 输入（越级取胜/低阶碾压，R2b-6）。
+// 取数失败=nil=战力数值序检查自然跳过（降级零提示，无等级表=零发现逐字一致）。
+func chapterCIPowerLevels(ctx context.Context, tc ToolContext) []quality.PowerLevelRef {
+	if tc.DB == nil {
+		return nil
+	}
+	rows, err := structure.NewStore(tc.DB).ListPowerLevels(ctx, tc.NovelID)
+	if err != nil {
+		return nil
+	}
+	out := make([]quality.PowerLevelRef, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, quality.PowerLevelRef{Name: r.Name, Rank: r.Rank})
 	}
 	return out
 }
