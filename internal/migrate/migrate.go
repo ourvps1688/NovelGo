@@ -34,6 +34,7 @@ import (
 	"github.com/novelgo/novelgo/internal/storyarc"
 	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/style"
+	"github.com/novelgo/novelgo/internal/task"
 	"github.com/novelgo/novelgo/internal/timeline"
 	"github.com/novelgo/novelgo/internal/voice"
 	"github.com/novelgo/novelgo/internal/volume"
@@ -133,6 +134,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&structure.PinnedInvariant{},
 		&structure.PowerLevel{},
 		&review.QualityAttempt{},
+		&task.Task{},
 		&engine.MigrateState{},
 	}
 
