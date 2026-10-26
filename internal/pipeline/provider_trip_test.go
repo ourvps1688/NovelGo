@@ -257,7 +257,8 @@ func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
 
 // TestProviderTripBreaksRewriteLoop 验收② + WBS 风险条目：S3 逐章重写熔断应
 // **中断整个循环**而非逐章失败刷屏——只报一次失败进度、剩余章节零派发；
-// 落地沿既有尾部通道（复评自身也过熔断判定，落 paused 等恢复）。
+// 熔断落地不走「重写轮数 +1 + 回到复评」尾部通道（熔断不是真实重写，不得烧
+// RewriteRounds 预算），直落 paused 等恢复。
 func TestProviderTripBreaksRewriteLoop(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
@@ -302,10 +303,14 @@ func TestProviderTripBreaksRewriteLoop(t *testing.T) {
 	require.Equal(t, []string{"starting", "failed"}, phases,
 		"熔断应中断整个逐章循环：只报一次失败进度，剩余章节不派发不刷屏")
 	require.Contains(t, failedErr, "疑似供应商挂起", "失败进度错误应带统一「疑似供应商挂起」口径")
-	// 落地沿既有尾部通道：复评自身也过熔断判定 → 落 paused 等恢复。
+	// 熔断直落 paused 等恢复（不经复评失败通道）。
 	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
 	require.NoError(t, gerr)
-	require.Equal(t, StatusPaused, got.Status, "熔断中断后应经复评失败通道落 paused（可恢复）")
+	require.Equal(t, StatusPaused, got.Status, "熔断中断后应直落 paused（可恢复）")
+	// 熔断不得烧自动重写预算：RewriteRounds 保持 0，恢复后仍享有完整 autoRewriteCap 轮数。
+	var landed GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &landed))
+	require.Zero(t, landed.RewriteRounds, "熔断落地不得计入重写轮数（熔断不是真实重写）")
 
 	// 哨兵可被 errors.Is 识别（循环据此做整循环中断的差异化落地）。
 	require.ErrorIs(t,

@@ -2040,6 +2040,7 @@ func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, nov
 	}
 	index := 0
 	// rewriteLoop 标签专供供应商熔断「整循环中断」用（WBS p4 §0.2）。
+	tripped := false
 rewriteLoop:
 	for _, item := range dispatchable {
 		chaps := chaptersByReading[item.ID]
@@ -2057,8 +2058,8 @@ rewriteLoop:
 				})
 				if errors.Is(rerr, errProviderTripped) {
 					// 供应商熔断（WBS p4 §0.2）：中断整个逐章循环而非逐章失败刷屏——
-					// 只报本条失败进度，剩余章节不再派发；落地沿既有尾部通道（复评自身
-					// 也有熔断判定，会按其原有失败通道落 paused 等恢复）。
+					// 只报本条失败进度，剩余章节不再派发；落地见循环后的 tripped 分支。
+					tripped = true
 					break rewriteLoop
 				}
 				// 单章失败不阻断其余章节；失败章节仍留在重写清单，由复评与重试上限约束。
@@ -2069,6 +2070,26 @@ rewriteLoop:
 				"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber,
 			})
 		}
+	}
+
+	// 供应商熔断落地：不走「重写轮数 +1 + 回到复评」尾部通道——熔断不是一次真实重写，
+	// 计入 RewriteRounds 会烧掉自动重写预算（烧满后 handoffRewriteToUser「已尝试 N 轮」
+	// 文案失实，违背绝不谎报完成原则）。参照 S4 失败通道落 paused 等恢复：恢复按 S5
+	// 重派发从剩余章节继续；ctxt 原样持久化（轮数不变），复评不在此处触发。
+	if tripped {
+		ctxtJSON, merr := json.Marshal(ctxt)
+		if merr == nil {
+			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, string(ctxtJSON)); serr != nil {
+				s.logger.Error("S5 重写：熔断落暂停失败", "err", serr)
+			}
+		} else {
+			s.logger.Error("S5 重写：熔断落地序列化上下文失败", "err", merr)
+		}
+		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5, Status: StatusPaused,
+			Note: "疑似供应商挂起（LLM 流式空闲超时触发熔断）：本次自动重写已中断，未计入重写轮数；已暂停，点击恢复将继续剩余章节重写"})
+		s.logger.Warn("S5 重写：疑似供应商挂起，整循环中断落暂停（不计重写轮数）",
+			"run_id", runID, "dispatched", index, "total", total)
+		return
 	}
 
 	// 重写轮数 +1，持久化后自动回到 S4 复评（复评会重算重写清单：解决则出清单，仍无效则再进本函数）。

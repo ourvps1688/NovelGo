@@ -23,6 +23,7 @@ import (
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/location"
+	"github.com/novelgo/novelgo/internal/logger"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
 	"github.com/novelgo/novelgo/internal/mcpserver"
 	"github.com/novelgo/novelgo/internal/migrate"
@@ -428,7 +429,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		userConfig = &llm.UserLLMConfig{}
 	}
 	providers := llm.Merge(llm.Builtin, userConfig)
-	a.llmClient = llm.NewClient(providers, a.logger)
+	// 日志分类（排障噪声治理）：LLM 流式/工具调用/重试日志走独立分类日志器
+	// （novelgo-llm.log），与应用日志（novelgo.log）分离，避免互相刷屏。
+	a.llmClient = llm.NewClient(providers, logger.LLM())
 
 	// 9. 初始化审批服务
 	a.approvals = approval.NewService(a.logger, a.settings.ApprovalMode)

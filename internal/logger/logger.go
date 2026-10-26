@@ -34,11 +34,24 @@ func New(level slog.Level, format string, out io.Writer) *slog.Logger {
 	return slog.New(handler)
 }
 
-// Default 返回开发环境默认日志器：文本格式、Debug 级别，同时写到 stderr 和数据目录下的 novelgo.log。
+// Default 返回开发环境默认应用日志器：文本格式、Debug 级别，同时写到 stderr 和数据目录下的 novelgo.log。
 // 文件日志自动轮转：单文件 10MB，保留 3 个备份，超过 30 天自动删除。
 // stderr 写入失败（如 Windows GUI 无控制台）不影响文件日志。
 func Default() *slog.Logger {
-	logPath := filepath.Join(config.DataDirPath(), "novelgo.log")
+	return newFileLogger("novelgo.log")
+}
+
+// LLM 返回 LLM 分类日志器：LLM 流式/工具调用/重试等日志单独写到数据目录下的
+// novelgo-llm.log（与应用日志 novelgo.log 分离，同样 stderr 双写），排障时可分别
+// 查看「LLM 供应商/网络」与「应用逻辑」两类日志，避免互相刷屏。轮转策略与 Default 一致。
+func LLM() *slog.Logger {
+	return newFileLogger("novelgo-llm.log")
+}
+
+// newFileLogger 构造写入指定日志文件的分类日志器（stderr + 文件双写）。
+// 文件目录创建失败时退化为仅 stderr，不影响日志可用性。
+func newFileLogger(fileName string) *slog.Logger {
+	logPath := filepath.Join(config.DataDirPath(), fileName)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
 		return New(slog.LevelDebug, "text", os.Stderr)
 	}

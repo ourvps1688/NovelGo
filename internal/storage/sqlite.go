@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -115,6 +116,12 @@ func (a *gormSlogAdapter) Trace(_ context.Context, begin time.Time, fc func() (s
 	}
 	if err != nil {
 		attrs = append(attrs, "错误", err)
+		// 未命中记录是正常业务分支（空查询/可选查询）而非异常：降为 Debug，
+		// 避免队列心跳等高频空查询把「GORM 查询异常」刷满应用日志（排障噪声源）。
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			a.log.Debug("GORM 查询未命中", attrs...)
+			return
+		}
 		a.log.Warn("GORM 查询异常", attrs...)
 		return
 	}
