@@ -1040,6 +1040,12 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	} else {
 		// §9.4 命中率度量：L2 告警产生（曝光口径，见 alert_metrics.go 单源注释）。
 		s.recordFeatureUsageN(ctx, featureAlertRaisedL2, len(audit.Issues))
+		// R5-1「RewriteBacklog 读写改走工单」：落表成功后重写清单以工单表投影为准
+		// （工单面板驳回/复验收口即时反映到清单）；bodyIssuesOf 内存清单降级为
+		// 落表失败时的回退（上方赋值保留）。
+		if ctxt.AuditKind != "blueprint" {
+			ctxt.RewriteBacklog = s.rewriteBacklogOf(ctx, novelID, runID, ctxt.RewriteBacklog)
+		}
 	}
 	ctxt.FixStates = nil
 	// 修复日志（R1b）同轮语义：随断点一并重置，新清单=新修复日志。
@@ -1311,6 +1317,16 @@ func (s *Service) syncIssueRow(ctx context.Context, novelID int64, runID, issueK
 	}
 }
 
+// recordIssueVerifyRow 把一条复验结论落工单（R5-1 复验回执）：通过→verified（终态）、
+// 未通过→pending（退回待修），verify_receipt/verify_at 同步留痕。非阻断口径与
+// syncIssueRow 一致（工单表是结构化事实源，缺表/写失败不中断复验闭环）。
+func (s *Service) recordIssueVerifyRow(ctx context.Context, novelID int64, runID, issueKey string, ok bool, receipt string) {
+	if err := s.store.RecordIssueVerify(ctx, novelID, runID, issueKey, ok, receipt); err != nil {
+		s.logger.Warn("issue 工单复验回执落表失败（非阻断）",
+			"run_id", runID, "issue", issueKey, "ok", ok, "err", err)
+	}
+}
+
 func (s *Service) executeFix(runID string, novelID int64) {
 	ctx := s.appCtx
 	run, err := s.store.GetByRunID(ctx, runID)
@@ -1431,6 +1447,10 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		ctxt.FixStates[it.ID] = "rewrite"
 		s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusRewrite, "")
 	}
+	// R5-1「RewriteBacklog 读写改走工单」：路由结果已逐条落工单（syncIssueRow），
+	// 重写清单改由工单表投影（工单面板驳回/复验收口即时反映到清单）；内存清单
+	// （ctxt 累积 + 本轮 upsert）只作落表失败时的回退。
+	backlog = s.rewriteBacklogOf(ctx, novelID, runID, backlog)
 	ctxt.RewriteBacklog = backlog
 	// 正文级路由落库：标记 rewrite + 沉淀重写清单（即便没有台账级问题待修也需持久化，供 G4 展示）。
 	if updated, merr := json.Marshal(ctxt); merr == nil {
@@ -1864,6 +1884,7 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 	for _, tg := range targets {
 		if !found { // 兼容回退：无回执按已修复确认处理
 			ctxt.FixStates[tg.ID] = "verified"
+			s.recordIssueVerifyRow(ctx, novelID, runID, tg.ID, true, "")
 			confirmed++
 			continue
 		}
@@ -1873,10 +1894,11 @@ func (s *Service) executeVerify(runID string, novelID int64) {
 			unverified++
 		case res.OK:
 			ctxt.FixStates[tg.ID] = "verified"
+			s.recordIssueVerifyRow(ctx, novelID, runID, tg.ID, true, res.Note)
 			confirmed++
 		default: // 未通过：退回待修
 			delete(ctxt.FixStates, tg.ID)
-			s.syncIssueRow(ctx, novelID, runID, tg.ID, IssueStatusPending, "")
+			s.recordIssueVerifyRow(ctx, novelID, runID, tg.ID, false, res.Note)
 			rejected++
 		}
 	}

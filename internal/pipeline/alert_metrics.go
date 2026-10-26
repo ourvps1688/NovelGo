@@ -74,9 +74,11 @@ func (s *Service) IssueHitStats(ctx context.Context, novelID int64) ([]IssueHitS
 		}
 		st.Total++
 		switch r.Status {
-		case IssueStatusFixed:
+		case IssueStatusFixed, IssueStatusVerified:
+			// verified=复验通过（R5-1 工单态）与自动修复回执 fixed 同为「命中」口径。
 			st.Fixed++
-		case IssueStatusSkipped:
+		case IssueStatusSkipped, IssueStatusDismissed:
+			// dismissed=工单驳回（R5-1）与修复回执 skipped 同为「未确认」口径。
 			st.Skipped++
 		default:
 			st.Pending++

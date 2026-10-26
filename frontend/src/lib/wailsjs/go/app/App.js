@@ -50,6 +50,10 @@ export function ComputeStyleStats(arg1) {
   return window['go']['app']['App']['ComputeStyleStats'](arg1);
 }
 
+export function ConfirmIssueTickets(arg1, arg2) {
+  return window['go']['app']['App']['ConfirmIssueTickets'](arg1, arg2);
+}
+
 export function ConfirmQuit() {
   return window['go']['app']['App']['ConfirmQuit']();
 }
@@ -184,6 +188,10 @@ export function DeleteVolume(arg1, arg2) {
 
 export function DiscoverModels(arg1, arg2, arg3) {
   return window['go']['app']['App']['DiscoverModels'](arg1, arg2, arg3);
+}
+
+export function DismissIssueTickets(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DismissIssueTickets'](arg1, arg2, arg3);
 }
 
 export function DismissUpdate(arg1) {
@@ -426,6 +434,10 @@ export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
 }
 
+export function ListIssueTickets(arg1) {
+  return window['go']['app']['App']['ListIssueTickets'](arg1);
+}
+
 export function ListRemoteSkills(arg1) {
   return window['go']['app']['App']['ListRemoteSkills'](arg1);
 }
@@ -586,6 +598,10 @@ export function SetVolumeFrozen(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetVolumeFrozen'](arg1, arg2, arg3);
 }
 
+export function StartIssueFixTickets(arg1, arg2) {
+  return window['go']['app']['App']['StartIssueFixTickets'](arg1, arg2);
+}
+
 export function StartPipeline(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['StartPipeline'](arg1, arg2, arg3, arg4);
 }
@@ -660,4 +676,8 @@ export function UpdateVolume(arg1, arg2, arg3) {
 
 export function UpsertVoiceDimension(arg1) {
   return window['go']['app']['App']['UpsertVoiceDimension'](arg1);
+}
+
+export function VerifyIssueTickets(arg1, arg2) {
+  return window['go']['app']['App']['VerifyIssueTickets'](arg1, arg2);
 }

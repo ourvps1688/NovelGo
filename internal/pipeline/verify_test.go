@@ -239,6 +239,11 @@ func TestServiceVerifyRejectedBackToPending(t *testing.T) {
 	byKey := map[string]string{}
 	for _, r := range rows {
 		byKey[r.IssueKey] = r.Status
+		if r.IssueKey == "I1" {
+			// R5-1 复验回执落工单：未通过也留一行结论（verify_receipt/verify_at）。
+			require.Equal(t, "只改了一半", r.VerifyReceipt, "复验回执应落工单行")
+			require.NotNil(t, r.VerifyAt)
+		}
 	}
 	require.Equal(t, IssueStatusPending, byKey["I1"], "复验未通过的工单行应同步回 pending")
 	require.Equal(t, IssueStatusFixed, byKey["I2"], "回执未提及的工单行保持 fixed 留待下轮")

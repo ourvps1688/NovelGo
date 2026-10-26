@@ -3,6 +3,8 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -15,40 +17,78 @@ import (
 // JSON 副本仍是提示词/前端渲染载荷；本表是结构化事实源（作用域分组、状态流转、统计）。
 
 // issue 工单状态（与 GateContext.FixStates 取值对齐；pending/fixing 是落表后的进行态）。
+// R5-1 升格为发现项工单（提案 §10.2）：status 列同时承载工单状态机
+// 「发现 → 确认 →（人工）修复中 → 复验通过/驳回」，新增 confirmed/verified/dismissed
+// 三态；流水线路由态（rewrite/retcon/skipped/fixed）保留作兼容读与自动回路收口
+// （R5-2 自动回路退役后工单态成为主用值）。
 const (
-	IssueStatusPending = "pending"
-	IssueStatusFixing  = "fixing"
-	IssueStatusFixed   = "fixed"
-	IssueStatusSkipped = "skipped"
-	IssueStatusRewrite = "rewrite"
-	IssueStatusRetcon  = "retcon"
+	IssueStatusPending   = "pending"   // 发现（落表初始态，待确认）
+	IssueStatusConfirmed = "confirmed" // 确认（作者认领，待人工修复）
+	IssueStatusFixing    = "fixing"    // 修复中（人工修复中）
+	IssueStatusFixed     = "fixed"     // 已修复（自动修复回执态，待复验；R5-2 随自动回路退役）
+	IssueStatusVerified  = "verified"  // 复验通过（终态，必带复验回执）
+	IssueStatusDismissed = "dismissed" // 驳回（终态，非问题/不修，留人工理由）
+	IssueStatusSkipped   = "skipped"
+	IssueStatusRewrite   = "rewrite"
+	IssueStatusRetcon    = "retcon"
 )
+
+// 工单流转的显式错误面（面板按钮路径：宁缺勿错——非法迁移显式报错，不静默改写）。
+var (
+	ErrIssueNotFound          = errors.New("issue 工单不存在")
+	ErrIssueIllegalTransition = errors.New("issue 工单状态流转不合法")
+	ErrIssueTerminal          = errors.New("issue 工单已终态，不可再流转")
+)
+
+// issueTicketNext 是发现项工单状态机的合法流转表（§10.2）：
+// 发现（pending）→ 确认（confirmed）→（人工）修复中（fixing）→ 复验通过（verified）/驳回（dismissed）。
+// 兼容流水线路由态的工单收口出口（rewrite/retcon/skipped/fixed 也走「去修复/驳回」收口，
+// 复验退回 pending=退回待修，与增量复验 executeVerify 同口径）。
+// verified/dismissed 是终态无出边；→verified 一律只经 RecordIssueVerify（必带复验回执），
+// 不经通用流转。本表只管工单面板显式流转，流水线内部同步（syncIssueRow）不校验（兼容写）。
+var issueTicketNext = map[string][]string{
+	IssueStatusPending:   {IssueStatusConfirmed, IssueStatusFixing, IssueStatusDismissed},
+	IssueStatusConfirmed: {IssueStatusFixing, IssueStatusDismissed},
+	IssueStatusFixing:    {IssueStatusPending, IssueStatusDismissed},
+	IssueStatusFixed:     {IssueStatusFixing, IssueStatusPending, IssueStatusDismissed},
+	IssueStatusRewrite:   {IssueStatusFixing, IssueStatusDismissed},
+	IssueStatusSkipped:   {IssueStatusFixing, IssueStatusDismissed},
+	IssueStatusRetcon:    {IssueStatusDismissed},
+	// IssueStatusVerified / IssueStatusDismissed：终态，无出边。
+}
 
 // PipelineIssue 是一条体检 issue 的持久化工单。
 type PipelineIssue struct {
-	ID      int64  `gorm:"column:id;primaryKey;autoIncrement"`
-	NovelID int64  `gorm:"column:novel_id;not null;index"`
-	RunID   string `gorm:"column:run_id;not null;index;uniqueIndex:idx_pipeline_issues_run_key,priority:1"`
+	ID      int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	NovelID int64  `gorm:"column:novel_id;not null;index"      json:"novel_id"`
+	RunID   string `gorm:"column:run_id;not null;index;uniqueIndex:idx_pipeline_issues_run_key,priority:1" json:"run_id"`
 	// IssueKey 是 run 内稳定键（issue 契约 ID，如 I1/V1/D1）。每轮体检整批替换
 	// （新体检=新问题清单，与 executeAudit 重置 FixStates 同语义），跨轮同号
 	// 不共用断点。
-	IssueKey    string `gorm:"column:issue_key;not null;uniqueIndex:idx_pipeline_issues_run_key,priority:2"`
-	Level       string `gorm:"column:level;not null"`
-	Area        string `gorm:"column:area"`
-	Desc        string `gorm:"column:desc;type:text"`
-	FixType     string `gorm:"column:fix_type"`
-	TargetScope string `gorm:"column:target_scope"`
-	Dimension   string `gorm:"column:dimension"`
-	Direction   string `gorm:"column:direction"`
+	IssueKey    string `gorm:"column:issue_key;not null;uniqueIndex:idx_pipeline_issues_run_key,priority:2" json:"issue_key"`
+	Level       string `gorm:"column:level;not null" json:"level"`
+	Area        string `gorm:"column:area"           json:"area"`
+	Desc        string `gorm:"column:desc;type:text" json:"desc"`
+	FixType     string `gorm:"column:fix_type"       json:"fix_type,omitempty"`
+	TargetScope string `gorm:"column:target_scope"   json:"target_scope,omitempty"`
+	Dimension   string `gorm:"column:dimension"      json:"dimension,omitempty"`
+	Direction   string `gorm:"column:direction"      json:"direction,omitempty"`
 	// ChapterIDsJSON 是涉及章节全局阅读序号（JSON 数组序列化，如 [1,2,3]）。
 	// 存的是 issueChapterIDs 的有效值（结构化字段优先，正则兜底），供作用域分组直接消费。
-	ChapterIDsJSON string `gorm:"column:chapter_ids;type:text"`
-	Status         string `gorm:"column:status;not null;index"`
-	SkipReason     string `gorm:"column:skip_reason;type:text"`
+	ChapterIDsJSON string `gorm:"column:chapter_ids;type:text" json:"chapter_ids,omitempty"`
+	Status         string `gorm:"column:status;not null;index"  json:"status"`
+	SkipReason     string `gorm:"column:skip_reason;type:text"  json:"skip_reason,omitempty"`
+	// VerifyReceipt 是复验回执的一行结论（复验通过/未通过的依据，来自复验回执 note
+	// 或人工复验备注）；复验落表时写入（RecordIssueVerify），供工单面板展示。
+	VerifyReceipt string `gorm:"column:verify_receipt;type:text" json:"verify_receipt,omitempty"`
+	// VerifyAt 是最近一次复验落表时间。
+	VerifyAt *time.Time `gorm:"column:verify_at" json:"verify_at,omitempty"`
+	// Note 是工单面板流转时的人工备注（驳回理由/交接说明）。
+	Note string `gorm:"column:note;type:text" json:"note,omitempty"`
 	// Round 是记录/流转时的修复轮数（GateContext.FixRounds），供轮次统计与增量复验分轮。
-	Round     int       `gorm:"column:round;not null;default:0"`
-	CreatedAt time.Time `gorm:"column:created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+	Round     int       `gorm:"column:round;not null;default:0" json:"round"`
+	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
 }
 
 // TableName 指定物理表名。
@@ -124,4 +164,133 @@ func (s *Store) ListIssues(ctx context.Context, novelID int64, runID string) ([]
 		return nil, err
 	}
 	return rows, nil
+}
+
+// ── 发现项工单（R5-1，提案 §10.2/§10.7）──────────────────────────────────────
+// issue 台账升格为工单：状态机（发现→确认→（人工）修复中→复验通过/驳回）+ 复验回执。
+// 工单面板按钮经 Service 走本组方法；流水线内部同步（UpdateIssueStatus）不走状态机
+// （兼容写，R5-2 自动回路退役后收口）。
+
+// getIssueRow 按 run 内稳定键取一行工单（不存在返回 ErrIssueNotFound）。
+func (s *Store) getIssueRow(ctx context.Context, novelID int64, runID, issueKey string) (*PipelineIssue, error) {
+	var row PipelineIssue
+	err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrIssueNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// TransitionIssueTicket 按工单状态机流转一条发现项工单（面板「确认/去修复/驳回/退回待修」）。
+// to 仅限 issueTicketNext 表内的合法迁移，非法迁移/终态一律显式报错（宁缺勿错）；
+// to=verified 一律拒绝——复验通过必须经 RecordIssueVerify 携带复验回执落表。
+// note 非空时写入 note 列（驳回理由/人工备注），为空不覆盖既有备注。
+func (s *Store) TransitionIssueTicket(ctx context.Context, novelID int64, runID, issueKey, to, note string) error {
+	if to == IssueStatusVerified {
+		return fmt.Errorf("%w: 复验通过须经复验回执落表（RecordIssueVerify）", ErrIssueIllegalTransition)
+	}
+	row, err := s.getIssueRow(ctx, novelID, runID, issueKey)
+	if err != nil {
+		return err
+	}
+	allowed := issueTicketNext[row.Status]
+	ok := false
+	for _, a := range allowed {
+		if a == to {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		if len(allowed) == 0 {
+			return fmt.Errorf("%w: %s 是终态", ErrIssueTerminal, row.Status)
+		}
+		return fmt.Errorf("%w: %s → %s", ErrIssueIllegalTransition, row.Status, to)
+	}
+	updates := map[string]any{"status": to, "updated_at": time.Now()}
+	if note != "" {
+		updates["note"] = note
+	}
+	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
+		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+		Updates(updates).Error
+}
+
+// RecordIssueVerify 落一条复验回执（§10.2「状态机 + 复验回执」）：通过→verified（终态），
+// 未通过→pending（退回待修，与增量复验 executeVerify 同口径）；verify_receipt/verify_at
+// 逐次留痕。终态工单（verified/dismissed）不接受复验。
+func (s *Store) RecordIssueVerify(ctx context.Context, novelID int64, runID, issueKey string, ok bool, receipt string) error {
+	row, err := s.getIssueRow(ctx, novelID, runID, issueKey)
+	if err != nil {
+		return err
+	}
+	if row.Status == IssueStatusVerified || row.Status == IssueStatusDismissed {
+		return fmt.Errorf("%w: %s 是终态", ErrIssueTerminal, row.Status)
+	}
+	to := IssueStatusPending // 复验未通过：退回待修
+	if ok {
+		to = IssueStatusVerified
+	}
+	now := time.Now()
+	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
+		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+		Updates(map[string]any{
+			"status": to, "verify_receipt": receipt, "verify_at": now, "updated_at": now,
+		}).Error
+}
+
+// ListIssueTicketsByNovel 列出一本书的全部发现项工单（工单面板列表，跨 run，新单在前）。
+func (s *Store) ListIssueTicketsByNovel(ctx context.Context, novelID int64) ([]PipelineIssue, error) {
+	var rows []PipelineIssue
+	err := s.db.WithContext(ctx).
+		Where("novel_id = ?", novelID).
+		Order("id DESC").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ListRewriteTickets 列出回流 S3 重写回路的正文级工单（RewriteBacklog 的工单表投影源）：
+// fix_type=body 或 V 系（isStyleExempt）且未收口的行（verified/dismissed/retcon 除外）。
+// 写保护（writeProtected）行由消费方 rewriteBacklogOf 过滤（与 bodyIssuesOf 同语义）。
+func (s *Store) ListRewriteTickets(ctx context.Context, novelID int64, runID string) ([]PipelineIssue, error) {
+	var rows []PipelineIssue
+	err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND run_id = ? AND status NOT IN ?",
+			novelID, runID, []string{IssueStatusVerified, IssueStatusDismissed, IssueStatusRetcon}).
+		Order("id").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PipelineIssue, 0, len(rows))
+	for _, r := range rows {
+		if r.FixType == FixTypeBody || isStyleExempt(r.IssueKey) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// rewriteItemOfRow 把一条正文级工单行投影为 RewriteItem（JSON 契约副本形状，前端兼容读）。
+func rewriteItemOfRow(r PipelineIssue) RewriteItem {
+	var chapters []int64
+	if r.ChapterIDsJSON != "" {
+		_ = json.Unmarshal([]byte(r.ChapterIDsJSON), &chapters)
+	}
+	return RewriteItem{
+		ID:          r.IssueKey,
+		Level:       r.Level,
+		Area:        r.Area,
+		Desc:        r.Desc,
+		Chapters:    chapters,
+		TargetScope: r.TargetScope,
+		Dimension:   r.Dimension,
+		Direction:   r.Direction,
+	}
 }

@@ -2729,6 +2729,110 @@ export namespace personasetting {
 
 export namespace pipeline {
 	
+	export class IssueTicketRef {
+	    run_id: string;
+	    issue_key: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IssueTicketRef(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_id = source["run_id"];
+	        this.issue_key = source["issue_key"];
+	    }
+	}
+	export class IssueVerifySummary {
+	    confirmed: number;
+	    rejected: number;
+	    unverified: number;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IssueVerifySummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.confirmed = source["confirmed"];
+	        this.rejected = source["rejected"];
+	        this.unverified = source["unverified"];
+	        this.detail = source["detail"];
+	    }
+	}
+	export class PipelineIssue {
+	    id: number;
+	    novel_id: number;
+	    run_id: string;
+	    issue_key: string;
+	    level: string;
+	    area: string;
+	    desc: string;
+	    fix_type?: string;
+	    target_scope?: string;
+	    dimension?: string;
+	    direction?: string;
+	    chapter_ids?: string;
+	    status: string;
+	    skip_reason?: string;
+	    verify_receipt?: string;
+	    // Go type: time
+	    verify_at?: any;
+	    note?: string;
+	    round: number;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    updated_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new PipelineIssue(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.novel_id = source["novel_id"];
+	        this.run_id = source["run_id"];
+	        this.issue_key = source["issue_key"];
+	        this.level = source["level"];
+	        this.area = source["area"];
+	        this.desc = source["desc"];
+	        this.fix_type = source["fix_type"];
+	        this.target_scope = source["target_scope"];
+	        this.dimension = source["dimension"];
+	        this.direction = source["direction"];
+	        this.chapter_ids = source["chapter_ids"];
+	        this.status = source["status"];
+	        this.skip_reason = source["skip_reason"];
+	        this.verify_receipt = source["verify_receipt"];
+	        this.verify_at = this.convertValues(source["verify_at"], null);
+	        this.note = source["note"];
+	        this.round = source["round"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.updated_at = this.convertValues(source["updated_at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 	export class PipelineRun {
 	    ID: number;
 	    NovelID: number;

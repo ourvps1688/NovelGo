@@ -56,6 +56,8 @@ export function CompressContext(arg1:app.CompressInput):Promise<app.CompressResu
 
 export function ComputeStyleStats(arg1:app.ComputeStyleStatsInput):Promise<style.Stats>;
 
+export function ConfirmIssueTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
+
 export function ConfirmQuit():Promise<void>;
 
 export function ControlPipeline(arg1:string,arg2:string):Promise<void>;
@@ -123,6 +125,8 @@ export function DeleteTimelineEntry(arg1:number,arg2:number):Promise<void>;
 export function DeleteVolume(arg1:number,arg2:number):Promise<void>;
 
 export function DiscoverModels(arg1:string,arg2:string,arg3:string):Promise<Array<llm.ModelInfo>>;
+
+export function DismissIssueTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>,arg3:string):Promise<void>;
 
 export function DismissUpdate(arg1:string):Promise<void>;
 
@@ -244,6 +248,8 @@ export function InstallRemoteSkill(arg1:app.InstallRemoteSkillInput):Promise<app
 
 export function IsInitialized():Promise<boolean>;
 
+export function ListIssueTickets(arg1:number):Promise<Array<pipeline.PipelineIssue>>;
+
 export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_novelgo_novelgo_internal_storage_PageResult_github_com_novelgo_novelgo_internal_skill_remote_RemoteSkillMeta__>;
 
 export function ListRetconCases(arg1:number):Promise<Array<retcon.RetconCase>>;
@@ -324,6 +330,8 @@ export function SetSelectedModel(arg1:string,arg2:string):Promise<void>;
 
 export function SetVolumeFrozen(arg1:number,arg2:number,arg3:boolean):Promise<volume.Volume>;
 
+export function StartIssueFixTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
+
 export function StartPipeline(arg1:number,arg2:string,arg3:any,arg4:boolean):Promise<pipeline.PipelineRun>;
 
 export function TestConnection(arg1:app.TestConnectionInput):Promise<llm.TestConnectionResult>;
@@ -361,3 +369,5 @@ export function UpdateTimelineEntry(arg1:number,arg2:number,arg3:app.UpdateTimel
 export function UpdateVolume(arg1:number,arg2:number,arg3:string):Promise<void>;
 
 export function UpsertVoiceDimension(arg1:app.UpsertVoiceDimensionInput):Promise<voice.Entry>;
+
+export function VerifyIssueTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<pipeline.IssueVerifySummary>;

@@ -8,6 +8,7 @@ import BlueprintWorkflowView from "./BlueprintWorkflowView";
 import SignabilityAuditView, { StockAuditPanel } from "./SignabilityAuditView";
 import PipelineControlBar from "./PipelineControlBar";
 import PatrolReportPanel from "./PatrolReportPanel";
+import IssueTicketsPanel from "./IssueTicketsPanel";
 import RetconPanel from "./RetconPanel";
 import VolumeManagePanel from "./VolumeManagePanel";
 
@@ -210,6 +211,7 @@ export default function PipelineWizard({ novelId }: Props) {
               }}
             />
           ) : null}
+          <IssueTicketsPanel novelId={novelId} />
           <RetconPanel novelId={novelId} />
           <VolumeManagePanel novelId={novelId} />
         </div>

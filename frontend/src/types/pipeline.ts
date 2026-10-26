@@ -82,8 +82,39 @@ export interface FixIssuePayload extends AuditIssue {
 
 // 回流到 S3 章节重写回路的正文级问题（pipeline:rewrite_backlog / run.ContextJSON.rewrite_backlog），
 // 与后端 RewriteItem 对应。作用域三枚举与源 issue 一致，供重写派发的冻结卷写保护判路与前端标签展示。
+// R5-1 起该清单是工单表的兼容投影（事实源=pipeline_issues，驳回/复验收口即时出清单）。
 export interface RewriteItem extends AuditIssue {
   chapters?: number[];
+}
+
+// 发现项工单状态（R5-1，与后端 internal/pipeline/issue.go 状态机对齐）。
+// 生命周期：发现(pending) → 确认(confirmed) →（人工）修复中(fixing) → 复验通过(verified)/
+// 驳回(dismissed)；verified/dismissed 为终态无出边，→verified 只经复验回执落表。
+// 流水线路由态（fixed/skipped/rewrite/retcon）兼容读，各留工单收口出口。
+export type IssueTicketStatus =
+  | "pending"
+  | "confirmed"
+  | "fixing"
+  | "fixed"
+  | "verified"
+  | "dismissed"
+  | "skipped"
+  | "rewrite"
+  | "retcon";
+
+// 工单引用（run 内稳定键 issue_key + run_id），与后端 pipeline.IssueTicketRef 对应。
+export interface IssueTicketRef {
+  run_id: string;
+  issue_key: string;
+}
+
+// 工单批量复验小结（与后端 pipeline.IssueVerifySummary 对应）：
+// confirmed=复验通过（verified）、rejected=未通过退回待修（pending）、unverified=跳过（终态等）。
+export interface IssueVerifySummary {
+  confirmed: number;
+  rejected: number;
+  unverified: number;
+  detail?: string;
 }
 
 // S5 修复进度状态（由 pipeline:fix_start / pipeline:fix_done 维护）。
