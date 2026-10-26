@@ -12,7 +12,7 @@ Timeline 是 AI 写作的剧情追踪系统，用于管理伏笔回收和用户�
 
 1. **category 约束枚举**（`foreshadowing` | `user_directive`）：系统级分类驱动不同查询和注入策略，此处需精确行为区分，不做自由文本。
 
-2. **target_chapter 必填作为排序键，不作为过滤条件**：Python 用它做 `WHERE target_chapter <= current + 3` 过滤，不准确就丢数据。Go 只用于 `ORDER BY`，不准确不影响可见性。Review agent 每章后校准。
+2. **target_chapter 必填作为排序键，不作为过滤条件**：Python 用它做 `WHERE target_chapter <= current + 3` 过滤，不准确就丢数据。Go 只用于 `ORDER BY`，不准确不影响可见性。写后由 statesync 校准。
 
 3. **混合注入替代距离过滤**：近期窗口全量 + 全局索引一行一条。Python 用 target_chapter ±3 做硬过滤配合 LIMIT 15，导致远期高重要度条目可能被近期低重要度挤出，永远不可见。
 
@@ -66,7 +66,7 @@ Python 6 状态（`pending` / `active` / `completed` / `resolved` / `abandoned` 
 
 核心矛盾：`target_chapter` 是 LLM 对不确定未来的数字估算，天生不准。Python 拿它做过滤（`<= current + 3`），不准就丢数据。
 
-Go 方案：只用于 `ORDER BY target_chapter ASC, importance DESC`，不作为 WHERE 条件。索引全量列出（100 条截断兜底），不准确不影响可见性。Review agent 每章后校准，准确性随时间自然提升。
+Go 方案：只用于 `ORDER BY target_chapter ASC, importance DESC`，不作为 WHERE 条件。索引全量列出（100 条截断兜底），不准确不影响可见性。写后由 statesync 校准，准确性随时间自然提升。
 
 ### 2. 混合注入
 
@@ -102,9 +102,9 @@ far  → 全量注入（完整 content，1 行）
 
 但时间线的 category 和 status 驱动不同的查询策略和上下文格式化逻辑——系统必须区分"这个是伏笔"、"这个是用户指令"来执行不同的注入行为。这是系统级分类，约束枚举是正确的选择。
 
-### 4. Review Agent
+### 4. 写后状态维护（statesync）
 
-每章写完后自动触发（非用户手动），职责：
+每章写完后由 statesync 子 agent 自动触发（非用户手动），职责：
 
 1. 故事超出预期 → 调整 target_chapter
 2. 伏笔已被自然回收但未标记 → 标记 resolved
@@ -138,7 +138,7 @@ far  → 全量注入（完整 content，1 行）
   ├─ add_timeline_entry  埋新伏笔 / 更新章节计划
   └─ update_timeline_entry  回收伏笔 / 调整 target_chapter
 
-第 N 章写完后 — Review Agent 自动触发：
+第 N 章写完后 — statesync 自动触发（写后状态维护）：
   ├─ 校准 target_chapter
   ├─ 标记已自然回收的伏笔
   └─ 发现冲突上报主 agent

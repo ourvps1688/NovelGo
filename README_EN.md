@@ -49,7 +49,7 @@
 
 After a chapter is written, the system automatically injects maintenance reminders telling the Agent exactly what to check: have characters changed, has pending foreshadowing been resolved, do arc nodes need to advance, does reader knowledge need updating. The Agent won't "forget maintenance"—it's forced to self-check item by item.
 
-If that's still not enough, you can launch the Review Sub-Agent—an independent Agent that audits the chapter content against system state from scratch, flags any inconsistencies straight into the conversation, and lets the main Agent fix them on the spot.
+If that's still not enough, you can launch the Review Sub-Agent—an independent Agent that reads the chapter from an editor's perspective (plot credibility, reading feel), shares its subjective notes straight into the conversation, and lets the main Agent fix them on the spot.
 
 ## Finding One Sentence Across Hundreds Of Thousands Of Words: Local Semantic Search
 
@@ -120,7 +120,7 @@ Same-name Skills override by priority: **Novel > User > Built-in**. Changes hot-
 | Layer | Storage | Scope | Editable |
 |---|---|---|---|
 | Built-in | Read-only bundled | All novels | No |
-| User | `~/.goink/skills/` | All novels | Yes |
+| User | `~/.novelgo/skills/` | All novels | Yes |
 | Novel | `{novel}/skills/` | Current novel | Yes |
 
 ### Three Modes
@@ -135,7 +135,7 @@ Same-name Skills override by priority: **Novel > User > Built-in**. Changes hot-
 
 |  | Smart auto | Command manual | Always-on always |
 |---|---|---|---|
-| **Built-in** | Scene Beats, Dialogue Subtext, Pacing Control, Suspense Hooks, Character Design, Revision Polish, De-AI-ify, Co-Creation Brainstorm | review / memory / collect / next | — |
+| **Built-in** | Scene Beats, Dialogue Subtext, Pacing Control, Suspense Hooks, Character Design, Revision Polish, De-AI-ify, Co-Creation Brainstorm, etc. | review / memory / collect / next, etc. | — |
 | **User** | Reusable cross-novel workflows | Personal quick commands | Global style rules |
 | **Novel** | Novel-specific workflows | Novel quick commands | Novel always-on rules |
 
@@ -173,7 +173,7 @@ The generated Skill appears in your list instantly. Load it with `/stylename` an
 
 **Layer 2—Dynamic Injection** • After the AI writes a long piece, the system auto-injects check items—character changes, foreshadowing status, arc nodes, reader knowledge.
 
-**Layer 3—Review Sub-Agent** • An independent sub-agent compares the chapter against system state and reports any issues immediately.
+**Layer 3—Review Sub-Agent** • An independent sub-agent reads the chapter from an editor's perspective and reports its subjective notes immediately (per-chapter state maintenance is handled by automatic post-write sync).
 
 ## Your Approval, Every Time
 
@@ -189,7 +189,7 @@ Every change has Git history. Roll back to any state at any time.
 
 ## The AI Can't Touch Files It Shouldn't
 
-Dual-layer sandbox security isolation—regex whitelist only allows legitimate paths like `chapters/`, `outlines/`, `goink.md`; SafePath prevents path traversal. Files are re-read and compared before writing to prevent overwriting your manual edits.
+Dual-layer sandbox security isolation—regex whitelist only allows legitimate paths like `chapters/`, `outlines/`, `novelgo.md`; SafePath prevents path traversal. Files are re-read and compared before writing to prevent overwriting your manual edits.
 
 ## Installation
 

@@ -5,7 +5,8 @@ package pipeline
 // 蓝图/S0 对齐/全量对齐/巡检）从裸 goroutine 迁到 internal/task 队列——
 // 幂等消费（同 kind+run 去重）、崩溃续跑（租约过期重领）、可观察（task 表）。
 //
-// 外部语义不变（R3b 边界，R3c 才退役 Interrupted/Dispatching）：
+// 外部语义不变（R3b 边界；Interrupted/Dispatching 两个补丁布尔后于 R3c 退役，
+// 执行体存活判据改为租约语义，见本文件 hasActiveTask）：
 //   - 队列不可用（tasks 表缺失 / Runner 未启动）→ 降级走 legacy 裸 goroutine，
 //     行为与迁移前逐字一致；
 //   - 跨进程崩溃续跑仍走 RecoverInterruptedRuns 的人工恢复链路（启动清扫

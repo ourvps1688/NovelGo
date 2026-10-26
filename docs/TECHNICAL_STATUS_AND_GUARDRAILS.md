@@ -50,11 +50,11 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 |---|---|---|
 | 技能意图路由 | ✅ 完成 | `useWhen` 结构化 + 确定性 cue 路由 + `RouteUserMessageSmart` LLM 兜底（4s 超时 / 0.6 置信 / 失败降级） |
 | 路由 CI 护栏 | ✅ 完成 | `internal/skill/regression_test.go`（确定性，零 key）+ `.github/workflows/skill-fallback-eval.yml`（夜跑 LLM，需 `DEEPSEEK_API_KEY` secret） |
-| **「签约」智能层** | ✅ 完成且验证 | 3 个专项技能：`signability-audit`（manual，七维体检）、`story-blueprint`/`worldbuilding-design`（auto）；已用真实 deepseek 验证产出「七维星级表 + 致命伤清单」结构化体检（非空壳）。**新增编排层** `signability-workflow`（manual，系统类）——把 3 专项技能串成「现状诊断→规划蓝图→世界设定→写作推进→签约体检→闭环回修」引导式闭环（2026-10-16，见 §5 P2-3） |
+| **「签约」智能层** | ✅ 完成且验证 | 3 个专项技能：`signability-audit`（manual，七维体检）、`story-blueprint`/`worldbuilding-design`（auto）；已用真实 deepseek 验证产出「七维星级表 + 致命伤清单」结构化体检（非空壳）。**新增编排层** `signability-workflow`（manual，系统类）——把 3 专项技能串成「现状诊断→规划蓝图→世界设定→写作推进→签约体检→闭环回修」引导式闭环（2026-10-16，见 §5 P2-3）；**该编排技能后已退役删除**（2026-10-18 起入口改由流水线状态机驱动，见 §9 变更记录） |
 | 编辑器体验 | ✅ 完成 | 墨色主题模块 `monacoTheme.ts`；正文字体/行距/关闭行号/关闭 overview ruler；diff 红调淡；滚动条中性灰 |
 | 人物关系图可视化 | ✅ 完成 | 后端 `GetCharacterRelations` + 前端 `CharacterGraph`（@antv/g6 v5 dagre 树布局、点击详情卡、懒加载）；F-5/F-6 特性已入库 |
 | 数据目录迁移 | ✅ 完成 | `platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效；`internal/datamove` 安全迁移（同盘 rename/跨盘拷贝+回退）；`app.PickDirectory/UpdateDataDir` + 前端「更改」按钮+进度条+非空确认框 |
-| 内置技能总数 | ✅ 19 个 | 含 3 个签约专项技能 + 1 个签约编排技能 `signability-workflow`；题材/偏好层在前端 `genreTemplates.ts`（30+ 题材卡） |
+| 内置技能总数 | ✅ 26 个 | 含 3 个签约专项技能（`signability-audit`/`story-blueprint`/`worldbuilding-design`）；原签约编排技能 `signability-workflow` 已退役删除（2026-10-16 时点为 19 个）；题材/偏好层在前端 `genreTemplates.ts`（30+ 题材卡） |
 | 测试基建 | ✅ 完成 | 55 Go 测试包 + 33 前端测试 + `internal/e2e`（3 OS Go 集成测试，覆盖 novel/chapter/git/ONNX 主链路） |
 | 发布链路 | ✅ 完成 | Win(Inno)/Linux(AppImage)/macOS(DMG + codesign + spctl + dmg 挂载验证)，按 `v*` tag 触发 |
 
@@ -115,7 +115,7 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
   - 门禁：`go build ./...` + `go test ./internal/datamove/... ./internal/platform/... ./app/...` +
     `prettier --check` + `npm run i18n:check` + `npm run build` 全绿。
   - ⚠️ **`internal/character/types.go:46` 的「后续可实现前端可视化关系图」TODO 已过时**（图早已存在），可择机清掉。
-- **[x] 「签约」层产品化 —— 技能内核（编排层）**：已实现并入库（`signability-workflow` 内置技能，2026-10-16）。
+- **[x] 「签约」层产品化 —— 技能内核（编排层）**：已实现并入库（`signability-workflow` 内置技能，2026-10-16）；**后已退役删除**（2026-10-18 起由流水线状态机承接，见 §9 变更记录）。
   把 `story-blueprint`/`worldbuilding-design`/`signability-audit` 三专项技能编排为引导式「签约潜力工作流」
   （现状诊断→规划蓝图→世界设定→写作推进→签约体检→闭环回修六阶段，全程服从题材卡约束，只编排不落库）。
   经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、AC1–AC9 全满足、Phase 4 QA 零缺陷。
@@ -124,6 +124,7 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
     （`PanelId="signability"`），由 `SignabilityWorkflowView` 承载六阶段导览卡 + 一键启动按钮：
     - 启动 = **合并式启用 `signability-workflow`（SetEnabledSkills 常驻注入）+ 经 `useChatLaunchStore` 通道向 ChatPanel 发 kickoff 消息**。
       关键点：`signability-workflow` 是 `mode: manual`，不进技能目录路由（`ListMetaForCatalog` 仅收 `ModeAuto`），故必须「先启用再发消息」才能启动，而非依赖 useWhen 目录路由。
+      注（2026-10-26）：以上为历史机制——PR3 起该入口由 pipeline 状态机驱动（`SignabilityWorkflowView` 直接 `StartPipeline`），不再经 chat skill 启动；`signability-workflow` 已退役删除。
     - 零侵入通道：新建极小 zustand store `useChatLaunchStore`（register/unregister/send），ChatPanel 挂载时 `register(handleSend)`、卸载 `unregister`；入口面板取 `send` 直接发消息，不改 ChatInput/ChatPanel 既有 props 契约。
     - 守卫：`novelId===0` 禁用并提示「先选小说」；未配模型（`selected_model_key` 指向模型不存在）禁用并提示「先配模型」。
     - i18n：新增 `shell.signability` 与 `signability.*` 双语键（标题/副标题/六阶段目标与完成判据/各阶段调用技能/kickoff/启动按钮/禁用提示）。
@@ -195,7 +196,8 @@ dev 用 2.16 验证并提交绑定，发布件与 dev 测试产物会分叉 → 
 | 2026-10-16 | P1 完成：`release.yml`(3处)+`verify-macos-codesign.yml`(1处) Wails CLI 对齐 `v2.16.0`；同步更新 §2/§5/§9 |
 | 2026-10-16 | 纠正 §5 误判：P2-1 人物关系图可视化**早已实现并入库**（F-5/F-6，`3fc049d`/`02faead`），此前「前端没有关系图 UI」为漏扫；同步 §3/§5/§9 |
 | 2026-10-16 | P2-2 完成：**数据目录迁移做成真正可用功能**。新增 `internal/datamove` 包（含测试）、`platform.readConfiguredDataDir()` 让 `config.json:data_dir` 生效、`app.PickDirectory/UpdateDataDir` 重写为安全迁移+回退、前端 `GeneralConfigTab` 加「更改」按钮+进度条+非空确认框；wails 绑定重生成；全门禁绿 |
-| 2026-10-16 | P2-3 技能内核完成（UI 待做）：新增内置编排技能 `signability-workflow`（manual/系统类），把 `story-blueprint`/`worldbuilding-design`/`signability-audit` 编排成六阶段「签约潜力工作流」引导式闭环。经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、Phase 4 QA 零缺陷（AC1–AC9 全满足）。内置技能总数 18→19。工作区 `skill-studio/20261016-135655-signflow/` |
-| 2026-10-16 | P2-3 UI 入口完成：左侧 ActivityBar 新增「签约潜力工作流」面板（`PanelId="signability"` + `SignabilityWorkflowView`）。启动=合并式启用 `signability-workflow`(SetEnabledSkills 常驻注入)+经 `useChatLaunchStore` 通道发 kickoff 消息到 ChatPanel；含选书/配模型守卫与双语 i18n。前端门禁（prettier/i18n:check/tsc/build）全绿 |
+| 2026-10-16 | P2-3 技能内核完成（UI 待做）：新增内置编排技能 `signability-workflow`（manual/系统类），把 `story-blueprint`/`worldbuilding-design`/`signability-audit` 编排成六阶段「签约潜力工作流」引导式闭环。经 NovelGo 真实解析器验证可加载、`internal/skill` 包测试通过、Phase 4 QA 零缺陷（AC1–AC9 全满足）。内置技能总数 18→19。工作区 `skill-studio/20261016-135655-signflow/`（该编排技能后已退役删除，见 2026-10-26 行） |
+| 2026-10-16 | P2-3 UI 入口完成：左侧 ActivityBar 新增「签约潜力工作流」面板（`PanelId="signability"` + `SignabilityWorkflowView`）。启动=合并式启用 `signability-workflow`(SetEnabledSkills 常驻注入)+经 `useChatLaunchStore` 通道发 kickoff 消息到 ChatPanel；含选书/配模型守卫与双语 i18n。前端门禁（prettier/i18n:check/tsc/build）全绿（历史机制：该编排技能后已退役删除，入口改由 pipeline 状态机驱动，见 2026-10-26 行） |
 | 2026-10-16 | **三提取合一（Form B）落地**：风格/套路/心智 = 单一入口 + 一次触发 + 产物分立（非一份整合技能）。后端 `internal/pattern` 拆出共享前缀 `runPrefix`(边界→章节摘要→递归压缩)与 `runFinal`(按 flavor 分流 struct/mental)，新增 `ExtractPatternAll`(一次前缀多 flavor 产物)；`types.go` 加 `Flavors []string` + `ExtractPatternAllResult{struct,mental}`；`app/pattern_api.go` 加 `ExtractPatternAll` 方法(含 cancelMgr/mental retriever 同 `ExtractPattern`)。前端 `ExtractWorkspaceView` 改为单一页面(范围开关 style/struct/mental 默认全开)、`PatternExtractView` 改 `defaultFlavors` 多选、`PatternSessionView` 多产物 session(共享前缀一次产出，套路+心智卡片分流，mental 自动并入写作流)。wails 绑定 `App.js/App.d.ts/models.ts` 手工补 `ExtractPatternAll`(CI build 权威重生成)。i18n 双语补齐。全门禁绿(pretty/i18n:check/tsc/build/go build/go test)。已推送 master |
 | 2026-10-16 | **三提取合一 UI 后续修复**：(1) 修复 `ExtractWorkspaceView` 因 `SectionHeader` 定义在组件体内部导致的 eslint "Cannot create components during render" error（2 errors），让 CI `lint-frontend` 恢复绿色；(2) 将叙事套路/心智、风格画像两个子面板改为独立圆角卡片容器（`rounded-xl border bg-card`），明确章节选择器只属于叙事卡片，消解用户「风格画像是否也读这 15 章」的歧义。全门禁绿（prettier/i18n:check/tsc/build/eslint 0 errors） |
+| 2026-10-26 | 退役清理：删除已停用的内置编排技能 `signability-workflow.md.disabled`（2026-10-18 起「签约潜力工作流」入口由 pipeline 状态机驱动，技能零代码引用）；同步修正 §3 技能总数（19→26 现值）与 §3/§5 编排层描述 |

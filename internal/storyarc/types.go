@@ -33,7 +33,7 @@ func (StoryArc) TableName() string { return "story_arcs" }
 // ArcNode 是弧线内的有序链节，承接 Python plot_node 的设计意图。
 //
 // 排序由 target_chapter ASC, id ASC 替代序列号——创建顺序天然打破同章平局。
-// target_chapter 是 LLM 对不确定未来的估算，只排不滤——不准确时 review agent 校准。
+// target_chapter 是 LLM 对不确定未来的估算，只排不滤——不准确时写后由 statesync 校准。
 // actual_chapter 记录实际发生在哪章，0=未发生。
 type ArcNode struct {
 	ID                  int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`

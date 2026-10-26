@@ -44,7 +44,7 @@ type RunOptions struct {
     AllowedTools     map[string]bool // 工具白名单，Tools 在 Run() 内部通过 registry.OpenAI() 生成
     ActiveVersion    int
     Model            *llm.ModelInfo   // 模型完整信息（ID + ContextWindow 等），调用方从 Provider 查
-    AgentType        string          // "main" | "review" | "memory"
+    AgentType        string          // "main" 或子 agent 类型（review / memory / statesync / signability / fix / …）
     ParentTurnID     *int            // 子 agent 指向触发它的主 turn，主 agent 为 nil
     MaxTurns         int             // 默认 50
     MaxContextTokens int             // 默认 800000
@@ -78,9 +78,9 @@ Python 用 `task_id`（随机 UUID）关联事件到前端。Go 中所有消息�
 
 同一个 `Agent.Run()` 被主和子共用。差异在 `RunOptions` 字段值，不在代码路径：
 
-| | 主 Agent | 子 Agent（review/memory） |
+| | 主 Agent | 子 Agent（review / memory / statesync 等） |
 |---|---|---|
-| `AgentType` | `"main"` | `"review"` / `"memory"` |
+| `AgentType` | `"main"` | `"review"` / `"memory"` / `"statesync"` 等 |
 | `ParentTurnID` | `nil` | `&parentTurnID` |
 | `AllowedTools` | mainAgentAllowlist | reviewAllowlist / memoryAllowlist |
 | 事件推送 | `wails.EventsEmit("agent:"+turnID, ...)` | `wails.EventsEmit("agent:"+parentTurnID, ...)` |
@@ -377,7 +377,7 @@ Python 把 `source: "subagent"` 和 `agent_type` 塞在 `extra_metadata` JSON �
 type Message struct {
     // ... 原有字段 ...
     AgentType    string `gorm:"column:agent_type;not null;default:'main';index" json:"agent_type"`
-    // "main" | "review" | "memory"
+    // "main" 或子 agent 类型（review / memory / statesync / signability / fix / …）
 }
 ```
 

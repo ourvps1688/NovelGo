@@ -1,6 +1,7 @@
 # NovelGo 创作流水线（C→A 演进）设计文档
 
-> 状态：设计阶段（尚未开工）
+> **⚠️ 历史设计文档**：本文写于流水线开工前，所述 S0–S6 流水线随后已按 C→A 路线落地（后续另有 R0–R4 重构，见 `docs/future/pipeline-core-redesign-proposal.md`）。文中对 identity 提示词步骤、review 定位、技能触发机制等的描述停留在当时快照，**现状以代码为准**，本文仅保留作实现对照。
+> 状态：历史设计（已落地，保留作对照）
 > 范围：把当前"散落的能力模块"接成"有序流水线"，用户只需在步间确认是否继续
 > 决策：采用 **C→A 渐进** 路线；MVP 覆盖「重接已有节点+门 / 补宏观蓝图节点 / 补签约评估节点」三块；**不**做双模式切换（流水线即主创作入口）
 > 关联文档：`docs/v3-system-design.md`、`internal/agent/DESIGN.md`、`internal/mcp_tools/DESIGN.md`

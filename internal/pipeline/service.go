@@ -3268,7 +3268,7 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 			Status: StatusRunning, Note: "已恢复运行"})
 		// 按需重新派发执行体：修复/体检失败落暂停的运行、以及启动恢复机制暂停的中断运行，
 		// 都在此按当前阶段重派发（体检/修复是幂等重入的），否则状态回到 running 却无人执行。
-		// 执行体仍存活（Dispatching=true，软暂停）时不重派发，等待其在批次/阶段边界继续。
+		// 执行体仍存活（任务队列租约活跃，软暂停）时不重派发，等待其在批次/阶段边界继续。
 		s.redispatchIfNeeded(ctx, run)
 	case "stop":
 		if err := s.store.SetStatus(ctx, runID, StatusAborted, run.ContextJSON); err != nil {

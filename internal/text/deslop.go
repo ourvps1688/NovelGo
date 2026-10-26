@@ -140,7 +140,7 @@ func CountEmDashes(content string) int {
 	return count
 }
 
-// ── Advisory：密度 / 启发式标记，仅供写后质检（deai-flavor）复核，不作写入门槛 ──
+// ── Advisory：密度 / 启发式标记，仅供写后自查复核（chapter-ci L0 的 AI 味词表、deai-flavor），不作写入门槛 ──
 //
 // 这些项在正常写作中可能有合法用途（如台词里的「不是A而是B」、角色真实呼吸的
 // 「深吸一口气」），因此只做提示、不做硬拒。密度阈值参考 oh-story 的 tic 判据。
