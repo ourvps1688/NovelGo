@@ -1247,18 +1247,33 @@ func renderReadResult(a *ReadArgs, path, display, content string) (*ToolResult, 
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 
-	if start > end {
-		return &ToolResult{Success: false, Error: fmt.Sprintf("start_line(%d) 不能大于 end_line(%d)", start, end)}, nil
-	}
-
-	// 行号越界收敛（#233）：LLM 可能携带陈旧行号（文件被改短后仍传旧偏移，如 250 行
-	// 的章节传 start_line=1880）。硬报错只把问题抛回让调用方猜正确行号；改为把请求
-	// 窗口平移到文件尾部（保持窗口大小）并显式 note 标注收敛——调用方从 total_lines
-	// 与实际行号前缀即可感知文件已变短并自行重锚，一次调用即可恢复。
-	// start>end 是参数自相矛盾，仍硬报错（无可收敛语义）；end 超界沿既有静默截断
-	// （默认 end=2000 大于多数章节，属常态不逐次提示）。
 	var note string
-	if start > totalLines {
+	switch {
+	case start > end:
+		// 倒序窗口归一（#233 续，现场实证：start_line=200 配 end_line=80）：
+		// 倒序几乎都源于陈旧行号混搭（旧版偏移配上新版总行数），而非调用方
+		// 真要倒着读。硬报错只把坏窗口抛回；改为两端各自收敛到 [1,total]，
+		// 仍倒序则交换，显式 note 标注原始值与归一结果，调用方据实际行号
+		// 前缀一次调用内即可重锚。编辑类工具（line_range_replace）的倒序
+		// 仍硬错——写操作需精确意图，此处只放宽只读的 read。
+		origStart, origEnd := start, end
+		if start > totalLines {
+			start = totalLines
+		}
+		if end > totalLines {
+			end = totalLines
+		}
+		if start > end {
+			start, end = end, start
+		}
+		note = fmt.Sprintf("start_line %d > end_line %d（行号可能已过期或倒序），已归一为 %d-%d 行",
+			origStart, origEnd, start, end)
+	case start > totalLines:
+		// 行号越界收敛（#233）：LLM 可能携带陈旧行号（文件被改短后仍传旧偏移，如 250 行
+		// 的章节传 start_line=1880）。硬报错只把问题抛回让调用方猜正确行号；改为把请求
+		// 窗口平移到文件尾部（保持窗口大小）并显式 note 标注收敛——调用方从 total_lines
+		// 与实际行号前缀即可感知文件已变短并自行重锚，一次调用即可恢复。
+		// end 超界沿既有静默截断（默认 end=2000 大于多数章节，属常态不逐次提示）。
 		win := end - start + 1
 		if win > totalLines {
 			win = totalLines
@@ -1268,7 +1283,7 @@ func renderReadResult(a *ReadArgs, path, display, content string) (*ToolResult, 
 		end = totalLines
 		note = fmt.Sprintf("start_line %d 超出文件总行数 %d（行号可能已过期），已收敛到文件尾部 %d-%d 行",
 			origStart, totalLines, start, end)
-	} else if end > totalLines {
+	case end > totalLines:
 		end = totalLines
 	}
 

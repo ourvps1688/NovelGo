@@ -725,7 +725,8 @@ func TestReadChapter_DisplayTitleAndTolerance(t *testing.T) {
 
 // TestReadRangeBeyondEOF_ConvergesToTail 验收 #233：LLM 携带陈旧行号（文件改短后
 // 仍传旧偏移）时不再硬报错「起始行 N 超出文件总行数」，而是把请求窗口平移到文件
-// 尾部（保持窗口大小）并显式 note 标注收敛；正常范围与 start>end 参数矛盾行为不变。
+// 尾部（保持窗口大小）并显式 note 标注收敛；倒序窗口（如 start=200 配 end=80）
+// 同样归一 + note 而非硬报错；正常范围读取不受影响。
 func TestReadRangeBeyondEOF_ConvergesToTail(t *testing.T) {
 	db, tc, ctx := setupRWEnv(t)
 	vol := seedVolume(t, db, 1, "第一卷", 1)
@@ -759,10 +760,21 @@ func TestReadRangeBeyondEOF_ConvergesToTail(t *testing.T) {
 	require.Equal(t, "2|L2\n3|L3", ok.Data["content"])
 	require.NotContains(t, ok.Data, "note")
 
-	// 参数自相矛盾（start>end）仍硬报错：无可收敛语义。
-	bad := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 5, "end_line": 3})
-	require.False(t, bad.Success)
-	require.Contains(t, bad.Error, "不能大于")
+	// 倒序窗口（陈旧行号混搭）不再硬报错：归一为正序窗口 + note 携带原始值。
+	inv := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 5, "end_line": 3})
+	require.True(t, inv.Success, inv.Error)
+	require.Equal(t, "3|L3\n4|L4\n5|L5", inv.Data["content"])
+	require.Equal(t, int64(3), toInt64(inv.Data["start_line"]))
+	require.Equal(t, int64(5), toInt64(inv.Data["end_line"]))
+	require.Contains(t, inv.Data["note"], "start_line 5 > end_line 3", "note 应携带原始倒序值")
+	require.Contains(t, inv.Data["note"], "已归一为 3-5 行")
+
+	// 现场语义（start=200 配 end=80 于 5 行文件）：两端各自收敛到 [1,total]。
+	stale := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 200, "end_line": 80})
+	require.True(t, stale.Success, stale.Error)
+	require.Equal(t, int64(5), toInt64(stale.Data["start_line"]))
+	require.Equal(t, int64(5), toInt64(stale.Data["end_line"]))
+	require.Contains(t, stale.Data["note"], "start_line 200 > end_line 80")
 }
 
 // toInt64 把 ToolResult.Data 里的数值断言值归一到 int64（JSON 解码/直传混用）。
