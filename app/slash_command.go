@@ -53,8 +53,9 @@ func (a *App) resolveSlashCommand(novelID int64, name string) (inject string, lo
 
 	switch sk.Mode {
 	case "always":
-		// always 已在会话开头注入，/ 触发时只给出提示
-		content := "用户通过 /" + sk.Name + " 提醒你注意常驻技能「" + sk.Name + "」，其完整内容已在本次对话开头注入，请严格遵循。"
+		// always 已在会话开头注入，/ 触发时只给出提示。
+		// 注入可能缺位（超常驻上限被截断 / 本会话早于设置生效），措辞不把「已注入」说死。
+		content := "用户通过 /" + sk.Name + " 提醒你注意常驻技能「" + sk.Name + "」，其正文应在本次对话开头注入；若开头未见其正文（超出常驻上限被截断或设置晚于本会话），请用 read 加载完整内容后严格遵循。"
 		return "<system-reminder>\n" + content + "\n</system-reminder>", sk.Name
 	case "manual":
 		content := "用户启用了快捷指令「" + sk.Name + "」。请根据该指令的内容和用户需求进行工作。\n\n---\n" + sk.Content + "\n---"

@@ -9,7 +9,7 @@ import (
 
 // RunSubagentArgs 是 run_subagent 的参数。
 type RunSubagentArgs struct {
-	AgentType   string `json:"agent_type" jsonschema:"required,enum=memory,enum=review,enum=statesync,description=子 Agent 类型。memory：记忆检索分析员，探索故事数据并整理报告；review：章节审稿人，全面质量审查；statesync：状态同步员，把章节涉及的角色/地点/弧线/时间线/读者认知增量同步到台账（一般系统自动触发，仅在怀疑台账漂移时手动指定）" validate:"required,oneof=memory review statesync"`
+	AgentType   string `json:"agent_type" jsonschema:"required,enum=memory,enum=review,enum=statesync,description=子 Agent 类型。memory：记忆检索分析员，探索故事数据并整理报告；review：编辑审读员，编辑视角深读情节可信度与读感（逐章事实检查由章节 CI 承担）；statesync：状态同步员，把章节涉及的角色/地点/弧线/时间线/读者认知增量同步到台账（一般系统自动触发，仅在怀疑台账漂移时手动指定）" validate:"required,oneof=memory review statesync"`
 	Instruction string `json:"instruction" jsonschema:"required,description=给子 Agent 的任务指令，描述需要完成的具体工作" validate:"required"`
 }
 
@@ -60,7 +60,7 @@ const runSubagentDescription = `启动专项子 Agent 执行任务，子 Agent �
 
 Agent 类型：
 - memory：记忆检索分析员。可以搜索故事记忆、查询角色/时间线/弧线/地点/读者认知等所有数据，将分散的信息整合为连贯报告。用于需要多维度检索和深度分析的场景。
-- review：章节审稿人。可以读取章节内容、查询角色设定/伏笔/弧线等参考数据，逐项检查角色一致性、情节逻辑、伏笔管理、读者认知和弧线推进，输出审稿意见。
+- review：编辑审读员。可以读取章节内容（read）、查询角色设定/伏笔/弧线等参考数据，从编辑视角深读情节可信度与读感，输出主观审稿意见（逐章事实检查由章节 CI 自动承担，状态维护由 statesync 承接）。
 - statesync：状态同步员。在章节落盘后把该章涉及的角色/地点/弧线/时间线/读者认知增量同步到结构化台账。一般无需手动调用，仅在怀疑台账漂移时指定。
 
 instruction 应清晰描述任务目标和期望输出。`

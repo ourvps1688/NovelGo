@@ -360,7 +360,7 @@ const mainAgentSystem1 = `你是 novelgo 小说创作系统的主创作助手，
 
 【技能（Skill）使用】
 
-技能是 markdown 格式的创作方法论模块，三种模式：auto（目录中按需调用，可 / 触发）/manual（仅 / 手动触发）/always（常驻注入）。对话开头注入 auto 技能目录（仅名称+简介）与 always 正文。
+技能是 markdown 格式的创作方法论模块，三种模式：auto（出现在目录，按需 read 调用，可 / 触发）/manual（不出现在目录；/ 手动触发，或用户意图命中时以建议形式提示）/always（新会话开头常驻注入正文，含勾选启用合计上限 3 个，超限截断的不进目录、仅 / 触发）。对话开头注入 auto 技能目录（仅名称+简介）与 always 正文。
 
 常驻（always）与勾选启用的技能正文已在对话开头注入（正文前已标注【来源：…】路径），直接遵守即可，无需再调用 read；其余技能按下方路径 read 加载。
 
@@ -431,7 +431,7 @@ const reviewAgentSystem1 = `你是小说创作系统的审稿 Agent，负责对�
 
 ## 审读流程
 
-1. **阅读章节** — 从 get_chapter_list 获取章节信息，了解当前进度
+1. **阅读章节** — 从 get_chapter_list 获取章节信息、了解当前进度，用 read 通读目标章节正文
 2. **收集上下文** — 调用只读工具获取角色设定、伏笔、弧线、读者认知
 3. **逐项检查**：
    - 角色一致性：性格、能力、关系是否前后一致
@@ -519,6 +519,7 @@ const signabilityAgentSystem1 = `你是 novelgo 小说创作系统的只读体�
 ## 可用工具（白名单，仅下列——只读）
 - 读章节：read（通读章节正文）、get_chapter_list
 - 读台账：list_volumes、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
+- 对卡核验：get_chapter_task_card（对照章纲任务卡四件套核对兑现）
 
 ## 工作流
 1. **收集证据**：按任务提示词与注入的技能方法论执行——检查范围（全书逐章通读 / 卷级作用域 / 三层输入）、评分维度、审读节奏均以注入的技能文案为准，此处不重复。
@@ -534,6 +535,7 @@ const fixAgentSystem1 = `你是 novelgo 小说创作系统的修复执行员（F
 ## 可用工具（白名单，仅下列）
 - 读上下文：read、list_volumes、get_chapter_list、get_characters、get_character_relations、get_locations、get_timeline、get_story_arcs、get_reader_perspective、search_story_memory
 - 改稿与补台账：edit（改章节正文 / 写卷纲 volumes/id_{id}.md）、update_chapter_plan（修章细纲）、create_volume（补卷）
+- 任务卡与书写不变量：upsert_chapter_task_card / get_chapter_task_card（修/查章纲任务卡）、list_pinned_invariants（只读书写不变量，修复须遵守作者钉住的硬约束）
 - 全部 statesync 写工具：create/update 角色、关系、地点、地点关系、时间线、弧线与节点、读者认知条目
 
 ## 工作流

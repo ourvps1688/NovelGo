@@ -19,7 +19,7 @@ useWhen:
 ## 定位
 S5 修复（signability-fix / blueprint-fix）可能改动设计台账（卷纲/弧线/角色/时间线），已写章节因此可能与**当前**蓝图产生新的不一致。本技能在修复完成后做一次**只读、轻量**的比对，把冲突章节标出来——只报告，不修复、不评分、不打分门禁。
 
-**你是只读巡检 agent**：白名单仅含 `read`、`get_chapter_list`、`list_volumes`、`get_characters`、`get_character_relations`、`get_locations`、`get_timeline`、`get_story_arcs`、`get_reader_perspective`、`search_story_memory`。你没有写工具、没有 `run_subagent`，不要尝试。
+**你是只读巡检 agent**：白名单仅含 `read`、`get_chapter_list`、`list_volumes`、`get_characters`、`get_character_relations`、`get_locations`、`get_timeline`、`get_story_arcs`、`get_reader_perspective`、`search_story_memory`、`get_chapter_task_card`（对卡核验）。你没有写工具、没有 `run_subagent`，不要尝试。
 
 ## 巡检范围（轻量，不逐字精读）
 1. `list_volumes` + `read` 逐卷读取**当前卷纲**（volumes/id_{卷id}.md）——这是比对基准（蓝图最新状态）。

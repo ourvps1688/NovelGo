@@ -169,7 +169,7 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 		warning = "⚠️ 常驻技能超过 " + strconv.Itoa(MaxAlwaysSkillsResident) +
 			" 个上限，已仅常驻最核心的 " + strconv.Itoa(MaxAlwaysSkillsResident) +
 			" 个；其余（" + strings.Join(dropped, "、") +
-			"）改为按需（auto）触发，避免长驻正文稀释上下文注意力。如需常驻请优先保留最核心的技能。\n"
+			"）本次不注入常驻，也不会出现在技能目录，仅可 / 手动触发。如需常驻请优先保留最核心的技能。\n"
 	}
 
 	if len(resident) == 0 {

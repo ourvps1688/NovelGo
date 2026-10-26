@@ -3,8 +3,8 @@ package skill
 // Mode 常量。
 const (
 	ModeAuto   = "auto"   // 出现在 skill catalog，AI 可自主 invoke，用户也可 / 触发
-	ModeManual = "manual" // 不出现在 catalog，仅用户 / 手动触发
-	ModeAlways = "always" // 不出现在 catalog，会话开头注入 system 消息，常驻生效
+	ModeManual = "manual" // 不出现在 catalog；/ 手动触发，或用户意图命中时以建议形式提示注入
+	ModeAlways = "always" // 不出现在 catalog，新会话开头注入 system 消息常驻生效（含勾选启用合计上限 3 个，超限截断的不进目录、仅 / 触发）
 )
 
 // UseWhenEntry 是「何时使用」意图线索的一条。
