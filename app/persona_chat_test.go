@@ -29,6 +29,28 @@ func writeUserSkillFile(t *testing.T, name, kind, sourceAuthor, body string, agg
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name+".md"), []byte(fm), 0o644))
 }
 
+// TestWriteUserSkillFile_NeverTouchesRealHome 哨兵：测试夹具绝不写真实 ~/.novelgo/skills。
+// 回归背景：writeUserSkillFile 曾把「X 的创作心智」夹具（mode: always）漏进真实用户技能目录，
+// 被 always 注入链路带进所有小说的每个会话。隔离依赖 configDir 的 NOVELGO_CONFIG_DIR 通道
+// （testsupport.Isolate 设置）。
+func TestWriteUserSkillFile_NeverTouchesRealHome(t *testing.T) {
+	_ = setupTestApp(t)
+	writeUserSkillFile(t, "X 的创作心智", "mental", "刘慈欣", "X_MENTAL_BODY", false)
+
+	dir := config.UserSkillsDir()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	realDir := filepath.Join(home, ".novelgo", "skills")
+	absDir, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	absReal, err := filepath.Abs(realDir)
+	require.NoError(t, err)
+	require.NotEqual(t, absReal, absDir, "user skill 目录必须与真实 ~/.novelgo/skills 隔离")
+
+	_, statErr := os.Stat(filepath.Join(realDir, "X 的创作心智.md"))
+	require.True(t, os.IsNotExist(statErr), "测试夹具不得出现在真实用户技能目录：%v", statErr)
+}
+
 // TestWriteSystemMessages_PersonaBlockPersisted 验证新会话的 persona 引导段被作为常驻
 // system 消息写入 DB，并且 loadAPIMessages 能读回（含 PersonaMarker）。
 func TestWriteSystemMessages_PersonaBlockPersisted(t *testing.T) {

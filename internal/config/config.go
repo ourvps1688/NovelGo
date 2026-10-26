@@ -92,7 +92,13 @@ func ModelsDir() string {
 }
 
 // configDir 返回指针文件所在的目录 ~/.novelgo。
+// NOVELGO_CONFIG_DIR 可整体覆盖该目录（测试隔离专用；生产不设置，行为不变）。
+// UserSkillsDir/StyleSamplesDir/LLMConfigPath/configPath 全部经由此处，
+// 测试只要 t.Setenv("NOVELGO_CONFIG_DIR", tmp) 即可切断对真实 ~/.novelgo 的读写。
 func configDir() (string, error) {
+	if dir := os.Getenv("NOVELGO_CONFIG_DIR"); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("获取用户目录失败: %w", err)

@@ -17,6 +17,7 @@ type Store struct {
 	logger  *slog.Logger
 	builtin []Skill
 	user    []Skill
+	userDir string // 用户技能目录（NewStore/ReloadUser 注入）；ListMeta 刷新以此为准，不回落真实 config 目录
 	novel   map[int64][]Skill
 }
 
@@ -31,6 +32,7 @@ func NewStore(logger *slog.Logger, userSkillsDir string) (*Store, error) {
 	s := &Store{
 		logger:  logger,
 		builtin: builtin,
+		userDir: userSkillsDir,
 		novel:   make(map[int64][]Skill),
 	}
 	if err := s.loadUser(userSkillsDir); err != nil {
@@ -61,7 +63,7 @@ func (s *Store) Get(novelID int64, name string) (*Skill, bool) {
 // ListMeta 返回所有可用 skill 的元数据，按 name 去重（novel > user > builtin）。
 // 每次调用自动刷新磁盘数据。
 func (s *Store) ListMeta(novelID int64) []SkillMeta {
-	if err := s.ReloadUser(config.UserSkillsDir()); err != nil {
+	if err := s.ReloadUser(s.currentUserDir()); err != nil {
 		s.logger.Warn("ListMeta: 刷新用户 skill 失败", "err", err)
 	}
 	if err := s.ReloadNovel(novelID, config.NovelSkillsDir(novelID)); err != nil {
@@ -139,12 +141,24 @@ func (s *Store) ReloadNovel(novelID int64, novelSkillsDir string) error {
 
 // loadUser 需在持有锁时调用。
 func (s *Store) loadUser(dir string) error {
+	s.userDir = dir
+	if dir == "" {
+		s.user = nil
+		return nil
+	}
 	skills, err := scanDir(s.logger, dir)
 	if err != nil {
 		return err
 	}
 	s.user = skills
 	return nil
+}
+
+// currentUserDir 返回 store 记录的用户技能目录（加锁读）。
+func (s *Store) currentUserDir() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userDir
 }
 
 // findByName 在切片中按名称查找 skill。
