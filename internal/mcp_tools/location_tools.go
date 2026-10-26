@@ -16,9 +16,14 @@ import (
 // ── get_locations ──────────────────────────────────────
 
 // GetLocationsArgs 是 get_locations 的参数。
+//
+// Mode 缺省放行（omitempty）并默认 list：查询模式类参数有天然缺省语义，
+// 不得要求 LLM 必传（与 get_characters 的 mode 口径一致）——LLM 漏传/传旧
+// 调用形态时走 list 而不是「参数校验失败」硬报错；Execute 的 switch default
+// 已把空 mode 归入 list。
 type GetLocationsArgs struct {
-	Mode         string `json:"mode" jsonschema:"required,description=查询模式：list=列表 detail=详情 network=全图,enum=list,enum=detail,enum=network,default=list" validate:"required,oneof=list detail network"`
-	LocationID   int64  `json:"location_id" jsonschema:"description=地点ID（detail模式必填）"                                                                    validate:"omitempty,min=1"`
+	Mode         string `json:"mode" jsonschema:"description=查询模式：list=列表（默认，可省略） detail=详情 network=全图,enum=list,enum=detail,enum=network,default=list" validate:"omitempty,oneof=list detail network"`
+	LocationID   int64  `json:"location_id" jsonschema:"description=地点ID（detail模式必填）"                                                          validate:"omitempty,min=1"`
 	LocationType string `json:"location_type" jsonschema:"description=按类型筛选（list模式可选）"`
 	Search       string `json:"search" jsonschema:"description=按名称搜索（list模式可选）"`
 	PageArgs            // 嵌入分页参数
