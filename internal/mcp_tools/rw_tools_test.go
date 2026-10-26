@@ -723,6 +723,61 @@ func TestReadChapter_DisplayTitleAndTolerance(t *testing.T) {
 	}
 }
 
+// TestReadRangeBeyondEOF_ConvergesToTail 验收 #233：LLM 携带陈旧行号（文件改短后
+// 仍传旧偏移）时不再硬报错「起始行 N 超出文件总行数」，而是把请求窗口平移到文件
+// 尾部（保持窗口大小）并显式 note 标注收敛；正常范围与 start>end 参数矛盾行为不变。
+func TestReadRangeBeyondEOF_ConvergesToTail(t *testing.T) {
+	db, tc, ctx := setupRWEnv(t)
+	vol := seedVolume(t, db, 1, "第一卷", 1)
+	created := execEdit(t, ctx, tc, editArgsTitle(fmt.Sprintf("chapters/%d/new.md", vol),
+		"full_replace", "L1\nL2\nL3\nL4\nL5", "短章节"))
+	require.True(t, created.Success, created.Error)
+	id := created.Data["chapter_id"].(int64)
+	path := fmt.Sprintf("chapters/id_%d.md", id)
+
+	// 越界窗口平移到尾部（现场语义：250 行章节传 start_line=1880 不再报错）。
+	res := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 7, "end_line": 8})
+	require.True(t, res.Success, res.Error)
+	require.Equal(t, int64(5), toInt64(res.Data["total_lines"]))
+	require.Equal(t, int64(4), toInt64(res.Data["start_line"]), "窗口应平移到文件尾部")
+	require.Equal(t, int64(5), toInt64(res.Data["end_line"]))
+	require.Equal(t, "4|L4\n5|L5", res.Data["content"])
+	require.Contains(t, res.Data["note"], "超出文件总行数 5", "收敛必须显式标注，绝不静默换行号")
+	require.Contains(t, res.Data["note"], "start_line 7", "note 应携带原始越界行号供调用方感知")
+
+	// 越界窗口大于全文：收敛为全文。
+	full := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 1880, "end_line": 2000})
+	require.True(t, full.Success, full.Error)
+	require.Equal(t, int64(1), toInt64(full.Data["start_line"]))
+	require.Equal(t, int64(5), toInt64(full.Data["end_line"]))
+	require.NotContains(t, full.Data, "truncated")
+	require.Contains(t, full.Data["note"], "start_line 1880")
+
+	// 正常范围读取不受影响：不带 note、行号原样。
+	ok := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 2, "end_line": 3})
+	require.True(t, ok.Success, ok.Error)
+	require.Equal(t, "2|L2\n3|L3", ok.Data["content"])
+	require.NotContains(t, ok.Data, "note")
+
+	// 参数自相矛盾（start>end）仍硬报错：无可收敛语义。
+	bad := execRW(t, ctx, tc, "read", map[string]any{"path": path, "start_line": 5, "end_line": 3})
+	require.False(t, bad.Success)
+	require.Contains(t, bad.Error, "不能大于")
+}
+
+// toInt64 把 ToolResult.Data 里的数值断言值归一到 int64（JSON 解码/直传混用）。
+func toInt64(v any) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return -1
+}
+
 // ── 创建回滚 ──────────────────────────────────────────────
 
 // 写文件失败（chapters 路径被文件占用导致 MkdirAll 失败）时，

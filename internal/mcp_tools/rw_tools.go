@@ -1250,10 +1250,25 @@ func renderReadResult(a *ReadArgs, path, display, content string) (*ToolResult, 
 	if start > end {
 		return &ToolResult{Success: false, Error: fmt.Sprintf("start_line(%d) 不能大于 end_line(%d)", start, end)}, nil
 	}
+
+	// 行号越界收敛（#233）：LLM 可能携带陈旧行号（文件被改短后仍传旧偏移，如 250 行
+	// 的章节传 start_line=1880）。硬报错只把问题抛回让调用方猜正确行号；改为把请求
+	// 窗口平移到文件尾部（保持窗口大小）并显式 note 标注收敛——调用方从 total_lines
+	// 与实际行号前缀即可感知文件已变短并自行重锚，一次调用即可恢复。
+	// start>end 是参数自相矛盾，仍硬报错（无可收敛语义）；end 超界沿既有静默截断
+	// （默认 end=2000 大于多数章节，属常态不逐次提示）。
+	var note string
 	if start > totalLines {
-		return &ToolResult{Success: false, Error: fmt.Sprintf("起始行 %d 超出文件总行数 %d", start, totalLines)}, nil
-	}
-	if end > totalLines {
+		win := end - start + 1
+		if win > totalLines {
+			win = totalLines
+		}
+		origStart := start
+		start = totalLines - win + 1
+		end = totalLines
+		note = fmt.Sprintf("start_line %d 超出文件总行数 %d（行号可能已过期），已收敛到文件尾部 %d-%d 行",
+			origStart, totalLines, start, end)
+	} else if end > totalLines {
 		end = totalLines
 	}
 
@@ -1282,6 +1297,9 @@ func renderReadResult(a *ReadArgs, path, display, content string) (*ToolResult, 
 	}
 	if end < totalLines {
 		data["truncated"] = true
+	}
+	if note != "" {
+		data["note"] = note
 	}
 
 	return &ToolResult{Success: true, Data: data}, nil
