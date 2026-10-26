@@ -22,7 +22,7 @@ useWhen:
 **立场声明**：你是执行员，不是审稿员。严格对照蓝图体检给出的 issue 清单修，**只动卷纲与卷结构**，不要自作主张大改已通过体检的部分，也不要新增未被指出的问题。
 
 ## 修复依据
-`blueprint-audit` 产出的结构化结果（由 orchestrator 注入到本次任务的 system 提示）形如：
+`blueprint-audit` 产出的结构化结果（由 orchestrator 注入到本次任务的用户消息/任务提示）形如：
 ```json
 {
   "verdict": "needs_fix",
