@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, CheckCircle, Play, ScanSearch } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle,
+  Play,
+  ScanSearch,
+  Stethoscope,
+} from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
 import { GetPatrolReport, RunDetectionTask } from "@/lib/wailsjs/go/app/App";
 import type { pipeline } from "@/lib/wailsjs/go/models";
@@ -146,9 +152,10 @@ export default function PipelineWizard({ novelId }: Props) {
             ) : (
               <>
                 {gate ? (
-                  <PipelineGateCard gate={gate} onResume={resume} />
+                  <PipelineGateCard gate={gate} onResume={resume} run={run} />
                 ) : null}
-                {!gate && stage === "S1" ? (
+                {/* R5-4 常驻控件并存：gate 存在时 S1/S3 控件不再被遮蔽（不卡流程）。 */}
+                {stage === "S1" ? (
                   <div className="flex flex-col gap-3">
                     <p className="text-sm text-muted-foreground">
                       {t("pipeline.hint.s1")}
@@ -163,7 +170,7 @@ export default function PipelineWizard({ novelId }: Props) {
                     </button>
                   </div>
                 ) : null}
-                {!gate && stage === "S3" ? (
+                {stage === "S3" ? (
                   <div className="flex flex-col gap-3">
                     <p className="text-sm text-muted-foreground">
                       {t("pipeline.hint.s3")}
@@ -176,6 +183,21 @@ export default function PipelineWizard({ novelId }: Props) {
                       >
                         <ArrowRight className="h-4 w-4" />
                         {t("pipeline.checkProgress")}
+                      </button>
+                      {/* R5-4 G3b 弹闸退役后的复检入口：常驻「进入体检/复检」，
+                          显式触发 audit_now（自动检测节奏红线不动，是否推进由人决定）。 */}
+                      <button
+                        type="button"
+                        className="inline-flex w-fit items-center gap-1 rounded border px-3 py-1.5 text-sm"
+                        title={t("pipeline.reauditHint")}
+                        onClick={() => {
+                          // 体检动作埋点（P4 T2.2）：失败静默零提示。
+                          trackFeature(ACTION_FEATURE_KEYS.audit);
+                          resume("audit_now");
+                        }}
+                      >
+                        <Stethoscope className="h-4 w-4" />
+                        {t("pipeline.reaudit")}
                       </button>
                       <button
                         type="button"

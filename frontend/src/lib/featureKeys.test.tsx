@@ -9,6 +9,8 @@ import { resolve, dirname } from "node:path";
 
 vi.mock("@/lib/wailsjs/go/app/App", () => ({
   RecordFeatureUsage: vi.fn(() => Promise.resolve()),
+  // R5-4 检测汇总视图依赖：PipelineGateCard 取未决工单计数（空表=零计数）。
+  ListIssueTickets: vi.fn(() => Promise.resolve([])),
 }));
 
 import { RecordFeatureUsage } from "@/lib/wailsjs/go/app/App";

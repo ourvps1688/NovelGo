@@ -148,7 +148,9 @@ export default function SignabilityAuditView({
           )}
         </p>
       ) : null}
-      {gate ? <PipelineGateCard gate={gate} onResume={onResume} /> : null}
+      {gate ? (
+        <PipelineGateCard gate={gate} onResume={onResume} run={run} />
+      ) : null}
     </div>
   );
 }

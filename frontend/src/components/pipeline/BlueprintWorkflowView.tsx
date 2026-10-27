@@ -90,7 +90,9 @@ export default function BlueprintWorkflowView({
           titleKey="pipeline.blueprint.auditTitle"
           scoreKey="pipeline.blueprint.score"
         />
-        {gate ? <PipelineGateCard gate={gate} onResume={onResume} /> : null}
+        {gate ? (
+          <PipelineGateCard gate={gate} onResume={onResume} run={run} />
+        ) : null}
       </div>
     );
   }
@@ -144,7 +146,9 @@ export default function BlueprintWorkflowView({
         </p>
       )}
 
-      {gate ? <PipelineGateCard gate={gate} onResume={onResume} /> : null}
+      {gate ? (
+        <PipelineGateCard gate={gate} onResume={onResume} run={run} />
+      ) : null}
     </div>
   );
 }
