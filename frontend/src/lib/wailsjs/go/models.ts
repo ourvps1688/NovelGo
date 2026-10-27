@@ -2728,7 +2728,27 @@ export namespace personasetting {
 }
 
 export namespace pipeline {
-	
+
+	export class DetectionTaskResult {
+	    kind: string;
+	    novel_id: number;
+	    scope_id?: number;
+	    run_id?: string;
+	    dispatched: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new DetectionTaskResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.novel_id = source["novel_id"];
+	        this.scope_id = source["scope_id"];
+	        this.run_id = source["run_id"];
+	        this.dispatched = source["dispatched"];
+	    }
+	}
 	export class IssueTicketRef {
 	    run_id: string;
 	    issue_key: string;

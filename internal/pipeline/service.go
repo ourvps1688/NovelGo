@@ -57,6 +57,10 @@ type Service struct {
 	// stateSyncRunner 对单章执行后台状态同步（statesync 子 Agent）。由 app 层注入（依赖 agent.RunSubAgent）。
 	// 为 nil 时 executeS0Align 跳过 statesync（仅做建卷），测试可注入 stub。
 	stateSyncRunner func(ctx context.Context, novelID, chapterID int64) error
+	// chapterCIRunner 对单章执行章节 CI 检测（chapterci 子 Agent → 质量档案，R5-3 T1.2）。
+	// 由 app 层注入 mcp_tools.RunChapterCIForChapter（依赖 agent.RunSubAgent）；
+	// 为 nil 时检测任务 chapter kind 降级跳过（零提示零报错）。
+	chapterCIRunner func(ctx context.Context, novelID, chapterID int64) error
 	// chapterStore 用于「回流 S3 重写回路」把 issue 里的章节阅读序号映射回真实 chapter_id。
 	// 默认从 s.store.db 构造；测试可注入或用 nil（nil 时重写回路降级为手动交回）。
 	chapterStore *chapter.Store
@@ -195,6 +199,12 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 // 生产环境必须注入，否则 executeS0Align 会跳过 statesync 仅做建卷。
 func (s *Service) SetStateSyncRunner(fn func(ctx context.Context, novelID, chapterID int64) error) {
 	s.stateSyncRunner = fn
+}
+
+// SetChapterCIRunner 注入章节 CI 检测执行器（R5-3 T1.2，检测任务 chapter kind）：
+// 由 app 层用 mcp_tools.RunChapterCIForChapter + agent.RunSubAgent 实现。
+func (s *Service) SetChapterCIRunner(fn func(ctx context.Context, novelID, chapterID int64) error) {
+	s.chapterCIRunner = fn
 }
 
 // SetVolumeFreezer 注入 G_freeze 自动冻结执行体（由 app 层用 internal/snapshot.Service.Freeze 实现，
@@ -2757,6 +2767,7 @@ var (
 	emitFixStartSlot          = newEmitterSlot(EmitFixStart)
 	emitFixDoneSlot           = newEmitterSlot(EmitFixDone)
 	emitRewriteBacklogSlot    = newEmitterSlot(EmitRewriteBacklog)
+	emitDetectDoneSlot        = newEmitterSlot(EmitDetectDone)
 )
 
 // 稳定 wrapper：调用点签名与用法零改动。
@@ -2770,6 +2781,7 @@ func emitConsistencyPatrol(ctx context.Context, p map[string]any) {
 func emitFixStart(ctx context.Context, p map[string]any)       { emitFixStartSlot.emit(ctx, p) }
 func emitFixDone(ctx context.Context, p map[string]any)        { emitFixDoneSlot.emit(ctx, p) }
 func emitRewriteBacklog(ctx context.Context, p map[string]any) { emitRewriteBacklogSlot.emit(ctx, p) }
+func emitDetectDone(ctx context.Context, p map[string]any)     { emitDetectDoneSlot.emit(ctx, p) }
 
 // swapEmitX 供测试原子注入实现并返回还原函数：
 // defer swapEmitX(f)() 或 t.Cleanup(swapEmitX(f))。
@@ -2796,6 +2808,9 @@ func swapEmitFixDone(f func(context.Context, map[string]any)) func() {
 }
 func swapEmitRewriteBacklog(f func(context.Context, map[string]any)) func() {
 	return emitRewriteBacklogSlot.swap(f)
+}
+func swapEmitDetectDone(f func(context.Context, map[string]any)) func() {
+	return emitDetectDoneSlot.swap(f)
 }
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

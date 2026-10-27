@@ -510,6 +510,10 @@ export function RejectRetconCase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RejectRetconCase'](arg1, arg2, arg3);
 }
 
+export function RunDetectionTask(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RunDetectionTask'](arg1, arg2, arg3);
+}
+
 export function ResumePipeline(arg1, arg2, arg3) {
   return window['go']['app']['App']['ResumePipeline'](arg1, arg2, arg3);
 }

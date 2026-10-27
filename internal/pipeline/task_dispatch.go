@@ -32,6 +32,7 @@ const (
 	taskKindS0Align    = "s0_align"    // S0 导入对齐（建卷+statesync）
 	taskKindFullAlign  = "full_align"  // 全量对齐（建卷+statesync+全本体检）
 	taskKindPatrol     = "patrol"      // 一致性巡检（张力报告，只读）
+	taskKindDetect     = "detect"      // 检测任务（卷体检/书体检，R5-3 T1.2 检测-only 皮；巡检·结构复用 taskKindPatrol）
 )
 
 // taskPayload 是执行参数（task.payload JSON；RunID/NovelID 同步冗余到 task 行供查询）。
@@ -135,6 +136,9 @@ func (s *Service) registerTaskHandlers() {
 	}))
 	s.taskRunner.Register(taskKindPatrol, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.runConsistencyPatrol(s.appCtx, runID, novelID)
+	}))
+	s.taskRunner.Register(taskKindDetect, s.runIDNovelIDHandler(func(runID string, novelID int64) {
+		s.executeDetectAudit(runID, novelID)
 	}))
 	// (*PipelineRun) 型执行体：从 DB 重载 run（持久化状态为准）。
 	s.taskRunner.Register(taskKindS0Align, s.runObjectHandler(func(run *PipelineRun) {

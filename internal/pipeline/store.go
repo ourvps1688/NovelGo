@@ -21,6 +21,12 @@ const (
 	StatusAborted  = "aborted"
 )
 
+// ModeDetect 标记检测任务（R5-3 T1.2）的结果容器 run。容器出生即 StatusFinished，
+// 借既有 status 过滤天然隔离 GetByNovel / GetActiveVolumeRun / RecoverInterruptedRuns /
+// abortRelatives 等活跃 run 链路（既有查询零改动、绝不污染 book-run）；复用走
+// GetDetectRun（mode='detect' + scope 匹配），进行态可见走 R0 观测与任务队列（T1.3）。
+const ModeDetect = "detect"
+
 // PipelineRun 记录一次创作流水线的运行状态，支持重启续跑。
 // 卷级作用域（G1 scoped sub-run）：book-run（VolumeID 为空）挂卷级 scoped sub-run
 // （VolumeID 非空、ParentRunID 指向 book-run），体检/修复仅作用于该卷。
@@ -28,7 +34,7 @@ type PipelineRun struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`
 	NovelID      int64  `gorm:"column:novel_id;index;not null"`
 	RunID        string `gorm:"column:run_id;uniqueIndex;not null"`
-	Mode         string `gorm:"column:mode;not null;default:new"` // new | continue
+	Mode         string `gorm:"column:mode;not null;default:new"` // new | continue | detect（检测容器，ModeDetect）
 	StartChapter *int   `gorm:"column:start_chapter"`             // 续写模式起始章号
 	CurrentStage string `gorm:"column:current_stage;not null"`
 	Status       string `gorm:"column:status;not null"`
@@ -271,6 +277,24 @@ func (s *Store) GetActiveVolumeRun(ctx context.Context, novelID, volumeID int64)
 			[]string{StatusFinished, StatusAborted}).
 		Order("id DESC").First(&run).Error
 	if err != nil {
+		return nil, err
+	}
+	s.hydrateGateObjects(ctx, []*PipelineRun{&run})
+	return &run, nil
+}
+
+// GetDetectRun 取该小说某作用域最新的检测任务容器 run（mode='detect'，R5-3 T1.2）。
+// volumeID 为空=全书容器（书体检/巡检·结构），非空=卷级容器（卷体检）。
+// 无则返回 gorm.ErrRecordNotFound，由 ensureDetectRun 新建。
+func (s *Store) GetDetectRun(ctx context.Context, novelID int64, volumeID *int64) (*PipelineRun, error) {
+	q := s.db.WithContext(ctx).Where("novel_id = ? AND mode = ?", novelID, ModeDetect)
+	if volumeID == nil {
+		q = q.Where("volume_id IS NULL")
+	} else {
+		q = q.Where("volume_id = ?", *volumeID)
+	}
+	var run PipelineRun
+	if err := q.Order("id DESC").First(&run).Error; err != nil {
 		return nil, err
 	}
 	s.hydrateGateObjects(ctx, []*PipelineRun{&run})

@@ -453,6 +453,13 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
 		}, a.logger, "pipeline-s0-align", novelID, chapterID)
 	})
+	// 注入章节 CI 检测执行器（R5-3 T1.2）：检测任务 chapter kind 经 chapterci 子 Agent
+	// 跑 L1 增量检查并落质量档案（与写后章节 CI 同一执行体）。
+	a.pipeline.SetChapterCIRunner(func(ctx context.Context, novelID, chapterID int64) error {
+		return mcp_tools.RunChapterCIForChapter(ctx, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
+			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
+		}, a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID)
+	})
 	// 注入 G_freeze 自动冻结执行体（WBS 2.5）：卷过 S4+S5 收口 / 完本收口时由流水线自动
 	// 置冻结并同事务提交 committed snapshot（Freeze 内含 2.4 冻结前台账审计闸门，幂等）。
 	a.pipeline.SetVolumeFreezer(func(ctx context.Context, novelID, volumeID int64) error {

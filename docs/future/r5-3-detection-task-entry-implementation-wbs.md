@@ -52,6 +52,8 @@
 
 ### T1.2 统一检测任务入口 `RunDetectionTask`（契约 0.1/0.2）
 
+> **实施定案补记（T1.2 落地时）**：队列 kind 取 Option B——新增 `taskKindDetect`（volume/book 检测-only 执行体）+ 字面复用 `taskKindPatrol`（structure）+ chapter 不排队走注入 `chapterCIRunner`。不复用 `taskKindAudit`/`taskKindFinalAudit` 的原因：其 handler 是带闸门裁决的 executeAudit/executeFinalAudit，与检测-only 语义相悖（§10.4「检测任务是队列的一类 kind」本义=执行体走 R3 队列，非强制同 kind 字符串）。检测容器 run = `ModeDetect` + 出生即 `StatusFinished`（借既有 status 过滤零改动隔离 GetByNovel/GetActiveVolumeRun/RecoverInterruptedRuns/abortRelatives，绝不污染 book-run）；复用走新增 `GetDetectRun`（mode='detect' + scope 匹配）。完成广播：volume/book 走新增 `pipeline:detect_done` 纯增量通道（既有事件协议零改动），structure 沿用 `pipeline:consistency_patrol` 既有通道。书体检口径=signabilityPrompt 全书通读（focused=false，契约/三层输入/goldenN 零改动）；S6 终检 final 口味留 R5-4 触发路由迁移。
+
 - **文件触点**：`internal/pipeline/detect.go`、`internal/pipeline/task_dispatch.go`（队列 kind 复用/新增）、`app/`（绑定）。
 - **交付物**：`RunDetectionTask(novelID int64, kind string, scopeID *int64) (*DetectionTaskResult, error)`——按 kind 分流（chapter→RunChapterCIForChapter；volume/book→建/复用 scoped 检测 run + dispatchExecutor 派发检测-only 核心；structure→runConsistencyPatrol）。建/复用 scoped 检测 run 语义对齐既有卷级 scoped sub-run（`currentVolumeScope`/`GetActiveVolumeRun`）。app 层暴露 `RunDetectionTask` 绑定（手工补 wailsjs 生成物）。
 - **验收**：①四种 kind 各能独立启动、不依赖流水线阶段（无活跃流水线也能跑）；②结果落正确容器（chapter→质量档案；volume/book→工单；structure→PatrolReport）；③队列不可用时降级 legacy 直跑（逐字一致，参照 `dispatchExecutor`）；④幂等重入（同 kind+run 由队列 dedup）。
