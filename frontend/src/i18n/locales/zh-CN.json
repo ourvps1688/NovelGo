@@ -2099,6 +2099,33 @@
         "freeze": "卷末冻结：事实与风格双快照",
         "patrol": "巡检：张力报告"
       },
+      "detect": {
+        "title": "检测任务",
+        "hint": "随时单独启动，不依赖流水线阶段；结果落质量档案 / 发现项工单 / 张力报告。",
+        "start": "启动检测",
+        "running": "检测中…",
+        "never": "尚未检测",
+        "lastRun": "上次检测 {{at}} · {{count}} 项发现",
+        "chapter": "章节检测",
+        "chapterDesc": "单章 L0/L1 质检，结果落质量档案",
+        "volume": "卷体检",
+        "volumeDesc": "8 维评分与文风漂移，发现项落工单",
+        "book": "书体检",
+        "bookDesc": "全书通读体检，发现项落工单",
+        "structure": "巡检·结构",
+        "structureDesc": "全书结构张力报告（只读）",
+        "selectChapter": "选择章节",
+        "selectVolume": "选择卷",
+        "emptyChapters": "暂无章节",
+        "emptyVolumes": "暂无卷",
+        "verdict": {
+          "pass": "通过",
+          "needs_fix": "待修复",
+          "checked": "已检查",
+          "pending": "待检查",
+          "skipped": "已跳过"
+        }
+      },
       "writingConfig": "写作评分配置",
       "panelNav": "面板直达"
     }

@@ -2139,6 +2139,33 @@
         "freeze": "Volume freeze: fact + style snapshots",
         "patrol": "Patrol: tension report"
       },
+      "detect": {
+        "title": "Detection Tasks",
+        "hint": "Start any detection on its own, independent of pipeline stage; results land in the quality ledger / issue tickets / tension report.",
+        "start": "Run detection",
+        "running": "Detecting…",
+        "never": "Not run yet",
+        "lastRun": "Last run {{at}} · {{count}} findings",
+        "chapter": "Chapter check",
+        "chapterDesc": "Per-chapter L0/L1 checks, written to the quality ledger",
+        "volume": "Volume audit",
+        "volumeDesc": "8-dimension score & style drift; findings become issue tickets",
+        "book": "Book audit",
+        "bookDesc": "Full-book read-through audit; findings become issue tickets",
+        "structure": "Patrol: structure",
+        "structureDesc": "Full-book structure tension report (read-only)",
+        "selectChapter": "Select chapter",
+        "selectVolume": "Select volume",
+        "emptyChapters": "No chapters yet",
+        "emptyVolumes": "No volumes yet",
+        "verdict": {
+          "pass": "Pass",
+          "needs_fix": "Needs fix",
+          "checked": "Checked",
+          "pending": "Pending",
+          "skipped": "Skipped"
+        }
+      },
       "writingConfig": "Writing score config",
       "panelNav": "Panel quick links"
     }

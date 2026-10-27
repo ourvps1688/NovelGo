@@ -10,6 +10,7 @@ import { usePanelStore } from "@/stores/usePanelStore";
 import WritingConfigTab from "@/components/settings/WritingConfigTab";
 import JourneyHeader from "./JourneyHeader";
 import JourneyCard from "./JourneyCard";
+import DetectionTasks from "./DetectionTasks";
 
 /** 三面板次级导航：labelKey 复用既有面板标签单源（shell.* / pipeline.title），禁自造变体。 */
 const PANEL_LINKS: {
@@ -56,6 +57,9 @@ export default function JourneyQuality() {
           feedsKey="shell.factory.quality.feeds"
           onClick={() => setActivePanel("pipeline")}
         />
+        {/* T2.1 检测任务卡区（R5-3）：四入口独立启动、不依赖流水线阶段，
+            与既有旅程卡并列；价值链顺序勿重排（卡仍只做入口）。 */}
+        <DetectionTasks />
         {/* 三面板次级导航（#185 验收：一跳触达 pipeline/reader/signability） */}
         <nav
           data-testid="journey-quality-panel-nav"

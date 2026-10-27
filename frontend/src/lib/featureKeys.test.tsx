@@ -52,7 +52,7 @@ describe("featureKeys 单源 key 枚举（P4 T2.2）", () => {
     expect(journeyFeatureKey("stages.custom")).toBe("journey.stages.custom");
   });
 
-  it("关键动作枚举全覆盖七类动作，均为 action.* 前缀", () => {
+  it("关键动作枚举全覆盖（七类动作 + 检测启动 + 告警命中率族），均为 action.* 前缀", () => {
     expect(Object.values(ACTION_FEATURE_KEYS).sort()).toEqual(
       [
         "action.audit",
@@ -62,6 +62,14 @@ describe("featureKeys 单源 key 枚举（P4 T2.2）", () => {
         "action.patrol",
         "action.rewrite",
         "action.retcon",
+        // R5-3 T2.1：检测任务手动启动
+        "action.detect",
+        // §9.4 告警→真问题命中率族（后端挂点记数，key 单源锁于此）
+        "action.alert_raised.l2",
+        "action.alert_raised.l1",
+        "action.alert_raised.struct",
+        "action.alert_confirmed.l2",
+        "action.alert_dismissed.l2",
       ].sort(),
     );
   });

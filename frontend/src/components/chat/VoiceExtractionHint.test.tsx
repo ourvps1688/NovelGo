@@ -60,10 +60,12 @@ describe("VoiceExtractionHint（WBS T2.2 空态漏斗）", () => {
     expect(screen.queryByTestId("voice-extraction-hint")).toBeNull();
   });
 
-  it("挂点接线断言：ChatPanel 与 SignabilityAuditView 均渲染本 hint（T2.2 文件触点）", () => {
+  it("挂点接线断言：ChatPanel 与 JourneyCreate 均渲染本 hint（文件触点）", () => {
+    // 挂点以现状为准：P3 原挂 SignabilityAuditView，后随重写入口 hint 语义
+    // 调整迁至 ChatPanel（写作入口）+ JourneyCreate（重写卡）；旧断言失步修复。
     for (const rel of [
       "components/chat/ChatPanel.tsx",
-      "components/pipeline/SignabilityAuditView.tsx",
+      "components/journey/JourneyCreate.tsx",
     ]) {
       const content = readFileSync(resolve(findSrcDir(), rel), "utf-8");
       expect(content, rel).toContain("<VoiceExtractionHint");

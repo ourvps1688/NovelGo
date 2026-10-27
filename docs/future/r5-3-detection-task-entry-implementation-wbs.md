@@ -74,6 +74,8 @@
 
 ### T2.1 journey-quality 检测任务卡（契约 0.1/0.4）
 
+> **实施定案补记（T2.1 落地时）**：检测任务卡区落独立组件 `frontend/src/components/journey/DetectionTasks.tsx`，挂载于 JourneyQuality 四旅程卡之后、面板直达之前（价值链顺序勿重排；JourneyCard 语义零改动——导航卡只做入口，检测启动卡自带 scope 选择与启动按钮）。scope 缺省取列表首项（少一次必点）、显式选择覆盖；章节/卷列表空=入口禁用+空态提示，书/结构恒可点（验收①）。状态行消费 T1.3 `ListDetectionTaskStatuses`（进行态/结论徽标+上次检测时间与发现数/未检测三态）；进行态轻量轮询 5s（仅 running 时），事件接线属 T2.2。降级零提示：`detection-tasks` query 前缀入 `queryErrorToast` 静默口径白名单，启动失败/回执 dispatched=false 一律静默。埋点：四入口共用 `action.detect`（featureKeys 单源）。**存量红修两处（均已 stash 验证 HEAD 上即红，顺手修复）**：①`featureKeys.test.tsx` 期望键集漏 §9.4 五个 alert key（补齐+纳 `action.detect`）；②`VoiceExtractionHint.test.tsx` 挂点接线断言仍指旧挂点 SignabilityAuditView（hint 现挂 ChatPanel+JourneyCreate），同步现挂点。测试坑：vitest 全量必须在 frontend 目录执行（`npm --prefix frontend run test`），仓库根跑假红（alias `@` 解析失败 33 文件红）；全局 setup 对 App 模块是 Proxy mock，测试文件自带 `vi.mock` 全量覆盖后须显式补齐所消费绑定（否则 query 静默 error）；`settings.selectNovelFirstHint` 配置卡与检测卡双渲染，断言用 `getAllByText`。
+
 - **文件触点**：`frontend/src/components/journey/JourneyQuality.tsx`（检测任务卡区）、`frontend/src/lib/factory.ts`（不动，PanelId 零删除）、`frontend/src/i18n/locales/{zh-CN,en}.json`。
 - **交付物**：journey-quality 增「检测任务」区：章节检测/卷体检/书体检/巡检·结构四个**启动入口**（点选 scope→调 `RunDetectionTask`），与既有"体检→修复→冻结→巡检"旅程卡并列（价值链顺序勿重排）。卷体检可选卷（VolumeManagePanel 卷列表复用）、书体检全书、巡检全书结构、章节检测选章。
 - **验收**：①四入口独立可点、不依赖流水线阶段；②PanelId 零删除（只加不删）；③i18n 双语齐（`i18n:check` 过）；④theme token（`theme:check` 过）；⑤desktop-first 布局。

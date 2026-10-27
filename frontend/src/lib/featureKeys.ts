@@ -31,6 +31,9 @@ export const ACTION_FEATURE_KEYS = {
   freeze: "action.freeze",
   /** 巡检：手动触发全书一致性巡检 */
   patrol: "action.patrol",
+  /** 检测任务：旅程面板手动启动检测（章节检测/卷体检/书体检/巡检·结构，
+   *  R5-3 T2.1 四入口共用一个 key——只记启动次数，不细分 scope） */
+  detect: "action.detect",
   /** retcon 立案：立案在后端 handoff 出口沉淀为候选案件，前端以「批准立案」
    *  裁决（candidate→approved 进入受控编辑）为使用信号 */
   retcon: "action.retcon",

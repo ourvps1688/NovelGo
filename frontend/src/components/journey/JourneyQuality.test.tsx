@@ -19,6 +19,12 @@ const mocks = vi.hoisted(() => ({
   GetWritingConfig: vi.fn(),
   SaveWritingConfig: vi.fn(),
   SetActiveNovel: vi.fn(),
+  // T2.1 检测任务卡：检测状态查询/启动 + scope 列表 + 埋点
+  GetChapters: vi.fn(),
+  GetVolumes: vi.fn(),
+  ListDetectionTaskStatuses: vi.fn(),
+  RunDetectionTask: vi.fn(),
+  RecordFeatureUsage: vi.fn(),
 }));
 
 vi.mock("@/lib/wailsjs/go/app/App", () => mocks);
@@ -39,6 +45,10 @@ describe("JourneyQuality：写作评分配置卡（T3.1 挂载点迁移）", () 
       score_max_retries: 3,
     });
     mocks.SaveWritingConfig.mockResolvedValue(undefined);
+    mocks.GetChapters.mockResolvedValue([]);
+    mocks.GetVolumes.mockResolvedValue([]);
+    mocks.ListDetectionTaskStatuses.mockResolvedValue([]);
+    mocks.RunDetectionTask.mockResolvedValue({ dispatched: true });
     useNovelStore.setState({ activeNovelId: 1 });
   });
 
@@ -88,9 +98,10 @@ describe("JourneyQuality：写作评分配置卡（T3.1 挂载点迁移）", () 
   it("未选书降级：提示先选书且零查询（逐字旧行为）", () => {
     useNovelStore.setState({ activeNovelId: 0 });
     render(<JourneyQuality />, { wrapper });
+    // 配置卡与检测任务卡同引 settings.selectNovelFirstHint 单源提示（两处命中）
     expect(
-      screen.getByText("settings.selectNovelFirstHint"),
-    ).toBeInTheDocument();
+      screen.getAllByText("settings.selectNovelFirstHint").length,
+    ).toBeGreaterThan(0);
     expect(mocks.GetWritingConfig).not.toHaveBeenCalled();
     expect(mocks.SaveWritingConfig).not.toHaveBeenCalled();
   });
@@ -104,6 +115,10 @@ describe("JourneyQuality：T3.2 旅程卡与三面板次级导航", () => {
       score_threshold: 60,
       score_max_retries: 3,
     });
+    mocks.GetChapters.mockResolvedValue([]);
+    mocks.GetVolumes.mockResolvedValue([]);
+    mocks.ListDetectionTaskStatuses.mockResolvedValue([]);
+    mocks.RunDetectionTask.mockResolvedValue({ dispatched: true });
     useNovelStore.setState({ activeNovelId: 1 });
     usePanelStore.setState({ activePanel: "journey-quality" });
   });
@@ -147,5 +162,161 @@ describe("JourneyQuality：T3.2 旅程卡与三面板次级导航", () => {
     expect(usePanelStore.getState().activePanel).toBe("pipeline");
     fireEvent.click(nav.getByText("shell.readerView"));
     expect(usePanelStore.getState().activePanel).toBe("reader");
+  });
+});
+
+// T2.1 验收（R5-3 契约 0.1/0.4）：检测任务四入口独立可点、不依赖流水线阶段；
+// 点选 scope → RunDetectionTask；状态行消费 T1.3 检测状态查询；降级零提示。
+describe("JourneyQuality：T2.1 检测任务卡（R5-3 检测任务独立入口）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.GetWritingConfig.mockResolvedValue({
+      auto_score_enabled: true,
+      score_threshold: 60,
+      score_max_retries: 3,
+    });
+    mocks.GetChapters.mockResolvedValue([
+      {
+        id: 101,
+        novel_id: 1,
+        sort_order: 1,
+        title: "初入江湖",
+        reading_number: 1,
+      },
+      {
+        id: 102,
+        novel_id: 1,
+        sort_order: 2,
+        title: "再战",
+        reading_number: 2,
+      },
+    ]);
+    mocks.GetVolumes.mockResolvedValue([
+      { id: 201, novel_id: 1, name: "第一卷", sort_order: 1 },
+      { id: 202, novel_id: 1, name: "第二卷", sort_order: 2 },
+    ]);
+    mocks.ListDetectionTaskStatuses.mockResolvedValue([]);
+    mocks.RunDetectionTask.mockResolvedValue({
+      kind: "book",
+      novel_id: 1,
+      dispatched: true,
+    });
+    useNovelStore.setState({ activeNovelId: 1 });
+    usePanelStore.setState({ activePanel: "journey-quality" });
+  });
+
+  it("四入口独立可点、不依赖流水线阶段：点选 scope 后各调 RunDetectionTask", async () => {
+    render(<JourneyQuality />, { wrapper });
+    // 无活跃流水线（本面板不接 usePipeline）四入口仍可启动（契约 0.1）。
+    // scope 缺省取列表首项，列表回填后按钮才可点。
+    const chapterEntry = await screen.findByTestId("detection-task-chapter");
+    await within(chapterEntry).findByRole("combobox");
+    fireEvent.click(within(chapterEntry).getByRole("button"));
+    const volumeEntry = await screen.findByTestId("detection-task-volume");
+    await within(volumeEntry).findByRole("combobox");
+    fireEvent.click(within(volumeEntry).getByRole("button"));
+    for (const kind of ["book", "structure"] as const) {
+      const entry = await screen.findByTestId(`detection-task-${kind}`);
+      fireEvent.click(within(entry).getByRole("button"));
+    }
+    await waitFor(() =>
+      expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "chapter", 101),
+    );
+    expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "volume", 201);
+    expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "book", null);
+    expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "structure", null);
+    // 检测启动埋点（单源 action.detect）
+    expect(mocks.RecordFeatureUsage).toHaveBeenCalledWith("action.detect");
+  });
+
+  it("scope 点选生效：切换章节/卷后启动参数随之变化", async () => {
+    render(<JourneyQuality />, { wrapper });
+    const chapterEntry = await screen.findByTestId("detection-task-chapter");
+    const chapterSelect = await within(chapterEntry).findByRole("combobox");
+    fireEvent.change(chapterSelect, { target: { value: "102" } });
+    fireEvent.click(within(chapterEntry).getByRole("button"));
+    await waitFor(() =>
+      expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "chapter", 102),
+    );
+
+    const volumeEntry = await screen.findByTestId("detection-task-volume");
+    const volumeSelect = await within(volumeEntry).findByRole("combobox");
+    fireEvent.change(volumeSelect, { target: { value: "202" } });
+    fireEvent.click(within(volumeEntry).getByRole("button"));
+    await waitFor(() =>
+      expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "volume", 202),
+    );
+  });
+
+  it("状态行消费 T1.3 检测状态查询：进行态/结论徽标/未检测三态", async () => {
+    mocks.ListDetectionTaskStatuses.mockResolvedValue([
+      {
+        kind: "chapter",
+        novel_id: 1,
+        running: false,
+        last_verdict: "checked",
+        last_issue_count: 3,
+        last_run_at: "2026-10-27T10:00:00Z",
+      },
+      { kind: "volume", novel_id: 1, running: true, last_issue_count: 0 },
+      { kind: "book", novel_id: 1, running: false, last_issue_count: 0 },
+      { kind: "structure", novel_id: 1, running: false, last_issue_count: 0 },
+    ]);
+    render(<JourneyQuality />, { wrapper });
+    // 章节：结论徽标 + 上次检测行
+    const chapter = await screen.findByTestId("detection-task-chapter");
+    expect(
+      await within(chapter).findByText(
+        "journey.quality.detect.verdict.checked",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(chapter).getByText("journey.quality.detect.lastRun"),
+    ).toBeInTheDocument();
+    // 卷：进行态（状态行 + 按钮同文且收口禁用）
+    const volume = await screen.findByTestId("detection-task-volume");
+    await within(volume).findByRole("button", {
+      name: "journey.quality.detect.running",
+    });
+    expect(within(volume).getByRole("button")).toBeDisabled();
+    // 书：未检测
+    const book = await screen.findByTestId("detection-task-book");
+    expect(
+      await within(book).findByText("journey.quality.detect.never"),
+    ).toBeInTheDocument();
+  });
+
+  it("未选书降级：提示先选书且零查询零启动", () => {
+    useNovelStore.setState({ activeNovelId: 0 });
+    render(<JourneyQuality />, { wrapper });
+    expect(
+      screen.getAllByText("settings.selectNovelFirstHint").length,
+    ).toBeGreaterThan(0);
+    expect(mocks.GetChapters).not.toHaveBeenCalled();
+    expect(mocks.GetVolumes).not.toHaveBeenCalled();
+    expect(mocks.ListDetectionTaskStatuses).not.toHaveBeenCalled();
+    expect(mocks.RunDetectionTask).not.toHaveBeenCalled();
+  });
+
+  it("空列表降级：章节/卷无 scope 时禁用并提示，书/结构仍可点", async () => {
+    mocks.GetChapters.mockResolvedValue([]);
+    mocks.GetVolumes.mockResolvedValue([]);
+    render(<JourneyQuality />, { wrapper });
+    const chapter = await screen.findByTestId("detection-task-chapter");
+    expect(
+      await within(chapter).findByText("journey.quality.detect.emptyChapters"),
+    ).toBeInTheDocument();
+    expect(within(chapter).getByRole("button")).toBeDisabled();
+    const volume = await screen.findByTestId("detection-task-volume");
+    expect(
+      await within(volume).findByText("journey.quality.detect.emptyVolumes"),
+    ).toBeInTheDocument();
+    expect(within(volume).getByRole("button")).toBeDisabled();
+
+    const book = await screen.findByTestId("detection-task-book");
+    fireEvent.click(within(book).getByRole("button"));
+    await waitFor(() =>
+      expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "book", null),
+    );
   });
 });

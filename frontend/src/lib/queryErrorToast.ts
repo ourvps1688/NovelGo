@@ -56,7 +56,8 @@ const QUERY_ERROR_I18N: Record<string, string> = {
 
 // 静默口径（P4 T2.3）：度量消费面加载失败=静默空态零报错（降级逐字一致）。
 // 这些 query 键前缀的错误不进 toast、不 console.error——统计失败业务零感知。
-const SILENT_QUERY_PREFIXES = new Set(["feature-usage"]);
+// R5-3 T2.1：检测状态查询（detection-tasks）同样静默——检测失败零提示零报错（契约 0.1）。
+const SILENT_QUERY_PREFIXES = new Set(["feature-usage", "detection-tasks"]);
 
 // 4a 全局 query 错误 toast 中间件。
 // 设计依据见 docs/feat/v1.4.0/refactor-plan/04a-query-error-toast.md。

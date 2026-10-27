@@ -217,3 +217,9 @@ export const writingConfigKeys = {
 export const personaSettingKeys = {
   detail: (novelId: number) => ["persona-setting", novelId] as const,
 };
+
+// R5-3 检测任务状态（T1.3/T2.1）：ListDetectionTaskStatuses(novelId) 四 kind
+// 全量概览（chapter→volume→book→structure 固定序）。启动检测后 invalidate。
+export const detectionKeys = {
+  list: (novelId: number) => ["detection-tasks", novelId] as const,
+};
