@@ -9,11 +9,13 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import JourneyQuality from "./JourneyQuality";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import { usePanelStore } from "@/stores/usePanelStore";
+import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 
 const mocks = vi.hoisted(() => ({
   GetWritingConfig: vi.fn(),
@@ -318,5 +320,124 @@ describe("JourneyQuality：T2.1 检测任务卡（R5-3 检测任务独立入口�
     await waitFor(() =>
       expect(mocks.RunDetectionTask).toHaveBeenCalledWith(1, "book", null),
     );
+  });
+});
+
+// T2.2 验收（R5-3）：检测启动→进行态→结果可达闭环——完成事件（事件协议零改动）
+// 驱动新结果徽标+状态刷新；查看结果跳既有面板（工单/张力报告/质量档案）；降级零提示。
+describe("JourneyQuality：T2.2 检测结果反馈接线", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.GetWritingConfig.mockResolvedValue({
+      auto_score_enabled: true,
+      score_threshold: 60,
+      score_max_retries: 3,
+    });
+    mocks.GetChapters.mockResolvedValue([
+      {
+        id: 101,
+        novel_id: 1,
+        sort_order: 1,
+        title: "初入江湖",
+        reading_number: 1,
+      },
+    ]);
+    mocks.GetVolumes.mockResolvedValue([
+      { id: 201, novel_id: 1, name: "第一卷", sort_order: 1 },
+    ]);
+    mocks.ListDetectionTaskStatuses.mockResolvedValue([
+      {
+        kind: "chapter",
+        novel_id: 1,
+        running: false,
+        last_verdict: "checked",
+        last_issue_count: 3,
+        last_run_at: "2026-10-27T10:00:00Z",
+      },
+      {
+        kind: "book",
+        novel_id: 1,
+        running: false,
+        last_verdict: "pass",
+        last_issue_count: 0,
+        last_run_at: "2026-10-27T11:00:00Z",
+      },
+    ]);
+    mocks.RunDetectionTask.mockResolvedValue({ dispatched: true });
+    useNovelStore.setState({ activeNovelId: 1 });
+    usePanelStore.setState({ activePanel: "journey-quality" });
+  });
+
+  /** 取 useDetectionFeedback 订阅的事件回调（setup 全局 mock 的 EventsOn）。 */
+  const handlerOf = (event: string) => {
+    const hit = vi.mocked(EventsOn).mock.calls.find((c) => c[0] === event);
+    expect(hit, `event ${event} subscribed`).toBeTruthy();
+    return hit![1] as (p: unknown) => void;
+  };
+
+  it("检测完成事件→新结果徽标+状态查询失效；查看结果跳正确面板并消隐", async () => {
+    render(<JourneyQuality />, { wrapper });
+    const book = await screen.findByTestId("detection-task-book");
+    await within(book).findByText("journey.quality.detect.verdict.pass");
+
+    // volume/book 完成事件（T1.2 pipeline:detect_done 增量通道）
+    const before = mocks.ListDetectionTaskStatuses.mock.calls.length;
+    await act(async () => {
+      handlerOf("pipeline:detect_done")({
+        novel_id: 1,
+        kind: "book",
+        verdict: "pass",
+        issue_count: 2,
+      });
+    });
+    expect(
+      await within(book).findByTestId("detection-fresh-book"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.ListDetectionTaskStatuses.mock.calls.length).toBeGreaterThan(
+        before,
+      ),
+    );
+
+    // 查看结果 → 跳流水线面板（工单/张力报告所在），新结果徽标消隐
+    fireEvent.click(within(book).getByTestId("detection-result-book"));
+    expect(usePanelStore.getState().activePanel).toBe("pipeline");
+    await waitFor(() =>
+      expect(within(book).queryByTestId("detection-fresh-book")).toBeNull(),
+    );
+  });
+
+  it("巡检完成沿用既有 consistency_patrol 通道；载荷 novel 不符静默忽略", async () => {
+    render(<JourneyQuality />, { wrapper });
+    await screen.findByTestId("detection-task-structure");
+    await act(async () => {
+      handlerOf("pipeline:consistency_patrol")({ novel_id: 999 });
+    });
+    expect(screen.queryByTestId("detection-fresh-structure")).toBeNull();
+    await act(async () => {
+      handlerOf("pipeline:consistency_patrol")({ novel_id: 1 });
+    });
+    expect(
+      await screen.findByTestId("detection-fresh-structure"),
+    ).toBeInTheDocument();
+  });
+
+  it("结果跳转门控：有结果才可达——章节→chapters、书→pipeline；未检测入口零跳转按钮", async () => {
+    render(<JourneyQuality />, { wrapper });
+    // 等检测状态查询回填后再交互（回填前无结果跳转按钮）
+    const chapter = await screen.findByTestId("detection-task-chapter");
+    await within(chapter).findByText("journey.quality.detect.verdict.checked");
+    fireEvent.click(within(chapter).getByTestId("detection-result-chapter"));
+    expect(usePanelStore.getState().activePanel).toBe("chapters");
+    const book = await screen.findByTestId("detection-task-book");
+    await within(book).findByText("journey.quality.detect.verdict.pass");
+    fireEvent.click(within(book).getByTestId("detection-result-book"));
+    expect(usePanelStore.getState().activePanel).toBe("pipeline");
+    // volume/structure 未检测（无 last_run_at）→ 零跳转按钮
+    await waitFor(() =>
+      expect(mocks.ListDetectionTaskStatuses).toHaveBeenCalled(),
+    );
+    expect(screen.queryByTestId("detection-result-volume")).toBeNull();
+    expect(screen.queryByTestId("detection-result-structure")).toBeNull();
   });
 });

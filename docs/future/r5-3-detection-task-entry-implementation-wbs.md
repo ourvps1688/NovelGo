@@ -83,6 +83,8 @@
 
 ### T2.2 检测结果反馈接线
 
+> **实施定案补记（T2.2 落地时）**：新 hook `frontend/src/hooks/useDetectionFeedback.ts`（不改 usePipeline——巡检面板自有 patrolTick 语义勿混）订阅 `pipeline:detect_done`（卷/书，载荷 {novel_id,kind,verdict,issue_count}）与 `pipeline:consistency_patrol`（结构，既有通道）——事件到达=检测状态查询失效（状态行刷新）+该 kind 记「新结果」徽标，点「查看结果」消隐；载荷 novel 不符/缺 kind 静默忽略（降级零提示）。**结果跳转落点复用既有面板零重复视图**：章节→`chapters` 面板（侧栏质量档案标记 SidebarChapterGroup quality_score）、卷/书→`pipeline` 面板（IssueTicketsPanel 恒渲染）、结构→`pipeline` 面板（PatrolReportPanel，run||patrolReport 渲染条件 T1.3 已保两源可达）；跳转按钮有结果（last_run_at 已落库）才亮。**章节检测无完成事件**（dispatchChapterDetect 直写质量档案，收口只注销进行态）——进行态由检测状态轮询收口即可见，结果跳转不依赖事件；不为它补事件（事件协议零改动红线）。测试坑：状态查询回填前无跳转按钮，交互前须等 verdict 行出现；EventsOn 经 setup 全局 mock，回调从 `vi.mocked(EventsOn).mock.calls` 捕获后 act() 触发；hook 清理可选调用（setup Proxy mock 无返回值）。
+
 - **文件触点**：`frontend/src/components/journey/JourneyQuality.tsx`、`frontend/src/hooks/usePipeline.ts`（或新 hook）。
 - **交付物**：启动检测后前端展示进行态 + 完成后跳结果（工单面板/巡检报告/质量档案）。复用既有事件协议（`pipeline:consistency_patrol`/`issue`/stage 事件，事件协议不变——§10.4）。
 - **验收**：检测启动→进行态→结果可达闭环；降级零提示（检测失败不弹错，静默）。

@@ -2143,6 +2143,8 @@
         "title": "Detection Tasks",
         "hint": "Start any detection on its own, independent of pipeline stage; results land in the quality ledger / issue tickets / tension report.",
         "start": "Run detection",
+        "viewResult": "View results",
+        "fresh": "New",
         "running": "Detecting…",
         "never": "Not run yet",
         "lastRun": "Last run {{at}} · {{count}} findings",
