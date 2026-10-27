@@ -223,3 +223,9 @@ export const personaSettingKeys = {
 export const detectionKeys = {
   list: (novelId: number) => ["detection-tasks", novelId] as const,
 };
+
+// 检测核心：全书一致性巡查报告（PatrolReportView）。完成事件 pipeline:consistency_patrol
+// 到达即 invalidate 重拉（R5-3 T1.3 双源合并视图）。
+export const patrolKeys = {
+  report: (novelId: number) => ["patrol-report", novelId] as const,
+};

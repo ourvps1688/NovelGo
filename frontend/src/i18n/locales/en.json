@@ -1777,9 +1777,10 @@
   },
   "signability": {
     "title": "Signability Workflow",
-    "subtitle": "A pipeline-driven evaluation for platform signing: from blueprint incubation, worldbuilding, chapter writing, signability audit to repair loop. Progress is shown on the top stage bar.",
+    "subtitle": "One-click whole-book signability audit (book-level detection task): assess signing potential and consistency issues. Results are summarized as tickets in the Detection Core panel; fixes are always triggered by you.",
     "genreConstraint": "Always cite this book's genre-card constraints (hook / conflict engine / chapter-end hook / no-drift / payoff density / emotional curve / word count). With no genre card, fall back to general web-novel standards without erroring out.",
-    "startButton": "Start Signability Workflow",
+    "startButton": "Run Signability Audit",
+    "auditing": "Signability audit in progress…",
     "continueButton": "Continue Current Workflow",
     "continueHint": "A signability pipeline is already running at stage {{stage}}. Click to return to the pipeline panel and continue.",
     "selectNovelFirst": "Select a book on the left first",
@@ -1861,7 +1862,8 @@
     "bookpitchDesc": "Feed an idea; book-pitch drafts title/blurb/tags & directions, then build the book"
   },
   "pipeline": {
-    "title": "Creation Pipeline (Orchestration Preset)",
+    "title": "Detection Core",
+    "detectCoreHint": "Detection tasks can be launched anytime, independent of the writing pipeline. Findings are collected as tickets; fixing is always manual.",
     "autoRun": "Auto Run",
     "alignFull": "Full Align",
     "alignFullHint": "Run full alignment on the imported book: build volume, backfill ledger, and run a whole-book signability audit",

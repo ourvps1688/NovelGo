@@ -38,7 +38,7 @@ import SkillMatrixView, {
 } from "@/components/skill/SkillMatrixView";
 import SignabilityWorkflowView from "@/components/skill/SignabilityWorkflowView";
 import BookPitchWorkflowView from "@/components/skill/BookPitchWorkflowView";
-import PipelineWizard from "@/components/pipeline/PipelineWizard";
+import DetectionCorePanel from "@/components/pipeline/DetectionCorePanel";
 import GitCommitView from "@/components/git/GitCommitView";
 import ExtractWorkspaceView from "@/components/extract/ExtractWorkspaceView";
 import JourneyAbsorb from "@/components/journey/JourneyAbsorb";
@@ -662,7 +662,7 @@ export default function WorkspaceView({
                     </ErrorBoundary>
                   ) : activePanel === "pipeline" ? (
                     <ErrorBoundary>
-                      <PipelineWizard novelId={activeNovelId} />
+                      <DetectionCorePanel novelId={activeNovelId} />
                     </ErrorBoundary>
                   ) : activePanel === "journey-absorb" ? (
                     <ErrorBoundary>

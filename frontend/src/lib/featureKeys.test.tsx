@@ -9,8 +9,6 @@ import { resolve, dirname } from "node:path";
 
 vi.mock("@/lib/wailsjs/go/app/App", () => ({
   RecordFeatureUsage: vi.fn(() => Promise.resolve()),
-  // R5-4 检测汇总视图依赖：PipelineGateCard 取未决工单计数（空表=零计数）。
-  ListIssueTickets: vi.fn(() => Promise.resolve([])),
 }));
 
 import { RecordFeatureUsage } from "@/lib/wailsjs/go/app/App";
@@ -22,7 +20,6 @@ import {
   trackFeature,
 } from "./featureKeys";
 import JourneyCard from "@/components/journey/JourneyCard";
-import PipelineGateCard from "@/components/pipeline/PipelineGateCard";
 
 const recordMock = vi.mocked(RecordFeatureUsage);
 
@@ -128,30 +125,6 @@ describe("埋点挂点闭环（P4 T2.2）", () => {
     fireEvent.click(screen.getByTestId("journey-card"));
     expect(recordMock).toHaveBeenCalledWith("journey.quality.stages.freeze");
     expect(onClick).toHaveBeenCalledTimes(1);
-  });
-
-  it("闸门决策埋点：fix→action.fix、audit_now→action.audit，continue 不计入", () => {
-    const onResume = vi.fn();
-    render(
-      <PipelineGateCard
-        gate={{
-          run_id: "r1",
-          novel_id: 1,
-          stage: "S4",
-          gate_id: "G4",
-          summary: "",
-          options: ["continue", "fix", "audit_now"],
-        }}
-        onResume={onResume}
-      />,
-    );
-    fireEvent.click(screen.getByText("pipeline.gate.fix"));
-    expect(recordMock).toHaveBeenLastCalledWith("action.fix");
-    fireEvent.click(screen.getByText("pipeline.gate.auditNow"));
-    expect(recordMock).toHaveBeenLastCalledWith("action.audit");
-    fireEvent.click(screen.getByText("pipeline.gate.continue"));
-    expect(recordMock).toHaveBeenCalledTimes(2);
-    expect(onResume).toHaveBeenCalledTimes(3);
   });
 });
 

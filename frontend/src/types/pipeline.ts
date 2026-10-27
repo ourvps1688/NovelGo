@@ -147,19 +147,8 @@ export interface FixActivityItem {
   failed: boolean;
 }
 
-// 线性阶段顺序。S0 = 导入/续写对齐入口；S4 = 签约体检（signability-audit，只读体检 + issue 清单）；
-// S5 = 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4 复评）；S6 = 完本终检；
-// GEnd = 完本终检闸门（确认 finish / 修复 fix / 终止 abort）。
-export const PIPELINE_STAGES = [
-  "S0",
-  "S1",
-  "G1",
-  "S2",
-  "S3",
-  "G3b",
-  "S4",
-  "S5",
-  "S4b",
-  "S6",
-  "GEnd",
-] as const;
+// 侧栏/顶部阶段条仅追踪**写作阶段**进度（S0 对齐入口 → S3 逐章写作 → G3b 里程碑）。
+// R5 检测核心已将「检测 / 修复闭环 / 完本终检」从流水线解耦为独立检测任务
+// （四 kind 独立启动 + 工单人工修复），故阶段条不再含 S4/S5/S4b/S6/GEnd
+// （旧「修复闭环」等阶段不再作为流水线阶段渲染，消除图3 不合理展示）。
+export const PIPELINE_STAGES = ["S0", "S1", "G1", "S2", "S3", "G3b"] as const;
