@@ -605,9 +605,9 @@ func (s *Service) markAuditedJSON(contextJSON string, chapterCount int) string {
 // milestoneSummary 生成里程碑/卷边界的复检建议 note 文案（R5-4 G3b 弹闸退役，非阻塞提示）。
 func milestoneSummary(n, sinceLast int, crossed bool) string {
 	if crossed {
-		return fmt.Sprintf("已跨入新卷（累计 %d 章，距上次体检 %d 章）。建议在「卷边界复评」中做一次全卷签约体检，或继续写作。", n, sinceLast)
+		return fmt.Sprintf("已跨入新卷（累计 %d 章，距上次体检 %d 章）。建议做一次卷边界复评（体检复检），或继续写作。", n, sinceLast)
 	}
-	return fmt.Sprintf("已写 %d 章，距上次签约体检已过 %d 章（每 5 章触发一次）。建议进入签约体检与修复闭环，或继续写作。", n, sinceLast)
+	return fmt.Sprintf("已写 %d 章，距上次体检已过 %d 章（每 5 章一次复检节奏）。建议进入体检复检，或继续写作。", n, sinceLast)
 }
 
 // currentVolumeScope 返回「当前卷」——本书最新写就章节所属的卷 id。
@@ -1062,9 +1062,9 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 		summary := audit.Summary
 		if summary == "" {
 			if audit.Verdict == "pass" {
-				summary = "蓝图体检通过，请确认是否进入写作或重生成。"
+				summary = "蓝图体检通过。建议：进入写作或重生成；是否推进由你决定。"
 			} else {
-				summary = "蓝图体检发现问题，建议进入修复闭环后再确认。"
+				summary = "蓝图体检发现问题。建议：进入修复闭环处理后再继续；是否推进由你决定。"
 			}
 		}
 		// G3：S5 修复后的蓝图巡检结论随闸门带给用户（非阻断，仅供参考）。
@@ -1084,9 +1084,9 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 	summary := audit.Summary
 	if summary == "" {
 		if auditStage == StageS6 {
-			summary = "完本终检已完成，请确认是否完本或进入修复闭环。"
+			summary = "完本终检已完成。建议：无致命伤可完本收口，或先进入修复闭环；是否完本由你决定。"
 		} else {
-			summary = "签约体检已完成，请确认是否继续或进入修复闭环。"
+			summary = "签约体检已完成。建议：继续写作，或进入修复闭环处理发现项；是否推进由你决定。"
 		}
 	}
 	// G3：S5 修复后的蓝图巡检结论随闸门带给用户（非阻断，仅供参考）。

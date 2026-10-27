@@ -1872,7 +1872,6 @@
       "noRun": "No active pipeline. Start one or re-run the audit first."
     },
     "gate": {
-      "title": "Your confirmation is required",
       "summaryTitle": "Detection Summary",
       "verdictPass": "Audit Passed",
       "verdictNeedsFix": "Issues Found",
@@ -1914,7 +1913,7 @@
     "running": "Running",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
-      "s3": "Writing chapter by chapter — keep writing according to the volume outline. A milestone gate offering \"Enter Signability Audit\" appears every 5 chapters since the last audit, or when you cross into a new volume. Click \"Check Writing Progress\" to trigger that check."
+      "s3": "Writing chapter by chapter — keep writing according to the volume outline. Every 5 chapters, or when crossing into a new volume, the system suggests an audit re-check (non-blocking; writing is never interrupted). Click \"Check Writing Progress\" to trigger that check, or use \"Run Audit / Re-check\" anytime."
     },
     "blueprint": {
       "generating": "Generating blueprint…",

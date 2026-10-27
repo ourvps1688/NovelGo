@@ -100,6 +100,65 @@ describe("PipelineWizard：T3.1 编排预设定位（R5-3 契约 0.3）", () => 
     expect(enDesc.length).toBeGreaterThan(0);
   });
 
+  it("R5-4 T2.2 诚实红线（双语 JSON 断言）：零逼答话术、检测汇总话术统一、完本保留人工确认", async () => {
+    const { default: zh } = await import("@/i18n/locales/zh-CN.json");
+    const { default: en } = await import("@/i18n/locales/en.json");
+    const zhGate = (
+      zh as {
+        pipeline: {
+          gate: Record<string, string>;
+          hint: { s3: string };
+          reaudit: string;
+          reauditHint: string;
+        };
+      }
+    ).pipeline;
+    const enGate = (
+      en as {
+        pipeline: {
+          gate: Record<string, string>;
+          hint: { s3: string };
+          reaudit: string;
+          reauditHint: string;
+        };
+      }
+    ).pipeline;
+    // 零逼答：G3b 已退役，不再有「需要你的确认」硬卡标题（死键已删）
+    expect(zhGate.gate.title).toBeUndefined();
+    expect(enGate.gate.title).toBeUndefined();
+    expect(JSON.stringify(zhGate.gate)).not.toContain("请确认");
+    expect(JSON.stringify(enGate.gate).toLowerCase()).not.toContain(
+      "your confirmation",
+    );
+    // 零「必须」话术（诚实红线，范围=R5-4 改造面：gate/hint/reaudit；
+    // retcon 边界语义「必须走显式审批」属硬约束说明，不在改造面）
+    const zhSurface =
+      JSON.stringify(zhGate.gate) +
+      zhGate.hint.s3 +
+      zhGate.reaudit +
+      zhGate.reauditHint;
+    expect(zhSurface).not.toContain("必须");
+    expect(zhSurface).not.toContain("请确认");
+    // 检测汇总话术统一（§10.2）：「检测完毕，发现 N 项」+「由你决定」
+    expect(zhGate.gate.foundCount).toContain("检测完毕，发现");
+    expect(zhGate.gate.suggestedActions).toContain("由你决定");
+    expect(enGate.gate.foundCount.toLowerCase()).toContain(
+      "detection finished",
+    );
+    expect(enGate.gate.suggestedActions.toLowerCase()).toContain("you decide");
+    // G3b 过期话术退役：hint.s3 零「里程碑闸」，改非阻塞复检建议
+    expect(zhGate.hint.s3).not.toContain("里程碑闸");
+    expect(zhGate.hint.s3).toContain("复检");
+    expect(enGate.hint.s3.toLowerCase()).not.toContain("milestone gate");
+    // 体检/复检常驻入口话术双语齐
+    expect(zhGate.reaudit.length).toBeGreaterThan(0);
+    expect(zhGate.reauditHint).toContain("由你决定");
+    expect(enGate.reaudit.length).toBeGreaterThan(0);
+    // 完本保留人工确认语气（契约例外）
+    expect(zhGate.gate.finish).toContain("确认");
+    expect(enGate.gate.finish.toLowerCase()).toContain("confirm");
+  });
+
   it("PanelId 零删除：pipeline 面板仍在全量清单（22 项不缩）", () => {
     expect(ALL_SIDEBAR_PANEL_IDS).toContain("pipeline");
     expect(ALL_SIDEBAR_PANEL_IDS).toHaveLength(22);
