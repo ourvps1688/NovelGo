@@ -30,7 +30,6 @@ export default function PipelineWizard({ novelId }: Props) {
     autoRun,
     fixProgress,
     fixActivity,
-    rewriteProgress,
     patrolTick,
     start,
     resume,
@@ -123,7 +122,6 @@ export default function PipelineWizard({ novelId }: Props) {
                 onResume={resume}
                 fixProgress={fixProgress}
                 fixActivity={fixActivity}
-                rewriteProgress={rewriteProgress}
               />
             ) : (
               <>

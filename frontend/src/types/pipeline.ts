@@ -130,10 +130,6 @@ export interface FixProgressState {
   batchIndex?: number;
   batchTotal?: number;
   doneIds?: string[];
-  // 重写交回：本轮无台账级问题可修、但存在正文级重写清单时置 true，
-  // 前端据此展示「已转交章节重写」而非「修复完成」，避免「完成但零修复」的误导。
-  rewriteHandoff?: boolean;
-  rewriteCount?: number;
   // retcon 交回：问题命中冻结卷写保护/retcon 候选、自动修复被拦截时置 true，
   // 前端据此展示「已转交人工裁决」（冻结卷不自动回改）。
   retconHandoff?: boolean;
@@ -149,24 +145,6 @@ export interface FixActivityItem {
   text: string;
   ok: boolean;
   failed: boolean;
-}
-
-// 自动章节重写回路的逐章进度（由 pipeline:rewrite_progress 维护）。
-// 重写是「交回 S3 重写」环节全自动派发章节重写 agent 的过程：先逐章重写，再回到复评；
-// 该状态让前端展示「正在自动重写第 X/Y 章」与每章结果，避免用户误以为流水线卡死。
-export interface RewriteProgressState {
-  running: boolean;
-  index: number;
-  total: number;
-  items: RewriteProgressChapter[];
-}
-
-// 单章重写结果。
-export interface RewriteProgressChapter {
-  chapterId: number;
-  readingNumber: number;
-  phase: "starting" | "done" | "failed";
-  error?: string;
 }
 
 // 线性阶段顺序。S0 = 导入/续写对齐入口；S4 = 签约体检（signability-audit，只读体检 + issue 清单）；

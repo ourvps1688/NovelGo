@@ -1935,22 +1935,12 @@
       "batch": "Batch {{index}}/{{total}}",
       "checklist": "Fix checklist ({{fixed}}/{{total}} fixed)",
       "resumeHint": "Fix interrupted: click Resume to continue with the remaining issues (completed ones are kept).",
-      "done": "Fix completed, re-auditing automatically…",
+      "done": "Fix finished",
       "failed": "Fix failed",
       "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
-      "rewriteHandoff": "Handed off to chapter rewrite ({{count}} items); please rewrite the related chapters in the writing view, then re-audit.",
       "retconHandoff": "Handed off for manual decision ({{count}} items hit frozen-volume write protection / retcon candidates); auto-fix is blocked. Prefer forward adaptation of this volume; changes to earlier volumes require retcon approval.",
       "stale": "Audit data incompatible, paused",
-      "staleHint": "This run's audit result is missing the fix_type field (legacy data); the auto-rewrite route cannot engage. Do NOT click Resume — re-run the audit/pipeline instead.",
-      "rewriteProgress": {
-        "rewriting": "Auto-rewriting chapter {{index}}/{{total}}…",
-        "done": "Auto-rewrote {{done}}/{{total}} chapters; returning to re-audit.",
-        "hint": "The rewrite loop auto-dispatched a chapter-rewrite agent: it rewrites the flagged chapters in full, then returns to the audit for verification.",
-        "chapter": "Chapter {{number}}",
-        "chapterStarting": "rewriting",
-        "chapterDone": "rewritten",
-        "chapterFailed": "failed"
-      }
+      "staleHint": "This run's audit result is missing the fix_type field (legacy data); the auto-rewrite route cannot engage. Do NOT click Resume — re-run the audit/pipeline instead."
     },
     "fixStatus": {
       "pending": "Pending",

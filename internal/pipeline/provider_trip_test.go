@@ -2,8 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/novelgo/novelgo/internal/chapter"
-	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/stretchr/testify/require"
 )
 
@@ -154,46 +150,6 @@ func TestProviderTripSkipsDispatchS4Audit(t *testing.T) {
 	require.Equal(t, StatusPaused, got.Status, "S4 失败通道=落 paused")
 }
 
-// TestProviderTripSkipsDispatchS5Fix 验收②：S5 修复批次熔断触发零派发，
-// 失败通道语义不变（批次失败计数 → 落 paused，emitFixDone ok=false 附错误）。
-func TestProviderTripSkipsDispatchS5Fix(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	forceProviderTrip(t)
-	calls := countSkillCalls(svc)
-
-	var fixDoneErrs []string
-	t.Cleanup(swapEmitFixDone(func(_ context.Context, p map[string]any) {
-		if v, ok := p["error"].(string); ok {
-			fixDoneErrs = append(fixDoneErrs, v)
-		}
-	}))
-
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
-	run, err := svc.StartPipeline(ctx, 903, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	// 同步直调 executeFix：把 run 钉在 S5/running（enterFix 的等价前置状态）。
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
-
-	svc.executeFix(run.RunID, 903)
-
-	require.Zero(t, *calls, "熔断触发必须零 agent 派发（含修复批次）")
-	require.NotEmpty(t, fixDoneErrs)
-	require.Contains(t, fixDoneErrs[0], "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
-	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
-	require.NoError(t, gerr)
-	require.Equal(t, StageS5, got.CurrentStage)
-	require.Equal(t, StatusPaused, got.Status, "S5 失败通道语义不变：首批失败（累计 1/3）落 paused")
-	var pausedCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &pausedCtxt))
-	require.Equal(t, 1, pausedCtxt.FixBatchFailures, "熔断走批次失败计数通道（语义不变）")
-}
-
 // TestProviderTripSkipsDispatchS6FinalAudit 验收②：S6 完本终检熔断触发零派发，
 // 失败通道语义不变（落 paused 可恢复）。
 func TestProviderTripSkipsDispatchS6FinalAudit(t *testing.T) {
@@ -255,65 +211,8 @@ func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
 	require.Zero(t, *calls, "三个巡检/体检派发点熔断时必须零 agent 派发")
 }
 
-// TestProviderTripBreaksRewriteLoop 验收② + WBS 风险条目：S3 逐章重写熔断应
-// **中断整个循环**而非逐章失败刷屏——只报一次失败进度、剩余章节零派发；
-// 熔断落地不走「重写轮数 +1 + 回到复评」尾部通道（熔断不是真实重写，不得烧
-// RewriteRounds 预算），直落 paused 等恢复。
-func TestProviderTripBreaksRewriteLoop(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
-	for i := 1; i <= 5; i++ {
-		require.NoError(t, db.Create(&chapter.Chapter{
-			NovelID: 906, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
-		}).Error)
-	}
-	forceProviderTrip(t)
-	calls := countSkillCalls(svc)
-
-	var phases []string
-	var failedErr string
-	t.Cleanup(swapEmitRewriteProgress(func(_ context.Context, p map[string]any) {
-		phase := fmt.Sprint(p["phase"])
-		phases = append(phases, phase)
-		if phase == "failed" {
-			failedErr = fmt.Sprint(p["error"])
-		}
-	}))
-
-	run, err := svc.StartPipeline(ctx, 906, "new", nil, false)
-	require.NoError(t, err)
-	// 重写清单指向第 2/3/4 章（3 个可派发章节），同步直调 finishFixHandoffRewrite。
-	ctxt := GateContext{
-		AuditStage: StageS4,
-		RewriteBacklog: []RewriteItem{{
-			ID: "I1", Level: "P0", Area: "开篇过签力", Desc: "前三章未立人设，代入感弱",
-			Chapters: []int64{2, 3, 4},
-		}},
-	}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
-
-	svc.finishFixHandoffRewrite(ctx, run.RunID, 906, ctxt)
-
-	require.Zero(t, *calls, "熔断触发必须零 agent 派发（含逐章重写与复评）")
-	// 整循环中断而非逐章刷屏：只 1 条 starting + 1 条 failed（第 3/4 章不再进循环）。
-	require.Equal(t, []string{"starting", "failed"}, phases,
-		"熔断应中断整个逐章循环：只报一次失败进度，剩余章节不派发不刷屏")
-	require.Contains(t, failedErr, "疑似供应商挂起", "失败进度错误应带统一「疑似供应商挂起」口径")
-	// 熔断直落 paused 等恢复（不经复评失败通道）。
-	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
-	require.NoError(t, gerr)
-	require.Equal(t, StatusPaused, got.Status, "熔断中断后应直落 paused（可恢复）")
-	// 熔断不得烧自动重写预算：RewriteRounds 保持 0，恢复后仍享有完整 autoRewriteCap 轮数。
-	var landed GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &landed))
-	require.Zero(t, landed.RewriteRounds, "熔断落地不得计入重写轮数（熔断不是真实重写）")
-
-	// 哨兵可被 errors.Is 识别（循环据此做整循环中断的差异化落地）。
-	require.ErrorIs(t,
-		svc.executeChapterRewrite(ctx, run.RunID, 906, RewriteItem{ID: "I1"}, chapter.Chapter{ID: 1}),
-		errProviderTripped)
-}
+// TestProviderTripBreaksRewriteLoop 已退役：自动重写循环（finishFixHandoffRewrite /
+// RewriteRounds / autoRewriteCap）随 R5-2 自动修复摘除而删除，逐章重写熔断护栏改由
+// r5_execute_fix_test.go 的 TestServiceExecuteChapterRewriteTripGuarded（executeChapterRewrite
+// 返回 errProviderTripped）与 TestProviderTripFixDispatchGuarded（工单修复派发零 agent）承接，
+// 单源 dispatchSkill 护栏 + 源码锁定 TestSkillRunnerDispatchOnlyViaTripGuard 保证整循环中断。

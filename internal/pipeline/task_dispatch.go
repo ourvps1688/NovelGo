@@ -11,8 +11,6 @@ package pipeline
 //     行为与迁移前逐字一致；
 //   - 跨进程崩溃续跑仍走 RecoverInterruptedRuns 的人工恢复链路（启动清扫
 //     AbandonActive 把残留活跃任务置 dead，恢复时重派新任务）；
-//   - executeFix 尾部对 executeAudit/executeVerify 的同步链保持直调（不入队），
-//     修复→复验/复评的顺序语义不变；
 //   - dedup=kind:run_id 活跃去重：同执行体同 run 在排队/执行中时重复派发被合并
 //     （幂等消费；此前裸 goroutine 会双跑）。
 
@@ -27,8 +25,8 @@ import (
 // 执行体种类（task.kind，Handler 注册键）。
 const (
 	taskKindAudit      = "audit"       // 签约体检（S4/S4b/蓝图体检，含 enterAudit/enterBlueprintAudit）
-	taskKindFix        = "fix"         // S5 修复循环
-	taskKindVerify     = "verify"      // R1c 增量复验
+	taskKindFix        = "fix"         // S5 检测结果路由+工单沉淀（R5-2 自动修复摘除后）
+	taskKindIssueFix   = "issue_fix"   // 发现项工单「去修复」执行体（#240 R5-2 工单接执行）
 	taskKindFinalAudit = "final_audit" // S6 完本终检
 	taskKindBlueprint  = "blueprint"   // S2 蓝图生成
 	taskKindS0Align    = "s0_align"    // S0 导入对齐（建卷+statesync）
@@ -126,8 +124,8 @@ func (s *Service) registerTaskHandlers() {
 	s.taskRunner.Register(taskKindFix, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.executeFix(runID, novelID)
 	}))
-	s.taskRunner.Register(taskKindVerify, s.runIDNovelIDHandler(func(runID string, novelID int64) {
-		s.executeVerify(runID, novelID)
+	s.taskRunner.Register(taskKindIssueFix, s.runIDNovelIDHandler(func(runID string, novelID int64) {
+		s.runIssueFixTickets(runID, novelID)
 	}))
 	s.taskRunner.Register(taskKindFinalAudit, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.executeFinalAudit(runID, novelID)

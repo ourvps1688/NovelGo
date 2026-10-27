@@ -25,7 +25,7 @@ const (
 	IssueStatusPending   = "pending"   // 发现（落表初始态，待确认）
 	IssueStatusConfirmed = "confirmed" // 确认（作者认领，待人工修复）
 	IssueStatusFixing    = "fixing"    // 修复中（人工修复中）
-	IssueStatusFixed     = "fixed"     // 已修复（自动修复回执态，待复验；R5-2 随自动回路退役）
+	IssueStatusFixed     = "fixed"     // 已修复（工单修复回执态，待复验；R5-2 起修复由工单显式触发）
 	IssueStatusVerified  = "verified"  // 复验通过（终态，必带复验回执）
 	IssueStatusDismissed = "dismissed" // 驳回（终态，非问题/不修，留人工理由）
 	IssueStatusSkipped   = "skipped"
@@ -43,7 +43,7 @@ var (
 // issueTicketNext 是发现项工单状态机的合法流转表（§10.2）：
 // 发现（pending）→ 确认（confirmed）→（人工）修复中（fixing）→ 复验通过（verified）/驳回（dismissed）。
 // 兼容流水线路由态的工单收口出口（rewrite/retcon/skipped/fixed 也走「去修复/驳回」收口，
-// 复验退回 pending=退回待修，与增量复验 executeVerify 同口径）。
+// 复验退回 pending=退回待修，与显式复验 VerifyIssueTickets 同口径）。
 // verified/dismissed 是终态无出边；→verified 一律只经 RecordIssueVerify（必带复验回执），
 // 不经通用流转。本表只管工单面板显式流转，流水线内部同步（syncIssueRow）不校验（兼容写）。
 var issueTicketNext = map[string][]string{
@@ -166,6 +166,19 @@ func (s *Store) ListIssues(ctx context.Context, novelID int64, runID string) ([]
 	return rows, nil
 }
 
+// ListFixingTickets 列出该 run 处于 fixing 态的发现项工单（工单「去修复」执行体的聚合入口，
+// #240 R5-2 工单接执行：执行体按 run 处理全部 fixing 态工单，不传 refs）。
+func (s *Store) ListFixingTickets(ctx context.Context, novelID int64, runID string) ([]PipelineIssue, error) {
+	var rows []PipelineIssue
+	err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND run_id = ? AND status = ?", novelID, runID, IssueStatusFixing).
+		Order("id").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ── 发现项工单（R5-1，提案 §10.2/§10.7）──────────────────────────────────────
 // issue 台账升格为工单：状态机（发现→确认→（人工）修复中→复验通过/驳回）+ 复验回执。
 // 工单面板按钮经 Service 走本组方法；流水线内部同步（UpdateIssueStatus）不走状态机
@@ -222,7 +235,7 @@ func (s *Store) TransitionIssueTicket(ctx context.Context, novelID int64, runID,
 }
 
 // RecordIssueVerify 落一条复验回执（§10.2「状态机 + 复验回执」）：通过→verified（终态），
-// 未通过→pending（退回待修，与增量复验 executeVerify 同口径）；verify_receipt/verify_at
+// 未通过→pending（退回待修，与显式复验 VerifyIssueTickets 同口径）；verify_receipt/verify_at
 // 逐次留痕。终态工单（verified/dismissed）不接受复验。
 func (s *Store) RecordIssueVerify(ctx context.Context, novelID int64, runID, issueKey string, ok bool, receipt string) error {
 	row, err := s.getIssueRow(ctx, novelID, runID, issueKey)

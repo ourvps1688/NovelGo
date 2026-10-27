@@ -38,11 +38,8 @@ func fatContextJSON(t *testing.T) (string, GateContext) {
 		RetconBacklog: []RewriteItem{
 			{ID: "I3", Level: "P0", Area: "设定", Desc: "冻结卷冲突", TargetScope: TargetScopeFrozenVolume, Direction: DirectionRetconCandidate},
 		},
-		RewriteRounds:    1,
-		FixLog:           []FixLogEntry{{ID: "I1", Note: "补了动机"}},
-		ManualBacklog:    []ManualItem{{ID: "I4", Level: "P1", Area: "工程", Desc: "外部依赖", Reason: "skipped", Chapters: []int64{6}}},
-		FixBatchFailures: 1,
-		VerifyPending:    true,
+		FixLog:        []FixLogEntry{{ID: "I1", Note: "补了动机"}},
+		ManualBacklog: []ManualItem{{ID: "I4", Level: "P1", Area: "工程", Desc: "外部依赖", Reason: "skipped", Chapters: []int64{6}}},
 	}
 	b, err := json.Marshal(orig)
 	require.NoError(t, err)
@@ -85,7 +82,7 @@ func TestSplitMergeGateObjects(t *testing.T) {
 		_, ok := thinMap[kind]
 		require.False(t, ok, "瘦 blob 不应残留大对象键 %s", kind)
 	}
-	for _, k := range []string{"stages", "gates", "extra", "fix_states", "fix_log", "s4_audited", "audit_reason", "verify_pending"} {
+	for _, k := range []string{"stages", "gates", "extra", "fix_states", "fix_log", "s4_audited", "audit_reason"} {
 		require.Contains(t, thinMap, k, "决策小字段 %s 应留在瘦 blob", k)
 	}
 	// merge 回胖视图与原上下文逐字段一致（含转义/换行的字符串键字节保真）。

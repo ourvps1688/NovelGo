@@ -15,7 +15,6 @@ import type {
   GateDecision,
   FixProgressState,
   FixActivityItem,
-  RewriteProgressState,
 } from "@/types/pipeline";
 import type { AgentEvent } from "@/components/chat/types";
 import { AgentEventType } from "@/components/chat/types";
@@ -43,14 +42,6 @@ export function usePipeline(novelId: number) {
     issues: [],
   });
   const [fixActivity, setFixActivity] = useState<FixActivityItem[]>([]);
-  // 自动章节重写回路进度：重写清单指向可定位章节时，后端全自动派发重写 agent，
-  // 该状态展示「正在自动重写第 X/Y 章」与每章结果。
-  const [rewriteProgress, setRewriteProgress] = useState<RewriteProgressState>({
-    running: false,
-    index: 0,
-    total: 0,
-    items: [],
-  });
   // 一致性巡检完成计数：每次 pipeline:consistency_patrol 事件 +1，
   // 巡检报告面板据此清除「巡检运行中」提示（失败不广播，按钮保持可重试）。
   const [patrolTick, setPatrolTick] = useState(0);
@@ -135,8 +126,6 @@ export function usePipeline(novelId: number) {
       }) => {
         if (p.novel_id !== novelId) return;
         setFixActivity([]);
-        // 新一轮修复批次开始：清除上一轮自动重写的残留进度。
-        setRewriteProgress({ running: false, index: 0, total: 0, items: [] });
         setFixProgress({
           running: true,
           ok: null,
@@ -156,8 +145,6 @@ export function usePipeline(novelId: number) {
         novel_id: number;
         ok?: boolean;
         error?: string;
-        rewrite_handoff?: boolean;
-        rewrite_count?: number;
         retcon_handoff?: boolean;
         retcon_count?: number;
         stale_audit?: boolean;
@@ -177,8 +164,6 @@ export function usePipeline(novelId: number) {
             running: false,
             ok: p.ok ?? false,
             error: p.error,
-            rewriteHandoff: p.rewrite_handoff ?? false,
-            rewriteCount: p.rewrite_count ?? 0,
             retconHandoff: p.retcon_handoff ?? false,
             retconCount: p.retcon_count ?? 0,
             stale: p.stale_audit ?? false,
@@ -207,67 +192,6 @@ export function usePipeline(novelId: number) {
         return next.slice(-FIX_ACTIVITY_MAX);
       });
     });
-    // 自动章节重写回路的逐章进度（starting/done/failed），展示「正在自动重写第 X/Y 章」。
-    const offRewriteProgress = EventsOn(
-      "pipeline:rewrite_progress",
-      (p: {
-        novel_id: number;
-        phase: "starting" | "done" | "failed";
-        index: number;
-        total: number;
-        chapter_id: number;
-        reading_number: number;
-        error?: string;
-      }) => {
-        if (p.novel_id !== novelId) return;
-        setRewriteProgress((prev) => {
-          const items = [...prev.items];
-          const idx = items.findIndex((it) => it.chapterId === p.chapter_id);
-          if (p.phase === "starting") {
-            if (idx < 0) {
-              items.push({
-                chapterId: p.chapter_id,
-                readingNumber: p.reading_number,
-                phase: "starting",
-              });
-            } else {
-              items[idx] = { ...items[idx], phase: "starting" };
-            }
-            return {
-              running: true,
-              index: p.index,
-              total: p.total,
-              items,
-            };
-          }
-          // done / failed：更新对应章节终态；全部终态后停止 running。
-          if (idx >= 0) {
-            items[idx] = {
-              ...items[idx],
-              phase: p.phase,
-              error: p.error,
-            };
-          } else {
-            items.push({
-              chapterId: p.chapter_id,
-              readingNumber: p.reading_number,
-              phase: p.phase,
-              error: p.error,
-            });
-          }
-          const allSettled = items.every(
-            (it) => it.phase === "done" || it.phase === "failed",
-          );
-          return {
-            running: !allSettled,
-            index: p.index,
-            total: p.total,
-            items,
-          };
-        });
-      },
-    );
-
     // 进入时拉取当前活跃流水线，恢复进度。
     GetPipelineState(novelId)
       .then((r: pipeline.PipelineRun) => {
@@ -290,7 +214,6 @@ export function usePipeline(novelId: number) {
       offFixStart();
       offFixDone();
       offAgentActivity();
-      offRewriteProgress();
     };
   }, [novelId]);
 
@@ -362,7 +285,6 @@ export function usePipeline(novelId: number) {
     autoRun,
     fixProgress,
     fixActivity,
-    rewriteProgress,
     patrolTick,
     start,
     resume,

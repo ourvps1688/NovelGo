@@ -85,7 +85,8 @@ type GateContext struct {
 	// 空串=未巡检或无章节可巡；非空时由 emitGateDecision 追加到复评闸门 summary，
 	// 提示用户哪些章节与当前卷纲冲突、是否需要重读。
 	DriftReport string `json:"drift_report,omitempty"`
-	// FixRounds 记录 S5 自动修复已发生的轮数，供 auto_run 模式判断是否达到上限改交人工。
+	// FixRounds 记录工单修复已发生的轮数（R5-2 起修复由发现项工单显式触发，每轮工单
+	// 修复收口 +1），供 auto_run 上限判断与工单轮次统计（ReplaceIssues 的 round 参数）。
 	FixRounds int `json:"fix_rounds,omitempty"`
 	// EntryStage 记录本书启动流水线时由 DetermineEntryStage 选定的入口阶段（S0/S1/S3），用于追溯。
 	EntryStage string `json:"entry_stage,omitempty"`
@@ -112,17 +113,9 @@ type GateContext struct {
 	RewriteBacklog []RewriteItem `json:"rewrite_backlog,omitempty"`
 	// RetconBacklog 是命中冻结卷写保护/retcon 候选的问题清单（target_scope=frozen_volume
 	// 或 direction=retcon_candidate 的 issue，含 body 与 ledger 两类），每次体检重新计算。
-	// S5/自动重写一律不碰这些项（冻结卷正文与既定设定不得被自动回改），交回人工裁决：
+	// S5/工单修复一律不碰这些项（冻结卷正文与既定设定不得被自动回改），交回人工裁决：
 	// 前向适配调整本卷，或（阶段 3）经 retcon 审批闸门受控回改前卷。
 	RetconBacklog []RewriteItem `json:"retcon_backlog,omitempty"`
-	// RewriteRounds 记录自动章节重写回路已发生的轮数（finishFixHandoffRewrite 每次自动重写后 +1），
-	// 供 auto/全自动重写模式下判断是否达到上限改交人工，避免「重写→复评→再重写」无限循环。
-	RewriteRounds int `json:"rewrite_rounds,omitempty"`
-	// FixBatchFailures 记录 S5 修复批次连续失败次数（批次成功完成即清零）。
-	// 批次失败原先只会落 paused 等用户恢复后原样重派——供应商频繁挂起或单批问题
-	// 过大时会无限循环。累计达 fixBatchFailureCap 后改发闸门交用户裁决（继续=回复评
-	// 重新评估剩余问题 / 终止），封死「失败→恢复→原样重试」的死循环。
-	FixBatchFailures int `json:"fix_batch_failures,omitempty"`
 	// FixLog 是本轮修复日志（R1b）：已修复条目的一行改动摘要（来自修复回执的可选
 	// log 字段），按完成先后排列。同轮后续批次/并行组的修复提示词经 fixLogBlock 注入
 	// 「本轮修复日志」，消除独立会话的重复勘察（F2）。executeAudit 落新体检结果时随
@@ -131,12 +124,8 @@ type GateContext struct {
 	// ManualBacklog 是「转人工工单」清单（R1c）：修复 agent 上报 skipped（无法自动修复
 	// 的工程级问题）即沉淀于此，由 G4/G终 闸门 summary 列出交作者人工处理，不再自动
 	// 重试（F2 尾部空转根治）。executeAudit 落新体检结果时随 FixStates 一并重置
-	// （新一轮体检=新一轮问题清单）；增量复验不触碰它。
+	// （新一轮体检=新一轮问题清单）；显式复验（VerifyIssueTickets）不触碰它。
 	ManualBacklog []ManualItem `json:"manual_backlog,omitempty"`
-	// VerifyPending 标记当前处于「修复后增量复验」流程（R1c）：finishFixAndReaudit
-	// 走增量复验分支前置 true，复验落地/收口置 false。进程重启后恢复（resume）据此
-	// 把 S4/S4b 的重派发指向增量复验而非全量体检，避免误用全量体检重置修复断点。
-	VerifyPending bool `json:"verify_pending,omitempty"`
 }
 
 // FixLogEntry 是修复日志里的一条：issueID → 一行改动摘要（agent 回执 log 字段上报）。

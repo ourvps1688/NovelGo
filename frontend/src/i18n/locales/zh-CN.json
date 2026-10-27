@@ -1895,22 +1895,12 @@
       "batch": "第 {{index}}/{{total}} 批",
       "checklist": "修复清单（已修复 {{fixed}} / 共 {{total}} 项）",
       "resumeHint": "修复已中断：点击「恢复」将从剩余未修复问题继续（已完成项保留）。",
-      "done": "修复完成，正在自动复评……",
+      "done": "修复执行完毕",
       "failed": "修复失败",
       "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
-      "rewriteHandoff": "已转交章节重写（{{count}} 项），请在写作页重写相关章节后重新复评。",
       "retconHandoff": "已转交人工裁决（{{count}} 项命中冻结卷写保护/retcon 候选），自动修复已拦截；请优先前向适配本卷，确需回改前卷的待 retcon 审批。",
       "stale": "体检数据不兼容，已暂停",
-      "staleHint": "本次运行的体检结果缺少 fix_type 字段（旧版数据），自动重写路由无法启用；请勿点击「恢复」，请重新发起体检/流水线。",
-      "rewriteProgress": {
-        "rewriting": "正在自动重写第 {{index}}/{{total}} 章……",
-        "done": "已自动重写 {{done}}/{{total}} 章，正在回到复评。",
-        "hint": "重写回路已自动派发章节重写 agent：先整章重写被标记的章节，再回到体检复评验证是否解决。",
-        "chapter": "第 {{number}} 章",
-        "chapterStarting": "重写中",
-        "chapterDone": "已重写",
-        "chapterFailed": "重写失败"
-      }
+      "staleHint": "本次运行的体检结果缺少 fix_type 字段（旧版数据），自动重写路由无法启用；请勿点击「恢复」，请重新发起体检/流水线。"
     },
     "fixStatus": {
       "pending": "待修复",

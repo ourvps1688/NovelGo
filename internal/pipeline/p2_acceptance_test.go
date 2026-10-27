@@ -10,13 +10,10 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"testing"
 
-	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/retcon"
-	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,19 +24,6 @@ func TestP2Acceptance_DriftAutoRouteAndExempt(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
-	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
-	for i := 1; i <= 5; i++ {
-		require.NoError(t, db.Create(&chapter.Chapter{
-			NovelID: 471, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
-		}).Error)
-	}
-	seeded, err := svc.chapterStore.ListAllByNovel(ctx, nil, 471)
-	require.NoError(t, err)
-	readingToID := map[int]int64{}
-	for _, ch := range seeded {
-		readingToID[ch.ReadingNumber] = ch.ID
-	}
-
 	issueV := `{"id":"V1","level":"P1","area":"文风漂移·章节#3","desc":"第3章节奏基线偏离","fix_type":"body",` +
 		`"target_scope":"active_volume","dimension":"none","direction":"forward_fix"}`
 	issueI := `{"id":"I3","level":"P0","area":"开篇过签力","desc":"第4章未立人设","fix_type":"body"}`
@@ -60,8 +44,6 @@ func TestP2Acceptance_DriftAutoRouteAndExempt(t *testing.T) {
 		}
 	}
 
-	defer swapEmitRewriteProgress(func(_ context.Context, _ map[string]any) {})()
-
 	run, err := svc.StartPipeline(ctx, 471, "new", nil, false)
 	require.NoError(t, err)
 	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
@@ -69,8 +51,14 @@ func TestP2Acceptance_DriftAutoRouteAndExempt(t *testing.T) {
 	require.NoError(t, merr)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
 
+	// 模拟 S4 体检已落发现项工单（R5-2 路由对既有工单行做状态同步，不新建）：否则
+	// executeFix 的 syncIssueRow（UpdateIssueStatus）因缺行而静默无操作，V1/I3 落不了 rewrite 态。
+	require.NoError(t, svc.store.ReplaceIssues(ctx, 471, run.RunID, 0, parseAudit(auditJSON).Issues),
+		"P2 验收：模拟 S4 落发现项工单失败")
+
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	// R5-2：检测结果路由收口为发现项工单，统一落 paused 交回用户（不自动派发修复/重写）。
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
 
 	got, _ := svc.store.GetByRunID(ctx, run.RunID)
 	var finalCtxt GateContext
@@ -82,8 +70,19 @@ func TestP2Acceptance_DriftAutoRouteAndExempt(t *testing.T) {
 		backlogIDs = append(backlogIDs, it.ID)
 	}
 	require.ElementsMatch(t, []string{"V1", "I3"}, backlogIDs, "V 系应自动分流进 RewriteBacklog")
-	// 派发豁免：只重写 I 系指向的第 4 章，V 系第 3 章零自动改写（只报告不改写）。
-	require.Equal(t, []int64{readingToID[4]}, rewrittenIDs, "V 系章节不得被自动重写")
+	// R5-2 自动重写摘除：fix 路由收口零自动派发章节重写（重写由作者在工单面板显式触发）；
+	// V 系本就只报告不改写，I 系亦不再自动重写——故 rewrittenIDs 应为空。
+	require.Empty(t, rewrittenIDs, "R5-2 摘除自动重写：fix 路由收口零自动派发章节重写")
+
+	// 路由结果已沉淀为发现项工单（rewrite 态），供工单面板处理。
+	rows, rerr := svc.store.ListIssues(ctx, 471, run.RunID)
+	require.NoError(t, rerr)
+	byKey := map[string]string{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r.Status
+	}
+	require.Equal(t, IssueStatusRewrite, byKey["V1"], "V 系路由为重写工单（只报告不改写）")
+	require.Equal(t, IssueStatusRewrite, byKey["I3"], "I 系路由为重写工单（待作者显式重写）")
 }
 
 // TestP2Acceptance_DriftRetconFiling 是验收①的 frozen 侧端到端：

@@ -20,13 +20,11 @@ import type {
   FixActivityItem,
   FixIssuePayload,
   RewriteItem,
-  RewriteProgressState,
   AuditData,
 } from "@/types/pipeline";
 import PipelineGateCard from "./PipelineGateCard";
 import StageActivityPanel from "./StageActivityPanel";
 import { IssueScopeTags } from "./IssueTags";
-import VoiceExtractionHint from "@/components/chat/VoiceExtractionHint";
 
 // 体检结果类型（AuditIssue / AuditData）的契约单源在 @/types/pipeline（对齐后端
 // internal/pipeline/contract.go），此处不再手写副本。
@@ -40,8 +38,6 @@ interface Props {
   // S5 修复进度（可选）：修复清单 + 实时活动流，由 usePipeline 订阅事件维护。
   fixProgress?: FixProgressState;
   fixActivity?: FixActivityItem[];
-  // 自动章节重写回路进度（可选）：重写清单指向可定位章节时后端全自动重写，展示逐章进度。
-  rewriteProgress?: RewriteProgressState;
 }
 
 // S4 签约体检 / S5 修复闭环 / S6 完本终检视图：
@@ -58,7 +54,6 @@ export default function SignabilityAuditView({
   onResume,
   fixProgress,
   fixActivity = [],
-  rewriteProgress,
 }: Props) {
   const { t } = useTranslation();
 
@@ -85,7 +80,6 @@ export default function SignabilityAuditView({
         fixActivity={fixActivity}
         fixKind={auditKind}
         rewriteItems={ctx?.rewrite_backlog as RewriteItem[] | undefined}
-        rewriteProgress={rewriteProgress}
       />
     );
   }
@@ -433,13 +427,11 @@ function FixProgressView({
   fixActivity,
   fixKind = "signability",
   rewriteItems,
-  rewriteProgress,
 }: {
   fixProgress?: FixProgressState;
   fixActivity: FixActivityItem[];
   fixKind?: "signability" | "blueprint";
   rewriteItems?: RewriteItem[];
-  rewriteProgress?: RewriteProgressState;
 }) {
   const { t } = useTranslation();
   const fixingLabel = t(`pipeline.${fixKind}.fixing`);
@@ -461,8 +453,6 @@ function FixProgressView({
       <div className="flex items-center gap-2">
         {fixProgress?.stale ? (
           <AlertTriangle className="h-4 w-4 text-warning-foreground" />
-        ) : fixProgress?.rewriteHandoff ? (
-          <PenLine className="h-4 w-4 text-warning-foreground" />
         ) : fixProgress?.retconHandoff ? (
           <ShieldAlert className="h-4 w-4 text-warning-foreground" />
         ) : fixProgress?.ok === false ? (
@@ -477,28 +467,21 @@ function FixProgressView({
         <span className="text-sm font-medium">
           {fixProgress?.stale
             ? t("pipeline.fixProgress.stale")
-            : fixProgress?.rewriteHandoff
-              ? t("pipeline.fixProgress.rewriteHandoff", {
-                  count: fixProgress?.rewriteCount ?? 0,
+            : fixProgress?.retconHandoff
+              ? t("pipeline.fixProgress.retconHandoff", {
+                  count: fixProgress?.retconCount ?? 0,
                 })
-              : fixProgress?.retconHandoff
-                ? t("pipeline.fixProgress.retconHandoff", {
-                    count: fixProgress?.retconCount ?? 0,
-                  })
-                : fixProgress?.ok === false
-                  ? t("pipeline.fixProgress.failed")
-                  : running
-                    ? batchTotal > 1
-                      ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
-                      : fixingLabel
-                    : idle
-                      ? t("pipeline.fixProgress.idle")
-                      : t("pipeline.fixProgress.done")}
+              : fixProgress?.ok === false
+                ? t("pipeline.fixProgress.failed")
+                : running
+                  ? batchTotal > 1
+                    ? `${fixingLabel} ${t("pipeline.fixProgress.batch", { index: batchIndex, total: batchTotal })}`
+                    : fixingLabel
+                  : idle
+                    ? t("pipeline.fixProgress.idle")
+                    : t("pipeline.fixProgress.done")}
         </span>
       </div>
-
-      {/* T2.2 挂点②：rewrite_handoff 提示处——未提取心智的书在重写交接口提示提取（非阻断） */}
-      {fixProgress?.rewriteHandoff ? <VoiceExtractionHint /> : null}
 
       {fixProgress?.ok === false && fixProgress?.error ? (
         <p className="rounded border border-danger bg-danger/10 px-3 py-2 text-danger-foreground text-sm">
@@ -573,86 +556,11 @@ function FixProgressView({
         </div>
       ) : null}
 
-      {fixProgress?.rewriteHandoff &&
-      rewriteItems &&
-      rewriteItems.length > 0 ? (
+      {rewriteItems && rewriteItems.length > 0 ? (
         <RewriteBacklogPanel items={rewriteItems} />
       ) : null}
 
-      {rewriteProgress && rewriteProgress.items.length > 0 ? (
-        <RewriteProgressView rewriteProgress={rewriteProgress} />
-      ) : null}
-
       {!idle ? <StageActivityPanel activity={fixActivity} /> : null}
-    </div>
-  );
-}
-
-// RewriteProgressView 展示自动章节重写回路的逐章进度：重写清单指向可定位章节时，
-// 后端全自动派发章节重写 agent，本视图显示「正在自动重写第 X/Y 章」与每章结果（done/failed）。
-// 与 FixProgressView 共用同一「正在发生什么」的界面语言，避免用户误以为流水线卡死。
-function RewriteProgressView({
-  rewriteProgress,
-}: {
-  rewriteProgress: RewriteProgressState;
-}) {
-  const { t } = useTranslation();
-  const { running, index, total, items } = rewriteProgress;
-  const doneCount = items.filter((it) => it.phase === "done").length;
-  const failedCount = items.filter((it) => it.phase === "failed").length;
-  return (
-    <div className="flex flex-col gap-3 rounded border border-primary/40 bg-primary/5 p-4">
-      <div className="flex items-center gap-2">
-        {running ? (
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-        ) : failedCount > 0 ? (
-          <XCircle className="h-4 w-4 text-danger-foreground" />
-        ) : (
-          <CheckCircle2 className="h-4 w-4 text-primary" />
-        )}
-        <span className="text-sm font-medium">
-          {running
-            ? t("pipeline.rewriteProgress.rewriting", { index, total })
-            : t("pipeline.rewriteProgress.done", {
-                done: doneCount,
-                total: items.length,
-              })}
-        </span>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {t("pipeline.rewriteProgress.hint")}
-      </p>
-      <ul className="flex flex-col gap-2">
-        {items.map((it) => (
-          <li
-            key={it.chapterId}
-            className="flex items-center gap-2 rounded border bg-card px-3 py-1.5 text-sm"
-          >
-            {it.phase === "done" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-            ) : it.phase === "failed" ? (
-              <XCircle className="h-3.5 w-3.5 text-danger-foreground" />
-            ) : (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            )}
-            <span className="font-medium">
-              {t("pipeline.rewriteProgress.chapter", {
-                number: it.readingNumber,
-              })}
-            </span>
-            <span className="text-muted-foreground">
-              {it.phase === "done"
-                ? t("pipeline.rewriteProgress.chapterDone")
-                : it.phase === "failed"
-                  ? t("pipeline.rewriteProgress.chapterFailed")
-                  : t("pipeline.rewriteProgress.chapterStarting")}
-            </span>
-            {it.error ? (
-              <span className="text-danger-foreground text-xs">{it.error}</span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

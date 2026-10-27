@@ -171,21 +171,16 @@ func TestOrchestratorS4S5ReAuditEdge(t *testing.T) {
 		}
 	}
 
-	// 卷边界复评阶段 S4b 进入 G4，选 fix → S5 修复 → 自动复评 → 回到 S4b。
-	// audit_reason=volume：卷收口口径修复后走全量复评（R1c：非 volume/final/蓝图才走增量复验），
-	// 本用例顺带锁定「volume 仍全量复评」回归。
+	// 卷边界复评阶段 S4b 进入 G4，选 fix → S5 路由检测结果为发现项工单 → 落 S5 paused 交回用户。
+	// R5-2 摘除「修复→自动复评」：fix 决策只路由工单、不派发修复、不自动复评（复评由用户
+	// 显式点「继续」触发）。本用例改锁「volume 口径 fix 决策同样无自动复评」。
 	runID := startS3Run(t, svc, 640, `{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4b","audit_reason":"volume"}`)
 	setRunStage(t, svc, runID, StageS4b, StatusRunning, `{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4b","audit_reason":"volume"}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "fix", ""))
-	waitForStageStatus(t, svc, runID, StatusAwaitingGate)
+	waitForStageStatus(t, svc, runID, StatusPaused)
 	got, _ := svc.store.GetByRunID(ctx, runID)
-	require.Equal(t, StageS4b, got.CurrentStage, "复评后应在 S4b 闸门")
-	// 初始 needs_fix 结论由测试预置（未实际跑体检），故修复闭环触发的复评使计数=1。
-	require.Equal(t, 1, auditCalls, "修复后应触发一次复评体检")
-	var ctxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
-	require.Equal(t, StageS4b, ctxt.AuditStage, "audit_stage 应保持 S4b")
-	require.Contains(t, ctxt.Audit, "pass", "复评应反映修复后的 pass 结论")
+	require.Equal(t, StageS5, got.CurrentStage, "R5-2：fix 决策路由为工单后落 S5（非自动复评闸门）")
+	require.Equal(t, 0, auditCalls, "R5-2 摘除自动复评：fix 决策不得自动触发复评体检")
 }
 
 // TestOrchestratorS0ImportEntry 验证 DetermineEntryStage 依据小说状态自动选入口，

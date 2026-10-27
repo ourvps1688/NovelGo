@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -224,36 +223,29 @@ func TestServiceAuditContinueMarksAudited(t *testing.T) {
 	require.True(t, ctxt.S4Audited, "continue 后应置 S4Audited，避免 S3 重复触发体检")
 }
 
-// TestServiceAuditFixLoopReAudit 验证：G4 选 fix 后进入 S5 修复闭环，
-// 修复完成后自动回到 S4 复评，复评结果（pass）重写 ContextJSON.Audit。
 // TestServiceRecoverInterruptedAndResume 验证启动恢复闭环（R3c：无补丁布尔，
 // 存活判据=队列活跃任务）：
-// 1) status=running 的僵尸运行被 RecoverInterruptedRuns 置为 paused（幂等）；
-// 2) resume 后按阶段重新派发执行体（S5 → executeFix → emitFixStart），最终回到 S4 闸门。
+//  1. status=running 的僵尸运行被 RecoverInterruptedRuns 置为 paused（幂等）；
+//  2. resume 后按阶段重新派发执行体（S5 → executeFix 重新路由为发现项工单），
+//     executeFix 收口落 paused 交回用户（不再自动复评/自动修复）。
 func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 
-	var fixStarts int
-	t.Cleanup(swapEmitFixStart(func(_ context.Context, _ map[string]any) { fixStarts++ }))
-
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-fix":
-			return SkillOutput{Text: "已按 issue 修复：强化开篇钩子"}, nil
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"仍有问题\",\"issues\":[]}\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{Text: "ok"}, nil
 	}
 
 	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
 	require.NoError(t, err)
-	// 模拟僵尸运行：S5 running（执行体已随旧进程消亡），带 audit（含待修问题）与 audit_stage 供复评回家。
+	// 模拟僵尸运行前 S4 体检已落发现项工单（R5-2 路由对既有工单行做状态同步，不新建）：
+	// 否则 executeFix 的 syncIssueRow 因缺行而静默无操作，恢复重派发后 ListIssues 为零行。
+	recoverAudit := `{"verdict":"needs_fix","issues":[{"id":"I1","level":"P0","area":"总体","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume"}]}`
+	require.NoError(t, svc.store.ReplaceIssues(ctx, run.NovelID, run.RunID, 0, parseAudit(recoverAudit).Issues))
+	// 模拟僵尸运行：S5 running（执行体已随旧进程消亡），带 audit（含待修问题）。
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning,
-		`{"audit":"{\"verdict\":\"needs_fix\",\"issues\":[{\"id\":\"I1\",\"level\":\"P0\",\"area\":\"总体\",\"desc\":\"开场灌水\"}]}","audit_stage":"S4"}`))
+		fmt.Sprintf("{\"audit\":%q,\"audit_stage\":\"S4\"}", recoverAudit)))
 
 	// 启动恢复：running → paused。
 	svc.RecoverInterruptedRuns()
@@ -266,250 +258,17 @@ func TestServiceRecoverInterruptedAndResume(t *testing.T) {
 	got, _ = svc.store.GetByRunID(ctx, run.RunID)
 	require.Equal(t, StatusPaused, got.Status)
 
-	// 用户点恢复：回 running + 按阶段重新派发（S5 → executeFix）。
+	// 用户点恢复：回 running + 按阶段重新派发（S5 → executeFix 重新路由为工单）。
 	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "resume"))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-	got, _ = svc.store.GetByRunID(ctx, run.RunID)
-	require.Equal(t, StageS4, got.CurrentStage, "复评应回到 audit_stage=S4 闸门")
-	require.Equal(t, 1, fixStarts, "恢复应重新派发一次修复（emitFixStart）")
-}
-
-// TestServiceFixBatchingAndResume 验证 S5 分批修复 + 失败恢复：
-// 3 个问题（1 P0 + 2 P1）→ P0 独占一批、P1 两条一批；首批失败落地为 paused（断点保留），
-// 恢复后从剩余问题继续（跳过已修复项），最终复评通过落 G4 闸门。
-func TestServiceFixBatchingAndResume(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	// 分组（R1b）：I1/I2（dimension=none 无章节 → global 共享组）串行；I3（dimension=character
-	// → dim:character 组）与 global 组不相交 → 组间并行。
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"三处待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
-		`{"id":"I3","level":"P1","area":"人设爽点","desc":"情感钩子缺失","fix_type":"ledger","target_scope":"active_volume","dimension":"character","direction":"forward_fix"}]}`
-	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
-	var fixMu sync.Mutex
-	var fixPrompts []string
-	var fixSessions []string
-	failI1Once := true // 首次遇到 I1 批次模拟 MaxTurns 耗尽失败（按内容定序，避免并行竞态）
-	var auditCalls int
-	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-audit":
-			// 初检结果由测试直接注入 ctxt.Audit，桩里的 audit 调用均为修复后的复评。
-			fixMu.Lock()
-			auditCalls++
-			fixMu.Unlock()
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
-		case "signability-fix":
-			fixMu.Lock()
-			fixPrompts = append(fixPrompts, input.Prompt)
-			fixSessions = append(fixSessions, input.SessionID)
-			shouldFail := failI1Once && strings.Contains(input.Prompt, `"id":"I1"`)
-			if shouldFail {
-				failI1Once = false
-			}
-			fixMu.Unlock()
-			if shouldFail {
-				// I1 批次模拟 MaxTurns 耗尽失败（该组剩余批次不再派发）。
-				return SkillOutput{}, fmt.Errorf("skill \"signability-fix\" 执行失败: 已达最大轮数，对话结束")
-			}
-			return SkillOutput{Text: "已修复"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	// 捕获 fix_start 载荷，断言 FixIssuePayload 携带作用域三字段（供前端标签/写保护判路）。
-	// emitFixStart 由服务层持锁串行调用，此处无并发写。
-	var firstFixStart map[string]any
-	t.Cleanup(swapEmitFixStart(func(_ context.Context, p map[string]any) {
-		if firstFixStart == nil {
-			firstFixStart = p
-		}
-	}))
-
-	run, err := svc.StartPipeline(ctx, 403, "new", nil, false)
-	require.NoError(t, err)
-	// audit_reason=volume：卷收口口径修复后走全量复评（R1c 增量复验仅存 golden3/milestone），
-	// 保持本用例「修复后跑一次体检做复评」的断言口径。
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4, AuditReason: "volume"}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	// fix → S5：I1 批次失败应落地 paused（而非停在 running 无人执行）；
-	// 并行组（I3）已完成的修复断点保留。
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
+	// executeFix 路由收口：落 paused 交回用户（R5-2 不再自动复评）。
 	waitForStageStatus(t, svc, run.RunID, StatusPaused)
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	require.Equal(t, StageS5, got.CurrentStage, "失败后应停在 S5")
-	var pausedCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &pausedCtxt))
-	require.Equal(t, map[string]string{"I3": "fixed"}, pausedCtxt.FixStates,
-		"单组失败不拖死其它组：并行组的 I3 应已完成并保留断点，失败组的 I1/I2 不落断点")
-	require.Equal(t, 1, pausedCtxt.FixBatchFailures,
-		"run 级失败计数：sweep 有批次失败即计数（有成功批次=有进展，计数重置为 1）")
-
-	// 恢复：从剩余问题继续（I1 重试 + I2），最终复评通过
-	require.NoError(t, svc.ControlPipeline(ctx, run.RunID, "resume"))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
 	got, _ = svc.store.GetByRunID(ctx, run.RunID)
-	require.Equal(t, StageS4, got.CurrentStage, "复评后应在 S4 闸门")
-	fixMu.Lock()
-	auditCount := auditCalls
-	prompts := append([]string(nil), fixPrompts...)
-	sessions := append([]string(nil), fixSessions...)
-	fixMu.Unlock()
-	require.Equal(t, 1, auditCount, "修复后应跑一次体检做复评（初检由测试直接注入）")
-	require.Len(t, prompts, 4, "sweep1：I1 失败 + I3 成功；sweep2：I1 重试 + I2 = 4 次修复调用")
-	var i1Calls, i2Calls, i3Calls int
-	for _, p := range prompts {
-		hasI1, hasI2, hasI3 := strings.Contains(p, `"id":"I1"`), strings.Contains(p, `"id":"I2"`), strings.Contains(p, `"id":"I3"`)
-		switch {
-		case hasI1:
-			i1Calls++
-			require.False(t, hasI2 || hasI3, "P0 应独占一批（global 组内 planFixBatches 小批）")
-		case hasI2:
-			i2Calls++
-			require.False(t, hasI3, "I2（global 组）与 I3（dim:character 组）不同批")
-		case hasI3:
-			i3Calls++
-		}
-	}
-	require.Equal(t, 2, i1Calls, "I1 失败重试 = 2 次派发")
-	require.Equal(t, 1, i2Calls, "I2 成功后不应重复修复")
-	require.Equal(t, 1, i3Calls, "I3 成功后不应重复修复")
-	for i, sid := range sessions {
-		for j := i + 1; j < len(sessions); j++ {
-			require.NotEqual(t, sid, sessions[j], "每批应使用独立会话，避免历史挤占轮数")
-		}
-	}
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-	// 复评落地时 executeAudit 会重置 FixStates（新一轮体检 = 全新问题清单，旧断点作废）。
-	// 批次断点正确性已由上方调用序列验证：恢复后重试 I1、已修项不重复修复。
-	require.Empty(t, finalCtxt.FixStates, "复评落地后旧修复断点应被重置")
-	require.Empty(t, finalCtxt.FixLog, "复评落地后修复日志应随断点一并重置")
-	require.Equal(t, 1, finalCtxt.FixRounds, "一次完整 sweep 递增一轮")
-
-	// fix_start 载荷应携带作用域三字段（batchIssues/allIssues 两处构造点均拷贝）。
-	require.NotNil(t, firstFixStart, "应广播 fix_start")
-	all0, ok := firstFixStart["all_issues"].([]FixIssuePayload)
-	require.True(t, ok, "all_issues 应为 []FixIssuePayload")
-	require.NotEmpty(t, all0)
-	require.Equal(t, TargetScopeActiveVolume, all0[0].TargetScope, "FixIssuePayload 应携带 target_scope")
-	require.Equal(t, "none", all0[0].Dimension, "FixIssuePayload 应携带 dimension")
-	require.Equal(t, DirectionForwardFix, all0[0].Direction, "FixIssuePayload 应携带 direction")
-	batch0, ok := firstFixStart["issues"].([]FixIssuePayload)
-	require.True(t, ok, "issues 应为 []FixIssuePayload")
-	require.NotEmpty(t, batch0)
-	require.Equal(t, TargetScopeActiveVolume, batch0[0].TargetScope, "批次清单也应携带 target_scope")
-	require.Equal(t, 3, firstFixStart["batch_total"], "batch_total 应为全部组的批次总数（global 组 2 + dim 组 1）")
-}
-
-// TestServiceBodyIssuesRoutedToRewriteBacklog 验证正文级（fix_type=body）问题被显式路由到
-// S3 重写回路：不进修复批次（修复 agent 看不到）、标记 FixStates=rewrite、沉淀进 RewriteBacklog，
-// 从而消除 S5 对修不动问题的空转，闭合修复链。
-func TestServiceBodyIssuesRoutedToRewriteBacklog(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	// 初检：I1 正文级（需章节重写），I2 台账级（S5 可修）。
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"五章程序文","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
-	// 复评：I2 已修（不在清单），I1 正文问题仍在（仍未重写）。
-	secondAudit := `{"verdict":"needs_fix","score":20,"summary":"修复后仍有正文问题","issues":[` +
-		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body"}]}`
-
-	var fixPrompts []string
-	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
-		case "signability-fix":
-			fixPrompts = append(fixPrompts, input.Prompt)
-			return SkillOutput{Text: "已修复"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	run, err := svc.StartPipeline(ctx, 406, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-
-	// 正文级 I1 必须沉淀进重写清单（复评后仍在该清单，因复评仍报出它）。
-	require.Len(t, finalCtxt.RewriteBacklog, 1, "正文级问题应流入 RewriteBacklog")
-	require.Equal(t, "I1", finalCtxt.RewriteBacklog[0].ID)
-	// 复评阶段 FixStates 被重置——此处只断言重写清单出口正确；修复 agent 是否触及 I1 由下方断言。
-	require.Len(t, fixPrompts, 1, "仅台账级 I2 应进入一次修复批次，正文级 I1 不应进批次")
-	require.Contains(t, fixPrompts[0], "I2", "修复批次应包含台账级 I2")
-	require.NotContains(t, fixPrompts[0], "I1", "修复批次不应包含正文级 I1（已路由到 S3 重写）")
-}
-
-// TestServiceFixHandoffRewriteWhenOnlyBodyIssues 验证：当体检问题全部为正文级（fix_type=body）、
-// 无可修台账项时，executeFix 必须「交回重写」而非谎报「修复完成」后立刻复评
-// （否则复评必复报同一批问题，形成「完成但零修复」死循环）。
-func TestServiceFixHandoffRewriteWhenOnlyBodyIssues(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	// 全部为正文级问题：S5 改不动，必须回流 S3 重写。
-	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"正文问题","issues":[` +
-		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
-		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"中段节奏拖沓","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
-
-	var fixCalled, auditCalled bool
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		if name == "signability-fix" {
-			fixCalled = true
-		}
-		if name == "signability-audit" {
-			auditCalled = true
-		}
-		return SkillOutput{Text: "ok"}, nil
-	}
-
-	var fixDonePayload map[string]any
-	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
-
-	run, err := svc.StartPipeline(ctx, 407, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	// 交回重写后阶段应暂停（而非进入复评闸门）。
-	waitForStageStatus(t, svc, run.RunID, StatusPaused)
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-
-	require.False(t, fixCalled, "无台账级问题，修复 agent 不应被调用")
-	require.False(t, auditCalled, "交回重写不应触发复评（避免复报同一批问题）")
-	require.Len(t, finalCtxt.RewriteBacklog, 2, "两个正文级问题都应流入 RewriteBacklog")
-	require.NotNil(t, fixDonePayload, "应广播 fix_done")
-	require.Equal(t, true, fixDonePayload["rewrite_handoff"], "fix_done 应带 rewrite_handoff 标记")
-	require.Equal(t, int(2), fixDonePayload["rewrite_count"], "rewrite_count 应为 2")
+	require.Equal(t, StageS5, got.CurrentStage, "恢复重派发后仍在 S5（路由收口，非复评闸门）")
+	// 恢复后重新路由：I1 沉淀为待修工单（S5 已非自动修复闭环）。
+	rows, lerr := svc.store.ListIssues(ctx, run.NovelID, run.RunID)
+	require.NoError(t, lerr)
+	require.Len(t, rows, 1)
+	require.Equal(t, IssueStatusPending, rows[0].Status, "恢复重派发应重新路由 I1 为待修工单")
 }
 
 // TestServiceFixRejectsStaleAuditWithoutFixType 验证陈旧 run 守卫：fix_type 特性落地前创建的
@@ -609,70 +368,6 @@ func TestServiceFixRejectsStaleAuditWithoutScopeFields(t *testing.T) {
 	require.Equal(t, false, fixDonePayload["ok"], "陈旧体检应 ok=false")
 	require.Equal(t, true, fixDonePayload["stale_audit"], "fix_done 应带 stale_audit 标记")
 	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "target_scope", "错误提示应说明缺作用域字段")
-}
-
-// TestServiceFixWriteProtectsFrozenIssues 验证 1.3/1.4 写保护与前向默认路由：
-// target_scope=frozen_volume / direction=retcon_candidate 的问题绝不进修复批次（不派发、
-// 不出现在修复提示词里），标记 FixStates=retcon 并展示为「转人工裁决」；其余项正常修复。
-func TestServiceFixWriteProtectsFrozenIssues(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	// I1 正常前向修复；I2 落点在冻结卷（写保护）；I3 硬矛盾 retcon 候选。
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"混合清单","issues":[` +
-		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
-		`{"id":"I2","level":"P1","area":"设定自洽","desc":"与前卷第3章冲突","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"forward_fix"},` +
-		`{"id":"I3","level":"P1","area":"设定自洽","desc":"硬矛盾需回改前卷","fix_type":"ledger","target_scope":"frozen_volume","dimension":"character","direction":"retcon_candidate"}]}`
-	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
-
-	var fixPrompts []string
-	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-fix":
-			fixPrompts = append(fixPrompts, input.Prompt)
-			return SkillOutput{Text: "已修复"}, nil
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	var firstFixStart map[string]any
-	t.Cleanup(swapEmitFixStart(func(_ context.Context, p map[string]any) {
-		if firstFixStart == nil {
-			firstFixStart = p
-		}
-	}))
-
-	run, err := svc.StartPipeline(ctx, 410, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
-	// 只有 I1 进修复批次；I2/I3 绝不出现在修复提示词里（冻结卷不得被自动回改）。
-	require.Len(t, fixPrompts, 1, "应只派发一个修复批次")
-	require.Contains(t, fixPrompts[0], "I1")
-	require.NotContains(t, fixPrompts[0], "I2", "冻结卷问题不得进修复批次")
-	require.NotContains(t, fixPrompts[0], "I3", "retcon 候选不得进修复批次")
-
-	// fix_start 全量清单里写保护问题应标为 retcon 状态。
-	require.NotNil(t, firstFixStart)
-	all0, ok := firstFixStart["all_issues"].([]FixIssuePayload)
-	require.True(t, ok)
-	byID := map[string]FixIssuePayload{}
-	for _, p := range all0 {
-		byID[p.ID] = p
-	}
-	require.Equal(t, "retcon", byID["I2"].Status, "冻结卷问题应标 retcon")
-	require.Equal(t, "retcon", byID["I3"].Status, "retcon 候选应标 retcon")
-	require.Equal(t, "fixing", byID["I1"].Status, "正常问题应进批次修复")
 }
 
 // TestServiceFixRetconHandoffWhenAllProtected 验证：全部问题命中写保护时，executeFix
@@ -776,222 +471,6 @@ func TestServiceAutoRewriteSkipsProtectedBodyItems(t *testing.T) {
 	require.Equal(t, true, fixDonePayload["retcon_handoff"], "fix_done 应带 retcon_handoff 标记")
 }
 
-// TestServiceAutoRewriteDispatch 验证：当重写清单指向可定位章节时，finishFixHandoffRewrite
-// 全自动派发 chapter-rewrite agent 重写对应章节（而非仅仅暂停交回），重写后自动回到复评，
-// 且 RewriteRounds 递增；复评若仍报出正文问题则停在闸门等人工（不无限循环）。
-func TestServiceAutoRewriteDispatch(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	// 测试库默认只迁移 pipeline_runs，自动重写回路需要 chapters 表（查询会 JOIN volumes），单独迁移。
-	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
-
-	// 种入 5 章（无卷，sort_order 即阅读序号 1..5），供重写回路定位 chapter_id。
-	for i := 1; i <= 5; i++ {
-		require.NoError(t, db.Create(&chapter.Chapter{
-			NovelID: 421, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
-		}).Error)
-	}
-	// 读取阅读序号→章节，确认第 3 章的 chapter_id。
-	seeded, err := svc.chapterStore.ListAllByNovel(ctx, nil, 421)
-	require.NoError(t, err)
-	readingToID := map[int]int64{}
-	for _, ch := range seeded {
-		readingToID[ch.ReadingNumber] = ch.ID
-	}
-	require.Contains(t, readingToID, 3, "应能通过阅读序号定位第 3 章")
-
-	// 正文级问题指向第 3 章：S5 改不动，必须自动整章重写。
-	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"正文问题","issues":[` +
-		`{"id":"I1","level":"P0","area":"开篇过签力","desc":"第3章未立人设，代入感弱","fix_type":"body"}]}`
-
-	var rewriteCalled bool
-	var rewriteChapterID int64
-	var auditCalled bool
-	var progress []string
-	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
-		switch name {
-		case "chapter-rewrite":
-			rewriteCalled = true
-			// 从提示词里抽取被重写的 chapter_id 校验。
-			rewriteChapterID = extractChapterIDFromPrompt(t, input.Prompt)
-			return SkillOutput{Text: "已整章重写"}, nil
-		case "signability-audit":
-			auditCalled = true
-			// 复评仍报出同一正文问题（模拟未一次解决），停在闸门等人工。
-			return SkillOutput{Text: "复评：\n```json\n" +
-				`{"verdict":"needs_fix","score":16,"summary":"重写后仍偏弱","issues":[` +
-				`{"id":"I1","level":"P0","area":"开篇过签力","desc":"第3章未立人设，代入感弱","fix_type":"body"}]}` +
-				"\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	defer swapEmitRewriteProgress(func(_ context.Context, p map[string]any) {
-		progress = append(progress, fmt.Sprint(p["phase"]))
-	})()
-
-	run, err := svc.StartPipeline(ctx, 421, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-
-	require.True(t, rewriteCalled, "重写清单指向可定位章节，应自动派发 chapter-rewrite")
-	require.Equal(t, readingToID[3], rewriteChapterID, "应重写第 3 章（即 chapter_id 对应阅读序号 3）")
-	require.True(t, auditCalled, "重写后应自动回到复评")
-	require.Equal(t, 1, finalCtxt.RewriteRounds, "重写轮数应 +1")
-	require.Contains(t, progress, "starting", "应广播重写开始进度")
-	require.Contains(t, progress, "done", "应广播重写完成进度")
-	require.Len(t, finalCtxt.RewriteBacklog, 1, "复评仍报正文问题，重写清单应保留 1 项")
-}
-
-// TestServiceStyleExemptSkipsAutoRewrite 验证 P2 T2.2 派发豁免（验收②）：
-// 混合清单里 V 系文风漂移项进 RewriteBacklog 供作者查看，但自动章节重写只派发
-// 非豁免项——I 系正文问题照常整章重写，V 系涉及章节零自动改写（只报告不改写）。
-func TestServiceStyleExemptSkipsAutoRewrite(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
-	for i := 1; i <= 5; i++ {
-		require.NoError(t, db.Create(&chapter.Chapter{
-			NovelID: 431, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
-		}).Error)
-	}
-	seeded, err := svc.chapterStore.ListAllByNovel(ctx, nil, 431)
-	require.NoError(t, err)
-	readingToID := map[int]int64{}
-	for _, ch := range seeded {
-		readingToID[ch.ReadingNumber] = ch.ID
-	}
-
-	// V1 指向第 3 章（文风漂移，豁免派发），I2 指向第 4 章（常规正文问题，照常派发）。
-	issueV := `{"id":"V1","level":"P1","area":"文风漂移·章节#3","desc":"第3章文风指标 avg_sent_len 偏离基线",` +
-		`"fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}`
-	issueI := `{"id":"I2","level":"P0","area":"开篇过签力","desc":"第4章未立人设，代入感弱","fix_type":"body"}`
-	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"混合清单","issues":[` + issueV + `,` + issueI + `]}`
-
-	var rewrittenIDs []int64
-	var auditCalled bool
-	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
-		switch name {
-		case "chapter-rewrite":
-			rewrittenIDs = append(rewrittenIDs, extractChapterIDFromPrompt(t, input.Prompt))
-			return SkillOutput{Text: "已整章重写"}, nil
-		case "signability-audit":
-			auditCalled = true
-			// 复评仍报出同一批问题（未一次解决），停在闸门等人工。
-			return SkillOutput{Text: "复评：\n```json\n" +
-				`{"verdict":"needs_fix","score":16,"summary":"复评仍报","issues":[` + issueV + `,` + issueI + `]}` +
-				"\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	defer swapEmitRewriteProgress(func(_ context.Context, _ map[string]any) {})()
-
-	run, err := svc.StartPipeline(ctx, 431, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-
-	require.Equal(t, []int64{readingToID[4]}, rewrittenIDs,
-		"只应重写 I 系指向的第 4 章；V 系第 3 章零自动改写（豁免派发）")
-	require.True(t, auditCalled, "I 系重写后应自动回到复评")
-	require.Equal(t, 1, finalCtxt.RewriteRounds, "重写轮数应 +1（只计可派发项）")
-	require.Len(t, finalCtxt.RewriteBacklog, 2, "复评仍报同批问题，V 系与 I 系都应留在重写清单")
-}
-
-// TestServiceStyleExemptHandoffNoLoop 验证 P2 T2.2 派发豁免（验收③）：全 V 系
-// RewriteBacklog 不触发自动重写循环——零 chapter-rewrite 派发、零复评，
-// 手动交接收口（note「文风漂移项待作者裁决」）且 RewriteRounds 不递增。
-func TestServiceStyleExemptHandoffNoLoop(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
-	for i := 1; i <= 3; i++ {
-		require.NoError(t, db.Create(&chapter.Chapter{
-			NovelID: 432, Title: fmt.Sprintf("第%d章", i), SortOrder: i,
-		}).Error)
-	}
-
-	auditJSON := `{"verdict":"needs_fix","score":15,"summary":"仅文风漂移","issues":[` +
-		`{"id":"V1","level":"P1","area":"文风漂移·章节#2","desc":"第2章文风指标 quote_density 偏离基线",` +
-		`"fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
-
-	var rewriteCalled, auditCalled bool
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "chapter-rewrite":
-			rewriteCalled = true
-		case "signability-audit":
-			auditCalled = true
-		}
-		return SkillOutput{Text: "ok"}, nil
-	}
-
-	var fixDonePayload map[string]any
-	defer swapEmitFixDone(func(_ context.Context, p map[string]any) { fixDonePayload = p })()
-
-	run, err := svc.StartPipeline(ctx, 432, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusPaused)
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-
-	require.False(t, rewriteCalled, "全豁免清单不得派发自动章节重写")
-	require.False(t, auditCalled, "全豁免不得进复评（防「重写→复评」死循环）")
-	require.Equal(t, 0, finalCtxt.RewriteRounds, "重写轮数不得递增")
-	require.Len(t, finalCtxt.RewriteBacklog, 1, "V 系应沉淀进重写清单供作者查看")
-	require.Equal(t, "V1", finalCtxt.RewriteBacklog[0].ID)
-	require.NotNil(t, fixDonePayload)
-	require.Equal(t, true, fixDonePayload["rewrite_handoff"], "fix_done 应带 rewrite_handoff 标记（前端零改动）")
-	require.Contains(t, fmt.Sprint(fixDonePayload["error"]), "文风漂移项待作者裁决")
-}
-
-// extractChapterIDFromPrompt 从 chapterRewritePrompt 生成的内容中解析 chapter_id=NNN。
-func extractChapterIDFromPrompt(t *testing.T, prompt string) int64 {
-	t.Helper()
-	re := regexp.MustCompile(`chapter_id=(\d+)`)
-	m := re.FindStringSubmatch(prompt)
-	if len(m) < 2 {
-		return 0
-	}
-	n, err := strconv.ParseInt(m[1], 10, 64)
-	require.NoError(t, err)
-	return n
-}
-
 // TestParseAuditFixType 验证 parseAudit 正确解析 fix_type 字段。
 func TestParseAuditFixType(t *testing.T) {
 	text := "结论\n```json\n{\"verdict\":\"needs_fix\",\"score\":10,\"summary\":\"x\",\"issues\":[" +
@@ -1057,41 +536,6 @@ func TestRetconItemsOf(t *testing.T) {
 
 	body := bodyIssuesOf(audit)
 	require.Empty(t, body, "写保护 body 项不进 bodyIssuesOf（互不相交）")
-}
-
-// TestServiceFixAllFixedSkipsToReaudit 验证断点续修边界：全部问题已修复但复评未跑
-// （如复评前中断后恢复）时，executeFix 应直接进入复评，不再调用修复 skill。
-func TestServiceFixAllFixedSkipsToReaudit(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	var fixCalls int
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[{"id":"I1","level":"P0","area":"成稿质量","desc":"x"}]}`
-	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
-		case "signability-fix":
-			fixCalls++
-			return SkillOutput{Text: "已修复"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	run, err := svc.StartPipeline(ctx, 404, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4,
-		FixStates: map[string]string{"I1": "fixed"}}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-	require.Equal(t, 0, fixCalls, "全部已修复时应跳过修复直接复评")
 }
 
 // TestParseFixReceipt 验证修复回执解析：围栏 JSON（含嵌套 skipped/log）、纯文本包围、
@@ -1192,94 +636,6 @@ func TestServiceAuditResetsFixStatesOnNewAudit(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
 	require.Empty(t, finalCtxt.FixStates, "新体检落地后旧修复断点必须重置，否则修复闭环空转")
 	require.Contains(t, finalCtxt.Audit, "复评仍有问题", "新体检结果应已落库")
-}
-
-// TestServiceAuditFixLoopReAudit 验证修复闭环收口后的 R1c 增量复验：非卷收口/完本口径
-// 修复后只对已修复项做 L1 定点复验（不再全量重审）——复验确认的销项（FixStates→verified、
-// 从体检清单摘除），闭环停在 S4 闸门。
-func TestServiceAuditFixLoopReAudit(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-
-	var auditCalls, verifyCalls int
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
-		`{"id":"I1","level":"P1","area":"节奏爽点","desc":"第3章拖沓","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[3]}]}`
-	verifyOut := `{"verified":[{"id":"I1","ok":true,"note":"第3章节奏已收紧"}],"summary":"1 项修复已确认"}`
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-audit":
-			auditCalls++
-			return SkillOutput{Text: "复评：\n```json\n{\"verdict\":\"pass\",\"score\":30,\"summary\":\"修复后通过\",\"issues\":[]}\n```"}, nil
-		case "signability-verify":
-			verifyCalls++
-			return SkillOutput{Text: "复验：\n```json\n" + verifyOut + "\n```"}, nil
-		case "signability-fix":
-			return SkillOutput{Text: "已修复。\n```json\n{\"fixed\":[\"I1\"],\"skipped\":[]}\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	run, err := svc.StartPipeline(ctx, 402, "new", nil, false)
-	require.NoError(t, err)
-	// 直接进入 S4（首轮体检已落库，G4 闸门待决策），准备选 fix → S5
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	// S4 选择 fix → 进入 S5 修复闭环，修复完成后自动增量复验
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	// 异步链 executeFix → executeVerify 最终应停在 S4 awaiting_gate（复验结论）
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	require.Equal(t, StageS4, got.CurrentStage, "复验后应在 S4 闸门")
-	var ctxtFinal GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxtFinal))
-	require.Equal(t, "verified", ctxtFinal.FixStates["I1"], "复验确认的项应销项为 verified")
-	require.NotContains(t, ctxtFinal.Audit, `"id":"I1"`, "已复验确认的问题应从体检清单摘除（增量销项）")
-	require.Contains(t, ctxtFinal.Audit, "增量复验", "复验结论应落进体检摘要")
-	require.Equal(t, 1, verifyCalls, "修复后应跑一次增量复验")
-	require.Equal(t, 0, auditCalls, "非卷收口/完本/蓝图口径不再全量重审（R1c）")
-}
-
-// gateRecorder 线程安全地收集闸门事件：emitGate 由执行体 goroutine 并发调用，
-// 测试侧无同步地读原切片在 -race 下是数据竞争（既往 -race 噪声源），统一加锁收口。
-type gateRecorder struct {
-	mu      sync.Mutex
-	entries []GatePayload
-}
-
-func (r *gateRecorder) record(p GatePayload) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.entries = append(r.entries, p)
-}
-
-// all 返回闸门事件快照（拷贝），供测试断言。
-func (r *gateRecorder) all() []GatePayload {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]GatePayload(nil), r.entries...)
-}
-
-// withCapturedGates 临时接管 emitGate，收集所有发出的闸门事件，测试结束后还原。
-func withCapturedGates(t *testing.T) *gateRecorder {
-	t.Helper()
-	rec := &gateRecorder{}
-	t.Cleanup(swapEmitGate(func(_ context.Context, p GatePayload) { rec.record(p) }))
-	return rec
-}
-
-// startS3Run 直接把流水线置为 S3 写作态（带给定 ContextJSON），跳过 S1/S2 异步路径以便精确控制。
-func startS3Run(t *testing.T, svc *Service, novelID int64, contextJSON string) string {
-	t.Helper()
-	run, err := svc.StartPipeline(context.Background(), novelID, "new", nil, false)
-	require.NoError(t, err)
-	require.NoError(t, svc.store.SetStageStatus(context.Background(), run.RunID, StageS3, StatusRunning, contextJSON))
-	return run.RunID
 }
 
 // TestServiceMilestoneGateOffersAudit 验证：已体检过（last_audit_chapter=3）且当前章数=8
@@ -1431,9 +787,10 @@ func TestServiceBlueprintAuditPass(t *testing.T) {
 	require.Equal(t, StageS3, got.CurrentStage, "G1 确认后应进入 S3 写作")
 }
 
-// TestServiceBlueprintAuditFixLoop 验证 A 方案蓝图体检闭环（修复支）：
-// 蓝图体检不通过（needs_fix）落 G1b 修复闸；G1b 选 fix 进入 S5 蓝图修复（blueprint-fix），
-// 修复完成后自动回到蓝图复评（blueprint-audit，pass），复评结果重写 BlueprintAudit 并落 G1。
+// TestServiceBlueprintAuditFixLoop 验证 A 方案蓝图体检闭环（修复支，R5-2 语义）：
+// 蓝图体检不通过（needs_fix）落 G1b 修复闸；G1b 选 fix 进入 S5——executeFix 仅把蓝图问题
+// 路由为发现项工单（R5-2 自动修复摘除），落 paused 交回用户，**不自动派发 blueprint-fix、
+// 不自动复评**；修复动作由用户显式「去修复」触发，工单执行体派发 blueprint-fix 修复后落 fixed。
 func TestServiceBlueprintAuditFixLoop(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
@@ -1470,17 +827,23 @@ func TestServiceBlueprintAuditFixLoop(t *testing.T) {
 	require.Equal(t, "blueprint", ctxt.AuditKind)
 	require.Contains(t, ctxt.BlueprintAudit, "needs_fix", "首检不通过应写入 BlueprintAudit")
 
-	// G1b 选 fix → 进入 S5 蓝图修复闭环，修复完成自动复评（pass）→ 落 G1。
+	// G1b 选 fix → 进入 S5：executeFix 仅把蓝图问题路由为发现项工单（R5-2 自动修复摘除），
+	// 落 paused 交回用户，不自动派发 blueprint-fix / 不自动复评。
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate) // 复评后再次落闸（G1）
-
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
+	require.Equal(t, 0, fixCalls, "R5-2：G1b fix 不得自动派发蓝图修复（改工单显式触发）")
 	got, _ = svc.store.GetByRunID(ctx, run.RunID)
-	require.Equal(t, StageS2, got.CurrentStage, "复评仍在 S2 宿主阶段内")
-	var ctxt2 GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt2))
-	require.Contains(t, ctxt2.BlueprintAudit, "pass", "复评应反映修复后的 pass 结论")
-	require.Equal(t, 1, fixCalls, "蓝图修复应调用一次 blueprint-fix")
-	require.Equal(t, 2, auditCount, "首检 + 复评共两次 blueprint-audit")
+	require.Equal(t, StageS5, got.CurrentStage, "蓝图修复路由收口仍留在 S5（交回用户）")
+	rows, lerr := svc.store.ListIssues(ctx, run.NovelID, run.RunID)
+	require.NoError(t, lerr)
+	require.Len(t, rows, 1)
+	require.Equal(t, IssueStatusPending, rows[0].Status, "蓝图问题应路由为待修工单")
+
+	// 用户显式「去修复」：工单修复执行体派发 blueprint-fix，修复完成后落 fixed。
+	require.NoError(t, svc.StartIssueFixTickets(ctx, run.NovelID, []IssueTicketRef{{RunID: run.RunID, IssueKey: "B1"}}))
+	require.Equal(t, 1, fixCalls, "工单修复应调用一次 blueprint-fix")
+	rows, _ = svc.store.ListIssues(ctx, run.NovelID, run.RunID)
+	require.Equal(t, IssueStatusFixed, rows[0].Status, "工单修复执行后应落 fixed")
 }
 
 // TestServiceBlueprintAuditAutoRunSkipped 验证：即便开启 auto_run，蓝图体检也绝不被自动裁决，
@@ -1540,63 +903,14 @@ func TestParseAuditEightDimensions(t *testing.T) {
 	require.Equal(t, "timeline#42 未回收", data.Issues[2].Desc)
 }
 
-// TestServiceDriftPatrolAfterFix 验证 G3：S5 修复完成后自动触发一次蓝图一致性巡检
-// （blueprint-drift-check，只读非阻断），结论写入 ctxt.DriftReport，并随复评闸门
-// summary 带给用户（标出与当前卷纲冲突的章节）。
-func TestServiceDriftPatrolAfterFix(t *testing.T) {
+// TestServiceBlueprintTicketFixDriftPatrolAfterFix 验证 G3：工单修复执行体收口后触发一次
+// 蓝图一致性巡检（只读非阻断），结论写入 DriftReport。R5-2 后巡检挂在工单修复收口上
+// （不再挂在自动修复回路），无论有无已写章节都触发一次（巡检自身按章节存在性降级）。
+func TestServiceBlueprintTicketFixDriftPatrolAfterFix(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
-	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 8, nil } // 有已写章节才巡检
-	captured := withCapturedGates(t)
-
-	var driftCalls int
-	secondAudit := `{"verdict":"pass","score":33,"summary":"修复后通过","issues":[]}`
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
-		case "signability-fix":
-			return SkillOutput{Text: "已按 issue 修复台账"}, nil
-		case "blueprint-drift-check":
-			driftCalls++
-			return SkillOutput{Text: "巡检：\n```json\n{\"verdict\":\"needs_fix\",\"score\":0," +
-				"\"summary\":\"发现 2 章与卷纲冲突\",\"issues\":[" +
-				"{\"id\":\"D1\",\"level\":\"P1\",\"area\":\"章节#12\",\"desc\":\"卷纲承诺的反转未出现\"}," +
-				"{\"id\":\"D2\",\"level\":\"P1\",\"area\":\"章节#15\",\"desc\":\"时间顺序与卷纲错位\"}]}\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	run, err := svc.StartPipeline(ctx, 603, "new", nil, false)
-	require.NoError(t, err)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning,
-		`{"audit":"{\"verdict\":\"needs_fix\"}","audit_stage":"S4"}`))
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-
-	require.Equal(t, 1, driftCalls, "修复完成后应恰好触发一次蓝图巡检")
-
-	got, _ := svc.store.GetByRunID(ctx, run.RunID)
-	var ctxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
-	require.Contains(t, ctxt.DriftReport, "蓝图巡检", "巡检结论应落库 DriftReport")
-	require.Contains(t, ctxt.DriftReport, "章节#12", "巡检结论应包含冲突章节")
-
-	gates := captured.all()
-	last := gates[len(gates)-1]
-	require.Equal(t, GateG4, last.GateID, "复评仍落 G4 闸")
-	require.Contains(t, last.Summary, "蓝图巡检", "巡检结论应随复评闸门 summary 带给用户")
-}
-
-// TestServiceDriftPatrolSkippedWhenNoChapters 验证 G3：无已写章节（纯蓝图阶段的蓝图修复）
-// 时跳过巡检，不浪费一次 LLM 调用，DriftReport 保持为空。
-func TestServiceDriftPatrolSkippedWhenNoChapters(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 0, nil }
+	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 0, nil } // 无已写章节
 
 	var driftCalls, auditCount int
 	firstAudit := `{"verdict":"needs_fix","score":15,"summary":"卷纲待修","issues":[{"id":"B1","level":"P0","area":"卷纲","desc":"第一卷与第三卷冲突"}]}`
@@ -1623,12 +937,64 @@ func TestServiceDriftPatrolSkippedWhenNoChapters(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "continue", "")) // S1->S2 生成+首检（不通过）
 	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", "")) // G1b→S5 蓝图修复→复评
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", "")) // G1b→S5 路由为工单（落 paused）
+	waitForStageStatus(t, svc, run.RunID, StatusPaused)
 
-	require.Equal(t, 0, driftCalls, "无章节时不应触发蓝图巡检")
+	// 工单去修复 → 蓝图修复执行体派发 blueprint-fix，收口后触发一次蓝图巡检。
+	require.NoError(t, svc.StartIssueFixTickets(ctx, run.NovelID, []IssueTicketRef{{RunID: run.RunID, IssueKey: "B1"}}))
+	require.Equal(t, 1, driftCalls, "工单修复收口后无论有无已写章节都应触发一次蓝图巡检")
 	got, _ := svc.store.GetByRunID(ctx, run.RunID)
 	var ctxt GateContext
 	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
-	require.Empty(t, ctxt.DriftReport, "无章节时 DriftReport 应为空")
+	require.Contains(t, ctxt.DriftReport, "蓝图巡检", "巡检结论应落库 DriftReport")
+}
+
+// extractChapterIDFromPrompt 从 chapterRewritePrompt 生成的内容中解析 chapter_id=NNN。
+func extractChapterIDFromPrompt(t *testing.T, prompt string) int64 {
+	t.Helper()
+	re := regexp.MustCompile(`chapter_id=(\d+)`)
+	m := re.FindStringSubmatch(prompt)
+	if len(m) < 2 {
+		return 0
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	require.NoError(t, err)
+	return n
+}
+
+// gateRecorder 线程安全地收集闸门事件：emitGate 由执行体 goroutine 并发调用，
+// 测试侧无同步地读原切片在 -race 下是数据竞争（既往 -race 噪声源），统一加锁收口。
+type gateRecorder struct {
+	mu      sync.Mutex
+	entries []GatePayload
+}
+
+func (r *gateRecorder) record(p GatePayload) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, p)
+}
+
+// all 返回闸门事件快照（拷贝），供测试断言。
+func (r *gateRecorder) all() []GatePayload {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]GatePayload(nil), r.entries...)
+}
+
+// withCapturedGates 临时接管 emitGate，收集所有发出的闸门事件，测试结束后还原。
+func withCapturedGates(t *testing.T) *gateRecorder {
+	t.Helper()
+	rec := &gateRecorder{}
+	t.Cleanup(swapEmitGate(func(_ context.Context, p GatePayload) { rec.record(p) }))
+	return rec
+}
+
+// startS3Run 直接把流水线置为 S3 写作态（带给定 ContextJSON），跳过 S1/S2 异步路径以便精确控制。
+func startS3Run(t *testing.T, svc *Service, novelID int64, contextJSON string) string {
+	t.Helper()
+	run, err := svc.StartPipeline(context.Background(), novelID, "new", nil, false)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.SetStageStatus(context.Background(), run.RunID, StageS3, StatusRunning, contextJSON))
+	return run.RunID
 }

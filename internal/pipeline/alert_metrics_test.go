@@ -5,7 +5,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
@@ -77,9 +76,6 @@ func TestAlertMetricsFixReceiptFlow(t *testing.T) {
 		`{"id":"I2","level":"P1","area":"b","desc":"d2","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[5]}]}`
 	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
 		switch name {
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" +
-				`{"verdict":"pass","score":30,"summary":"修复后通过","schema_version":3,"issues":[]}` + "\n```"}, nil
 		case "signability-fix":
 			return SkillOutput{Text: "已修复：\n```json\n" +
 				`{"fixed":["I1"],"skipped":[{"id":"I2","reason":"查无此问题"}]}` + "\n```"}, nil
@@ -88,14 +84,13 @@ func TestAlertMetricsFixReceiptFlow(t *testing.T) {
 		}
 	}
 	ctx := context.Background()
-	run, err := svc.StartPipeline(ctx, 903, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
 
-	svc.executeFix(run.RunID, 903)
+	// R5-2：S5 不再自动派发修复——路由为待修工单后由显式「去修复」触发，修复回执度量不变。
+	runID := startS5Run(t, svc, 903, auditJSON)
+	svc.executeFix(runID, 903) // I1/I2 路由为待修工单
+	require.NoError(t, svc.StartIssueFixTickets(ctx, 903, []IssueTicketRef{
+		{RunID: runID, IssueKey: "I1"}, {RunID: runID, IssueKey: "I2"},
+	}))
 
 	keys := sk.snapshot()
 	require.Contains(t, keys, featureAlertConfirmedL2, "fixed 1 条 → confirmed 记 1 次")

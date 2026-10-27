@@ -11,7 +11,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -162,22 +161,18 @@ func TestServiceFixLedgerChangesEnterFixLogAndVerify(t *testing.T) {
 			verifyPromptGot = input.Prompt
 			verifyMu.Unlock()
 			return SkillOutput{Text: "复验：\n```json\n{\"verified\":[{\"id\":\"I1\",\"ok\":true,\"note\":\"已生效\"}],\"summary\":\"1 项修复已确认\"}\n```"}, nil
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n{\"verdict\":\"pass\",\"score\":30,\"summary\":\"修复后通过\",\"issues\":[]}\n```"}, nil
 		default:
 			return SkillOutput{Text: "ok"}, nil
 		}
 	}
 
-	run, err := svc.StartPipeline(ctx, novelID, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
-
-	require.NoError(t, svc.ResumePipeline(ctx, run.RunID, "fix", ""))
-	waitForStageStatus(t, svc, run.RunID, StatusAwaitingGate)
+	runID := startS5Run(t, svc, novelID, auditJSON)
+	svc.executeFix(runID, novelID) // I1 路由为待修工单
+	// R5-2：S5 不再自动派发修复/复评——由显式「去修复」触发修复（动台账→履历进入修复日志），
+	// 再显式「复验」触发复验（提示词带下游影响核对块）。
+	require.NoError(t, svc.StartIssueFixTickets(ctx, novelID, []IssueTicketRef{{RunID: runID, IssueKey: "I1"}}))
+	_, verr := svc.VerifyIssueTickets(ctx, novelID, []IssueTicketRef{{RunID: runID, IssueKey: "I1"}})
+	require.NoError(t, verr)
 
 	verifyMu.Lock()
 	got := verifyPromptGot

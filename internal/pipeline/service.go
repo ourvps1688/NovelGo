@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -900,19 +899,9 @@ func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason strin
 	s.dispatchExecutor(taskKindAudit, target.RunID, target.NovelID, func() { go s.executeAudit(target.RunID, target.NovelID) })
 }
 
-// enterFix 置 S5 running 并异步执行 signability-fix 修复循环。
+// enterFix 置 S5 running 并异步执行「检测结果路由 + 工单沉淀」（R5-2 自动修复摘除后，
+// S5 不再派发任何修复执行；修复动作由发现项工单显式触发，见 StartIssueFixTickets）。
 func (s *Service) enterFix(ctx context.Context, run *PipelineRun) {
-	// 新一轮修复开始：清零批次连续失败计数（上一轮的失败不应累计到新一轮）。
-	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-	}
-	if ctxt.FixBatchFailures > 0 {
-		ctxt.FixBatchFailures = 0
-		if updated, merr := json.Marshal(ctxt); merr == nil {
-			run.ContextJSON = string(updated)
-		}
-	}
 	if err := s.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, run.ContextJSON); err != nil {
 		s.logger.Error("S5 进入失败", "err", err)
 		return
@@ -1031,9 +1020,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		ctxt.RetconBacklog = retconItemsOf(audit)
 	}
 	// 新一轮体检结果落地即视为全新问题清单：清除上一轮的修复断点（FixStates）。
-	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），executeFix 会把
-	// 全部问题误判为「已修复」而静默跳过修复直接复评——表现为提示「修复完成，正在自动
-	// 复评」，实际上一个问题都没修（auto_run 下还会空转到 FixRounds 上限）。
+	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），S5 路由会把
+	// 全部问题误判为「已修复」而静默跳过工单沉淀——表现为「检测完毕」却零发现项。
 	// issue 工单表（R1）同语义整批替换：新体检=新问题清单，跨轮同号不共用断点。
 	if terr := s.store.ReplaceIssues(ctx, novelID, runID, ctxt.FixRounds, audit.Issues); terr != nil {
 		s.logger.Warn("S4 体检：issue 工单落表失败（非阻断）", "run_id", runID, "err", terr)
@@ -1050,9 +1038,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	ctxt.FixStates = nil
 	// 修复日志（R1b）同轮语义：随断点一并重置，新清单=新修复日志。
 	ctxt.FixLog = nil
-	// 转人工工单（R1c）与增量复验标记同轮语义：新一轮体检=新一轮问题清单。
+	// 转人工工单（R1c）随断点一并重置：新一轮体检=新一轮问题清单。
 	ctxt.ManualBacklog = nil
-	ctxt.VerifyPending = false
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
@@ -1081,7 +1068,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 			return
 		}
 		if ctxt.FixRounds >= autoFixCap {
-			// 超出自动修复上限：改交人工决策，避免无休止自动修复。
+			// 超出修复轮数上限：改交人工决策，避免 auto_run 无休止推进修复环节
+			//（修复执行本身由工单显式触发，R5-2，此处只挡自动推进节奏）。
 			if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
 				s.logger.Error("S4 体检：落库闸门状态失败", "err", err)
 				return
@@ -1172,24 +1160,17 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 	})
 }
 
-// executeFix 异步执行 S5 修复：跑 signability-fix（按 issue 清单改稿 / 同步台账）→
-// 修复完成后自动回到 executeAudit 复评（仍异步）。复评由 G4 闸门交回用户决策。
-// fixBatchP0 / fixBatchP1 是分批修复的每批问题数：P0 单条常涉及整章改写/重排，独占一批；
-// P1 每批两条。保证每条问题都有充足的对话轮数预算，避免一轮对话吃下全部问题导致
-// MaxTurns 耗尽、整轮修复失败。
+// executeFix 异步执行 S5「检测结果路由 + 工单沉淀」（R5-2 自动修复摘除，提案 §10.3）：
+// 把检测结果四分区路由（写保护→retcon 候选 / 正文级·V 系→重写清单 / 其余→待修工单）后
+// 沉淀为发现项工单，交回用户在工单面板显式处理（去修复/复验/驳回），不派发任何修复执行、
+// 不自动回流复评（§10.3「修复动作永远由人显式触发，复验显式点」）。
+// fixBatchP0 / fixBatchP1 是工单修复（StartIssueFixTickets 被动触发）的每批问题数：
+// P0 单条常涉及整章改写/重排，独占一批；P1 每批两条。保证每条问题都有充足的对话轮数
+// 预算，避免一轮对话吃下全部问题导致 MaxTurns 耗尽、整轮修复失败。
 const (
 	fixBatchP0 = 1
 	fixBatchP1 = 2
-	// fixBatchFailureCap 是同一运行内修复批次连续失败的上限：达到后不再「暂停→恢复→
-	// 原样重派」地无限循环，改发闸门交用户裁决（继续=回复评重新评估 / 终止）。
-	// 批次成功完成即清零计数。
-	fixBatchFailureCap = 3
 )
-
-// autoRewriteCap 是自动章节重写回路的单次运行最大轮数：达到上限后不再自动重写，
-// 改为交回用户手动处理（避免「重写→复评→再重写」无限循环）。每轮 finishFixHandoffRewrite
-// 自动重写后 +1，复评若仍报出同一批正文问题会再次进入重写，最多 autoRewriteCap 轮。
-const autoRewriteCap = 2
 
 // planFixBatches 把待修问题按优先级分批（保持原有顺序）：P0 每批 fixBatchP0 条，
 // P1 每批 fixBatchP1 条。
@@ -1296,13 +1277,6 @@ func planFixGroups(issues []AuditIssue) [][]AuditIssue {
 	return groups
 }
 
-// fixSweepFailure 记录一次修复 sweep 里某批次的失败（R1b 组间并行的收口依据）：
-// seq 是全局批次派发序号，供 run 级失败通道的消息与事件沿用既有 batch_index 语义。
-type fixSweepFailure struct {
-	seq int
-	err error
-}
-
 // （R3c 退役）执行体存活不再由 GateContext.Dispatching 自报：队列的 kind:run_id
 // 活跃去重即「活跃不重派、已退出即重派」（dispatchExecutor），存活判据见
 // task.Store.HasActiveForRun。
@@ -1314,16 +1288,6 @@ func (s *Service) syncIssueRow(ctx context.Context, novelID int64, runID, issueK
 	if err := s.store.UpdateIssueStatus(ctx, novelID, runID, issueKey, status, skipReason); err != nil {
 		s.logger.Warn("issue 工单状态同步失败（非阻断）",
 			"run_id", runID, "issue", issueKey, "status", status, "err", err)
-	}
-}
-
-// recordIssueVerifyRow 把一条复验结论落工单（R5-1 复验回执）：通过→verified（终态）、
-// 未通过→pending（退回待修），verify_receipt/verify_at 同步留痕。非阻断口径与
-// syncIssueRow 一致（工单表是结构化事实源，缺表/写失败不中断复验闭环）。
-func (s *Service) recordIssueVerifyRow(ctx context.Context, novelID int64, runID, issueKey string, ok bool, receipt string) {
-	if err := s.store.RecordIssueVerify(ctx, novelID, runID, issueKey, ok, receipt); err != nil {
-		s.logger.Warn("issue 工单复验回执落表失败（非阻断）",
-			"run_id", runID, "issue", issueKey, "ok", ok, "err", err)
 	}
 }
 
@@ -1378,30 +1342,22 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		}
 	}
 
-	// 断点续修：跳过已修复/已跳过/已路由重写（rewrite）问题（此前批次完成并落库的），只修剩余部分。
-	// 注意：旧断点与新体检清单 ID 撞车的问题由 executeAudit 落新体检结果时重置
-	// FixStates 解决（新一轮问题就是新问题），这里「全部命中断点」只可能是修复
-	// 完成后、复评前的中断恢复，直接进入复评是正确语义。
+	// 断点续路由：跳过已修复/已跳过/已路由（rewrite/retcon）问题（此前轮次已落库的），
+	// 只对剩余问题做路由沉淀。注意：旧断点与新体检清单 ID 撞车的问题由 executeAudit
+	// 落新体检结果时重置 FixStates 解决（新一轮问题就是新问题）。
 	if ctxt.FixStates == nil {
 		ctxt.FixStates = map[string]string{}
 	}
-	fixedIDs := make([]string, 0, len(ctxt.FixStates))
-	isResolved := make(map[string]bool, len(ctxt.FixStates)) // fixed/verified/skipped/rewrite 均不再进修复批次
+	isResolved := make(map[string]bool, len(ctxt.FixStates)) // fixed/verified/skipped/rewrite/retcon 均不再路由
 	for id, st := range ctxt.FixStates {
 		switch st {
-		case "fixed":
-			fixedIDs = append(fixedIDs, id)
-			isResolved[id] = true
-		case "verified": // R1c：已复验销项（修复确认生效），展示与 fixed 同口径
-			fixedIDs = append(fixedIDs, id)
-			isResolved[id] = true
-		case "skipped", "rewrite", "retcon":
+		case "fixed", "verified", "skipped", "rewrite", "retcon":
 			isResolved[id] = true
 		}
 	}
 
 	// 冻结卷写保护/retcon 候选（1.3/1.4）：target_scope=frozen_volume 或 direction=
-	// retcon_candidate 的问题一律不派发自动修复/自动重写（冻结卷正文与既定设定不得被
+	// retcon_candidate 的问题一律不派发修复执行（冻结卷正文与既定设定不得被
 	// 自动回改），标记 FixStates=retcon 并沉淀到 RetconBacklog，交回人工裁决。
 	retconBacklog := ctxt.RetconBacklog
 	if retconBacklog == nil {
@@ -1464,705 +1420,63 @@ func (s *Service) executeFix(runID string, novelID int64) {
 
 	pending := make([]AuditIssue, 0, len(auditData.Issues))
 	for _, it := range auditData.Issues {
-		// V 系文风漂移项豁免自动修复派发（只报告不改写，WBS §0.3）：已随上方
-		// 析出循环进 RewriteBacklog 供作者裁决，绝不进修复批次。
+		// V 系文风漂移项只报告不改写（WBS §0.3）：已随上方析出循环进 RewriteBacklog
+		// 供作者裁决，绝不进修复执行。
 		if !isResolved[it.ID] && it.FixType != FixTypeBody && !isStyleExempt(it.ID) {
 			pending = append(pending, it)
 		}
 	}
-	if len(pending) == 0 {
-		// 无台账级问题待修。三种语义必须区分，否则会谎报「修复完成」后立刻复评，
-		// 而复评必复报同一批问题，形成「完成但零修复」死循环：
-		//  (a) 存在回流 S3 重写的清单 → 这些问题 S5 改不动，明确交回用户重写，不再复评；
-		//  (b) 存在写保护/retcon 候选清单 → 冻结卷不得自动回改，交回人工裁决，不再复评；
-		//  (c) 既无待修也无上述清单（全部此前已 fixed/skipped）→ 才进复评做最终验证。
-		if len(backlog) > 0 {
-			s.finishFixHandoffRewrite(ctx, runID, novelID, ctxt)
-			return
-		}
-		if len(retconBacklog) > 0 {
-			s.handoffRetconToUser(ctx, runID, novelID, ctxt)
-			return
-		}
-		s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
+	// 写保护安全出口（语义不变）：纯 retcon 候选（无任何待修/重写项）交回人工裁决。
+	if len(pending) == 0 && len(backlog) == 0 && len(retconBacklog) > 0 {
+		s.handoffRetconToUser(ctx, runID, novelID, ctxt)
 		return
 	}
-	// R1b 作用域分组并行（F2 根治）：作用域 token（章节∪台账维度）相交的问题同组串行
-	// （组内沿用 planFixBatches 小批轮数预算），不相交的组间并行派发修复会话——写冲突
-	// 天然规避、互不拖慢。共享断点态（FixStates/FixLog）与 run 级失败计数由 mu 串行化；
-	// 单组失败只终止该组剩余批次，不拖死其它组，收口后按 run 级语义统一计数/暂停/发闸
-	// （与既有 S5 失败通道一致）。
-	groups := planFixGroups(pending)
-	totalBatches := 0
-	for _, g := range groups {
-		totalBatches += len(planFixBatches(g))
-	}
-	// 台账变更入账水位（R2b-7 §8.3-3）：本 sweep 起点的履历 id，批次收口后按增量
-	// 把「修台账本身」的变更落入修复日志（ledgerChangeWatermark 失败=-1=跳过入账）。
-	fixWatermark := s.ledgerChangeWatermark(ctx, novelID)
-
-	var (
-		mu           sync.Mutex
-		wg           sync.WaitGroup
-		batchSeq     int // 全局批次派发序号（fix_start 的 batch_index）
-		batchOK      int // 本 sweep 成功完成的批次数（run 级失败计数语义用）
-		failures     []fixSweepFailure
-		guardStopped bool
-	)
-
-	for groupIdx, group := range groups {
-		wg.Add(1)
-		go func(groupIdx int, group []AuditIssue) {
-			defer wg.Done()
-			for _, batch := range planFixBatches(group) {
-				// 批次间守卫：用户暂停/中止后在批次边界停下（软暂停语义），恢复时从剩余问题继续。
-				// 单组看到状态变更即停，其余组在各自下个批次边界跟进；收口时统一广播一次。
-				if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-					(cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
-					s.logger.Info("S5 修复：状态已变更，批次边界停止", "run_id", runID, "group", groupIdx+1,
-						"batch", len(planFixBatches(group)), "stage", cur.CurrentStage, "status", cur.Status)
-					mu.Lock()
-					guardStopped = true
-					mu.Unlock()
-					return
-				}
-
-				batchIDs := make(map[string]bool, len(batch))
-				for _, it := range batch {
-					batchIDs[it.ID] = true
-				}
-				mu.Lock()
-				batchSeq++
-				seq := batchSeq
-				batchIssues := make([]FixIssuePayload, 0, len(batch))
-				for _, it := range batch {
-					batchIssues = append(batchIssues, FixIssuePayload{
-						ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc, Status: "fixing",
-						TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction,
-					})
-				}
-				// 全量问题清单（含逐项状态）：前端在修复清单里给每个问题标注
-				// 待修复 / 正在修复 / 已修复，用户不用猜 LLM 做到哪了。
-				allIssues := make([]FixIssuePayload, 0, len(auditData.Issues))
-				for _, it := range auditData.Issues {
-					p := FixIssuePayload{ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
-						TargetScope: it.TargetScope, Dimension: it.Dimension, Direction: it.Direction}
-					switch st := ctxt.FixStates[it.ID]; {
-					case st == "fixed":
-						p.Status = "fixed"
-					case st == "verified": // R1c 已复验销项，前端展示与已修复同口径
-						p.Status = "fixed"
-					case st == "skipped":
-						p.Status = "skipped"
-					case st == "rewrite":
-						p.Status = "rewrite"
-					case st == "retcon":
-						p.Status = "retcon"
-					case batchIDs[it.ID]:
-						p.Status = "fixing"
-					default:
-						p.Status = "pending"
-					}
-					allIssues = append(allIssues, p)
-				}
-				fixedSnapshot := append([]string(nil), fixedIDs...)
-				// 本轮修复日志快照（R1b）：已修条目摘要注入本批提示词，消除重复勘察。
-				fixLogSnapshot := append([]FixLogEntry(nil), ctxt.FixLog...)
-				emitFixStart(ctx, map[string]any{
-					"run_id":      runID,
-					"novel_id":    novelID,
-					"issues":      batchIssues,
-					"all_issues":  allIssues,
-					"summary":     auditData.Summary,
-					"batch_index": seq,
-					"batch_total": totalBatches,
-					"done_ids":    fixedSnapshot,
-				})
-
-				// 每批独立会话：避免历史消息堆积挤占后续批次的轮数预算。
-				fixSkill := "signability-fix"
-				fixPromptText := fixPrompt(novelID, batch, auditData.Summary,
-					fixLogSnapshot, s.buildBlocks(ctx, novelID, contextasm.PurposeFix))
-				if ctxt.AuditKind == "blueprint" {
-					fixSkill = "blueprint-fix"
-					fixPromptText = blueprintFixPrompt(novelID, batch, auditData.Summary, fixLogSnapshot)
-				}
-				mu.Unlock()
-
-				// 派发前过供应商熔断判定（dispatchSkill 单源，WBS p4 §0.2）：近 10 分钟流式空闲
-				// 超时达到阈值说明 Provider 基本不可用（正常修复期间接近 0），此时不派发 agent
-				// 白烧 18 轮墙钟时间（每轮都可能白等 3 分钟被看门狗取消），直接按批次失败快速
-				// 落入计数/闸门通道（失败计数/闸门通道语义与既有 S5 熔断一致）。
-				out, batchErr := s.dispatchSkill(ctx, fixSkill, SkillInput{
-					NovelID:   novelID,
-					Prompt:    fixPromptText,
-					MaxTurns:  18,
-					SessionID: "pipeline:" + runID + ":fix:" + uuid.NewString(),
-					RunID:     runID,
-				})
-				if batchErr != nil {
-					s.logger.Error("S5 修复执行失败", "run_id", runID, "group", groupIdx+1, "batch", seq, "err", batchErr)
-					// 单组失败只终止本组剩余批次（不拖死其它组），run 级失败计数/暂停/闸门
-					// 在全部组收口后统一处理。
-					mu.Lock()
-					failures = append(failures, fixSweepFailure{seq: seq, err: batchErr})
-					mu.Unlock()
-					return
-				}
-				// 本批完成：解析修复回执并落库断点（仍 S5/running），供失败恢复与重启续修。
-				mu.Lock()
-				fixedNow, skippedNow := applyFixReceipt(&ctxt, batch, out.Text, s.logger)
-				fixedIDs = append(fixedIDs, fixedNow...)
-				// 回执结果同步 issue 工单表（R1）：fixed 落状态，skipped 连原因一并留痕。
-				for _, id := range fixedNow {
-					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusFixed, "")
-				}
-				for id, reason := range skippedNow {
-					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
-				}
-				// §9.4 命中率度量：修复回执流转=告警确认/未确认（body 级走 S3 重写
-				// 回路不经修复回执，不计入——见 alert_metrics.go 单源注释）。
-				s.recordFeatureUsageN(ctx, featureAlertConfirmedL2, len(fixedNow))
-				s.recordFeatureUsageN(ctx, featureAlertDismissedL2, len(skippedNow))
-				// 台账变更入账（R2b-7）：本批修复若动了台账，把履历增量落进修复日志
-				// （与回执 log 互补：不依赖 LLM 自报，同轮后续批次可见、复验核对下游）。
-				s.appendLedgerChangeLog(ctx, novelID, &ctxt, fixWatermark)
-				batchOK++
-				// 断点落库：保持 run 当前状态不变（用户并发暂停/中止不被覆盖回 running），
-				// 只刷新上下文断点（FixStates/FixLog），供失败恢复与重启续修。
-				if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil && cur.CurrentStage == StageS5 {
-					if ctxtJSON, merr := json.Marshal(ctxt); merr == nil {
-						if serr := s.store.SetStageStatus(ctx, runID, StageS5, cur.Status, string(ctxtJSON)); serr != nil {
-							s.logger.Error("S5 修复：批次断点落库失败", "err", serr)
-						}
-					}
-				}
-				mu.Unlock()
-			}
-		}(groupIdx, group)
-	}
-	wg.Wait()
-
-	// 收口（run 级语义，与既有失败通道一致）：守卫停止 > 失败计数/暂停/闸门 > 全部成功进复评。
-	if guardStopped {
-		emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID,
-			"ok": false, "error": "修复已被暂停或中止，等待恢复"})
-		return
-	}
-	if len(failures) > 0 {
-		// 失败计数（run 级「连续失败」语义，等价于串行时代的批末计数）：本 sweep 有批次
-		// 成功=有进展，计数重置为 1；全程零成功=连续失败 +1；全成功清零（在复评收口处）。
-		// 达 fixBatchFailureCap 后不再「暂停→恢复→原样重派」无限循环，改发闸门交用户裁决。
-		if batchOK > 0 {
-			ctxt.FixBatchFailures = 1
-		} else {
-			ctxt.FixBatchFailures++
-		}
-		errMsgs := make([]string, 0, len(failures))
-		for _, f := range failures {
-			errMsgs = append(errMsgs, f.err.Error())
-		}
-		batchErrText := strings.Join(errMsgs, "；")
-		// 透出供应商健康度：若近期频发流式空闲超时，提示用户这是 Provider 挂起而非代码问题，
-		// 避免误判为「修复功能坏了」。idle 超时由 llm 层空闲看门狗记录。
-		idleCount := llm.RecentIdleTimeouts(15 * time.Minute)
-		idleNote := ""
-		if idleCount > 0 {
-			idleNote = fmt.Sprintf("；近 15 分钟 LLM 流式空闲超时 %d 次（疑似供应商挂起，建议检查 Provider 或稍后重跑）", idleCount)
-		}
-		ctxtUpdated, merr := json.Marshal(ctxt)
-		if merr != nil {
-			ctxtUpdated = []byte(run.ContextJSON)
-		}
-		emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": false,
-			"error":                  batchErrText + idleNote,
-			"batch_index":            failures[0].seq,
-			"batch_total":            totalBatches,
-			"failed_batches":         len(failures),
-			"provider_idle_timeouts": idleCount})
-		if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-			cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
-			if ctxt.FixBatchFailures >= fixBatchFailureCap {
-				// 达到失败上限：转人工裁决，等待闸门决策而非盲目重试。
-				if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusAwaitingGate, string(ctxtUpdated)); serr != nil {
-					s.logger.Error("S5 修复：失败转闸门落库失败", "err", serr)
-				}
-				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-					Status: StatusAwaitingGate,
-					Note: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批），已转人工裁决",
-						ctxt.FixBatchFailures, failures[0].seq, totalBatches)})
-				emitGate(ctx, GatePayload{RunID: runID, NovelID: novelID, Stage: StageS5, GateID: GateG4,
-					Summary: fmt.Sprintf("修复批次已连续失败 %d 次（最近一次：第 %d/%d 批：%s%s）。已修复 %d 项保留。"+
-						"「继续」= 回到体检复评重新评估剩余问题（可拆分/降级难修项后再决定）；「终止」= 结束本流水线。",
-						ctxt.FixBatchFailures, failures[0].seq, totalBatches, batchErrText, idleNote, len(fixedIDs)),
-					Options: []string{"continue", "abort"}})
-			} else {
-				// 失败落地为 paused（保留已完成批次的断点），恢复时从剩余问题继续。
-				if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, string(ctxtUpdated)); serr != nil {
-					s.logger.Error("S5 修复：失败落暂停失败", "err", serr)
-				}
-				emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
-					Status: StatusPaused,
-					Note: fmt.Sprintf("第 %d/%d 批修复失败（累计 %d/%d 次）：%s；已暂停，点击恢复将从剩余问题继续（已修复 %d 项保留）%s",
-						failures[0].seq, totalBatches, ctxt.FixBatchFailures, fixBatchFailureCap, batchErrText, len(fixedIDs), idleNote)})
-			}
-		}
-		return
-	}
-	s.finishFixAndReaudit(ctx, runID, novelID, ctxt)
+	// R5-2 自动修复摘除（提案 §10.3）：待修（台账级）问题不再派发 signability-fix
+	// 批次——修复执行改由发现项工单显式触发（StartIssueFixTickets 被动响应，作用域
+	// 分组/修复日志共享/定向重写等执行能力原样保留）。统一收口：路由结果已沉淀为
+	// 工单，交回用户在工单面板处理；不派发修复、不自动回复评（复验/复评由用户显式
+	// 触发，§10.3「修复动作永远由人显式触发，修复完成后显式点复验」）。
+	s.settleFixToTickets(ctx, runID, novelID, ctxt, pending, backlog, retconBacklog)
 }
 
-// finishFixAndReaudit 是 S5 修复全部批次完成后的收尾：递增修复轮数、复位到原体检
-// 阶段并自动复评（仍异步）。「修复到位」最终以复评（G4/G终 闸门）通过为准。
-func (s *Service) finishFixAndReaudit(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
-	// 守卫：若异步期间状态已变更（如用户中止），不自动复评。
-	cur, gerr := s.store.GetByRunID(ctx, runID)
-	if gerr == nil && (cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
-		s.logger.Info("S5 修复：状态已变更，放弃复评", "stage", cur.CurrentStage, "status", cur.Status)
-		return
+// settleFixToTickets 是 S5 的统一收口出口（R5-2，提案 §10.3）：检测结果路由完毕后交回
+// 用户在发现项工单面板显式处理（去修复/复验/驳回）——不派发任何修复执行、不自动回复评
+// （复验/复评由用户显式触发，§10.3「修复动作永远由人显式触发，修复完成后显式点复验」）。
+// S5 落 paused，note 指向工单面板；retcon 候选同步立案（幂等）。
+func (s *Service) settleFixToTickets(ctx context.Context, runID string, novelID int64, ctxt GateContext,
+	pending []AuditIssue, backlog, retconBacklog []RewriteItem) {
+	// retcon 候选立案（幂等，WBS 3.1）：冻结卷写保护项绝不派发修复，只进 retcon 审批闸门。
+	if len(retconBacklog) > 0 {
+		s.persistRetconCandidates(ctx, novelID, retconBacklog)
 	}
-
-	// 广播修复完成：前端收尾活动流，提示进入复评。
-	emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": true})
-
-	// G3 蓝图漂移巡检：S5 修复可能改动了设计台账（卷纲/弧线/时间线），已写章节可能与当前蓝图
-	// 产生新的不一致。修复完成后触发一次「轻量蓝图一致性巡检」（只读、非阻断），结论存入
-	// ctxt.DriftReport，由复评闸门 summary 带给用户。无已写章节（纯蓝图阶段）时跳过。
-	if n, cerr := s.chapterCount(ctx, novelID); cerr == nil && n > 0 {
-		ctxt.DriftReport = s.runBlueprintDriftPatrol(ctx, runID, novelID)
-	}
-
-	// 复位到对应体检阶段 running 是为了让 executeAudit 的「状态未变更」守卫判定通过，
-	// 否则守卫会因当前为 S5 而放弃落 G4 闸门，导致复评结果无家可归（见测试 TestServiceAuditFixLoopReAudit）。
-	auditStage := ctxt.AuditStage
-	if auditStage == "" {
-		auditStage = StageS4
-	}
-	ctxt.FixRounds++ // 递增修复轮数（供 auto_run 上限判断，避免无限自动修复）
-
-	// R1c 复评分流（提案 §4.3-4/5）：
-	//  ① 全 skip（本轮零修复确认、问题全部转人工）→ 不复验不重审，直接落闸交回用户——
-	//     否则复评/复验会把同一批「修不了」的问题反复端出来空转（F2 尾部根治）；
-	//  ② 全量复评（L2 深审）仅存于卷收口/完本终检/蓝图收口——审计型深审保留全书口径；
-	//  ③ 其余（golden3/milestone）→ 增量复验（L1）：只验已修复项及其修过的作用域。
-	fixedCount, skippedCount := 0, 0
-	for _, st := range ctxt.FixStates {
-		switch st {
-		case "fixed":
-			fixedCount++
-		case "skipped":
-			skippedCount++
+	styleCount := 0
+	for _, it := range backlog {
+		if isStyleExempt(it.ID) {
+			styleCount++
 		}
 	}
-	fullReaudit := ctxt.AuditReason == "volume" || ctxt.AuditReason == "final" ||
-		ctxt.AuditKind == "blueprint" || auditStage == StageS6
-	if !fullReaudit && fixedCount == 0 && skippedCount > 0 {
-		s.handbackManualNoVerify(ctx, runID, novelID, ctxt, auditStage, skippedCount)
-		return
-	}
-
-	// 增量复验分支先置复验标记（随阶段复位一并落库）：中断恢复时据此重派复验而非全量体检。
-	if !fullReaudit {
-		ctxt.VerifyPending = true
-	}
-	ctxtJSON, _ := json.Marshal(ctxt)
-	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusRunning, string(ctxtJSON)); err != nil {
-		s.logger.Error("S5 修复：复评前复位阶段失败", "err", err)
-		return
-	}
-	if fullReaudit {
-		s.executeAudit(runID, novelID)
-		return
-	}
-	s.executeVerify(runID, novelID)
-}
-
-// handbackManualNoVerify 是 R1c「全 skip 不复验」的收口出口：本轮修复零修复确认、问题
-// 全部被 skip 转人工工单时，不再做任何复验/复评（做了也只会把同一批修不了的问题再端出来
-// 空转），直接把人工工单清单落 G4/G终 闸门交回用户裁决。闸门常落（不进 auto_run 自动
-// 裁决）——零修复确认意味着自动闭环没干活，必须交人看一眼。
-func (s *Service) handbackManualNoVerify(ctx context.Context, runID string, novelID int64, ctxt GateContext, auditStage string, skippedCount int) {
-	msg := fmt.Sprintf(
-		"本轮修复零修复确认：%d 项 agent 无法自动修复，已全部转人工工单（不再自动重试），未做复验——"+
-			"请人工处理后自行复检，或直接继续", skippedCount)
-	ctxt.VerifyPending = false
-	ctxtJSON, merr := json.Marshal(ctxt)
-	if merr != nil {
-		ctxtJSON = []byte("{}")
-	}
-	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(ctxtJSON)); err != nil {
-		s.logger.Error("S5 修复：全 skip 转人工落闸失败", "err", err)
-		return
-	}
-	emitFixDone(ctx, map[string]any{"run_id": runID, "novel_id": novelID, "ok": true,
-		"manual_handoff": true, "manual_count": skippedCount, "error": msg})
-	s.emitGateDecision(ctx, runID, novelID, auditStage,
-		AuditData{Verdict: "needs_fix", Summary: msg})
-}
-
-// executeVerify 是 R1c 的增量复验（L1）：修复收口后只对「已修复（fixed）项及其修过的作用域」
-// 做定点核验，替代全量重审（全量复评仅存 L2 深审：卷收口/完本/蓝图收口）。
-// 与 executeAudit 的关键区别（落地不整体清）：不整体清 FixStates/FixLog、不整批替换
-// issue 工单——复验通过的销项（FixStates→"verified"），未通过的退回待修，未提及的留待
-// 下轮再验；被 skip（转人工）的条目一律保持不再重试。
-func (s *Service) executeVerify(runID string, novelID int64) {
-	ctx := s.appCtx
-	run, err := s.store.GetByRunID(ctx, runID)
-	if err != nil {
-		s.logger.Error("S5 增量复验：加载流水线失败", "run_id", runID, "err", err)
-		return
-	}
-	auditStage := run.CurrentStage // 复位后的体检阶段（S4 / S4b）
-
-	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-	}
-	// 防御：蓝图/完本口径绝不走增量复验（正常分流已挡，此处兜底回全量）。
-	if ctxt.AuditKind == "blueprint" || auditStage == StageS6 {
-		s.executeAudit(runID, novelID)
-		return
-	}
-	auditData := parseAudit(ctxt.Audit)
-
-	// 复验目标 = 已修复（"fixed"，尚未复验）项，带修过作用域与修复日志摘要。
-	fixNote := map[string]string{}
-	for _, e := range ctxt.FixLog {
-		fixNote[e.ID] = e.Note
-	}
-	targets := make([]verifyTarget, 0, len(auditData.Issues))
-	for _, it := range auditData.Issues {
-		if ctxt.FixStates[it.ID] != "fixed" {
-			continue
-		}
-		targets = append(targets, verifyTarget{
-			ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
-			Chapters: issueChapterIDs(it), FixNote: fixNote[it.ID],
-		})
-	}
-
-	// R2b-8 修复传播检查（提案 §8.4 组件 C）：改动章节/台账条目取依赖闭包，闭包非空
-	// 且未超阈值时附「修复传播检查」块做定向 L1 复验；超阈值=结构性牵连，块不注入
-	// （不硬修），闸门 summary 明示升级人工/深审。空闭包=提示词逐字一致（降级零提示）。
-	ledgerNotes := ledgerChangeNotes(ctxt.FixLog)
-	prop := s.propagationCheck(ctx, novelID, targets, ctxt.FixLog)
-
-	var (
-		results   map[string]verifyResult
-		verifySum string
-		found     bool
-	)
-	if len(targets) > 0 {
-		out, verr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
-			NovelID:   novelID,
-			Prompt:    verifyPrompt(novelID, targets, ledgerNotes, prop.block(), s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
-			MaxTurns:  12,
-			SessionID: "pipeline:" + runID + ":verify:" + uuid.NewString(),
-			RunID:     runID,
-		})
-		if verr != nil {
-			s.logger.Error("S5 增量复验执行失败", "run_id", runID, "err", verr)
-			// 失败落地为 paused（VerifyPending 保持 true）：恢复时按增量复验重派发。
-			if serr := s.store.SetStageStatus(ctx, runID, auditStage, StatusPaused, run.ContextJSON); serr != nil {
-				s.logger.Error("S5 增量复验：失败落暂停失败", "err", serr)
-			}
-			emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: auditStage, Status: StatusPaused,
-				Note: "增量复验失败：" + verr.Error() + "；已暂停，点击恢复将重新复验"})
-			return
-		}
-		results, verifySum, found = parseVerifyReceipt(out.Text)
-		if !found {
-			// 兼容回退（与修复回执同口径）：无回执按已修复确认处理，不卡死闭环。
-			s.logger.Warn("S5 增量复验：输出缺少回执 JSON，按已修复确认处理（兼容回退）",
-				"run_id", runID, "targets", len(targets))
-		}
-	}
-
-	// 落地（不整体清 FixStates/FixLog）：通过→销项（verified）；未通过→退回待修；
-	// 未提及→保持 fixed 留待下轮再验。skipped/rewrite/retcon 等其余断点一律不动。
-	confirmed, rejected, unverified := 0, 0, 0
-	for _, tg := range targets {
-		if !found { // 兼容回退：无回执按已修复确认处理
-			ctxt.FixStates[tg.ID] = "verified"
-			s.recordIssueVerifyRow(ctx, novelID, runID, tg.ID, true, "")
-			confirmed++
-			continue
-		}
-		res, ok := results[tg.ID]
-		switch {
-		case !ok:
-			unverified++
-		case res.OK:
-			ctxt.FixStates[tg.ID] = "verified"
-			s.recordIssueVerifyRow(ctx, novelID, runID, tg.ID, true, res.Note)
-			confirmed++
-		default: // 未通过：退回待修
-			delete(ctxt.FixStates, tg.ID)
-			s.recordIssueVerifyRow(ctx, novelID, runID, tg.ID, false, res.Note)
-			rejected++
-		}
-	}
-
-	// 销项清单里确认修复的问题从体检结果 JSON 摘除（增量销项，非整体清）：前端体检视图
-	// 只剩未收口的问题。verdict/score 不动——复验不评分，不伪造未产出的判定（宁缺勿错）。
-	auditData.Issues = pruneVerifiedIssues(auditData.Issues, ctxt.FixStates)
-	line := fmt.Sprintf("增量复验（L1）：确认修复 %d 项", confirmed)
-	if rejected > 0 {
-		line += fmt.Sprintf("，%d 项未通过复验已退回待修", rejected)
-	}
-	if unverified > 0 {
-		line += fmt.Sprintf("，%d 项未复验留待下轮", unverified)
-	}
-	if verifySum != "" {
-		line += "；复验小结：" + verifySum
-	}
-	// R2b-8 传播检查收口汇报：闭包规模/升级结论 + L0 全书规则扫描兜底计数
-	// （只报告不改写；空结果零提示，summary 与无该段逐字一致）。
-	if seg := prop.summary(); seg != "" {
-		line += "；" + seg
-	}
-	if len(targets) > 0 || len(ledgerNotes) > 0 {
-		if seg := s.l0RuleSweep(ctx, novelID); seg != "" {
-			line += "；" + seg
-		}
-	}
-	auditData.Summary += "；" + line
-	auditJSON, _ := json.Marshal(auditData)
-	ctxt.Audit = string(auditJSON)
-	ctxt.VerifyPending = false
-
-	updated, merr := json.Marshal(ctxt)
-	if merr != nil {
-		s.logger.Warn("S5 增量复验：序列化上下文失败", "err", merr)
-		updated = []byte(run.ContextJSON)
-	}
-	run.ContextJSON = string(updated)
-
-	// 守卫：异步执行期间用户已推进则不覆盖；执行体退出前清执行中标记。
-	cur, gerr := s.store.GetByRunID(ctx, runID)
-	if gerr == nil && (cur.CurrentStage != auditStage || cur.Status != StatusRunning) {
-		s.logger.Info("S5 增量复验：状态已变更，放弃落闸", "stage", cur.CurrentStage, "status", cur.Status)
-		return
-	}
-
-	// 剩余待修 = 清单里仍未收口（无断点）的项：复验退回的 + 此前未处理的。
-	remaining := 0
-	for _, it := range auditData.Issues {
-		if ctxt.FixStates[it.ID] == "" {
-			remaining++
-		}
-	}
-	// auto_run 自动裁决（与 executeAudit 同构）：剩余待修→继续修（受上限约束）；全收口→继续。
-	if run.AutoRun && ctxt.AuditKind != "blueprint" {
-		if remaining == 0 {
-			if err := s.orchestrator.Advance(ctx, run, "continue"); err != nil {
-				s.logger.Error("S5 增量复验：自动继续推进失败", "err", err)
-			}
-			return
-		}
-		if ctxt.FixRounds >= autoFixCap {
-			if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
-				s.logger.Error("S5 增量复验：落库闸门状态失败", "err", err)
-				return
-			}
-			s.emitGateDecision(ctx, runID, novelID, auditStage, auditData)
-			return
-		}
-		if err := s.orchestrator.Advance(ctx, run, "fix"); err != nil {
-			s.logger.Error("S5 增量复验：自动进入修复闭环失败", "err", err)
-		}
-		return
-	}
-
-	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
-		s.logger.Error("S5 增量复验：落库闸门状态失败", "err", err)
-		return
-	}
-	s.emitGateDecision(ctx, runID, novelID, auditStage, auditData)
-}
-
-// pruneVerifiedIssues 从体检清单摘除已复验确认（FixStates="verified"）的问题（R1c 增量销项）。
-func pruneVerifiedIssues(issues []AuditIssue, fixStates map[string]string) []AuditIssue {
-	pruned := make([]AuditIssue, 0, len(issues))
-	for _, it := range issues {
-		if fixStates[it.ID] == "verified" {
-			continue
-		}
-		pruned = append(pruned, it)
-	}
-	return pruned
-}
-
-// finishFixHandoffRewrite 处理「本轮无台账级问题可修、但存在正文级重写清单」的情况：
-// 这些问题必须回 S3 重写章节才能解决，S5 用补丁改不动。为闭合修复链，本函数默认**自动
-// 派发章节重写 agent** 把被标记章节整章重写（用户选择全自动模式），重写后自动回到 S4 复评；
-// 复评若仍报出同一批正文问题会再次进入本函数，由 autoRewriteCap 上限收敛（达到上限改交人工）。
-//
-// 三种「交回用户」的出口（明确暂停 + 广播 rewrite_handoff，前端展示「已转交章节重写」而非「修复完成」）：
-//  0. 重写清单里没有任何可派发项（全为 V 系文风漂移豁免/写保护兜底项）——只报告不改写，
-//     交回作者裁决（note「文风漂移项待作者裁决」），绝不进自动重写循环；
-//  1. 重写轮数已达 autoRewriteCap —— 自动重写多次仍无效，交回人工决策；
-//  2. 重写清单涉及章节无法在本书定位（chapters 为空或缺章）——无法自动重写，只能手动。
-//
-// 其余情况一律走自动重写 + 复评闭环，绝不谎报「修复完成」后立刻复评形成死循环。
-func (s *Service) finishFixHandoffRewrite(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
-	// 守卫：若异步期间状态已变更（如用户中止），不重复处理。
-	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
-		(cur.CurrentStage != StageS5 || cur.Status != StatusRunning) {
-		return
-	}
-
-	// 出口 0（P2 T2.2 派发豁免）：可派发项=非写保护且非 V 系文风漂移（isStyleExempt）。
-	// V 系「只报告不改写」（WBS §0.3）：进 RewriteBacklog 供作者查看，但绝不派发
-	// 自动章节重写。全豁免（清单里没有任何可派发项）→ 手动交接收口，绝不进
-	// 「重写→复评」循环空转（风险 G2 防死循环）。
-	dispatchable := make([]RewriteItem, 0, len(ctxt.RewriteBacklog))
-	for _, item := range ctxt.RewriteBacklog {
-		if writeProtected(item.TargetScope, item.Direction) || isStyleExempt(item.ID) {
-			continue
-		}
-		dispatchable = append(dispatchable, item)
-	}
-	if len(dispatchable) == 0 {
-		n := len(ctxt.RewriteBacklog)
-		s.handoffRewriteWithMsg(ctx, runID, novelID, ctxt, fmt.Sprintf(
-			"%d 个文风漂移项（V 系）只报告不改写，已豁免自动章节重写，文风漂移项待作者裁决："+
-				"请在写作页酌情润色相关章节或保持原样后，再重新进入修复/复评",
-			n,
-		))
-		return
-	}
-
-	// 出口 1：重写轮数已达上限 → 交回人工。
-	if ctxt.RewriteRounds >= autoRewriteCap {
-		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
-		return
-	}
-
-	// 把重写清单涉及章节的阅读序号映射回真实 chapter_id；剔除无法定位的章节。
-	// 只解析可派发项（写保护项与 V 系豁免项不派发，无需定位）。
-	chaptersByReading, err := s.resolveRewriteChapters(ctx, novelID, dispatchable)
-	if err != nil {
-		s.logger.Warn("S5 重写：章节定位失败，降级交回用户", "run_id", runID, "err", err)
-		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
-		return
-	}
-	if len(chaptersByReading) == 0 {
-		// 出口 2：清单未指向任何可定位章节（如无 chapters 标注或章节已删）→ 手动重写。
-		s.handoffRewriteToUser(ctx, runID, novelID, ctxt)
-		return
-	}
-
-	// 自动重写：逐章派发章节重写 agent（每章独立会话，充足轮数预算）。
-	// 派发范围=可派发项（上方已过滤写保护与 V 系豁免；正常路径下 bodyIssuesOf 已把
-	// 写保护项分流进 RetconBacklog，此处兜底旧数据）。
-	total := 0
-	for _, item := range dispatchable {
-		total += len(chaptersByReading[item.ID])
-	}
-	index := 0
-	// rewriteLoop 标签专供供应商熔断「整循环中断」用（WBS p4 §0.2）。
-	tripped := false
-rewriteLoop:
-	for _, item := range dispatchable {
-		chaps := chaptersByReading[item.ID]
-		for _, ch := range chaps {
-			index++
-			emitRewriteProgress(ctx, map[string]any{
-				"run_id": runID, "novel_id": novelID, "phase": "starting",
-				"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber,
-			})
-			if rerr := s.executeChapterRewrite(ctx, runID, novelID, item, ch); rerr != nil {
-				s.logger.Error("S5 重写：章节重写失败", "run_id", runID, "chapter_id", ch.ID, "err", rerr)
-				emitRewriteProgress(ctx, map[string]any{
-					"run_id": runID, "novel_id": novelID, "phase": "failed",
-					"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber, "error": rerr.Error(),
-				})
-				if errors.Is(rerr, errProviderTripped) {
-					// 供应商熔断（WBS p4 §0.2）：中断整个逐章循环而非逐章失败刷屏——
-					// 只报本条失败进度，剩余章节不再派发；落地见循环后的 tripped 分支。
-					tripped = true
-					break rewriteLoop
-				}
-				// 单章失败不阻断其余章节；失败章节仍留在重写清单，由复评与重试上限约束。
-				continue
-			}
-			emitRewriteProgress(ctx, map[string]any{
-				"run_id": runID, "novel_id": novelID, "phase": "done",
-				"index": index, "total": total, "chapter_id": ch.ID, "reading_number": ch.ReadingNumber,
-			})
-		}
-	}
-
-	// 供应商熔断落地：不走「重写轮数 +1 + 回到复评」尾部通道——熔断不是一次真实重写，
-	// 计入 RewriteRounds 会烧掉自动重写预算（烧满后 handoffRewriteToUser「已尝试 N 轮」
-	// 文案失实，违背绝不谎报完成原则）。参照 S4 失败通道落 paused 等恢复：恢复按 S5
-	// 重派发从剩余章节继续；ctxt 原样持久化（轮数不变），复评不在此处触发。
-	if tripped {
-		ctxtJSON, merr := json.Marshal(ctxt)
-		if merr == nil {
-			if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, string(ctxtJSON)); serr != nil {
-				s.logger.Error("S5 重写：熔断落暂停失败", "err", serr)
-			}
-		} else {
-			s.logger.Error("S5 重写：熔断落地序列化上下文失败", "err", merr)
-		}
-		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5, Status: StatusPaused,
-			Note: "疑似供应商挂起（LLM 流式空闲超时触发熔断）：本次自动重写已中断，未计入重写轮数；已暂停，点击恢复将继续剩余章节重写"})
-		s.logger.Warn("S5 重写：疑似供应商挂起，整循环中断落暂停（不计重写轮数）",
-			"run_id", runID, "dispatched", index, "total", total)
-		return
-	}
-
-	// 重写轮数 +1，持久化后自动回到 S4 复评（复评会重算重写清单：解决则出清单，仍无效则再进本函数）。
-	ctxt.RewriteRounds++
-	ctxtJSON, merr := json.Marshal(ctxt)
-	if merr == nil {
-		// 保持 S5/running，使下方复评前的守卫通过；复评函数会自行复位到体检阶段。
-		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusRunning, string(ctxtJSON)); serr != nil {
-			s.logger.Error("S5 重写：落库重写轮数失败", "err", serr)
-		}
-	}
-	s.logger.Info("S5 重写：自动重写完成，回到复评", "run_id", runID, "round", ctxt.RewriteRounds, "total", total)
-	s.executeAudit(runID, novelID)
-}
-
-// handoffRewriteToUser 把正文级重写清单交回用户手动处理：明确暂停当前阶段、广播带
-// rewrite_handoff 标记的 fix_done（前端展示「已转交章节重写」而非「修复完成」），绝不谎报完成。
-func (s *Service) handoffRewriteToUser(ctx context.Context, runID string, novelID int64, ctxt GateContext) {
-	n := len(ctxt.RewriteBacklog)
+	pendingCount, rewriteCount, retconCount := len(pending), len(backlog), len(retconBacklog)
+	total := pendingCount + rewriteCount + retconCount
 	var msg string
-	if ctxt.RewriteRounds >= autoRewriteCap {
-		msg = fmt.Sprintf(
-			"自动章节重写已尝试 %d 轮仍未解决；%d 个正文级问题转交你手动在写作页重写相关章节后，再重新进入修复/复评",
-			autoRewriteCap, n,
-		)
+	if total == 0 {
+		msg = "检测结果已全部收口（无待处理发现项）：点「继续」回到检测环节复评，或在发现项工单面板查看历史工单"
 	} else {
-		msg = fmt.Sprintf(
-			"本轮无台账级问题可修；%d 个正文级问题已转交 S3 章节重写回路，请在写作页重写相关章节后重新进入修复/复评",
-			n,
-		)
+		msg = fmt.Sprintf("检测完毕，发现 %d 项已沉淀为发现项工单（待修 %d 项 / 正文级与文风漂移 %d 项 / retcon 候选 %d 项）："+
+			"请在「发现项工单」面板逐项处理（去修复/复验/驳回），处理完成后点「继续」回到检测环节复评",
+			total, pendingCount, rewriteCount, retconCount)
+		if styleCount > 0 {
+			msg += fmt.Sprintf("；其中 %d 项文风漂移（V 系）只报告不改写，请在写作页酌情润色相关章节或驳回", styleCount)
+		}
 	}
-	s.handoffRewriteWithMsg(ctx, runID, novelID, ctxt, msg)
-}
-
-// handoffRewriteWithMsg 是 rewrite_handoff 交回的统一出口（暂停 + 广播 + 前端 note），
-// 消息由调用方按语义定制（自动重写超限/章节不可定位/文风漂移全豁免）。
-func (s *Service) handoffRewriteWithMsg(ctx context.Context, runID string, novelID int64, ctxt GateContext, msg string) {
-	n := len(ctxt.RewriteBacklog)
 	emitFixDone(ctx, map[string]any{
-		"run_id":          runID,
-		"novel_id":        novelID,
-		"ok":              true,
-		"rewrite_handoff": true,
-		"rewrite_count":   n,
-		"rewrite_rounds":  ctxt.RewriteRounds,
-		"error":           msg,
+		"run_id": runID, "novel_id": novelID, "ok": true, "tickets": true,
+		"pending_count": pendingCount, "rewrite_count": rewriteCount, "retcon_count": retconCount,
+		"error": msg,
 	})
 	if cur, gerr := s.store.GetByRunID(ctx, runID); gerr == nil &&
 		cur.CurrentStage == StageS5 && cur.Status == StatusRunning {
 		if serr := s.store.SetStageStatus(ctx, runID, StageS5, StatusPaused, cur.ContextJSON); serr != nil {
-			s.logger.Error("S5 重写：交回落暂停失败", "err", serr)
+			s.logger.Error("S5 路由：交回用户落暂停失败", "err", serr)
 		}
 		emitStage(ctx, StagePayload{RunID: runID, NovelID: novelID, Stage: StageS5,
 			Status: StatusPaused, Note: msg})
@@ -2179,7 +1493,7 @@ func (s *Service) handoffRetconToUser(ctx context.Context, runID string, novelID
 	s.persistRetconCandidates(ctx, novelID, ctxt.RetconBacklog)
 	msg := fmt.Sprintf(
 		"%d 项问题命中冻结卷写保护/retcon 候选（target_scope=frozen_volume 或 direction=retcon_candidate），"+
-			"已拦截自动修复与自动重写，转交人工裁决：请优先前向适配（改本卷及后续适配已定稿前卷）；"+
+			"已拦截任何自动修复执行，转交人工裁决：请优先前向适配（改本卷及后续适配已定稿前卷）；"+
 			"确需回改前卷的，请经 retcon 审批闸门逐项审批后受控处理（批准后留痕编辑、可回滚）",
 		n,
 	)
@@ -2342,7 +1656,8 @@ func driftPatrolPrompt(novelID int64) string {
 		"无冲突 → verdict=pass；有冲突 → needs_fix。", novelID)
 }
 
-// autoFixCap 是 auto_run 模式下「不通过→自动修复」的最大轮数上限，超过则交人工决策，避免无限循环。
+// autoFixCap 是 auto_run 模式下「不通过→进修复环节」的最大轮数上限（修复轮数由工单
+// 修复收口递增，R5-2），超过则交人工决策，避免 auto_run 无限循环推进。
 const autoFixCap = 3
 
 // ── S6 完本终检（PR5）────────────────────────────────
@@ -2757,8 +2072,8 @@ func upsertFixLog(entries []FixLogEntry, add []FixLogEntry) []FixLogEntry {
 }
 
 // fixLogLedgerPrefix 是台账变更入账条目在修复日志里的 ID 前缀（"L:<履历id>"）：
-// 与 issue 系 ID（I/D/T/V/C）命名空间不相交，供 executeVerify 识别台账变更条目
-// 做「台账修改下游影响」核对（R2b-7 §8.3-3）。
+// 与 issue 系 ID（I/D/T/V/C）命名空间不相交，供工单复验（VerifyIssueTickets）识别
+// 台账变更条目做「台账修改下游影响」核对（R2b-7 §8.3-3）。
 const fixLogLedgerPrefix = "L:"
 
 // ledgerChangeWatermark 返回本书 ledger_change_history 当前最大 id（修复 sweep 起点
@@ -2967,9 +2282,9 @@ func writeProtected(targetScope, direction string) bool {
 	return targetScope == TargetScopeFrozenVolume || direction == DirectionRetconCandidate
 }
 
-// bodyIssuesOf 从体检结果中析出可自动重写的正文级（fix_type=body）问题，构造回流 S3
+// bodyIssuesOf 从体检结果中析出需整章重写的正文级（fix_type=body）问题，构造回流 S3
 // 重写回路的清单。命中写保护（writeProtected）的正文级问题不进本清单（冻结卷章节
-// 不得被自动重写），改由 retconItemsOf 析出到 RetconBacklog。
+// 不得被自动回改），改由 retconItemsOf 析出到 RetconBacklog。
 func bodyIssuesOf(audit AuditData) []RewriteItem {
 	items := make([]RewriteItem, 0, len(audit.Issues))
 	for _, it := range audit.Issues {
@@ -3406,16 +2721,12 @@ func (s *Service) redispatchIfNeeded(ctx context.Context, run *PipelineRun) {
 	}
 	switch run.CurrentStage {
 	case StageS4, StageS4b:
-		if ctxt.VerifyPending {
-			// R1c：修复后增量复验中断恢复——重派复验而非全量体检，避免误重置修复断点。
-			s.logger.Info("恢复：重新派发增量复验", "run_id", run.RunID, "stage", run.CurrentStage)
-			s.dispatchExecutor(taskKindVerify, run.RunID, run.NovelID, func() { go s.executeVerify(run.RunID, run.NovelID) })
-			return
-		}
 		s.logger.Info("恢复：重新派发签约体检", "run_id", run.RunID, "stage", run.CurrentStage)
 		s.dispatchExecutor(taskKindAudit, run.RunID, run.NovelID, func() { go s.executeAudit(run.RunID, run.NovelID) })
 	case StageS5:
-		s.logger.Info("恢复：重新派发 S5 修复（从剩余问题继续）", "run_id", run.RunID)
+		// R5-2：S5=检测结果路由+工单沉淀（幂等重入），恢复重派发只为把路由结果落齐；
+		// 修复执行/复验均由发现项工单面板显式触发，不在此自动派发。
+		s.logger.Info("恢复：重新派发 S5 检测结果路由与工单沉淀", "run_id", run.RunID)
 		s.dispatchExecutor(taskKindFix, run.RunID, run.NovelID, func() { go s.executeFix(run.RunID, run.NovelID) })
 	case StageS6:
 		s.logger.Info("恢复：重新派发完本终检", "run_id", run.RunID)
@@ -3483,7 +2794,6 @@ var (
 	emitFixStartSlot          = newEmitterSlot(EmitFixStart)
 	emitFixDoneSlot           = newEmitterSlot(EmitFixDone)
 	emitRewriteBacklogSlot    = newEmitterSlot(EmitRewriteBacklog)
-	emitRewriteProgressSlot   = newEmitterSlot(EmitRewriteProgress)
 )
 
 // 稳定 wrapper：调用点签名与用法零改动。
@@ -3494,10 +2804,9 @@ func emitStockAudit(ctx context.Context, p map[string]any)    { emitStockAuditSl
 func emitConsistencyPatrol(ctx context.Context, p map[string]any) {
 	emitConsistencyPatrolSlot.emit(ctx, p)
 }
-func emitFixStart(ctx context.Context, p map[string]any)        { emitFixStartSlot.emit(ctx, p) }
-func emitFixDone(ctx context.Context, p map[string]any)         { emitFixDoneSlot.emit(ctx, p) }
-func emitRewriteBacklog(ctx context.Context, p map[string]any)  { emitRewriteBacklogSlot.emit(ctx, p) }
-func emitRewriteProgress(ctx context.Context, p map[string]any) { emitRewriteProgressSlot.emit(ctx, p) }
+func emitFixStart(ctx context.Context, p map[string]any)       { emitFixStartSlot.emit(ctx, p) }
+func emitFixDone(ctx context.Context, p map[string]any)        { emitFixDoneSlot.emit(ctx, p) }
+func emitRewriteBacklog(ctx context.Context, p map[string]any) { emitRewriteBacklogSlot.emit(ctx, p) }
 
 // swapEmitX 供测试原子注入实现并返回还原函数：
 // defer swapEmitX(f)() 或 t.Cleanup(swapEmitX(f))。
@@ -3524,9 +2833,6 @@ func swapEmitFixDone(f func(context.Context, map[string]any)) func() {
 }
 func swapEmitRewriteBacklog(f func(context.Context, map[string]any)) func() {
 	return emitRewriteBacklogSlot.swap(f)
-}
-func swapEmitRewriteProgress(f func(context.Context, map[string]any)) func() {
-	return emitRewriteProgressSlot.swap(f)
 }
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

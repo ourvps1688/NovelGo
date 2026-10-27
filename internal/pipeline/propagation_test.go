@@ -77,8 +77,8 @@ func TestVerifyPromptPropagationBlock(t *testing.T) {
 		"块在上下文块（Facts）之前")
 }
 
-// TestServiceVerifyPropagationBlockAndSummary 端到端：修复改动第 1 章 → 伏笔共引
-// 第 3 章 → 复验提示词带传播块（第 3 章+共引条目），闸门 summary 报闭包纳入定向复验。
+// TestServiceVerifyPropagationBlockAndSummary 端到端（R5-2）：工单面板复验（VerifyIssueTickets）
+// 复用增量复验契约——修复改动第 1 章 → 伏笔共引第 3 章 → 复验提示词带传播块（第 3 章+共引条目）。
 func TestServiceVerifyPropagationBlockAndSummary(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -103,30 +103,28 @@ func TestServiceVerifyPropagationBlockAndSummary(t *testing.T) {
 	run, err := svc.StartPipeline(ctx, novelID, "new", nil, false)
 	require.NoError(t, err)
 	ctxt := GateContext{
-		Audit: auditJSON, AuditStage: StageS4, VerifyPending: true,
-		FixStates: map[string]string{"I1": "fixed"},
-		FixLog:    []FixLogEntry{{ID: "I1", Note: "重排了第1章节奏"}},
+		Audit: auditJSON, AuditStage: StageS4,
+		FixLog: []FixLogEntry{{ID: "I1", Note: "重排了第1章节奏"}},
 	}
 	ctxtJSON, merr := json.Marshal(ctxt)
 	require.NoError(t, merr)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
 
-	svc.executeVerify(run.RunID, novelID)
+	require.NoError(t, svc.store.ReplaceIssues(ctx, novelID, run.RunID, 0, []AuditIssue{
+		{ID: "I1", Level: "P1", Area: "节奏爽点", Desc: "第1章拖沓", FixType: FixTypeLedger, ChapterIDs: []int64{1}},
+	}))
+	require.NoError(t, svc.store.TransitionIssueTicket(ctx, novelID, run.RunID, "I1", IssueStatusFixing, ""))
+
+	_, err = svc.VerifyIssueTickets(ctx, novelID, []IssueTicketRef{{RunID: run.RunID, IssueKey: "I1"}})
+	require.NoError(t, err)
 
 	require.Contains(t, verifyPromptGot, "【修复传播检查（依赖闭包定向复验）】", "闭包非空应注入传播块")
 	require.Contains(t, verifyPromptGot, fmt.Sprintf("第 3 章（共引 time_entries:%d）", entryID))
 	require.NotContains(t, verifyPromptGot, "第 1 章（共引", "种子章（改动章）不进依赖清单")
-
-	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
-	require.NoError(t, gerr)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-	summary := parseAudit(finalCtxt.Audit).Summary
-	require.Contains(t, summary, "修复传播检查：依赖闭包 1 章已纳入定向复验")
 }
 
 // TestServiceVerifyPropagationEscalates 超阈值（>8 章）= 结构性牵连：传播块不注入
-// （不硬修），闸门 summary 明示升级人工/深审裁决。
+// （不硬修），定点复验清单照常（已修复项仍要验）。
 func TestServiceVerifyPropagationEscalates(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -153,29 +151,22 @@ func TestServiceVerifyPropagationEscalates(t *testing.T) {
 		`{"id":"I1","level":"P1","area":"节奏爽点","desc":"第1章拖沓","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[1]}]}`
 	run, err := svc.StartPipeline(ctx, novelID, "new", nil, false)
 	require.NoError(t, err)
-	ctxt := GateContext{
-		Audit: auditJSON, AuditStage: StageS4, VerifyPending: true,
-		FixStates: map[string]string{"I1": "fixed"},
-	}
+	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
 	ctxtJSON, merr := json.Marshal(ctxt)
 	require.NoError(t, merr)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
 
-	svc.executeVerify(run.RunID, novelID)
+	require.NoError(t, svc.store.ReplaceIssues(ctx, novelID, run.RunID, 0, []AuditIssue{
+		{ID: "I1", Level: "P1", Area: "节奏爽点", Desc: "第1章拖沓", FixType: FixTypeLedger, ChapterIDs: []int64{1}},
+	}))
+	require.NoError(t, svc.store.TransitionIssueTicket(ctx, novelID, run.RunID, "I1", IssueStatusFixing, ""))
+
+	_, err = svc.VerifyIssueTickets(ctx, novelID, []IssueTicketRef{{RunID: run.RunID, IssueKey: "I1"}})
+	require.NoError(t, err)
 
 	require.NotContains(t, verifyPromptGot, "【修复传播检查",
 		"闭包超阈值不注入传播块（结构性牵连不硬修）")
 	require.Contains(t, verifyPromptGot, `"id":"I1"`, "定点复验清单照常（已修复项仍要验）")
-
-	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
-	require.NoError(t, gerr)
-	var finalCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &finalCtxt))
-	summary := parseAudit(finalCtxt.Audit).Summary
-	require.Contains(t, summary, "依赖闭包 9 章超阈值（>8）")
-	require.Contains(t, summary, "结构性牵连", "明示结构性牵连")
-	require.Contains(t, summary, "不自动硬修")
-	require.Contains(t, summary, "升级人工/深审")
 }
 
 // TestPropagationCheckSeedEntriesFromFixLog 条目种子：FixLog "L:" 台账变更履历 →

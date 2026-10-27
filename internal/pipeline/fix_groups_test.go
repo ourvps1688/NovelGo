@@ -10,7 +10,6 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
@@ -113,7 +112,6 @@ func TestServiceFixGroupsRunParallel(t *testing.T) {
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"两组待修","issues":[` +
 		`{"id":"I1","level":"P0","area":"设定自洽","desc":"第1章冲突","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[1]},` +
 		`{"id":"I2","level":"P1","area":"节奏爽点","desc":"第5章拖沓","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[5]}]}`
-	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
 
 	var arriveMu sync.Mutex
 	arrived := 0
@@ -121,8 +119,6 @@ func TestServiceFixGroupsRunParallel(t *testing.T) {
 	bothArrived := make(chan struct{})
 	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
 		switch name {
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
 		case "signability-fix":
 			arriveMu.Lock()
 			arrived++
@@ -144,24 +140,24 @@ func TestServiceFixGroupsRunParallel(t *testing.T) {
 		}
 	}
 
-	run, err := svc.StartPipeline(ctx, 901, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
-
-	svc.executeFix(run.RunID, 901)
+	// R5-2：S5 不再自动派发修复——检测结果路由为待修工单后，由显式「去修复」触发
+	// 修复执行体（runIssueFixTickets → runLedgerFixTickets，分组并行语义不变）。
+	runID := startS5Run(t, svc, 901, auditJSON)
+	svc.executeFix(runID, 901) // I1/I2 路由为待修工单
+	require.NoError(t, svc.StartIssueFixTickets(ctx, 901, []IssueTicketRef{
+		{RunID: runID, IssueKey: "I1"}, {RunID: runID, IssueKey: "I2"},
+	}))
 
 	arriveMu.Lock()
 	gotArrived, gotTimeout := arrived, timedOut
 	arriveMu.Unlock()
 	require.Equal(t, 2, gotArrived, "两个不相交分组应各派发一次修复会话")
 	require.False(t, gotTimeout, "两组修复会话未在会合点同时到达——分组并行未生效（退回串行？）")
-	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	got, gerr := svc.store.GetByRunID(ctx, runID)
 	require.NoError(t, gerr)
-	require.Equal(t, StageS4, got.CurrentStage, "全部批次成功后应进复评")
-	require.Equal(t, StatusAwaitingGate, got.Status)
+	// R5-2：修复由人显式触发、收口后不自动进复评——run 保持在 S5 paused 交回用户。
+	require.Equal(t, StageS5, got.CurrentStage, "显式修复收口后仍在 S5（路由收口，非复评闸门）")
+	require.Equal(t, StatusPaused, got.Status)
 }
 
 // TestServiceFixLogSharedAcrossBatches 验收「修复日志共享」（R1b，F2）：同组内前批
@@ -175,14 +171,11 @@ func TestServiceFixLogSharedAcrossBatches(t *testing.T) {
 	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"同组两批","issues":[` +
 		`{"id":"I1","level":"P0","area":"人设卖点","desc":"主角动机缺失","fix_type":"ledger","target_scope":"active_volume","dimension":"character","direction":"forward_fix"},` +
 		`{"id":"I2","level":"P1","area":"人设爽点","desc":"配角记忆点弱","fix_type":"ledger","target_scope":"active_volume","dimension":"character","direction":"forward_fix"}]}`
-	secondAudit := `{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`
 
 	var mu sync.Mutex
 	var prompts []string
 	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
 		switch name {
-		case "signability-audit":
-			return SkillOutput{Text: "复评：\n```json\n" + secondAudit + "\n```"}, nil
 		case "signability-fix":
 			mu.Lock()
 			prompts = append(prompts, input.Prompt)
@@ -199,14 +192,12 @@ func TestServiceFixLogSharedAcrossBatches(t *testing.T) {
 		}
 	}
 
-	run, err := svc.StartPipeline(ctx, 902, "new", nil, false)
-	require.NoError(t, err)
-	ctxt := GateContext{Audit: auditJSON, AuditStage: StageS4}
-	ctxtJSON, merr := json.Marshal(ctxt)
-	require.NoError(t, merr)
-	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, string(ctxtJSON)))
-
-	svc.executeFix(run.RunID, 902)
+	// R5-2：S5 不再自动派发修复——路由为待修工单后由显式「去修复」触发，分组串行/日志共享语义不变。
+	runID := startS5Run(t, svc, 902, auditJSON)
+	svc.executeFix(runID, 902) // I1/I2 路由为待修工单
+	require.NoError(t, svc.StartIssueFixTickets(ctx, 902, []IssueTicketRef{
+		{RunID: runID, IssueKey: "I1"}, {RunID: runID, IssueKey: "I2"},
+	}))
 
 	mu.Lock()
 	got := append([]string(nil), prompts...)

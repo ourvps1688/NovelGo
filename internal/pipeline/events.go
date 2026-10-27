@@ -17,7 +17,6 @@ const (
 	EvFixStart          = "pipeline:fix_start"          // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
 	EvFixDone           = "pipeline:fix_done"           // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
 	EvRewriteBacklog    = "pipeline:rewrite_backlog"    // 正文级问题回流 S3 重写回路：{run_id, novel_id, items}（前端展示重写清单）
-	EvRewriteProgress   = "pipeline:rewrite_progress"   // 自动章节重写进度：{run_id, novel_id, phase, index, total, chapter_id, error}
 )
 
 // StagePayload 阶段变更事件载荷。
@@ -101,10 +100,4 @@ func EmitFixDone(ctx context.Context, p map[string]any) {
 // EmitRewriteBacklog 广播「正文级问题回流 S3 重写回路」，通知前端刷新并展示重写清单。
 func EmitRewriteBacklog(ctx context.Context, p map[string]any) {
 	wails.EventsEmit(ctx, EvRewriteBacklog, p)
-}
-
-// EmitRewriteProgress 广播自动章节重写的逐章进度（开始/完成/失败），前端据此展示
-// 「正在自动重写第 X/Y 章」与结果，避免用户误以为流水线卡死。
-func EmitRewriteProgress(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvRewriteProgress, p)
 }
