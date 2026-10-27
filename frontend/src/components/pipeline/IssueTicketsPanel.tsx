@@ -345,7 +345,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                       {fmtTime(row.updated_at)}
                     </span>
                   </div>
-                  <p className="line-clamp-2 text-muted-foreground text-xs">
+                  <p className="whitespace-pre-wrap break-words text-muted-foreground text-xs">
                     {row.desc}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">

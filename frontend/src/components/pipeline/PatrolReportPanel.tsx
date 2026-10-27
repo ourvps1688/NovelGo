@@ -82,7 +82,7 @@ export default function PatrolReportPanel({
       ) : null}
 
       {data?.summary ? (
-        <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
           {data.summary}
         </p>
       ) : null}
@@ -93,28 +93,40 @@ export default function PatrolReportPanel({
         </div>
         {issues.length > 0 ? (
           <ul className="flex flex-col gap-2">
-            {issues.map((it) => (
-              <li
-                key={it.id}
-                className="rounded border bg-card px-3 py-2 text-sm"
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-xs ${
-                      it.level === "P0"
-                        ? "bg-danger text-danger-foreground"
-                        : "bg-warning text-warning-foreground"
-                    }`}
-                  >
-                    {it.level}
-                  </span>
-                  <span className="font-medium">{it.area}</span>
-                  <span className="text-muted-foreground">{it.id}</span>
-                </div>
-                <p className="mt-1 text-muted-foreground">{it.desc}</p>
-                <IssueScopeTags issue={it} />
-              </li>
-            ))}
+            {issues
+              .filter((it) => it && (it.desc || it.area || it.id))
+              .map((it) => (
+                <li
+                  key={it.id ?? `${it.area}-${it.desc?.slice(0, 12)}`}
+                  className="rounded border bg-card px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center gap-2">
+                    {it.level ? (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-xs ${
+                          it.level === "P0"
+                            ? "bg-danger text-danger-foreground"
+                            : "bg-warning text-warning-foreground"
+                        }`}
+                      >
+                        {it.level}
+                      </span>
+                    ) : null}
+                    {it.area ? (
+                      <span className="font-medium">{it.area}</span>
+                    ) : null}
+                    {it.id ? (
+                      <span className="text-muted-foreground">{it.id}</span>
+                    ) : null}
+                  </div>
+                  {it.desc ? (
+                    <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+                      {it.desc}
+                    </p>
+                  ) : null}
+                  <IssueScopeTags issue={it} />
+                </li>
+              ))}
           </ul>
         ) : (
           <p className="text-sm text-muted-foreground">
