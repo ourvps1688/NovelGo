@@ -973,15 +973,24 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		quickCh = ch
 	}
 
-	out, err := s.dispatchSkill(ctx, auditSkill, SkillInput{
-		NovelID: novelID,
-		Prompt:  auditPrompt,
+	// 检测-only 核心（R5-3 T1.1，detect.go）：跑体检 skill → 解析 → 合并 drift →
+	// 落工单/报告（新一轮清单落法）。提示词/契约单源不变；auto-advance/闸门裁决
+	// 留在本函数（流水线行为零变化）。
+	outcome, err := s.runDetection(ctx, detectRequest{
+		runID:     runID,
+		novelID:   novelID,
+		skill:     auditSkill,
+		prompt:    auditPrompt,
+		sessionID: "pipeline:" + runID + ":audit",
 		// 只读体检需通读/抽样全书章节与台账（长篇动辄 70+ 章），12 轮在长篇上
 		// 会在读完全书前耗尽（「已达最大轮数」）。放宽到 24 轮。
-		MaxTurns:  24,
-		SessionID: "pipeline:" + runID + ":audit",
-		RunID:     runID,
-	})
+		maxTurns: 24,
+		runRef:   runID,
+		volumeID: run.VolumeID,
+		kind:     ctxt.AuditKind,
+		landing:  detectLandNewRound,
+		label:    "S4 体检",
+	}, &ctxt, run.ContextJSON)
 	if err != nil {
 		s.logger.Error("S4 体检执行失败", "run_id", runID, "err", err)
 		// 失败落地为 paused：恢复时按需重派发，避免状态停在 running 无人执行。
@@ -992,62 +1001,16 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 			Note: "签约体检失败：" + err.Error() + "；已暂停，点击恢复将重新体检"})
 		return
 	}
-
-	audit := parseFreshAudit(out.Text)
+	audit := outcome.Audit
 	// R2-4 双轨对照收口：快审 verdict 与全量裁决异同记本地度量（只读对照，
-	// 不改裁决不改状态；快审失败/超窗静默零提示）。drift 合并不改 verdict，先收对照。
+	// 不改裁决不改状态；快审失败/超窗静默零提示）。drift 合并不改 verdict，对照结论不变。
 	if quickCh != nil {
 		s.recordQuickAuditCompare(ctx, quickCh, audit.Verdict)
-	}
-	// P2 文风漂移（WBS p2 §0.3）：确定性检测的 V 系 issue 追加到清单尾部（warning 级，
-	// 经 bodyIssuesOf/retconItemsOf 自然收口进既有修复/重写路由）。verdict 不翻转——
-	// drift-only 保持 LLM verdict，不触发收口修复循环；蓝图体检不参与文风检测。
-	if ctxt.AuditKind != "blueprint" {
-		audit.Issues = mergeDriftIssues(audit.Issues, s.runStyleDriftCheck(ctx, novelID, run.VolumeID))
-	}
-	auditJSON, _ := json.Marshal(audit)
-
-	// ctxt 已在函数顶部解析；按 AuditKind 把体检结果写回对应字段（蓝图 → BlueprintAudit，签约 → Audit）。
-	// 签约类体检同步重算「回流 S3 重写回路」的正文级问题清单（每次体检反映最新结果）；
-	// 蓝图体检不产生正文级问题，置空避免污染。
-	if ctxt.AuditKind == "blueprint" {
-		ctxt.BlueprintAudit = string(auditJSON)
-		ctxt.RewriteBacklog = nil
-		ctxt.RetconBacklog = nil
-	} else {
-		ctxt.Audit = string(auditJSON)
-		ctxt.RewriteBacklog = bodyIssuesOf(audit)
-		ctxt.RetconBacklog = retconItemsOf(audit)
-	}
-	// 新一轮体检结果落地即视为全新问题清单：清除上一轮的修复断点（FixStates）。
-	// 否则复评产出的 issue 会与旧断点 ID 撞车（LLM 惯性编号 I1..In），S5 路由会把
-	// 全部问题误判为「已修复」而静默跳过工单沉淀——表现为「检测完毕」却零发现项。
-	// issue 工单表（R1）同语义整批替换：新体检=新问题清单，跨轮同号不共用断点。
-	if terr := s.store.ReplaceIssues(ctx, novelID, runID, ctxt.FixRounds, audit.Issues); terr != nil {
-		s.logger.Warn("S4 体检：issue 工单落表失败（非阻断）", "run_id", runID, "err", terr)
-	} else {
-		// §9.4 命中率度量：L2 告警产生（曝光口径，见 alert_metrics.go 单源注释）。
-		s.recordFeatureUsageN(ctx, featureAlertRaisedL2, len(audit.Issues))
-		// R5-1「RewriteBacklog 读写改走工单」：落表成功后重写清单以工单表投影为准
-		// （工单面板驳回/复验收口即时反映到清单）；bodyIssuesOf 内存清单降级为
-		// 落表失败时的回退（上方赋值保留）。
-		if ctxt.AuditKind != "blueprint" {
-			ctxt.RewriteBacklog = s.rewriteBacklogOf(ctx, novelID, runID, ctxt.RewriteBacklog)
-		}
-	}
-	ctxt.FixStates = nil
-	// 修复日志（R1b）同轮语义：随断点一并重置，新清单=新修复日志。
-	ctxt.FixLog = nil
-	// 转人工工单（R1c）随断点一并重置：新一轮体检=新一轮问题清单。
-	ctxt.ManualBacklog = nil
-	updated, merr := json.Marshal(ctxt)
-	if merr != nil {
-		s.logger.Warn("S4 体检：序列化上下文失败", "err", merr)
-		updated = []byte(run.ContextJSON)
 	}
 	// 把含新体检结果的上下文同步进 run 对象：auto_run 分支的 Advance(ctx, run, ...)
 	// → enterFix / markAuditedJSON 持久化的正是 run.ContextJSON，若不刷新会在
 	// 自动裁决路径丢掉刚产出的体检结果（手动路径由下方 SetStageStatus 落 updated 无此问题）。
+	updated := outcome.Updated
 	run.ContextJSON = string(updated)
 
 	// 守卫：若异步执行期间用户已推进（如点了 fix / continue），不覆盖新状态。
@@ -1696,12 +1659,25 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 		return
 	}
 
-	out, err := s.dispatchSkill(ctx, "signability-audit", SkillInput{
-		NovelID:   novelID,
-		Prompt:    finalAuditPrompt(novelID, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
-		MaxTurns:  16,
-		SessionID: "pipeline:" + runID + ":final",
-	})
+	// 检测-only 核心（R5-3 T1.1，detect.go）：终检沿用 report-only 落法（只写报告字段，
+	// 不动工单/断点——S6 现行为零变化），G终人工裁决留在本函数。
+	var ctxt GateContext
+	if run.ContextJSON != "" {
+		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
+	}
+	outcome, err := s.runDetection(ctx, detectRequest{
+		runID:     runID,
+		novelID:   novelID,
+		skill:     "signability-audit",
+		prompt:    finalAuditPrompt(novelID, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
+		sessionID: "pipeline:" + runID + ":final",
+		maxTurns:  16,
+		// P2 文风漂移：终检扫全书（scope=nil），V 系追加尾部；verdict 不翻转（G终人工裁决）。
+		volumeID: nil,
+		kind:     "",
+		landing:  detectLandReportOnly,
+		label:    "S6 终检",
+	}, &ctxt, run.ContextJSON)
 	if err != nil {
 		s.logger.Error("S6 终检执行失败", "run_id", runID, "err", err)
 		if serr := s.store.SetStageStatus(ctx, runID, StageS6, StatusPaused, run.ContextJSON); serr != nil {
@@ -1711,21 +1687,8 @@ func (s *Service) executeFinalAudit(runID string, novelID int64) {
 			Note: "完本终检失败：" + err.Error() + "；已暂停，点击恢复将重新终检"})
 		return
 	}
-
-	audit := parseFreshAudit(out.Text)
-	// P2 文风漂移：终检扫全书（scope=nil），V 系追加尾部；verdict 不翻转（G终人工裁决）。
-	audit.Issues = mergeDriftIssues(audit.Issues, s.runStyleDriftCheck(ctx, novelID, nil))
-	auditJSON, _ := json.Marshal(audit)
-
-	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-	}
-	ctxt.Audit = string(auditJSON)
-	updated, merr := json.Marshal(ctxt)
-	if merr != nil {
-		updated = []byte(run.ContextJSON)
-	}
+	audit := outcome.Audit
+	updated := outcome.Updated
 
 	// 守卫：若异步期间状态已变更（如用户中止），不覆盖新状态。
 	// 无论守卫结果如何，本执行体即将退出，先清除执行中标记。
