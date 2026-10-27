@@ -109,11 +109,14 @@
 
 ### T4.1 双验收 + 全量门禁 + 提交
 
+> **实施定案补记（T4.1 落地时）**：验收载体 `internal/pipeline/r5_3_acceptance_test.go` 三测（检测独立性 / 预设一键写→检测+G4 对照 / 自动节奏源码锁）+ P0–P2 零触碰 grep 断言（`git diff --name-only` R5 全程/R5-3/本次三口径全 0）记结论。**抓获并修复存量红一处（pre-#248 即红，顺手修复）**：`enterAudit`/`enterFinalAudit` 不复位 `ctxt.AuditKind`——S2 蓝图体检置 "blueprint" 后泄漏进上下文，黄金三章/里程碑/卷收口的签约体检**静默改走 blueprint-audit**（签约体检被吞，S5 修复侧同读该字段还会误读 BlueprintAudit/绕过陈旧守卫）；修复=进入新一轮签约体检/终检时 `AuditKind=""` 复位（蓝图轮只经 enterBlueprintAudit 进入、其自身再置 "blueprint"，零回退）；回归锁=PresetKeepsGate 断言 signability-audit 恰 1 次+blueprint-audit 恰 1 次+GateID==G4。既有 `TestServiceGoldenThreeTriggersAudit` 绿是假绿（技能名 stub 回退文本经 parseAudit 兜底合成 needs_fix 单条 issue，断言撞巧合）——体检类断言必须锁技能名。测试坑：①`parseAudit` 对垃圾文本合成兜底 issue（I1/P0/总体/文本原样），stub 非体检技能回 "ok" 会被整批落表覆盖前轮清单，测试 stub 须按技能名给合法 JSON；②golangci-lint 传裸文件列表（含 _test.go）丢包上下文假报 typecheck undefined（exit 7，"0 issues"），须跑包路径 `./internal/pipeline/...`。
+
 - **验收 A（检测独立性）**：无活跃流水线时，四类检测任务皆可单独启动并落正确结果（卷/书→工单、巡检→报告、章节→质量档案）；检测-only 零 auto-advance/fix/gate。
 - **验收 B（编排预设 + 勿回退）**：流水线作为预设仍可一键跑"写→检测"；自动检测节奏保留（不改纯手动）；PanelId 零删除；P0–P2 工件零触碰（grep 断言）。
 - **门禁**：Go 四道闸（gofmt 改动文件 LF 归一化 / go build / go test 全量 / golangci-lint 0 issue）+ 前端四道（format:check / i18n:check / lint 0 error / build）+ `theme:check`。`TestRewriteVoiceABE2E` 真实 LLM E2E 402 外部瞬态不作回归判据。
 - **提交**：一任务一提交（feat(pipeline) R5-3）+ chore(memory) 记忆账；commit 带全套 export；推送前 fetch→rebase→提交→推送→核验 AHEAD=0。
 - **依赖**：T1–T3。**风险**：低。
+- **T4.1 结论（2026-10-27）**：双验收全绿——①检测独立性：四 kind 无活跃流水线逐一独立启动落正确容器（质量档案/工单×2/张力报告），检测-only 零闸门/阶段/修复广播+零修复重写派发+容器出生即终态+全程零活跃 run；②预设一键写→检测自动进 S4 落 2 工单、G4 裁决保留（与检测-only 零闸门对照），黄金三章首检/完本终检/卷边界与里程碑复检/写后章节 CI 钩子四触发点源码锁+检测核心零裁决调用锁全过；PanelId 零删除（22 项断言）、P0–P2 工件零触碰 grep 断言三口径 0。门禁全绿（Go 四道+前端五道+vitest 47 文件 389 测；TestRewriteVoiceABE2E 402 瞬态照旧排除）。
 
 ---
 

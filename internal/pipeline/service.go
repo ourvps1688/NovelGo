@@ -896,6 +896,11 @@ func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason strin
 	}
 	ctxt.AuditReason = reason
 	ctxt.AuditStage = stage
+	// 复位体检种类：S2 蓝图体检置 AuditKind=blueprint 并留在上下文里，若不复位，
+	// 黄金三章/里程碑/卷收口的签约体检会误走 blueprint-audit 技能与蓝图修复路由
+	// （S5 修复侧同读此字段），签约体检被静默跳过（R5-3 T4.1 验收 B 抓获的泄漏）。
+	// 蓝图体检轮只经 enterBlueprintAudit 进入（其自身再置 "blueprint"），此处复位不回退。
+	ctxt.AuditKind = ""
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S4 进入：序列化上下文失败", "err", merr)
@@ -1650,6 +1655,9 @@ func (s *Service) enterFinalAudit(ctx context.Context, run *PipelineRun) {
 	}
 	ctxt.AuditReason = "final"
 	ctxt.AuditStage = StageS6
+	// 复位体检种类（同 enterAudit）：终检虽硬编码 signability-audit，但其 S5 修复侧
+	// 按 AuditKind 读 BlueprintAudit/豁免陈旧守卫——蓝图泄漏会把完本修复路由带偏。
+	ctxt.AuditKind = ""
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		s.logger.Warn("S6 进入：序列化上下文失败", "err", merr)
