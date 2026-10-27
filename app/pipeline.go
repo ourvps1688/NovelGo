@@ -6,7 +6,7 @@ import (
 	"github.com/novelgo/novelgo/internal/pipeline"
 )
 
-// StartPipeline 启动一次创作流水线（mode: new|continue；续写模式传 startChapter；autoRun 开启自动连跑）。
+// StartPipeline 启动一次创作流水线（mode: new|continue；续写模式传 startChapter；autoRun 历史参数，R5-4 自动裁决已退役）。
 func (a *App) StartPipeline(novelID int64, mode string, startChapter *int, autoRun bool) (*pipeline.PipelineRun, error) {
 	if a.pipeline == nil {
 		return nil, fmt.Errorf("创作流水线服务未初始化")

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -638,70 +639,87 @@ func TestServiceAuditResetsFixStatesOnNewAudit(t *testing.T) {
 	require.Contains(t, finalCtxt.Audit, "复评仍有问题", "新体检结果应已落库")
 }
 
-// TestServiceMilestoneGateOffersAudit 验证：已体检过（last_audit_chapter=3）且当前章数=8
-// （距上次 5 章）时，S3「继续」应弹出 G3b 里程碑闸，且提供 audit_now 选项。
-func TestServiceMilestoneGateOffersAudit(t *testing.T) {
+// TestServiceMilestoneNoteSuggestsAudit（R5-4 G3b 弹闸退役）验证：已体检过
+// （last_audit_chapter=3）且当前章数=8（距上次 5 章）时，S3「继续」不落闸、不发闸门事件，
+// 改非阻塞 milestone 复检建议 note，写作循环持续 running 不被打断。
+func TestServiceMilestoneNoteSuggestsAudit(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 8, nil }
 	captured := withCapturedGates(t)
+	var notes []string
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
+		if p.Note != "" {
+			notes = append(notes, p.Note)
+		}
+	}))
 	ctx := context.Background()
 
 	runID := startS3Run(t, svc, 500, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 
-	require.NotEmpty(t, captured.all(), "应弹出 G3b 里程碑闸")
-	gates := captured.all()
-	last := gates[len(gates)-1]
-	require.Equal(t, StageS3, last.Stage)
-	require.Equal(t, GateG3b, last.GateID)
-	require.Contains(t, last.Options, "audit_now", "里程碑闸应提供进入体检选项")
-	require.NotContains(t, last.Options, "modify", "PR4 不再使用 modify 选项")
+	require.Empty(t, captured.all(), "R5-4：S3 里程碑不得弹闸（G3b 退役，零 gate 事件）")
+	got, _ := svc.store.GetByRunID(ctx, runID)
+	require.Equal(t, StageS3, got.CurrentStage)
+	require.Equal(t, StatusRunning, got.Status, "S3 应持续 running，写作不被检测打断")
+	require.Contains(t, strings.Join(notes, "\n"), "体检", "里程碑应给非阻塞复检建议 note")
 }
 
-// TestServiceVolumeBoundaryOffersAudit 验证：跨卷边界（volumeBoundary=true）时，
-// 即便章数未达 5 章间距，S3「继续」也应弹出 G3b 里程碑闸并提供 audit_now。
-func TestServiceVolumeBoundaryOffersAudit(t *testing.T) {
+// TestServiceVolumeBoundaryNoteSuggestsAudit（R5-4 G3b 弹闸退役）验证：跨卷边界时，
+// 即便章数未达 5 章间距，S3「继续」也给非阻塞复检建议 note（零弹闸零 gate 事件）。
+func TestServiceVolumeBoundaryNoteSuggestsAudit(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 3, nil }
 	svc.volumeBoundary = func(_ context.Context, _ int64) (bool, error) { return true, nil }
 	captured := withCapturedGates(t)
+	var notes []string
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
+		if p.Note != "" {
+			notes = append(notes, p.Note)
+		}
+	}))
 	ctx := context.Background()
 
 	runID := startS3Run(t, svc, 501, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 
-	require.NotEmpty(t, captured.all())
-	gates := captured.all()
-	last := gates[len(gates)-1]
-	require.Equal(t, StageS3, last.Stage)
-	require.Equal(t, GateG3b, last.GateID)
-	require.Contains(t, last.Options, "audit_now", "卷边界应触发复检选项")
+	require.Empty(t, captured.all(), "R5-4：跨卷里程碑不得弹闸（G3b 退役，零 gate 事件）")
+	got, _ := svc.store.GetByRunID(ctx, runID)
+	require.Equal(t, StageS3, got.CurrentStage)
+	require.Equal(t, StatusRunning, got.Status)
+	require.Contains(t, strings.Join(notes, "\n"), "新卷", "跨卷应给非阻塞复检建议 note")
 }
 
-// TestServiceNonMilestoneGateNoAudit 验证：已体检过且章数仅 +1（未达 5 章、未跨卷）时，
-// S3「继续」只弹普通逐章闸，不提供 audit_now，避免频繁打断写作。
-func TestServiceNonMilestoneGateNoAudit(t *testing.T) {
+// TestServiceNonMilestoneChapterNote（R5-4 G3b 弹闸退役）验证：已体检过且章数仅 +1
+// （未达 5 章、未跨卷）时，S3「继续」只给「已完成第 N 章」进度 note（零弹闸零复检建议）。
+func TestServiceNonMilestoneChapterNote(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 4, nil }
 	svc.volumeBoundary = func(_ context.Context, _ int64) (bool, error) { return false, nil }
 	captured := withCapturedGates(t)
+	var notes []string
+	t.Cleanup(swapEmitStage(func(_ context.Context, p StagePayload) {
+		if p.Note != "" {
+			notes = append(notes, p.Note)
+		}
+	}))
 	ctx := context.Background()
 
 	runID := startS3Run(t, svc, 502, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 
-	require.NotEmpty(t, captured.all())
-	gates := captured.all()
-	last := gates[len(gates)-1]
-	require.Equal(t, StageS3, last.Stage)
-	require.Equal(t, GateG3b, last.GateID)
-	require.ElementsMatch(t, []string{"continue", "abort"}, last.Options, "普通逐章闸不应提供 audit_now")
+	require.Empty(t, captured.all(), "R5-4：普通逐章节奏不得弹闸（G3b 退役，零 gate 事件）")
+	got, _ := svc.store.GetByRunID(ctx, runID)
+	require.Equal(t, StageS3, got.CurrentStage)
+	require.Equal(t, StatusRunning, got.Status)
+	joined := strings.Join(notes, "\n")
+	require.Contains(t, joined, "已完成第 4 章", "普通节奏应给进度 note")
+	require.NotContains(t, joined, "建议", "普通节奏不应给复检建议")
 }
 
-// TestServiceAuditNowEntersS4b 验证：G3b 选 audit_now 应进入 S4b 卷边界复评阶段，
+// TestServiceAuditNowEntersS4b 验证：显式 audit_now 应进入 S4b 卷边界复评阶段，
 // 且 ContextJSON.audit_stage 记录为 S4b（供修复后复评回到同阶段）。
 func TestServiceAuditNowEntersS4b(t *testing.T) {
 	db := newTestDB(t)
@@ -730,7 +748,7 @@ func TestServiceMilestoneResetsLastAuditChapter(t *testing.T) {
 	ctx := context.Background()
 
 	runID := startS3Run(t, svc, 504, `{"last_audit_chapter":3,"s4_audited":true}`)
-	// 里程碑闸选 audit_now → 进入 S4b
+	// 显式 audit_now → 进入 S4b
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "audit_now", ""))
 	waitForStageStatus(t, svc, runID, StatusAwaitingGate)
 	got, _ := svc.store.GetByRunID(ctx, runID)

@@ -9,7 +9,7 @@ const (
 	GateG1b  = "G1b"  // 蓝图体检修复闸（蓝图体检不通过时停留，用户决定 fix/continue/abort）
 	StageS2  = "S2"   // 蓝图（PR2 落库；A 方案复用为「生成 → 蓝图体检 → 蓝图修复」宿主阶段）
 	StageS3  = "S3"   // 逐章写作（含评分门禁 + statesync）
-	GateG3b  = "G3b"  // 里程碑闸（PR4 启用，每 5 章 / 卷边界）
+	GateG3b  = "G3b"  // 里程碑闸（R5-4 弹闸退役：不再发闸门事件；常量保留协议兼容，复检入口走 audit_now）
 	StageS4  = "S4"   // 签约体检（signability-audit，只读体检 + issue 清单）
 	StageS4b = "S4b"  // 卷边界复评（PR4：每 5 章 / 跨卷时触发，复用 S4 节点）
 	StageS5  = "S5"   // 修复闭环（按 issue 清单改稿 / 同步台账，修复后回到 S4/S4b/S6 复评）

@@ -143,7 +143,7 @@ func (s *Service) runIssueFixTickets(runID string, novelID int64) {
 	fixedLedger, skippedLedger := s.runLedgerFixTickets(ctx, runID, novelID, &ctxt, ledgerIssues)
 	fixedBody, skippedBody := s.runBodyRewriteTickets(ctx, runID, novelID, bodyItems)
 
-	// 收口：修复轮数 +1（供 auto_run 上限与工单轮次统计，R5-2 起只由工单修复收口递增），
+	// 收口：修复轮数 +1（工单轮次统计与增量复验分轮，R5-2 起只由工单修复收口递增），
 	// 蓝图漂移巡检（G3，非阻断）结论写入 DriftReport 持久化，广播修复完成。
 	ctxt.FixRounds++
 	patrol := s.runBlueprintDriftPatrol(ctx, runID, novelID)

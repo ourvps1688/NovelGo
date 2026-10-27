@@ -233,7 +233,11 @@ func TestR53Acceptance_AutoCadenceSourceLock(t *testing.T) {
 	require.Contains(t, orchSrc, `enterAudit(ctx, run, "golden3")`, "黄金三章首检自动触发不得退役")
 	require.Contains(t, orchSrc, `o.svc.enterFinalAudit(ctx, run)`, "完本终检入口不得退役")
 	require.Contains(t, orchSrc, `reason = "volume"`, "卷边界复检触发不得退役")
-	require.Contains(t, orchSrc, `GateG3b`, "每 5 章里程碑复检闸不得退役")
+	// R5-4 迁移（WBS 契约 0.4）：G3b 弹闸退役后，锁的口径从「GateG3b 常量在」改为
+	// 「里程碑复检入口保留」——advanceS3 的 audit_now 决策分支与 enterAudit
+	// milestone/volume 触发链不得退役（自动检测节奏红线不动）。
+	require.Contains(t, orchSrc, `if decision == "audit_now"`, "复检入口决策分支（audit_now）不得退役")
+	require.Contains(t, orchSrc, `o.svc.enterAudit(ctx, run, reason)`, "复检入口须进 enterAudit（milestone/volume 触发链保留）")
 
 	rw, err := os.ReadFile("../mcp_tools/rw_tools.go")
 	require.NoError(t, err)

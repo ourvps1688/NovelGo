@@ -47,8 +47,9 @@ type PipelineRun struct {
 	StartChapter *int   `gorm:"column:start_chapter"`             // 续写模式起始章号
 	CurrentStage string `gorm:"column:current_stage;not null"`
 	Status       string `gorm:"column:status;not null"`
-	AutoRun      bool   `gorm:"column:auto_run;not null;default:false"`
-	ContextJSON  string `gorm:"column:context_json;type:text"`
+	// AutoRun 历史参数（R5-4 自动裁决已退役，字段保留兼容零迁移）：现无行为效果。
+	AutoRun     bool   `gorm:"column:auto_run;not null;default:false"`
+	ContextJSON string `gorm:"column:context_json;type:text"`
 	// VolumeID 是本 run 的卷作用域：非空=卷级 scoped sub-run，S4/S5 仅作用于该卷；
 	// 空=book-run（全书）。旧数据均为 NULL，即全书 book-run（向后兼容）。
 	VolumeID *int64 `gorm:"column:volume_id;index"`
@@ -81,9 +82,9 @@ type GateContext struct {
 	// 渲染 issue 清单，也供 S5 修复 agent 作为修复依据。
 	Audit string `json:"audit,omitempty"`
 	// S4Audited 标记本书是否已做过一次签约体检（无论通过与否）。一旦为 true，
-	// S3 逐章循环不再自动触发 S4a（避免每章都弹体检），改由 PR4 的 G3b 里程碑智能触发。
+	// S3 逐章循环不再自动触发 S4a（避免每章都弹体检），改由里程碑智能提示（R5-4 起非阻塞 note）。
 	S4Audited bool `json:"s4_audited,omitempty"`
-	// LastAuditChapter 记录上次签约体检（S4/S4b）时本书已落库章节数；供 PR4 里程碑闸计算间距
+	// LastAuditChapter 记录上次签约体检（S4/S4b）时本书已落库章节数；供里程碑间距判定
 	// （每 5 章触发一次复检）。未体检过为 0，等同强制下次进入里程碑判定。
 	LastAuditChapter int `json:"last_audit_chapter,omitempty"`
 	// AuditReason 记录上次进入体检的触发原因：golden3（黄金三章首检）| milestone（章节里程碑）| volume（卷边界）| final（完本终检）。
@@ -101,7 +102,7 @@ type GateContext struct {
 	// 提示用户哪些章节与当前卷纲冲突、是否需要重读。
 	DriftReport string `json:"drift_report,omitempty"`
 	// FixRounds 记录工单修复已发生的轮数（R5-2 起修复由发现项工单显式触发，每轮工单
-	// 修复收口 +1），供 auto_run 上限判断与工单轮次统计（ReplaceIssues 的 round 参数）。
+	// 修复收口 +1），供工单轮次统计与增量复验分轮（ReplaceIssues 的 round 参数）。
 	FixRounds int `json:"fix_rounds,omitempty"`
 	// EntryStage 记录本书启动流水线时由 DetermineEntryStage 选定的入口阶段（S0/S1/S3），用于追溯。
 	EntryStage string `json:"entry_stage,omitempty"`
@@ -411,6 +412,7 @@ func (s *Store) SetStageStatus(ctx context.Context, runID, stage, status, contex
 }
 
 // SetAutoRun 切换流水线的 auto_run 开关（运行中由 ControlPipeline("set_auto") 调用）。
+// 历史参数（R5-4 自动裁决已退役，保留兼容），现无行为效果。
 func (s *Store) SetAutoRun(ctx context.Context, runID string, autoRun bool) error {
 	return s.db.WithContext(ctx).Model(&PipelineRun{}).
 		Where("run_id = ?", runID).

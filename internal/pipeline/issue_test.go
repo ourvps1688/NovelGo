@@ -156,13 +156,14 @@ func TestServiceExecuteAuditLandsIssueRows(t *testing.T) {
 	require.Equal(t, IssueStatusPending, rows[0].Status)
 }
 
-// TestServiceExecuteAuditAutoRunKeepsAuditContext 验证 auto_run 自动裁决路径不丢体检结果：
-// Advance(ctx, run, ...) 持久化的是 run.ContextJSON，必须携带本轮刚产出的体检 JSON
-// （否则自动修复闭环会拿着陈旧/空 Audit 派发）。
-func TestServiceExecuteAuditAutoRunKeepsAuditContext(t *testing.T) {
+// TestServiceExecuteAuditLandsGateKeepsAuditContext（R5-4 auto_run 自动裁决退役）验证：
+// 检测收口统一落 awaiting_gate + G4 汇总闸门（裁决交还用户，即便 autoRun=true 也不自动
+// Advance），且本轮刚产出的体检 JSON 必须随上下文落库（不得丢体检结果）。
+func TestServiceExecuteAuditLandsGateKeepsAuditContext(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
+	captured := withCapturedGates(t)
 	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
 		if name == "signability-audit" {
 			return SkillOutput{Text: "```json\n" +
@@ -171,13 +172,17 @@ func TestServiceExecuteAuditAutoRunKeepsAuditContext(t *testing.T) {
 		return SkillOutput{Text: "ok"}, nil
 	}
 
-	run, err := svc.StartPipeline(ctx, 461, "new", nil, true) // autoRun
+	run, err := svc.StartPipeline(ctx, 461, "new", nil, true) // autoRun（历史参数，自动裁决已退役）
 	require.NoError(t, err)
 	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, `{}`))
 	svc.executeAudit(run.RunID, run.NovelID)
 
 	got, err := svc.store.GetByRunID(ctx, run.RunID)
 	require.NoError(t, err)
-	require.Equal(t, StageS3, got.CurrentStage, "auto pass 应自动回写作")
-	require.Contains(t, got.ContextJSON, "自动通过结论", "auto_run 路径的体检结果必须随上下文落库")
+	require.Equal(t, StatusAwaitingGate, got.Status, "R5-4：检测收口统一落等人态，零自动裁决")
+	require.Equal(t, StageS4, got.CurrentStage, "不得被 autoRun 自动推进（pass 也不自动 continue）")
+	require.Contains(t, got.ContextJSON, "自动通过结论", "体检结果必须随上下文落库")
+	gates := captured.all()
+	require.NotEmpty(t, gates, "应广播 G4 汇总闸门供检测汇总视图消费")
+	require.Equal(t, GateG4, gates[len(gates)-1].GateID)
 }

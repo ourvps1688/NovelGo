@@ -61,22 +61,22 @@ func TestOrchestratorFullRun(t *testing.T) {
 	require.Equal(t, StatusFinished, got.Status, "完本终检确认后应 finished")
 }
 
-// TestOrchestratorGateBlockResume 验证闸门点 Advance 后状态为 awaiting_gate，
-// 用户 ResumePipeline 恢复后继续推进（S3 普通闸 / G4 / G终 三类闸门）。
+// TestOrchestratorGateBlockResume 验证闸门停点（G4 / G终）Advance 后状态为 awaiting_gate，
+// 用户 ResumePipeline 恢复后继续推进；S3 段（R5-4 G3b 弹闸退役）验证写作节奏不落闸、持续 running。
 func TestOrchestratorGateBlockResume(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 
-	// S3 普通逐章闸：章数 +1（未达 5 章、未跨卷）→ 落 G3b 普通闸（awaiting_gate）。
+	// S3 普通逐章节奏（R5-4）：章数 +1（未达 5 章、未跨卷）→ 不落闸，S3 持续 running。
 	svc.chapterCount = func(_ context.Context, _ int64) (int, error) { return 4, nil }
 	svc.volumeBoundary = func(_ context.Context, _ int64) (bool, error) { return false, nil }
 	runID := startS3Run(t, svc, 610, `{"last_audit_chapter":3,"s4_audited":true}`)
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 	got, _ := svc.store.GetByRunID(ctx, runID)
-	require.Equal(t, StatusAwaitingGate, got.Status, "闸门点应停在 awaiting_gate")
+	require.Equal(t, StatusRunning, got.Status, "R5-4：S3 写作节奏不落闸，持续 running")
 	require.Equal(t, StageS3, got.CurrentStage)
-	// 用户继续 → 推进（普通闸 continue 回 S3 running）。
+	// 再次「继续」仍是纯按钮节奏（不会卡进任何闸门）。
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 	got, _ = svc.store.GetByRunID(ctx, runID)
 	require.Equal(t, StatusRunning, got.Status)
@@ -144,11 +144,12 @@ func TestOrchestratorPauseAtCheckpoint(t *testing.T) {
 	require.Equal(t, StatusPaused, got.Status, "暂停态不应推进")
 	require.Equal(t, StageS3, got.CurrentStage)
 
-	// 恢复后继续 → 正常推进到 awaiting_gate。
+	// 恢复后继续 → 回 S3 写作节奏（R5-4：不落闸，持续 running）。
 	require.NoError(t, svc.ControlPipeline(ctx, runID, "resume"))
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", ""))
 	got, _ = svc.store.GetByRunID(ctx, runID)
-	require.Equal(t, StatusAwaitingGate, got.Status, "恢复后应正常推进到闸门")
+	require.Equal(t, StatusRunning, got.Status, "恢复后应回 S3 写作节奏（R5-4 不落闸）")
+	require.Equal(t, StageS3, got.CurrentStage)
 }
 
 // TestOrchestratorS4S5ReAuditEdge 验证 S4→fix→S5→复评→S4 回边正确，且 audit_stage 在 S4/S4b 间保持。

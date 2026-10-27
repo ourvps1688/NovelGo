@@ -313,8 +313,8 @@ func (s *Service) buildBlocks(ctx context.Context, novelID int64, purpose contex
 
 // StartPipeline 启动一次新流水线，并广播阶段事件。
 // 续写模式（mode=continue）由调用方在 startChapter 传入起始章号。
-// autoRun 开启后，流水线在自动化的阶段（S2 蓝图 / S4 体检 / S5 修复）自动连跑，
-// 仅在闸门（G1 / G终）与需人工的写作（S1 孵化 / S3 逐章）处停下（详见 Orchestrator）。
+// autoRun 为历史参数（R5-4 自动裁决已退役、字段保留兼容零迁移）：闸门裁决一律交还用户，
+// 自动 = 只自动触发检测节奏（黄金三章首检/复检入口/完本终检入口），不含自动推进（详见 Orchestrator）。
 // 初始阶段由 DetermineEntryStage 依本书现状自动选择：新书→S1；存量书（有章节无台账）→S0；
 // 已就绪（有章节且有台账）→S3。
 func (s *Service) StartPipeline(ctx context.Context, novelID int64, mode string, startChapter *int, autoRun bool) (*PipelineRun, error) {
@@ -526,7 +526,7 @@ func (s *Service) reachedGoldenThree(ctx context.Context, novelID int64) bool {
 }
 
 // crossedVolumeBoundary 判断本书最新两章是否分属不同卷（即刚跨入新卷）。
-// 用于 PR4「卷边界复检」触发：一旦进入新卷，里程碑闸即提供「进入签约体检」选项。
+// 用于「卷边界复检」触发：一旦进入新卷，进度提示给复检建议（R5-4 起非阻塞 note）。
 func (s *Service) crossedVolumeBoundary(ctx context.Context, novelID int64) bool {
 	if s.volumeBoundary == nil {
 		return false
@@ -587,7 +587,7 @@ func (s *Service) auditPassed(ctx context.Context, runID string) bool {
 }
 
 // markAuditedJSON 在原 ContextJSON 上置 S4Audited=true 并记录当前已体检到的章节数，
-// 返回序列化结果。chapterCount 用于 PR4 里程碑闸的间距判定（避免每章重复复检）。
+// 返回序列化结果。chapterCount 用于里程碑复检的间距判定（避免每章重复复检）。
 func (s *Service) markAuditedJSON(contextJSON string, chapterCount int) string {
 	var ctxt GateContext
 	if contextJSON != "" {
@@ -602,7 +602,7 @@ func (s *Service) markAuditedJSON(contextJSON string, chapterCount int) string {
 	return string(b)
 }
 
-// milestoneSummary 生成 G3b 里程碑闸的提示文案（中文，由后端直接下发给前端展示）。
+// milestoneSummary 生成里程碑/卷边界的复检建议 note 文案（R5-4 G3b 弹闸退役，非阻塞提示）。
 func milestoneSummary(n, sinceLast int, crossed bool) string {
 	if crossed {
 		return fmt.Sprintf("已跨入新卷（累计 %d 章，距上次体检 %d 章）。建议在「卷边界复评」中做一次全卷签约体检，或继续写作。", n, sinceLast)
@@ -995,8 +995,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	}
 
 	// 检测-only 核心（R5-3 T1.1，detect.go）：跑体检 skill → 解析 → 合并 drift →
-	// 落工单/报告（新一轮清单落法）。提示词/契约单源不变；auto-advance/闸门裁决
-	// 留在本函数（流水线行为零变化）。
+	// 落工单/报告（新一轮清单落法）。提示词/契约单源不变；闸门裁决留在本函数
+	// （R5-4 起检测收口统一落等人态，裁决交还用户）。
 	outcome, err := s.runDetection(ctx, detectRequest{
 		runID:     runID,
 		novelID:   novelID,
@@ -1028,9 +1028,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	if quickCh != nil {
 		s.recordQuickAuditCompare(ctx, quickCh, audit.Verdict)
 	}
-	// 把含新体检结果的上下文同步进 run 对象：auto_run 分支的 Advance(ctx, run, ...)
-	// → enterFix / markAuditedJSON 持久化的正是 run.ContextJSON，若不刷新会在
-	// 自动裁决路径丢掉刚产出的体检结果（手动路径由下方 SetStageStatus 落 updated 无此问题）。
+	// 含新体检结果的上下文：下方落闸持久化用 updated，同时同步进 run 对象保持一致。
 	updated := outcome.Updated
 	run.ContextJSON = string(updated)
 
@@ -1042,31 +1040,8 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		return
 	}
 
-	// auto_run 自动裁决：仅对普通签约体检（S4/S4b）生效；完本终检（S6）必须人工确认 finish。
-	// 通过 → continue 回 S3；不通过 → fix 进 S5，但受修复轮数上限约束，避免无限循环。
-	if run.AutoRun && auditStage != StageS6 && ctxt.AuditKind != "blueprint" {
-		if audit.Verdict == "pass" {
-			if err := s.orchestrator.Advance(ctx, run, "continue"); err != nil {
-				s.logger.Error("S4 体检：自动继续推进失败", "err", err)
-			}
-			return
-		}
-		if ctxt.FixRounds >= autoFixCap {
-			// 超出修复轮数上限：改交人工决策，避免 auto_run 无休止推进修复环节
-			//（修复执行本身由工单显式触发，R5-2，此处只挡自动推进节奏）。
-			if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
-				s.logger.Error("S4 体检：落库闸门状态失败", "err", err)
-				return
-			}
-			s.emitGateDecision(ctx, runID, novelID, auditStage, audit)
-			return
-		}
-		if err := s.orchestrator.Advance(ctx, run, "fix"); err != nil {
-			s.logger.Error("S4 体检：自动进入修复闭环失败", "err", err)
-		}
-		return
-	}
-
+	// R5-4 自动裁决退役（WBS 契约 0.1）：检测收口统一「落 awaiting_gate + 汇总闸门事件」，
+	// 是否推进由人决定（G4/G终 停点语义=结论就绪、等人定夺；完本仍绝不自动确认）。
 	if err := s.store.SetStageStatus(ctx, runID, auditStage, StatusAwaitingGate, string(updated)); err != nil {
 		s.logger.Error("S4 体检：落库闸门状态失败", "err", err)
 		return
@@ -1640,9 +1615,8 @@ func driftPatrolPrompt(novelID int64) string {
 		"无冲突 → verdict=pass；有冲突 → needs_fix。", novelID)
 }
 
-// autoFixCap 是 auto_run 模式下「不通过→进修复环节」的最大轮数上限（修复轮数由工单
-// 修复收口递增，R5-2），超过则交人工决策，避免 auto_run 无限循环推进。
-const autoFixCap = 3
+// autoFixCap（R5-4 已退役）：auto_run 自动裁决分支随「裁决交还用户」一并摘除，
+// 修复轮数上限判断不再需要（FixRounds 仍保留供工单轮次统计与增量复验分轮）。
 
 // ── S6 完本终检（PR5）────────────────────────────────
 
@@ -1779,7 +1753,7 @@ func (s *Service) defaultHasLedger(ctx context.Context, novelID int64) (bool, er
 	return c > 0, nil
 }
 
-// setS3Running 把流水线置为 S3 逐章写作（running），供里程碑/普通闸在 auto_run 或继续时复用。
+// setS3Running 把流水线置为 S3 逐章写作（running），供进度提示与继续写作时复用。
 func (s *Service) setS3Running(ctx context.Context, run *PipelineRun) error {
 	if err := s.store.SetStageStatus(ctx, run.RunID, StageS3, StatusRunning, run.ContextJSON); err != nil {
 		return err
@@ -2627,8 +2601,8 @@ func (s *Service) ControlPipeline(ctx context.Context, runID, cmd string) error 
 		// 联动终止同族 run（book-run ↔ 卷级 scoped sub-run），避免孤儿子 run / 永久等待。
 		s.abortRelatives(ctx, run)
 	case "set_auto":
-		// 运行中切换 auto_run：翻转 AutoRun 字段。开启后，自动化的阶段（S2/S4/S5）
-		// 在闸门点自动裁决连跑；关闭则恢复为人工逐闸确认。
+		// 运行中切换 auto_run：翻转 AutoRun 字段。历史参数（R5-4 自动裁决已退役），
+		// 字段保留兼容零迁移；现无行为效果，闸门裁决一律交还用户。
 		if err := s.store.SetAutoRun(ctx, runID, !run.AutoRun); err != nil {
 			return err
 		}

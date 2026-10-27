@@ -77,9 +77,9 @@ func TestGFreezeOnVolumeBoundaryHandoff(t *testing.T) {
 	svc.SetVolumeFreezer(rec.freeze)
 
 	runID := startS3Run(t, svc, novelID, `{"last_audit_chapter":3,"s4_audited":true}`)
-	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", "")) // 跨卷 → G3b 闸
+	require.NoError(t, svc.ResumePipeline(ctx, runID, "continue", "")) // 跨卷 → 非阻塞提示（R5-4 不弹闸）
 
-	// G3b 选 audit_now：跨卷时 reason=volume（卷边界复评）。
+	// 显式 audit_now：跨卷时 reason=volume（卷边界复评）。
 	require.NoError(t, svc.ResumePipeline(ctx, runID, "audit_now", ""))
 	scoped, err := svc.store.GetActiveVolumeRun(ctx, novelID, v1)
 	require.NoError(t, err, "卷边界复评应定界在刚完结的前一卷 v1")

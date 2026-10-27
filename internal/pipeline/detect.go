@@ -6,7 +6,7 @@ package pipeline
 // 定位：把「体检本体」从流水线裁决中剥离为可复用核心——跑体检 skill → 解析结构化
 // 结果 → 合并确定性文风漂移（V 系）→ 落工单/报告。核心零 auto-advance、零修复派发、
 // 零闸门广播（检测-only 语义）：
-//   - 流水线内的裁决（auto_run 自动推进 / awaiting_gate + G4·G终广播）由
+//   - 流水线内的裁决（awaiting_gate + G4·G终 广播，R5-4 起裁决一律交还用户）由
 //     executeAudit / executeFinalAudit 调用本核心后承接，行为零变化（既有 pipeline
 //     测试零回退）；
 //   - 检测任务（RunDetectionTask，T1.2）直接消费核心结果，按 scope 落正确结果容器

@@ -28,8 +28,7 @@ func NewOrchestrator(svc *Service) *Orchestrator {
 
 // Advance 按当前阶段与决策推进流水线，是唯一的"下一步去哪"裁决点。
 //   - decision=abort：终止流水线。
-//   - 安全检查点：运行中若已被暂停/中止，挂起不推进（供 S5 每轮前 / S3 章间 /
-//     auto_run 章间轮询）。
+//   - 安全检查点：运行中若已被暂停/中止，挂起不推进（供 S5 每轮前 / S3 章间）。
 func (o *Orchestrator) Advance(ctx context.Context, run *PipelineRun, decision string) error {
 	if run.Status == StatusFinished || run.Status == StatusAborted {
 		return fmt.Errorf("流水线已 %s，无法推进", run.Status)
@@ -113,15 +112,19 @@ func (o *Orchestrator) advanceS2(ctx context.Context, run *PipelineRun, decision
 	}
 }
 
-// advanceS3 逐章写作阶段：处理完本终检入口、黄金三章首检、里程碑闸、普通逐章闸。
+// advanceS3 逐章写作阶段：处理完本终检入口、黄金三章首检与非阻塞进度提示。
+//
+// R5-4 G3b 弹闸退役（WBS 契约 0.2）：里程碑与普通逐章节奏不再落 awaiting_gate、
+// 不发 G3b 闸门事件，改非阻塞 stage note——S3 写作循环持续 running 不被检测打断，
+// 是否复检由用户经「进入体检/复检」显式触发（audit_now 分支保留，自动检测节奏红线不动）。
 func (o *Orchestrator) advanceS3(ctx context.Context, run *PipelineRun, decision string) error {
 	// 用户主动发起完本终检。
 	if decision == "finish_book" {
 		o.svc.enterFinalAudit(ctx, run)
 		return nil
 	}
-	// 用户显式选择「进入签约体检」（里程碑闸提供），直接进体检（卷边界复检走 S4b）。
-	// 触发原因按闸门成因区分：刚跨入新卷 → volume（卷边界复评，收口即 G_freeze 冻结前一卷）；
+	// 用户显式选择进入体检（复检入口），直接进体检（卷边界复检走 S4b）。
+	// 触发原因按成因区分：刚跨入新卷 → volume（卷边界复评，收口即 G_freeze 冻结前一卷）；
 	// 每 5 章里程碑 → milestone（中途复检，不冻结）。
 	if decision == "audit_now" {
 		reason := "milestone"
@@ -131,8 +134,7 @@ func (o *Orchestrator) advanceS3(ctx context.Context, run *PipelineRun, decision
 		o.svc.enterAudit(ctx, run, reason)
 		return nil
 	}
-	// 闸门响应态：用户在 G3b 闸门点了「continue」→ 回到写作循环（running）。
-	// 此时不再重新判定里程碑/生成闸门，否则会卡在闸门无法恢复写作。
+	// 闸门响应态：旧版 G3b 弹闸遗留的 awaiting_gate run（升级兼容），继续即回写作循环。
 	if run.Status == StatusAwaitingGate {
 		return o.svc.setS3Running(ctx, run)
 	}
@@ -141,7 +143,8 @@ func (o *Orchestrator) advanceS3(ctx context.Context, run *PipelineRun, decision
 		o.svc.enterAudit(ctx, run, "golden3")
 		return nil
 	}
-	// 已体检过：按里程碑逻辑判定是否弹「可复检」的 G3b 闸。
+	// 进度提示（非阻塞）：里程碑/卷边界给复检建议 note，普通节奏给「已完成第 N 章」note；
+	// 均不落闸、不发闸门事件，S3 持续 running（写作循环改纯按钮节奏）。
 	n, _ := o.svc.chapterCount(ctx, run.NovelID)
 	var ctxt GateContext
 	if run.ContextJSON != "" {
@@ -149,40 +152,14 @@ func (o *Orchestrator) advanceS3(ctx context.Context, run *PipelineRun, decision
 	}
 	sinceLast := n - ctxt.LastAuditChapter
 	crossed := o.svc.crossedVolumeBoundary(ctx, run.NovelID)
+	note := fmt.Sprintf("已完成第 %d 章。继续写作下一章；累计写满 5 章或进入新卷时可进入体检复检。", n)
 	if n >= 3 && (sinceLast >= 5 || crossed) {
-		// 里程碑闸：提供「进入签约体检」选项，引导用户在节点处复检。
-		if run.AutoRun {
-			// auto_run：跳过体检提示，直接继续写作（每 5 章/卷边界的复检改为人工触发）。
-			return o.svc.setS3Running(ctx, run)
-		}
-		if err := o.svc.store.SetStageStatus(ctx, run.RunID, StageS3, StatusAwaitingGate, run.ContextJSON); err != nil {
-			return err
-		}
-		emitGate(ctx, GatePayload{
-			RunID:   run.RunID,
-			NovelID: run.NovelID,
-			Stage:   StageS3,
-			GateID:  GateG3b,
-			Summary: milestoneSummary(n, sinceLast, crossed),
-			Options: []string{"continue", "audit_now", "abort"},
-		})
-		return nil
+		note = milestoneSummary(n, sinceLast, crossed)
 	}
-	// 普通逐章闸：维持循环，提示继续写作，待达里程碑或卷边界再提示体检。
-	if run.AutoRun {
-		return o.svc.setS3Running(ctx, run)
-	}
-	if err := o.svc.store.SetStageStatus(ctx, run.RunID, StageS3, StatusAwaitingGate, run.ContextJSON); err != nil {
+	if err := o.svc.store.SetStageStatus(ctx, run.RunID, StageS3, StatusRunning, run.ContextJSON); err != nil {
 		return err
 	}
-	emitGate(ctx, GatePayload{
-		RunID:   run.RunID,
-		NovelID: run.NovelID,
-		Stage:   StageS3,
-		GateID:  GateG3b,
-		Summary: fmt.Sprintf("已完成第 %d 章。继续写作下一章；累计写满 5 章或进入新卷时会提示进入签约体检。", n),
-		Options: []string{"continue", "abort"},
-	})
+	emitStage(ctx, StagePayload{RunID: run.RunID, NovelID: run.NovelID, Stage: StageS3, Status: StatusRunning, Note: note})
 	return nil
 }
 
