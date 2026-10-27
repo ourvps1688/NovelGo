@@ -11,19 +11,23 @@ const mocks = vi.hoisted(() => ({
   GetPatrolReport: vi.fn(),
   RunDetectionTask: vi.fn(),
   RecordFeatureUsage: vi.fn(),
+  // R5-4 验收 A：可变 usePipeline 状态（gate 呈现态常驻控件并存断言用）。
+  pipelineState: {
+    run: null as object | null,
+    stage: "",
+    status: "",
+    stageNote: "",
+    gate: null as object | null,
+    autoRun: false,
+    fixProgress: null,
+    fixActivity: [] as string[],
+    patrolTick: 0,
+  },
 }));
 
 vi.mock("@/hooks/usePipeline", () => ({
   usePipeline: () => ({
-    run: null,
-    stage: "",
-    status: "",
-    stageNote: "",
-    gate: null,
-    autoRun: false,
-    fixProgress: null,
-    fixActivity: [],
-    patrolTick: 0,
+    ...mocks.pipelineState,
     start: mocks.start,
     resume: mocks.resume,
     control: mocks.control,
@@ -38,7 +42,9 @@ vi.mock("@/lib/wailsjs/go/app/App", () => ({
 
 // 子面板全部 stub：本任务零 UI 重构，不验子面板内部行为。
 vi.mock("./PipelineControlBar", () => ({ default: () => null }));
-vi.mock("./PipelineGateCard", () => ({ default: () => null }));
+vi.mock("./PipelineGateCard", () => ({
+  default: () => <div data-testid="gate-card-stub" />,
+}));
 vi.mock("./BlueprintWorkflowView", () => ({ default: () => null }));
 vi.mock("./SignabilityAuditView", () => ({
   default: () => null,
@@ -56,6 +62,11 @@ describe("PipelineWizard：T3.1 编排预设定位（R5-3 契约 0.3）", () => 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.GetPatrolReport.mockResolvedValue(null);
+    mocks.pipelineState.run = null;
+    mocks.pipelineState.stage = "";
+    mocks.pipelineState.status = "";
+    mocks.pipelineState.stageNote = "";
+    mocks.pipelineState.gate = null;
   });
 
   it("空态定位文案：presetHint 明示双合法用法（只跑检测/只跑流水线皆合法）", () => {
@@ -98,6 +109,53 @@ describe("PipelineWizard：T3.1 编排预设定位（R5-3 契约 0.3）", () => 
     ).journey.create.stages.writingPipelineDesc;
     expect(zhDesc.length).toBeGreaterThan(0);
     expect(enDesc.length).toBeGreaterThan(0);
+  });
+
+  it("R5-4 验收 A：gate 呈现态常驻控件不遮蔽（S3 写作/复检/完本入口可点，不卡流程）", () => {
+    mocks.pipelineState.run = { run_id: "r1", novel_id: 1 };
+    mocks.pipelineState.stage = "S3";
+    mocks.pipelineState.status = "awaiting_gate";
+    mocks.pipelineState.gate = {
+      run_id: "r1",
+      novel_id: 1,
+      stage: "S4",
+      gate_id: "G4",
+      summary: "检测完毕",
+      options: ["continue", "fix", "abort"],
+    };
+    render(<PipelineWizard novelId={1} />);
+    // 检测汇总卡与常驻控件并存（不再被 gate 遮蔽）
+    expect(screen.getByTestId("gate-card-stub")).toBeInTheDocument();
+    // 写作节奏入口
+    fireEvent.click(
+      screen.getByRole("button", { name: "pipeline.checkProgress" }),
+    );
+    expect(mocks.resume).toHaveBeenCalledWith("continue");
+    // 复检入口（显式 audit_now，人决定推进）
+    fireEvent.click(screen.getByRole("button", { name: "pipeline.reaudit" }));
+    expect(mocks.resume).toHaveBeenCalledWith("audit_now");
+    // 完本终检入口
+    fireEvent.click(
+      screen.getByRole("button", { name: "pipeline.gate.finishBook" }),
+    );
+    expect(mocks.resume).toHaveBeenCalledWith("finish_book");
+  });
+
+  it("R5-4 验收 A：gate 呈现态 S1「继续」不遮蔽（蓝图停点不卡流程）", () => {
+    mocks.pipelineState.run = { run_id: "r1", novel_id: 1 };
+    mocks.pipelineState.stage = "S1";
+    mocks.pipelineState.status = "awaiting_gate";
+    mocks.pipelineState.gate = {
+      run_id: "r1",
+      novel_id: 1,
+      stage: "S1",
+      gate_id: "G1",
+      summary: "蓝图体检通过",
+      options: ["continue", "modify", "abort"],
+    };
+    render(<PipelineWizard novelId={1} />);
+    fireEvent.click(screen.getByRole("button", { name: "pipeline.continue" }));
+    expect(mocks.resume).toHaveBeenCalledWith("continue");
   });
 
   it("R5-4 T2.2 诚实红线（双语 JSON 断言）：零逼答话术、检测汇总话术统一、完本保留人工确认", async () => {
