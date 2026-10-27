@@ -282,6 +282,10 @@ export function GetContent(arg1, arg2) {
   return window['go']['app']['App']['GetContent'](arg1, arg2);
 }
 
+export function GetDetectionTaskStatus(arg1, arg2, arg3) {
+  return window['go']['app']['App']['GetDetectionTaskStatus'](arg1, arg2, arg3);
+}
+
 export function GetEnabledSkills(arg1) {
   return window['go']['app']['App']['GetEnabledSkills'](arg1);
 }
@@ -320,6 +324,10 @@ export function GetNovelSettings(arg1) {
 
 export function GetNovels() {
   return window['go']['app']['App']['GetNovels']();
+}
+
+export function GetPatrolReport(arg1) {
+  return window['go']['app']['App']['GetPatrolReport'](arg1);
 }
 
 export function GetPersonaSetting(arg1) {
@@ -432,6 +440,10 @@ export function InstallRemoteSkill(arg1) {
 
 export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
+}
+
+export function ListDetectionTaskStatuses(arg1) {
+  return window['go']['app']['App']['ListDetectionTaskStatuses'](arg1);
 }
 
 export function ListIssueTickets(arg1) {

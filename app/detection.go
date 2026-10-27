@@ -19,3 +19,30 @@ func (a *App) RunDetectionTask(novelID int64, kind string, scopeID *int64) (*pip
 	}
 	return a.pipeline.RunDetectionTask(a.ctx, novelID, kind, scopeID)
 }
+
+// GetDetectionTaskStatus 返回某类检测任务的状态（进行态 + 最近一次结果摘要，
+// R5-3 T1.3）。scopeID 为空取该 kind「最近一次检测」概览口径。
+func (a *App) GetDetectionTaskStatus(novelID int64, kind string, scopeID *int64) (*pipeline.DetectionTaskStatus, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetDetectionTaskStatus(a.ctx, novelID, kind, scopeID)
+}
+
+// ListDetectionTaskStatuses 返回四类检测任务的状态全量（概览口径），
+// 供旅程检测任务卡一次取齐（R5-3 T1.3/T2.1）。
+func (a *App) ListDetectionTaskStatuses(novelID int64) ([]pipeline.DetectionTaskStatus, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.ListDetectionTaskStatuses(a.ctx, novelID)
+}
+
+// GetPatrolReport 返回张力报告消费视图（R5-3 T1.3）：合并活跃流水线 run 与
+// structure 检测容器两源，按落库时间戳最新者胜；无报告返回 nil。
+func (a *App) GetPatrolReport(novelID int64) (*pipeline.PatrolReportView, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetPatrolReport(a.ctx, novelID)
+}

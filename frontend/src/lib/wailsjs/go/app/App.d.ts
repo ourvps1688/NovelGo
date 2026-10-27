@@ -171,6 +171,7 @@ export function GetCommitFileList(arg1:number,arg2:string):Promise<app.CommitFil
 export function GetCommitLog(arg1:number,arg2:number,arg3:string):Promise<Array<git.CommitInfo>>;
 
 export function GetContent(arg1:number,arg2:string):Promise<string>;
+export function GetDetectionTaskStatus(arg1:number,arg2:string,arg3:any):Promise<pipeline.DetectionTaskStatus>;
 
 export function GetEnabledSkills(arg1:number):Promise<Array<string>>;
 
@@ -191,6 +192,7 @@ export function GetModels():Promise<Array<llm.AvailableModel>>;
 export function GetNovelSettings(arg1:number):Promise<app.SettingResult>;
 
 export function GetNovels():Promise<Array<novel.Novel>>;
+export function GetPatrolReport(arg1:number):Promise<pipeline.PatrolReportView>;
 
 export function GetPersonaSetting(arg1:number):Promise<personasetting.PersonaSetting>;
 
@@ -248,6 +250,7 @@ export function InstallRemoteSkill(arg1:app.InstallRemoteSkillInput):Promise<app
 
 export function IsInitialized():Promise<boolean>;
 
+export function ListDetectionTaskStatuses(arg1:number):Promise<Array<pipeline.DetectionTaskStatus>>;
 export function ListIssueTickets(arg1:number):Promise<Array<pipeline.PipelineIssue>>;
 
 export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_novelgo_novelgo_internal_storage_PageResult_github_com_novelgo_novelgo_internal_skill_remote_RemoteSkillMeta__>;

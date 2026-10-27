@@ -209,7 +209,7 @@ func (s *Service) RunDetectionTask(ctx context.Context, novelID int64, kind stri
 
 // dispatchChapterDetect 章节检测分流：经注入的 chapterCIRunner 跑 L1 增量检查
 // （落质量档案），异步执行不阻塞调用方。未注入执行器时降级跳过（零提示零报错，
-// 回执 Dispatched=false 如实标记）。
+// 回执 Dispatched=false 如实标记）。派发即登记检测进行态（T1.3），收口注销。
 func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTaskResult {
 	res := &DetectionTaskResult{Kind: DetectionKindChapter, NovelID: novelID, ScopeID: &chapterID}
 	if s.chapterCIRunner == nil {
@@ -217,7 +217,9 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 		return res
 	}
 	runner := s.chapterCIRunner
+	s.beginDetect(DetectionKindChapter, novelID, &chapterID, "")
 	go func() {
+		defer s.endDetect(DetectionKindChapter, novelID, &chapterID)
 		if err := runner(s.appCtx, novelID, chapterID); err != nil {
 			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "err", err)
 		}
@@ -228,12 +230,14 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 
 // dispatchScopedDetect 卷/书/结构检测分流：建/复用检测容器 run 后派发执行体
 // （structure 复用 taskKindPatrol，卷/书走 taskKindDetect 检测-only 皮）。
+// 派发即登记检测进行态（T1.3：覆盖排队/执行/legacy 直跑全阶段），执行体收口注销。
 func (s *Service) dispatchScopedDetect(ctx context.Context, novelID int64, kind string, scopeID *int64) (*DetectionTaskResult, error) {
-	run, err := s.ensureDetectRun(ctx, novelID, scopeID)
+	run, err := s.ensureDetectRun(ctx, novelID, kind, scopeID)
 	if err != nil {
 		return nil, err
 	}
 	res := &DetectionTaskResult{Kind: kind, NovelID: novelID, ScopeID: scopeID, RunID: run.RunID, Dispatched: true}
+	s.beginDetect(kind, novelID, scopeID, run.RunID)
 	if kind == DetectionKindStructure {
 		s.dispatchExecutor(taskKindPatrol, run.RunID, novelID,
 			func() { go s.runConsistencyPatrol(s.appCtx, run.RunID, novelID) })
@@ -245,10 +249,10 @@ func (s *Service) dispatchScopedDetect(ctx context.Context, novelID int64, kind 
 }
 
 // ensureDetectRun 建/复用检测容器 run（WBS T1.2「scoped 检测 run」语义）：
-// 同 novel+scope 复用最新容器（新检测=同一容器换新一轮结果，工单整批替换语义
-// 自然成立）；无则新建（ModeDetect、出生即 StatusFinished）。
-func (s *Service) ensureDetectRun(ctx context.Context, novelID int64, volumeID *int64) (*PipelineRun, error) {
-	existing, err := s.store.GetDetectRun(ctx, novelID, volumeID)
+// 同 novel+kind+scope 复用最新容器（新检测=同一容器换新一轮结果，工单整批替换语义
+// 自然成立）；无则新建（mode='detect:<kind>'、出生即 StatusFinished）。
+func (s *Service) ensureDetectRun(ctx context.Context, novelID int64, kind string, volumeID *int64) (*PipelineRun, error) {
+	existing, err := s.store.GetDetectRun(ctx, novelID, kind, volumeID)
 	if err == nil && existing != nil {
 		return existing, nil
 	}
@@ -258,7 +262,7 @@ func (s *Service) ensureDetectRun(ctx context.Context, novelID int64, volumeID *
 	run := &PipelineRun{
 		NovelID:      novelID,
 		RunID:        uuid.NewString(),
-		Mode:         ModeDetect,
+		Mode:         detectModeOf(kind),
 		CurrentStage: detectContainerStage,
 		Status:       StatusFinished,
 		VolumeID:     volumeID,
@@ -276,6 +280,8 @@ func (s *Service) ensureDetectRun(ctx context.Context, novelID int64, volumeID *
 // 零阶段推进（检测-only 语义）；失败静默降级（零提示零报错，不改检测口径）。
 func (s *Service) executeDetectAudit(runID string, novelID int64) {
 	ctx := s.appCtx
+	// 检测进行态注销（T1.3）：按 runID 注销派发时登记的条目（含加载失败早退路径）。
+	defer s.endDetectByRunID(runID)
 	run, err := s.store.GetByRunID(ctx, runID)
 	if err != nil {
 		s.logger.Warn("检测任务：加载检测容器失败（非阻断）", "run_id", runID, "err", err)
@@ -313,9 +319,18 @@ func (s *Service) executeDetectAudit(runID string, novelID int64) {
 	if serr := s.store.SetStageStatus(ctx, runID, run.CurrentStage, run.Status, string(outcome.Updated)); serr != nil {
 		s.logger.Warn("检测任务：结果落库失败", "run_id", runID, "err", serr)
 	}
-	detectKind := DetectionKindVolume
-	if run.VolumeID == nil {
+	// kind 由容器 mode 推导（T1.3 按 kind 分容器后 mode='detect:<kind>' 是权威来源；
+	// 异常 mode 兜底按 VolumeID 判定，绝不空 kind 广播）。
+	detectKind := DetectionKindBook
+	switch run.Mode {
+	case detectModeOf(DetectionKindVolume):
+		detectKind = DetectionKindVolume
+	case detectModeOf(DetectionKindBook):
 		detectKind = DetectionKindBook
+	default:
+		if run.VolumeID != nil {
+			detectKind = DetectionKindVolume
+		}
 	}
 	emitDetectDone(ctx, map[string]any{
 		"novel_id":    novelID,

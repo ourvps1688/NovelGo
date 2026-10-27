@@ -118,6 +118,12 @@ type Service struct {
 	// 入队失败时 dispatchExecutor 降级走裸 goroutine（迁移前行为，语义不变）。
 	taskStore  *task.Store
 	taskRunner *task.Runner
+	// detectRunning 是检测任务进行态登记表（T1.3，detect_status.go）：key=detectKey
+	// （detect:<kind>:<novelID>:<scope>），value=结果容器 RunID（章节检测为空串）。
+	// 派发即登记（覆盖排队/执行/legacy 直跑全阶段），执行体收口（含失败）注销。
+	// 纯进程内单源：任务队列启动清扫（AbandonActive）会把跨进程残留活跃任务置 dead，
+	// 「进行态」与执行体生命周期同进程，无需回查 task 表。
+	detectRunning sync.Map
 }
 
 // NewService 构造流水线服务。

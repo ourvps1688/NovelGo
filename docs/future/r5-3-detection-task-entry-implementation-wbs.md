@@ -61,6 +61,8 @@
 
 ### T1.3 检测任务结果消费面（报告视图接线）
 
+> **实施定案补记（T1.3 落地时）**：两个开放设计点定案——①**检测容器按 kind 分化**：mode 由 `'detect'` 改为 `'detect:<kind>'`（`detectModeOf`，GetDetectRun 加 kind 参数 + 新增 `GetLatestDetectRun`）。book 与 structure 共享全书容器有两害：按 kind 的「最近一次检测」粒度分不开 updated_at；detect/patrol 是不同队列 dedup key 可并发执行，各自 read-modify-write 同一容器 ContextJSON 会互相覆盖丢结果——分容器一并根治。②**张力报告双源合并**：`GetPatrolReport(novelID)` 合并「活跃流水线 run」（G_freeze 自动巡检/control "patrol" 落点）与「structure 检测容器」（检测任务落点）两源，按落库时间戳最新者胜——GateContext 新增 `PatrolReportAt *time.Time`（storePatrolReport 打戳；time.Time 是 struct 不能 omitempty 必须指针；旧数据无戳回退 run.UpdatedAt，因活跃 run 的 UpdatedAt 会被其他写入推高只作兜底）。PatrolReportPanel 数据源换此口（渲染条件 `run || patrolReport`，onRun 无 run 时回退 `RunDetectionTask(structure)`），组件 props 契约零改动。检测状态查询：`DetectionTaskStatus{Kind, NovelID, ScopeID, Running, LastRunID, LastVerdict, LastIssueCount, LastRunAt}` + `GetDetectionTaskStatus`（scopeID 空=最近一次概览）+ `ListDetectionTaskStatuses`（四 kind 全量供 T2.1）；chapter 结果取质量档案（L1Status+L0/L1 发现数），volume/book 取容器 Audit，structure 取 PatrolReport。**进行态=进程内登记表**（Service.detectRunning：派发即登记、执行体收口含失败注销，覆盖排队/执行/legacy 全阶段）——不回查 task 表：队列启动清扫 AbandonActive 使进行态与执行体生命周期同进程，单一源免双判据。测试坑：GateContext.Audit/PatrolReport 是 string 字段存 JSON 文本，夹具必须 JSON 串字面量（塞裸对象→Unmarshal 整体失败静默降级零结果）；gorm 默认 logger 只打报错查询，成功 SQL 不留痕（勿以日志缺失推断未执行）。
+
 - **文件触点**：`internal/pipeline/`（检测报告查询）、`app/`（绑定）。
 - **交付物**：检测任务完成后前端可查：卷/书体检→verdict + 发现项工单（既有 `IssueTicketsPanel`/`ListIssueTickets` 跨 run 查询，天然可用）；巡检→张力报告（既有 `PatrolReportPanel`）；章节→质量档案（既有）。补检测任务状态查询（按 novel+kind 查最近一次检测结果/进行态）供旅程面板展示。
 - **验收**：四类检测结果各自可达现有面板（不新建重复视图）；检测进行态可见（R0 观测 `exec_run_stats` 已有，复用）。

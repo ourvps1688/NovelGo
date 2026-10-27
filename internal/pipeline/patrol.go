@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/novelgo/novelgo/internal/contextasm"
 )
@@ -45,6 +46,9 @@ func patrolPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 // （不落库、不广播、不阻断）——兜底巡检不给流水线添堵。
 func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelID int64) {
 	bg := s.appCtx
+	// 检测进行态注销（T1.3）：巡检·结构检测派发时按容器 runID 登记，收口（含失败）注销；
+	// 流水线侧巡检无登记条目，注销为 no-op。
+	defer s.endDetectByRunID(runID)
 	out, err := s.dispatchSkill(bg, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)),
@@ -67,6 +71,7 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 
 // storePatrolReport 把张力报告写入 run 的 ContextJSON.PatrolReport（只读展示用，
 // 不进任何修复路由）。仿 storeStockAudit：写前重读 run，保留当前 stage/status。
+// 同步打落库时间戳 PatrolReportAt（T1.3）：GetPatrolReport 双源合并按时间戳最新者胜。
 func (s *Service) storePatrolReport(ctx context.Context, runID string, data AuditData) error {
 	cur, err := s.store.GetByRunID(ctx, runID)
 	if err != nil {
@@ -77,7 +82,9 @@ func (s *Service) storePatrolReport(ctx context.Context, runID string, data Audi
 		_ = json.Unmarshal([]byte(cur.ContextJSON), &ctxt)
 	}
 	reportJSON, _ := json.Marshal(data)
+	now := time.Now()
 	ctxt.PatrolReport = string(reportJSON)
+	ctxt.PatrolReportAt = &now
 	updated, merr := json.Marshal(ctxt)
 	if merr != nil {
 		return merr

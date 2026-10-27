@@ -21,11 +21,20 @@ const (
 	StatusAborted  = "aborted"
 )
 
-// ModeDetect 标记检测任务（R5-3 T1.2）的结果容器 run。容器出生即 StatusFinished，
-// 借既有 status 过滤天然隔离 GetByNovel / GetActiveVolumeRun / RecoverInterruptedRuns /
-// abortRelatives 等活跃 run 链路（既有查询零改动、绝不污染 book-run）；复用走
-// GetDetectRun（mode='detect' + scope 匹配），进行态可见走 R0 观测与任务队列（T1.3）。
+// ModeDetect 是检测任务（R5-3 T1.2/T1.3）结果容器 run 的 mode 家族前缀。
+// 容器出生即 StatusFinished，借既有 status 过滤天然隔离 GetByNovel /
+// GetActiveVolumeRun / RecoverInterruptedRuns / abortRelatives 等活跃 run 链路
+// （既有查询零改动、绝不污染 book-run）；进行态可见走进程内检测登记表（T1.3）。
+//
+// 实际 mode 值按 kind 分容器（T1.3 开放设计点①定案）：'detect:<kind>'
+// （detectModeOf）。book 与 structure 若共享全书容器有两害——①按 kind 的
+// 「最近一次检测」粒度分不开 updated_at；② detect/patrol 是不同队列 dedup key
+// 可并发执行，各自 read-modify-write 同一容器 ContextJSON 会互相覆盖丢结果。
+// 复用走 GetDetectRun（mode+scope 匹配，同 scope 复用同 RunID）。
 const ModeDetect = "detect"
+
+// detectModeOf 生成检测容器的 mode 值：'detect:<kind>'（kind ∈ DetectionKind*）。
+func detectModeOf(kind string) string { return ModeDetect + ":" + kind }
 
 // PipelineRun 记录一次创作流水线的运行状态，支持重启续跑。
 // 卷级作用域（G1 scoped sub-run）：book-run（VolumeID 为空）挂卷级 scoped sub-run
@@ -34,7 +43,7 @@ type PipelineRun struct {
 	ID           int64  `gorm:"primaryKey;autoIncrement"`
 	NovelID      int64  `gorm:"column:novel_id;index;not null"`
 	RunID        string `gorm:"column:run_id;uniqueIndex;not null"`
-	Mode         string `gorm:"column:mode;not null;default:new"` // new | continue | detect（检测容器，ModeDetect）
+	Mode         string `gorm:"column:mode;not null;default:new"` // new | continue | detect:<kind>（检测容器，detectModeOf）
 	StartChapter *int   `gorm:"column:start_chapter"`             // 续写模式起始章号
 	CurrentStage string `gorm:"column:current_stage;not null"`
 	Status       string `gorm:"column:status;not null"`
@@ -105,6 +114,11 @@ type GateContext struct {
 	// 建议性报告，只报告不改写、绝不进自动修复路由（区别于 Audit/StockAudit），改不改由作者定。
 	// 卷末（G_freeze 冻结成功）自动一次 + 控制指令 "patrol" 手动触发，供巡检报告视图只读展示。
 	PatrolReport string `json:"patrol_report,omitempty"`
+	// PatrolReportAt 是张力报告的落库时间戳（storePatrolReport 打戳；time.Time 是
+	// struct 不能 omitempty，必须指针）。GetPatrolReport 双源合并（活跃 run + structure
+	// 检测容器）按此时间戳最新者胜；旧数据无此键时回退 run.UpdatedAt（活跃 run 的
+	// UpdatedAt 会被其他写入推高，只作兜底判据不作首选）。
+	PatrolReportAt *time.Time `json:"patrol_report_at,omitempty"`
 	// （R3c 退役）Interrupted/Dispatching 两个补丁布尔已删除：执行体存活与中断恢复
 	// 改用任务队列的租约语义（task.Store.HasActiveForRun + kind:run_id 活跃去重，
 	// 见 task_dispatch.go）。旧 ContextJSON 里残留的 interrupted/dispatching 键
@@ -283,11 +297,11 @@ func (s *Store) GetActiveVolumeRun(ctx context.Context, novelID, volumeID int64)
 	return &run, nil
 }
 
-// GetDetectRun 取该小说某作用域最新的检测任务容器 run（mode='detect'，R5-3 T1.2）。
-// volumeID 为空=全书容器（书体检/巡检·结构），非空=卷级容器（卷体检）。
+// GetDetectRun 取该小说某 kind 某作用域最新的检测任务容器 run（mode='detect:<kind>'，
+// R5-3 T1.2/T1.3）。volumeID 为空=全书容器（书体检/巡检·结构），非空=卷级容器（卷体检）。
 // 无则返回 gorm.ErrRecordNotFound，由 ensureDetectRun 新建。
-func (s *Store) GetDetectRun(ctx context.Context, novelID int64, volumeID *int64) (*PipelineRun, error) {
-	q := s.db.WithContext(ctx).Where("novel_id = ? AND mode = ?", novelID, ModeDetect)
+func (s *Store) GetDetectRun(ctx context.Context, novelID int64, kind string, volumeID *int64) (*PipelineRun, error) {
+	q := s.db.WithContext(ctx).Where("novel_id = ? AND mode = ?", novelID, detectModeOf(kind))
 	if volumeID == nil {
 		q = q.Where("volume_id IS NULL")
 	} else {
@@ -295,6 +309,20 @@ func (s *Store) GetDetectRun(ctx context.Context, novelID int64, volumeID *int64
 	}
 	var run PipelineRun
 	if err := q.Order("id DESC").First(&run).Error; err != nil {
+		return nil, err
+	}
+	s.hydrateGateObjects(ctx, []*PipelineRun{&run})
+	return &run, nil
+}
+
+// GetLatestDetectRun 取该小说某 kind 最近一次检测的容器 run（不限作用域）：
+// 检测状态查询（T1.3）在无 scopeID 时取「最近一次检测」结果用。无则返回
+// gorm.ErrRecordNotFound。
+func (s *Store) GetLatestDetectRun(ctx context.Context, novelID int64, kind string) (*PipelineRun, error) {
+	var run PipelineRun
+	if err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND mode = ?", novelID, detectModeOf(kind)).
+		Order("id DESC").First(&run).Error; err != nil {
 		return nil, err
 	}
 	s.hydrateGateObjects(ctx, []*PipelineRun{&run})

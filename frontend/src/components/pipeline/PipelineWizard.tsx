@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, CheckCircle, Play, ScanSearch } from "lucide-react";
 import { usePipeline } from "@/hooks/usePipeline";
+import { GetPatrolReport, RunDetectionTask } from "@/lib/wailsjs/go/app/App";
+import type { pipeline } from "@/lib/wailsjs/go/models";
+import type { AuditData } from "@/types/pipeline";
 import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import PipelineGateCard from "./PipelineGateCard";
 import BlueprintWorkflowView from "./BlueprintWorkflowView";
@@ -49,19 +52,31 @@ export default function PipelineWizard({ novelId }: Props) {
     }
   }, [run]);
 
-  // 解析全书一致性巡检（张力报告，WBS 3.3）：存于 run.ContextJSON.patrol_report，
-  // 与 stock_audit 同模式（只读展示，绝不进自动修复路由）。
-  const patrolReport = useMemo(() => {
-    if (!run?.ContextJSON) return null;
-    try {
-      const c = JSON.parse(run.ContextJSON);
-      const raw = c.patrol_report;
-      if (!raw) return null;
-      return typeof raw === "string" ? JSON.parse(raw) : raw;
-    } catch {
-      return null;
-    }
-  }, [run]);
+  // 全书一致性巡检（张力报告，WBS 3.3）：经 GetPatrolReport 双源合并取数
+  // （活跃流水线 run + structure 检测容器，按落库时间戳最新者胜，R5-3 T1.3）——
+  // finished 检测容器的结果也可达本面板。patrolTick（巡检完成事件）变化即重拉；
+  // 取数失败静默（降级零提示），只读展示，绝不进自动修复路由。
+  const [patrolReport, setPatrolReport] = useState<AuditData | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    GetPatrolReport(novelId)
+      .then((view: pipeline.PatrolReportView | null) => {
+        if (cancelled) return;
+        if (!view?.report) {
+          setPatrolReport(null);
+          return;
+        }
+        try {
+          setPatrolReport(JSON.parse(view.report));
+        } catch {
+          setPatrolReport(null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [novelId, patrolTick]);
 
   return (
     <div className="flex h-full flex-col">
@@ -196,16 +211,23 @@ export default function PipelineWizard({ novelId }: Props) {
         ) : null}
 
         {/* 卷级管理面板（阶段 4）：一致性巡检报告 / retcon 审批 / 卷冻结管理。
-            与流水线阶段无关常驻展示，巡检报告依赖 run（无 run 时隐藏）。 */}
+            与流水线阶段无关常驻展示；巡检报告经双源合并取数，有历史报告或活跃
+            run 皆可见（R5-3 T1.3：finished 检测容器结果可达本面板）。 */}
         <div className="mt-4 flex flex-col gap-3">
-          {run ? (
+          {run || patrolReport ? (
             <PatrolReportPanel
               data={patrolReport}
               tick={patrolTick}
               onRun={() => {
                 // 巡检动作埋点（P4 T2.2）：失败静默零提示。
                 trackFeature(ACTION_FEATURE_KEYS.patrol);
-                control("patrol");
+                if (run) {
+                  control("patrol");
+                  return;
+                }
+                // 无活跃流水线：走检测任务独立入口（R5-3 T1.2，巡检·结构），
+                // 完成沿用 consistency_patrol 事件刷新本面板。
+                RunDetectionTask(novelId, "structure", null).catch(() => {});
               }}
             />
           ) : null}

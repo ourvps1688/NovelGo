@@ -122,7 +122,7 @@ func TestRunDetectionTaskVolumeAndBookLandTickets(t *testing.T) {
 
 	run, gerr := svc.store.GetByRunID(ctx, res.RunID)
 	require.NoError(t, gerr)
-	require.Equal(t, ModeDetect, run.Mode)
+	require.Equal(t, detectModeOf(DetectionKindVolume), run.Mode, "卷检测容器按 kind 分容器（T1.3）")
 	require.Equal(t, StatusFinished, run.Status, "检测容器出生即终态")
 	require.Equal(t, detectContainerStage, run.CurrentStage)
 	require.NotNil(t, run.VolumeID)
@@ -193,10 +193,11 @@ func TestRunDetectionTaskStructureLandsPatrolReport(t *testing.T) {
 
 	run, gerr := svc.store.GetByRunID(ctx, res.RunID)
 	require.NoError(t, gerr)
-	require.Equal(t, ModeDetect, run.Mode)
+	require.Equal(t, detectModeOf(DetectionKindStructure), run.Mode, "巡检·结构检测容器按 kind 分容器（T1.3）")
 	var ctxt GateContext
 	require.NoError(t, json.Unmarshal([]byte(run.ContextJSON), &ctxt))
 	require.Contains(t, ctxt.PatrolReport, "检测出2条问题", "张力报告应落检测容器")
+	require.NotNil(t, ctxt.PatrolReportAt, "张力报告落库应打时间戳（T1.3 双源合并判据）")
 	rows, lerr := svc.store.ListIssues(ctx, 902, res.RunID)
 	require.NoError(t, lerr)
 	require.Empty(t, rows, "巡检只报告不改写：零发现项工单")
