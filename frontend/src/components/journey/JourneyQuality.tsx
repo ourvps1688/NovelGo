@@ -12,13 +12,20 @@ import JourneyHeader from "./JourneyHeader";
 import JourneyCard from "./JourneyCard";
 import DetectionTasks from "./DetectionTasks";
 
-/** 三面板次级导航：labelKey 复用既有面板标签单源（shell.* / pipeline.title），禁自造变体。 */
+/** 三面板次级导航：labelKey 复用既有面板标签单源（shell.* / pipeline.title），禁自造变体。
+ *  R5-3 T3.1 编排预设定位：pipeline 入口 tooltip 带预设表述（不宣称唯一入口，
+ *  检测任务区可只跑检测不跑流水线，流水线亦可不手动跑检测）。 */
 const PANEL_LINKS: {
   id: "signability" | "pipeline" | "reader";
   labelKey: string;
+  titleKey?: string;
 }[] = [
   { id: "signability", labelKey: "shell.workflow" },
-  { id: "pipeline", labelKey: "pipeline.title" },
+  {
+    id: "pipeline",
+    labelKey: "pipeline.title",
+    titleKey: "pipeline.presetHint",
+  },
   { id: "reader", labelKey: "shell.readerView" },
 ];
 
@@ -73,6 +80,7 @@ export default function JourneyQuality() {
             <button
               key={p.id}
               type="button"
+              title={p.titleKey ? t(p.titleKey) : undefined}
               onClick={() => setActivePanel(p.id)}
               className="h-7 rounded-md border bg-card px-3 text-xs text-foreground/90 transition-colors hover:border-foreground/20 hover:bg-muted/50"
             >

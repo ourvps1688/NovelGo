@@ -94,6 +94,11 @@ export default function PipelineWizard({ novelId }: Props) {
             <p className="text-sm text-muted-foreground">
               {t("pipeline.empty")}
             </p>
+            {/* R5-3 T3.1 编排预设定位：流水线=「写→检测」一键串起的便捷壳，
+                可只跑检测不跑流水线、可只跑流水线不手动跑检测皆合法（不宣称唯一入口）。 */}
+            <p className="text-xs text-muted-foreground/80">
+              {t("pipeline.presetHint")}
+            </p>
             <button
               type="button"
               className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-primary-foreground text-sm"

@@ -96,6 +96,8 @@
 
 ### T3.1 编排预设定位（契约 0.3）
 
+> **实施定案补记（T3.1 落地时）**：纯定位/文案任务，零后端触碰（Orchestrator.Advance/闸门语义零改动，G 闸门降级仍属 R5-4）。三处定位文案：①`PipelineWizard` 空态加 `pipeline.presetHint`（「开始流水线」决策点，明示双合法用法：只跑检测不跑流水线、只跑流水线不手动跑检测皆合法）；②`JourneyCreate` 写作流水线卡加 `descKey=writingPipelineDesc`（编排预设=「写→检测」一键串起的便捷壳）；③`JourneyQuality` pipeline 直达入口加 `titleKey=presetHint` tooltip（PANEL_LINKS 扩可选 titleKey 字段，labelKey 单源禁自造变体纪律不变）。`pipeline.title` 双语补「（编排预设）」后缀，`detect.hint` 补「只跑检测不跑流水线完全合法（流水线只是可选的编排预设）」——全程零「唯一入口」宣称（诚实红线，测试 JSON 断言锁死）。**测试坑**：`ALL_SIDEBAR_PANEL_IDS` 实为 22 项（SidebarPanelId 含 "search"；PanelId 21 项，勿混）；vitest 断言 i18n 文案时 mock 返回 key 字面量，文案内容断言须直接 import 双语 JSON（PipelineWizard.test 的诚实断言模式）。双速卡并列语义勿动（plan §6.1 反模式），descKey 只加描述不改跳转。
+
 - **文件触点**：`frontend/src/components/pipeline/PipelineWizard.tsx`（定位文案）、i18n、`JourneyQuality`/`JourneyCreate`（预设入口表述）。
 - **交付物**：流水线框为"编排预设（写→检测一键串起的便捷壳）"——入口文案/说明调整，明确"可只跑检测不跑流水线、可只跑流水线不手动跑检测"。**不删流水线能力、不动 Orchestrator.Advance/闸门语义**（G 闸门降级属 R5-4）。
 - **验收**：文案/定位诚实（不宣称"唯一入口"）；流水线功能零回退；PanelId 零删除。

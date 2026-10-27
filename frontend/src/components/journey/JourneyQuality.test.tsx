@@ -165,6 +165,15 @@ describe("JourneyQuality：T3.2 旅程卡与三面板次级导航", () => {
     fireEvent.click(nav.getByText("shell.readerView"));
     expect(usePanelStore.getState().activePanel).toBe("reader");
   });
+
+  it("T3.1 编排预设定位：pipeline 直达入口 tooltip 带预设表述", () => {
+    render(<JourneyQuality />, { wrapper });
+    const nav = within(screen.getByTestId("journey-quality-panel-nav"));
+    expect(nav.getByText("pipeline.title").closest("button")).toHaveAttribute(
+      "title",
+      "pipeline.presetHint",
+    );
+  });
 });
 
 // T2.1 验收（R5-3 契约 0.1/0.4）：检测任务四入口独立可点、不依赖流水线阶段；

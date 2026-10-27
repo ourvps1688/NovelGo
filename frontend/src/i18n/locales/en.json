@@ -1861,7 +1861,7 @@
     "bookpitchDesc": "Feed an idea; book-pitch drafts title/blurb/tags & directions, then build the book"
   },
   "pipeline": {
-    "title": "Creation Pipeline",
+    "title": "Creation Pipeline (Orchestration Preset)",
     "autoRun": "Auto Run",
     "alignFull": "Full Align",
     "alignFullHint": "Run full alignment on the imported book: build volume, backfill ledger, and run a whole-book signability audit",
@@ -1896,6 +1896,7 @@
       "GEnd": "Final Gate"
     },
     "empty": "No pipeline run is in progress.",
+    "presetHint": "Orchestration preset: a one-click shell chaining writing → detection. Running detection only (entries live in the Quality journey) or running the pipeline only without manual detection — both are legitimate.",
     "start": "Start Pipeline",
     "continue": "Continue",
     "checkProgress": "Check Writing Progress",
@@ -2127,6 +2128,7 @@
         "intent": "Intent: book pitch & blueprint",
         "writingFree": "Writing: free chat",
         "writingPipeline": "Writing: pipeline",
+        "writingPipelineDesc": "Orchestration preset: a one-click shell chaining writing → detection; you can also skip the pipeline and run detection on its own in the Quality journey.",
         "rewrite": "Rewrite"
       },
       "panelNav": "Panel quick links"
@@ -2141,7 +2143,7 @@
       },
       "detect": {
         "title": "Detection Tasks",
-        "hint": "Start any detection on its own, independent of pipeline stage; results land in the quality ledger / issue tickets / tension report.",
+        "hint": "Start any detection on its own, independent of pipeline stage — detection without the pipeline is perfectly legitimate (the pipeline is just an optional writing → detection orchestration preset); results land in the quality ledger / issue tickets / tension report.",
         "start": "Run detection",
         "viewResult": "View results",
         "fresh": "New",

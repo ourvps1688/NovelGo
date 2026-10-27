@@ -64,7 +64,9 @@ export default function JourneyCreate() {
           feedsKey="shell.factory.create.feeds"
           onClick={() => setActivePanel("bookpitch")}
         />
-        {/* 双速写作卡并列：自由区 chat + 质检区 pipeline（禁止合并，plan §6.1 反模式） */}
+        {/* 双速写作卡并列：自由区 chat + 质检区 pipeline（禁止合并，plan §6.1 反模式）。
+            R5-3 T3.1 编排预设定位：流水线=「写→检测」一键串起的便捷壳（可只跑流水线
+            不手动跑检测），单独检测入口在质检旅程（可只跑检测不跑流水线）——皆合法。 */}
         <JourneyCard
           titleKey="journey.create.stages.writingFree"
           feedsKey="shell.factory.create.feeds"
@@ -72,6 +74,7 @@ export default function JourneyCreate() {
         />
         <JourneyCard
           titleKey="journey.create.stages.writingPipeline"
+          descKey="journey.create.stages.writingPipelineDesc"
           feedsKey="shell.factory.create.feeds"
           onClick={() => setActivePanel("pipeline")}
         />

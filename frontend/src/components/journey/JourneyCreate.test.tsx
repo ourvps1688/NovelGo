@@ -41,6 +41,10 @@ describe("JourneyCreate：T4.2 旅程卡、双速并列与十面板次级导航"
     const pipeline = screen.getByText("journey.create.stages.writingPipeline");
     expect(free).toBeInTheDocument();
     expect(pipeline).toBeInTheDocument();
+    // T3.1 编排预设定位：流水线卡带预设表述（写→检测一键串起的便捷壳）
+    expect(
+      screen.getByText("journey.create.stages.writingPipelineDesc"),
+    ).toBeInTheDocument();
 
     fireEvent.click(free);
     expect(usePanelStore.getState().activePanel).toBe("chapters");
