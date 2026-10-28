@@ -58,6 +58,7 @@ import { useWindowState } from "@/hooks/useWindowState";
 import { useImportNovel } from "@/hooks/useImportNovel";
 import type { PanelId, SidebarPanelId } from "@/types/panel";
 import { usePanelStore } from "@/stores/usePanelStore";
+import { useSettingsOpenStore } from "@/stores/useSettingsOpenStore";
 import { useFocusStore } from "@/stores/useFocusStore";
 import { useEditorStore } from "@/stores/useEditorStore";
 import { useGitStore } from "@/components/git/useGitStore";
@@ -172,8 +173,12 @@ export default function WorkspaceView({
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // 全局「打开设置」通道（useSettingsOpenStore）：工单面板等子面板可经此打开
+  // 设置并定位到指定 tab（如「切换模型」），无需逐层透传 props。
+  const settingsOpen = useSettingsOpenStore((s) => s.open);
+  const settingsTab = useSettingsOpenStore((s) => s.tab);
+  const closeSettings = useSettingsOpenStore((s) => s.close);
   const [activeSkillName, setActiveSkillName] = useState<string | null>(null);
   // 技能矩阵筛选状态提升到 WorkspaceView，供 SidePanel 与 SkillMatrixView 共享。
   const [skillMatrixSearch, setSkillMatrixSearch] = useState("");
@@ -482,7 +487,9 @@ export default function WorkspaceView({
               {THEME_ICON[theme]}
             </button>
             <button
-              onClick={() => setShowSettings(true)}
+              onClick={() =>
+                useSettingsOpenStore.getState().requestOpen("general")
+              }
               className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer w-8 h-8 flex items-center justify-center mr-1"
               title={t("workspace.settings")}
             >
@@ -715,9 +722,9 @@ export default function WorkspaceView({
         <StatusBar />
 
         <SettingsDialog
-          open={showSettings}
-          onClose={() => setShowSettings(false)}
-          initialTab="general"
+          open={settingsOpen}
+          onClose={closeSettings}
+          initialTab={settingsTab ?? "general"}
         />
 
         <HelpDialog open={showHelp} onClose={() => setShowHelp(false)} />

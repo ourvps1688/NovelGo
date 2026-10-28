@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ClipboardCheck, Loader2, Wrench, XCircle } from "lucide-react";
+import {
+  ClipboardCheck,
+  Loader2,
+  Wrench,
+  XCircle,
+  AlertTriangle,
+} from "lucide-react";
 import type { pipeline } from "@/lib/wailsjs/go/models";
 import {
   ConfirmIssueTickets,
@@ -11,6 +17,8 @@ import {
 } from "@/lib/wailsjs/go/app/App";
 import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
+import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
+import { useSettingsOpenStore } from "@/stores/useSettingsOpenStore";
 import { IssueScopeTags } from "./IssueTags";
 
 function fmtTime(v?: unknown): string {
@@ -50,6 +58,12 @@ function refOf(row: pipeline.PipelineIssue): pipeline.IssueTicketRef {
   return { run_id: row.run_id, issue_key: row.issue_key };
 }
 
+// 是否「供应商疑似挂起」：后端熔断哨兵错误（errProviderTripped）文案统一含
+// 「疑似供应商挂起」并提示已跳过派发。与真错误区分——挂起可重试/切模型，真错误才纯提示。
+function isProviderTrip(msg: string): boolean {
+  return msg.includes("疑似供应商挂起") || msg.includes("已跳过派发");
+}
+
 // IssueTicketsPanel 是发现项工单面板（R5-1，提案 §10.1/§10.2）：检测产出的问题
 // 统统沉淀为工单，**人工修复入口**。按钮显式驱动状态机：发现 → 确认 →（人工）
 // 修复中 → 复验通过/驳回。修复动作永远由人触发；「复验」显式点击后按增量复验契约
@@ -65,6 +79,9 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   >("");
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissReason, setDismissReason] = useState("");
+  // 供应商疑似挂起弹窗（#271 中期方案）：复验遇熔断时给可操作弹窗，区分可重试与真错误。
+  const [tripOpen, setTripOpen] = useState(false);
+  const [tripError, setTripError] = useState("");
 
   const load = useCallback(() => {
     ListIssueTickets(novelId)
@@ -84,6 +101,11 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   );
   const selectedRefs = useMemo(
     () => visible.filter((r) => selected.has(r.id)).map((r) => refOf(r)),
+    [visible, selected],
+  );
+  // 选中工单整行（供「去修复」构造发给聊天的上下文）。
+  const selectedRows = useMemo(
+    () => visible.filter((r) => selected.has(r.id)),
     [visible, selected],
   );
 
@@ -143,6 +165,84 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       t("pipeline.tickets.dismissOk", { count: selectedRefs.length }),
     );
   }, [dismissReason, runAction, novelId, selectedRefs, t]);
+
+  // 「去修复」的下一步（#270）：把选中工单的问题上下文发到中央聊天窗口，给人工明确
+  // 的修复入口；同时把状态翻为「修复中」以记录进度。即使状态标记失败（如供应商挂起），
+  // 上下文已发到聊天，不丢失下一步。
+  const onFix = useCallback(async () => {
+    const rows = selectedRows;
+    if (rows.length === 0) {
+      toastInfo(t("pipeline.tickets.selectHint"));
+      return;
+    }
+    setBusy("fix");
+    try {
+      const items = rows
+        .map((r, i) => {
+          const ch = chaptersOf(r);
+          const chText = ch.length
+            ? `  ${t("pipeline.tickets.chapters", { list: ch.join(", ") })}`
+            : "";
+          return `${i + 1}. [${r.issue_key}] ${r.area}\n    ${t(
+            "pipeline.tickets.fixPromptDesc",
+          )} ${r.desc}${chText}`;
+        })
+        .join("\n\n");
+      const content =
+        `${t("pipeline.tickets.fixPromptTitle")}\n\n${items}\n\n` +
+        t("pipeline.tickets.fixPromptFooter");
+      // 先发聊天（最重要的下一步），再标记状态，避免状态标记失败吞掉下一步。
+      useChatLaunchStore.getState().send?.(content);
+      await StartIssueFixTickets(
+        novelId,
+        rows.map((r) => refOf(r)),
+      );
+      toastSuccess(t("pipeline.tickets.fixSent", { count: rows.length }));
+      setSelected(new Set());
+      setDismissOpen(false);
+      setDismissReason("");
+      load();
+    } catch (error) {
+      // 状态标记失败仍保留选中以便重试；聊天上下文已发出。
+      toastError(toErrorMessage(error));
+      load();
+    } finally {
+      setBusy("");
+    }
+  }, [selectedRows, novelId, t, load]);
+
+  // 「复验」遇供应商挂起（#271 中期方案）：弹可操作弹窗（重试/切换模型/关闭），
+  // 区分可重试的挂起与真错误；真错误仍走纯文本提示。
+  const onVerify = useCallback(async () => {
+    const refs = selectedRefs;
+    if (refs.length === 0) {
+      toastInfo(t("pipeline.tickets.selectHint"));
+      return;
+    }
+    setBusy("verify");
+    try {
+      const sum = await VerifyIssueTickets(novelId, refs);
+      toastSuccess(
+        t("pipeline.tickets.verifyOk", {
+          confirmed: sum?.confirmed ?? 0,
+          rejected: sum?.rejected ?? 0,
+          unverified: sum?.unverified ?? 0,
+        }),
+      );
+      setSelected(new Set());
+      load();
+    } catch (error) {
+      const msg = toErrorMessage(error);
+      if (isProviderTrip(msg)) {
+        setTripError(msg);
+        setTripOpen(true);
+      } else {
+        toastError(msg);
+      }
+    } finally {
+      setBusy("");
+    }
+  }, [selectedRefs, novelId, t, load]);
 
   return (
     <div className="flex flex-col gap-3 rounded border bg-card p-4">
@@ -213,13 +313,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
               <button
                 type="button"
                 disabled={busy !== "" || selectedRefs.length === 0}
-                onClick={() =>
-                  void runAction(
-                    "fix",
-                    () => StartIssueFixTickets(novelId, selectedRefs),
-                    t("pipeline.tickets.fixOk", { count: selectedRefs.length }),
-                  )
-                }
+                onClick={() => void onFix()}
                 className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
               >
                 {busy === "fix" ? (
@@ -233,25 +327,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                 type="button"
                 disabled={busy !== "" || selectedRefs.length === 0}
                 title={t("pipeline.tickets.verifyHint")}
-                onClick={() =>
-                  void runAction(
-                    "verify",
-                    async () => {
-                      const sum = await VerifyIssueTickets(
-                        novelId,
-                        selectedRefs,
-                      );
-                      toastSuccess(
-                        t("pipeline.tickets.verifyOk", {
-                          confirmed: sum?.confirmed ?? 0,
-                          rejected: sum?.rejected ?? 0,
-                          unverified: sum?.unverified ?? 0,
-                        }),
-                      );
-                    },
-                    "",
-                  )
-                }
+                onClick={() => void onVerify()}
                 className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
               >
                 {busy === "verify" ? (
@@ -381,6 +457,66 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
           </p>
         )
       )}
+
+      {/* 供应商疑似挂起弹窗（#271 中期方案）：复验遇熔断时给可操作弹窗，
+          区分可重试的挂起与真错误；重试复用 onVerify，切换模型经全局设置通道。 */}
+      {tripOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setTripOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle className="w-4 h-4 text-warning" />
+              <span className="text-sm font-semibold">
+                {t("pipeline.tickets.tripTitle")}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              {t("pipeline.tickets.tripHint")}
+            </p>
+            <pre className="mb-3 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 text-[11px] text-muted-foreground">
+              {tripError}
+            </pre>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setTripOpen(false)}
+                className="rounded border px-3 py-1.5 text-xs hover:bg-muted"
+              >
+                {t("pipeline.tickets.tripClose")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTripOpen(false);
+                  useSettingsOpenStore.getState().requestOpen("model");
+                }}
+                className="rounded border px-3 py-1.5 text-xs hover:bg-muted"
+              >
+                {t("pipeline.tickets.switchModel")}
+              </button>
+              <button
+                type="button"
+                disabled={busy !== ""}
+                onClick={() => {
+                  setTripOpen(false);
+                  void onVerify();
+                }}
+                className="inline-flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {busy === "verify" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : null}
+                {t("pipeline.tickets.retry")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
