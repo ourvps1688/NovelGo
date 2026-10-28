@@ -1889,19 +1889,6 @@
       "finish": "Confirm Completion",
       "abort": "Abort"
     },
-    "stage": {
-      "S0": "Import Align",
-      "S1": "Incubate Blueprint",
-      "G1": "Blueprint Gate",
-      "S2": "Worldbuilding",
-      "S3": "Chapter Writing",
-      "G3b": "Milestone Gate",
-      "S4": "Signability Audit",
-      "S5": "Fix Loop",
-      "S4b": "Volume Re-audit",
-      "S6": "Final Audit",
-      "GEnd": "Final Gate"
-    },
     "empty": "No pipeline run is in progress.",
     "presetHint": "Orchestration preset: a one-click shell chaining writing → detection. Running detection only (entries live in the Quality journey) or running the pipeline only without manual detection — both are legitimate.",
     "start": "Start Pipeline",
@@ -1909,10 +1896,6 @@
     "checkProgress": "Check Writing Progress",
     "reaudit": "Run Audit / Re-check",
     "reauditHint": "Run a signability audit / re-check on current progress. Results are summarized in the detection summary card; you decide whether to proceed.",
-    "currentStage": "Current stage: {{stage}}",
-    "stageBarTitle": "Creation Pipeline",
-    "awaitingGate": "Awaiting confirmation",
-    "running": "Running",
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
       "s3": "Writing chapter by chapter — keep writing according to the volume outline. Every 5 chapters, or when crossing into a new volume, the system suggests an audit re-check (non-blocking; writing is never interrupted). Click \"Check Writing Progress\" to trigger that check, or use \"Run Audit / Re-check\" anytime."

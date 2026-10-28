@@ -146,9 +146,3 @@ export interface FixActivityItem {
   ok: boolean;
   failed: boolean;
 }
-
-// 侧栏/顶部阶段条仅追踪**写作阶段**进度（S0 对齐入口 → S3 逐章写作 → G3b 里程碑）。
-// R5 检测核心已将「检测 / 修复闭环 / 完本终检」从流水线解耦为独立检测任务
-// （四 kind 独立启动 + 工单人工修复），故阶段条不再含 S4/S5/S4b/S6/GEnd
-// （旧「修复闭环」等阶段不再作为流水线阶段渲染，消除图3 不合理展示）。
-export const PIPELINE_STAGES = ["S0", "S1", "G1", "S2", "S3", "G3b"] as const;
