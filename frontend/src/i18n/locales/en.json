@@ -2011,7 +2011,7 @@
       "fixPromptDesc": "Description: ",
       "fixPromptFooter": "Give actionable edit suggestions one by one; when a direct rewrite is needed, cite the chapter and paragraph.",
       "tripTitle": "Provider appears unresponsive",
-      "tripHint": "The LLM provider has hit too many idle stream timeouts recently and was auto-circuit-broken, pausing dispatch. Retry later, or switch model/provider and retry.",
+      "tripHint": "The LLM provider has hit too many hard failures recently (connection refused / 5xx / header timeout) and was auto-circuit-broken, pausing dispatch; it will auto-probe in half-open after cooldown. Retry later, or switch model/provider and retry.",
       "retry": "Retry",
       "switchModel": "Switch model",
       "tripClose": "Close",
