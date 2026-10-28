@@ -19,12 +19,14 @@ type GetChapterListArgs struct {
 	PageArgs // 嵌入分页参数
 }
 
-// GetChapterListTool 获取章节目录，按阅读顺序降序。
+// GetChapterListTool 获取章节目录，按阅读顺序升序（第1章在前）。
 type GetChapterListTool struct{}
 
 func (t *GetChapterListTool) Name() string { return "get_chapter_list" }
 func (t *GetChapterListTool) Description() string {
-	return "获取小说的章节目录，支持分页。按阅读顺序降序排列（最新的在前），按卷分组展示每章的稳定 ID、实时阅读序号、标题和字数。"
+	return "获取小说的章节目录，支持分页。按阅读顺序升序排列（第1章在最前、依次递增），按卷分组展示每章的「稳定 ID [chapter_id]」与「实时阅读序号 [第N章]」、标题和字数。" +
+		"注意：chapter_id 是数据库主键（稳定不变），不等于阅读序号；重排/换卷后 chapter_id 与第几章的对应关系会变化。" +
+		"要按阅读序号（第N章）精确读写正文/大纲，请直接使用路径 chapters/no_{N}.md / outlines/no_{N}.md（系统会确定性解析为对应的 chapter_id），不要自行用序号推算 chapter_id。"
 }
 func (t *GetChapterListTool) Category() ToolCategory { return CategoryNovelManagement }
 
@@ -42,7 +44,7 @@ func (t *GetChapterListTool) Execute(ctx context.Context, args any, tc ToolConte
 	chStore := chapter.NewStore(tc.DB, tc.LoggerOrDefault())
 	result, err := chStore.ListByNovel(ctx, nil, tc.NovelID, chapter.ListByNovelOptions{
 		PageParams: storage.PageParams{Page: a.Page, Size: a.Size},
-		Order:      "desc",
+		Order:      "asc",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list chapters: %w", err)

@@ -43,16 +43,17 @@ func TestGetChapterListGroupsByVolume(t *testing.T) {
 	if !ok {
 		t.Fatalf("content = %#v, want string", result.Data["content"])
 	}
-	want := fmt.Sprintf(`## 未分卷
-- 第4章《未分卷草稿》 [chapter_id:%d] · 1400 字
+	// 升序：第一卷在前、第二卷次之、未分卷置于末尾；第1章对应第一卷首章。
+	want := fmt.Sprintf(`## 第一卷 [volume_id:%d]
+- 第1章《初入江湖》 [chapter_id:%d] · 1100 字
+- 第2章《夜宿客栈》 [chapter_id:%d] · 1200 字
 
 ## 第二卷 [volume_id:%d]
 - 第3章《再入京城》 [chapter_id:%d] · 1300 字
 
-## 第一卷 [volume_id:%d]
-- 第2章《夜宿客栈》 [chapter_id:%d] · 1200 字
-- 第1章《初入江湖》 [chapter_id:%d] · 1100 字`,
-		chapters[3].ID, secondVolumeID, chapters[2].ID, firstVolumeID, chapters[1].ID, chapters[0].ID)
+## 未分卷
+- 第4章《未分卷草稿》 [chapter_id:%d] · 1400 字`,
+		firstVolumeID, chapters[0].ID, chapters[1].ID, secondVolumeID, chapters[2].ID, chapters[3].ID)
 	if content != want {
 		t.Errorf("content =\n%s\nwant:\n%s", content, want)
 	}
