@@ -36,3 +36,11 @@
 - #261 PIPELINE_STAGES 移除 S4/S5/S4b/S6/GEnd（保留 S0/S1/G1/S2/S3/G3b）。
 - #262 i18n（pipeline.title→检测核心，zh/en）+ featureKeys.test.tsx 移除 PipelineGateCard 引用。
 - #263 四道闸 + vitest 验证（format:check/i18n:check/lint 0 error/build/vitest 全绿）→ 一任务一提交推送核 0 0。
+
+## 供应商熔断重设计（P0 已落地，commit 74800a1b）
+- **根因修复**：原 `provider_trip.go` 用「近 10min 空闲超时 ≥10 次」当硬信号误熔断（thinking 模型长静默/代理缓冲被误杀）。P0 把「空闲超时」从熔断触发信号**剥离**，熔断只认**硬失败**。
+- **三态自愈熔断器** `internal/llm/breaker.go`：`providerBreakerManager` 全局单例 `ProviderBreaker`，按 provider 隔离；三态 Closed/Open/Half-Open；阈值初值 `hardFailureTrip=5`、`hardFailureWindow=2min`、`breakerCooldown=30s`、`breakerProbeSuccess=1`；Open 冷却到期→自动 Half-Open 探针，探针成功→Closed、失败→回 Open（自愈）。
+- **硬失败口径**（`retry_matrix.go` 置 `APIError.Hard`）：连接拒绝 / DNS 不可达 / 首字节超时 / `>=5xx` → `Hard=true`；瞬时 EOF/reset、429/408、其余 4xx、空闲超时 → `Hard=false`。空闲超时（idle watchdog）**只观测**（`idleFires`/`RecentIdleTimeouts`），绝不驱动熔断。
+- **接线**：`stream.go` 两处错误点（`apiErrorFromNetErr`/`apiErrorFromHTTP`）`Hard` 时 `ProviderBreaker.RecordHardFailure(providerName)`；`parseSSE` 改为返回 `hadError`，仅流正常结束（`!hadError`）调 `RecordSuccess`（软错误不回血）。`provider_trip.go` `providerTripped()` 改基于 `llm.ProviderBreaker.AnyOpen` 取数接缝 `breakerOpenProviders`（替换旧 `idleTimeoutCount`），废弃 `fixProviderIdleTrip`/`providerIdleWindow` 作熔断条件。
+- **测试纪律**：`breakerOpenProviders` 是可替换接缝（测试钉 `["deepseek"]` 确定触发）；`TestSkillRunnerDispatchOnlyViaTripGuard` 仍锁 `s.skillRunner(` 仅 1 处（在 `dispatchSkill` 内）。新增 `breaker_test.go` 覆盖三态迁移/阈值/按 provider 隔离/自愈/空闲不触发。
+- **P1 待办（未做）**：①chat 通道 `app/chat.go` 直连 `agent.Run`→`ChatStream` 仍不查 breaker，需接 `ProviderBreaker` 共用；②空闲预算放宽（观测口径）。P0 不解决 chat 绕过问题。
