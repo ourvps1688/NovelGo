@@ -1777,7 +1777,7 @@
   },
   "signability": {
     "title": "Signability Workflow",
-    "subtitle": "One-click whole-book signability audit (book-level detection task): assess signing potential and consistency issues. Results are summarized as tickets in the Detection Core panel; fixes are always triggered by you.",
+    "subtitle": "One-click whole-book signability audit (book-level detection task): assess signing potential and consistency issues. Results render inline on this page as a signability assessment and findings overview; fixes are always triggered by you.",
     "genreConstraint": "Always cite this book's genre-card constraints (hook / conflict engine / chapter-end hook / no-drift / payoff density / emotional curve / word count). With no genre card, fall back to general web-novel standards without erroring out.",
     "startButton": "Run Signability Audit",
     "auditing": "Signability audit in progress…",
@@ -1785,7 +1785,9 @@
     "continueHint": "A signability pipeline is already running at stage {{stage}}. Click to return to the pipeline panel and continue.",
     "selectNovelFirst": "Select a book on the left first",
     "configureModelFirst": "Configure a model in Settings first",
-    "launchFailed": "Failed to start the pipeline. Please retry."
+    "launchFailed": "Failed to start the pipeline. Please retry.",
+    "evaluation": "Signability Assessment",
+    "evaluationHint": "Findings overview from this whole-book audit. Confirm each item, then Start Fix, or send it to chat to collaborate with the AI on edits."
   },
   "bookpitch": {
     "title": "New Book Pitch Workflow",
@@ -1855,7 +1857,7 @@
   },
   "workflow": {
     "title": "Workflow",
-    "subtitle": "Pick a detection task to start: chapter / volume / full-book signability audit / structure patrol each have their own entry; results are summarized in Detection Core.",
+    "subtitle": "Pick a detection task to start: chapter / volume / full-book signability audit / structure patrol each have their own entry and landing page; results render inline, fixes are manual.",
     "signability": "Signability Workflow",
     "signabilityDesc": "Assess signing potential with a guided blueprint-to-audit loop",
     "bookpitch": "New Book Pitch Workflow",
@@ -2155,6 +2157,9 @@
         "selectVolume": "Select volume",
         "emptyChapters": "No chapters yet",
         "emptyVolumes": "No volumes yet",
+        "resultTitle": "Detection Result",
+        "viewTickets": "View & handle tickets in Detection Core",
+        "viewQuality": "View quality ledger",
         "verdict": {
           "pass": "Pass",
           "needs_fix": "Needs fix",

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FileText,
@@ -7,11 +7,11 @@ import {
   Play,
   AlertTriangle,
   Loader2,
-  ArrowRight,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ListDetectionTaskStatuses,
+  ListIssueTickets,
   RunDetectionTask,
 } from "@/lib/wailsjs/go/app/App";
 import { detectionKeys } from "@/lib/queryKeys";
@@ -23,17 +23,32 @@ import { useSettings } from "@/components/settings/useSettings";
 import { usePanelStore } from "@/stores/usePanelStore";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-import type { PanelId } from "@/types/panel";
-import type { chapter, volume } from "@/lib/wailsjs/go/models";
+import type { pipeline, chapter, volume } from "@/lib/wailsjs/go/models";
 
 type DetectKind = "chapter" | "volume" | "structure";
 
-// 检测结果跳转落点（与 DetectionTasks 一致）：章节→章节面板（质量档案），
-// 卷/结构→检测核心面板（工单/张力报告）。
-const RESULT_PANEL: Record<DetectKind, PanelId> = {
-  chapter: "chapters",
-  volume: "pipeline",
-  structure: "pipeline",
+// verdict → i18n key（卷/结构=pass|needs_fix；章节=质量档案 L1Status
+// checked|pending|skipped）。未知值如实显示原值（宁缺勿错不造词）。
+const VERDICT_KEYS: Record<string, string> = {
+  pass: "journey.quality.detect.verdict.pass",
+  needs_fix: "journey.quality.detect.verdict.needs_fix",
+  checked: "journey.quality.detect.verdict.checked",
+  pending: "journey.quality.detect.verdict.pending",
+  skipped: "journey.quality.detect.verdict.skipped",
+  error: "journey.quality.detect.verdict.error",
+};
+
+// 工单状态徽章配色（与 IssueTicketsPanel 同口径）：内联结果只读展示用。
+const STATUS_CLS: Record<string, string> = {
+  pending: "bg-warning/10 text-warning-foreground",
+  confirmed: "bg-primary/10 text-primary",
+  fixing: "bg-primary/10 text-primary",
+  fixed: "bg-primary/10 text-primary",
+  verified: "bg-success/10 text-success-foreground",
+  dismissed: "bg-muted text-muted-foreground",
+  skipped: "bg-muted text-muted-foreground",
+  rewrite: "bg-warning/10 text-warning-foreground",
+  retcon: "bg-warning/10 text-warning-foreground",
 };
 
 const SELECT_CLS =
@@ -51,8 +66,9 @@ interface Props {
 }
 
 // 检测工作流详情视图（R5 检测核心）：工作流侧栏选中某一检测种类后，主区渲染对应的
-// 独立启动界面——章节/卷需先选 scope，结构无需 scope。只启动检测、不跑流水线；
-// 完成后跳到结果落点（章节→质量档案，卷/结构→检测核心）。修复由人工触发。
+// 独立落地页——章节/卷需先选 scope，结构无需 scope。只启动检测、不跑流水线；
+// 完成后**就地内联展示结果**（章节→质量档案入口，卷/结构→本页工单概览），不再
+// 强制跳到共享「检测核心」页。修复由人工在工单面板触发。
 export default function DetectionWorkflowView({ novelId, kind }: Props) {
   const { t } = useTranslation();
   const [launching, setLaunching] = useState(false);
@@ -84,6 +100,19 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   const st = (statuses ?? []).find((s) => s.kind === kind);
   const running = !!st?.running;
 
+  // 就地内联结果数据源：卷/结构检测落发现项工单（按 run_id 取本种类最近一次结果）；
+  // 章节检测落质量档案（非工单），内联区仅给入口跳转，不列工单。
+  const { data: allIssues } = useQuery({
+    queryKey: ["detect-inline-issues", novelId],
+    queryFn: async () => (await ListIssueTickets(novelId)) ?? [],
+    enabled: !!novelId && !!st?.last_run_at,
+  });
+  const inlineIssues: pipeline.PipelineIssue[] = useMemo(() => {
+    if (kind === "chapter" || !st?.last_run_id) return [];
+    const runId = st.last_run_id;
+    return (allIssues ?? []).filter((r) => r.run_id === runId);
+  }, [allIssues, kind, st?.last_run_id]);
+
   const scopeReady =
     kind === "chapter"
       ? effChapterId != null
@@ -107,13 +136,13 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
       trackFeature(ACTION_FEATURE_KEYS.detect);
       await RunDetectionTask(novelId, kind, effScope);
       queryClient.invalidateQueries({ queryKey: detectionKeys.list(novelId) });
-      setActivePanel(RESULT_PANEL[kind]);
+      // 不再强制跳转到共享「检测核心」页：结果在本页就地内联展示（见下方结果区）。
     } catch (err) {
       toastError(toErrorMessage(err, t("signability.launchFailed")));
     } finally {
       setLaunching(false);
     }
-  }, [novelId, hasModel, kind, effScope, queryClient, setActivePanel, t]);
+  }, [novelId, hasModel, kind, effScope, queryClient, t]);
 
   const noNovel = !novelId;
   const buttonDisabled =
@@ -197,13 +226,68 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
         ) : null}
 
         {st?.last_run_at ? (
-          <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground/70">
-            <span>
+          <div className="mt-4 rounded-lg border bg-muted/30 p-3 max-w-3xl">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-foreground">
+                {t("journey.quality.detect.resultTitle")}
+              </span>
+              {st.last_verdict ? (
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                  {VERDICT_KEYS[st.last_verdict]
+                    ? t(VERDICT_KEYS[st.last_verdict])
+                    : st.last_verdict}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
               {t("journey.quality.detect.lastRun", {
                 at: fmtTime(st.last_run_at),
                 count: st.last_issue_count ?? 0,
               })}
-            </span>
+            </p>
+
+            {inlineIssues.length > 0 ? (
+              <ul className="mt-2 flex flex-col gap-1.5">
+                {inlineIssues.slice(0, 12).map((r) => (
+                  <li
+                    key={r.id}
+                    className="rounded border bg-card px-2 py-1.5 text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[11px] ${
+                          STATUS_CLS[r.status] ??
+                          "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {t(`pipeline.tickets.status.${r.status}`)}
+                      </span>
+                      <span className="shrink-0 font-medium">
+                        {r.issue_key}
+                      </span>
+                      <span className="truncate font-medium">{r.area}</span>
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+                      {r.desc}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setActivePanel(kind === "chapter" ? "chapters" : "pipeline")
+                }
+                className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
+              >
+                {kind === "chapter"
+                  ? t("journey.quality.detect.viewQuality")
+                  : t("journey.quality.detect.viewTickets")}
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -238,16 +322,6 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               ? t("journey.quality.detect.running")
               : t("journey.quality.detect.start")}
           </button>
-          {st?.last_run_at ? (
-            <button
-              type="button"
-              onClick={() => setActivePanel(RESULT_PANEL[kind])}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
-            >
-              {t("journey.quality.detect.viewResult")}
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          ) : null}
         </div>
       </div>
     </div>
