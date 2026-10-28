@@ -22,6 +22,12 @@
 - 重启 wails dev 要点：①`/c/Users/Administrator/go/bin/wails.exe dev`（带全套 Go/CGO export）；②重启前 `rm -rf frontend/dist/assets`（否则 vite emptyDir 触发 SAFE_DELETE_BULK_CONFIRM_REQUIRED 失败）；③结束旧进程用 PowerShell `Stop-Process -Id <pid> -Force`。wails watcher 会卡死不重建，修完须核验运行中构建（grep 二进制文案实证新代码进进程）。
 - 队列测试「入队后断言不被执行」须先停/延后消费循环。MCP read 工具 start_line 越界=窗口平移收敛+note；破坏性参数才 required。grep 零回退口径：P0–P2 工件、theme token、desktop-first、PanelId 零删除。
 
+## 章节寻址约定（聊天 LLM 防找错章，勿回退）
+- **chapter_id 是稳定主键（DB 自增），阅读序号是实时计算（volumes.sort_order+chapters.sort_order），二者不等价；换卷/重排后对应关系会变。** 前端严格用后端 reading_number，编号本身没错。
+- `get_chapter_list` **升序**返回（第1章在最前、未分卷置末尾）；Description 明示 chapter_id≠阅读序号，并提示用 `no_{N}` 定位。
+- 章节物理路径仍按 id 落盘（`chapters/id_{id}.md` / `outlines/id_{id}.md`）。新增**按阅读序号确定性寻址** `chapters/no_{N}.md` / `outlines/no_{N}.md`：`git.ChapterPathRef` 增 `ByReadingNumber`/`ReadingNumber`，`ParseChapterLikePath` 增 `no_(\d+)` 正则；read/edit 经 `resolveChapterRef`→`chapter.Store.GetChapterIDByReadingNumber` 反查再落物理路径；越界返回明确业务错误。`agent/chapterID` 同步解析 `no_{N}` 保证展示标题正确。
+- 工具描述铁律：让 LLM 精修「第N章」必须用 `no_{N}`，严禁把 get_chapter_list 里的「第N章」直接当 id 推算（错误示例：精修第1章却用 id_1）。
+
 ## 当前任务（2026-10 末）：前端切到检测核心
 - #257 新建 DetectionCorePanel（组合 IssueTicketsPanel+PatrolReportPanel+RetconPanel+VolumeManagePanel，react-query 取 GetPatrolReport + ListDetectionTaskStatuses；为 PatrolReportPanel 供 data/tick/onRun(structure 检测)）。
 - #258 WorkspaceView 的 pipeline 面板切到 DetectionCorePanel（移除 PipelineWizard 导入与渲染分支）。
