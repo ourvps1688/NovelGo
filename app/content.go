@@ -9,6 +9,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/text"
@@ -80,9 +81,11 @@ func (a *App) SaveContent(input SaveContentInput) error {
 		return err
 	}
 
-	// T-AGG-5：保存的是 skill 文件（新增/编辑源 mental skill）→ 自动重建受影响的跨书聚合档案。
+	// T-AGG-5：保存的是 skill 文件（新增/编辑源 mental skill）→ 自动重建受影响的跨书聚合档案；
+	// 同时若是创作心智（kind=mental），自动让其对本书生效（勾选常驻 + 设为写作人格）。
 	if isSkillPath(input.Path) {
 		a.reconcileAggregated()
+		a.autoActivateMentalSkill(input.NovelID, input.Content)
 	}
 
 	if ref, ok := git.ParseChapterLikePath(input.Path); ok && !ref.IsOutline && !ref.IsNew && ref.VolumeID == 0 {
@@ -150,4 +153,59 @@ func (a *App) validateVolumeContentPath(novelID int64, filePath string) error {
 
 func isSkillPath(p string) bool {
 	return strings.HasPrefix(p, "skills/") || strings.HasPrefix(p, "~/.novelgo/skills/")
+}
+
+// autoActivateMentalSkill 在提取/创建的心智（kind=mental）技能落盘后，自动让它对本书生效：
+// (A) 合并追加到本书 .enabled.json 勾选启用（等效临时 always，聊天 + 号菜单可见已勾选、常驻注入）；
+// (C) 若本书尚未开启写作人格，则自动设为本书 PenLine 人格（kind=skill, ref=技能名），使其在写作模式常驻注入。
+// 幂等、best-effort：任何失败仅记录告警，不影响 SaveContent 主流程。
+// 仅当路径为 skill 路径时由 SaveContent 调用（input.Path 已通过 isSkillPath 校验）。
+func (a *App) autoActivateMentalSkill(novelID int64, content string) {
+	if novelID <= 0 {
+		return
+	}
+	sk, err := skill.ParseBytes([]byte(content), "")
+	if err != nil {
+		a.logger.Warn("自动激活心智：解析失败，已跳过", "novel_id", novelID, "err", err)
+		return
+	}
+	if sk.Kind != "mental" || sk.Name == "" {
+		return
+	}
+
+	// (A) 合并追加到本书启用清单（保留已有勾选，去重）。
+	enabled, err := skill.LoadEnabled(novelID)
+	if err != nil {
+		a.logger.Warn("自动激活心智：读取启用清单失败", "novel_id", novelID, "err", err)
+	} else {
+		already := false
+		for _, n := range enabled {
+			if n == sk.Name {
+				already = true
+				break
+			}
+		}
+		if !already {
+			enabled = append(enabled, sk.Name)
+			if err := skill.SaveEnabled(novelID, enabled); err != nil {
+				a.logger.Warn("自动激活心智：写入启用清单失败", "novel_id", novelID, "err", err)
+			} else {
+				a.logger.Info("自动激活心智：已勾选常驻启用", "novel_id", novelID, "skill", sk.Name)
+			}
+		}
+	}
+
+	// (C) 自动设为本书写作人格（覆盖式：每次保存心智均以该书最新心智作为活跃人格，
+	// 与提取流程原「提完即绑定为人格」语义一致）。
+	ps := personasetting.NewStore(a.db, a.logger)
+	if err := ps.Save(a.ctx, &personasetting.PersonaSetting{
+		NovelID: novelID,
+		Enabled: true,
+		Kind:    "skill",
+		Ref:     sk.Name,
+	}); err != nil {
+		a.logger.Warn("自动激活心智：写入 persona 设置失败", "novel_id", novelID, "err", err)
+	} else {
+		a.logger.Info("自动激活心智：已设为本书写作人格", "novel_id", novelID, "skill", sk.Name)
+	}
 }

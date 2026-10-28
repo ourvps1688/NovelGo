@@ -13,14 +13,12 @@ import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import { useSaveContent } from "@/components/content/useSaveContent";
 import { isContentConflict } from "@/components/content/editorSaveQueue";
 import { reportAIFileChange } from "@/components/content/aiFileChanges";
-import { useSavePersonaSetting } from "@/components/chat/usePersonaSetting";
 import { toastSuccess } from "@/utils/toast";
 import { usePatternProgress } from "@/hooks/usePatternProgress";
 import Markdown from "@/components/Markdown";
 import { splitFrontmatter } from "@/components/content/types";
 import PatternProgressView from "./PatternProgressView";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
-import { GetEnabledSkills, SetEnabledSkills } from "@/lib/wailsjs/go/app/App";
 
 interface Props {
   taskId: string;
@@ -68,7 +66,6 @@ function ResultCard({
   const [overwriteContent, setOverwriteContent] = useState<string | null>(null);
   const [checkingSave, setCheckingSave] = useState(false);
   const saveMutation = useSaveContent();
-  const savePersonaSetting = useSavePersonaSetting(result.novelId);
 
   const saveGenerated = async (expectedContent: string) => {
     if (!result) return;
@@ -82,27 +79,11 @@ function ResultCard({
       });
       reportAIFileChange({ novelId: result.novelId, path: result.filePath });
       setOverwriteContent(null);
-      // mental 提取：保存成功后自动并入写作流（合并写入本书 .enabled.json，不全量覆盖）。
+      // mental 提取：勾选常驻 + 设为本书写作人格已由后端 SaveContent 统一收口
+      // （覆盖所有心智落盘路径，含手动创建/编辑），此处仅保留用户侧反馈。
       const { meta: savedMeta } = splitFrontmatter(result.rawContent);
       if (savedMeta.kind === "mental") {
-        try {
-          const current = (await GetEnabledSkills(result.novelId)) ?? [];
-          if (!current.includes(result.name)) {
-            await SetEnabledSkills({
-              novel_id: result.novelId,
-              names: [...current, result.name],
-            });
-          }
-          // 提完即把该书心智设为本书活跃写作人格（每书独立，覆盖式）。
-          await savePersonaSetting.mutateAsync({
-            enabled: true,
-            kind: "skill",
-            ref: result.name,
-          });
-          toastSuccess(t("extract.mindsetBoundPersona", { name: result.name }));
-        } catch {
-          // 自动启用/绑定失败不阻塞已保存的 skill，静默忽略。
-        }
+        toastSuccess(t("extract.mindsetBoundPersona", { name: result.name }));
       }
       onSaved?.();
       onExit();

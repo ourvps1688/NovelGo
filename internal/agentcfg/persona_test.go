@@ -141,3 +141,26 @@ func TestBuildSystemMessages_PersonaDoesNotBreakAlways(t *testing.T) {
 	require.Empty(t, msg2.Persona, "无 persona 时 Persona 应为空")
 	require.Contains(t, msg2.Always, "ALWAYS_BODY", "无 persona 时 Always 仍在")
 }
+
+// TestBuildSystemMessages_PersonaExcludedFromAlways 验证 #282：本书已将某 mental 设为写作人格
+// （kind=skill）时，该技能从常驻 Always 块中排除，避免与 Persona 通道重复注入、浪费 token。
+// 同时验证无 persona 时该技能仍正常常驻注入（排除逻辑仅由 persona 触发）。
+func TestBuildSystemMessages_PersonaExcludedFromAlways(t *testing.T) {
+	store, novelID := personaTestStore(t,
+		skillSpec{name: "X 的创作心智", kind: "mental", sourceAuthor: "刘慈欣", body: "X_MENTAL_BODY"},
+		skillSpec{name: "常驻技能", kind: "", sourceAuthor: "", body: "ALWAYS_BODY"},
+	)
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+
+	// 人格指向 X 的创作心智：它应只经 Persona 注入，不出现在 Always。
+	msg, _ := BuildSystemMessages(t.Context(), db, novelID, store, &PersonaRef{Kind: "skill", Ref: "X 的创作心智"})
+	require.Contains(t, msg.Persona, "X_MENTAL_BODY", "persona 应注入心智正文")
+	require.NotContains(t, msg.Always, "X_MENTAL_BODY", "人格技能不应重复出现在 Always 块")
+	require.Contains(t, msg.Always, "ALWAYS_BODY", "其他常驻技能仍应注入")
+
+	// 无 persona 时，X 的创作心智（mode=always）应正常出现在 Always。
+	msg2, _ := BuildSystemMessages(t.Context(), db, novelID, store, nil)
+	require.Contains(t, msg2.Always, "X_MENTAL_BODY", "无 persona 时常驻技能应正常注入")
+}

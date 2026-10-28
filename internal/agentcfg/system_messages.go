@@ -43,6 +43,12 @@ func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillS
 
 	if skillStore != nil {
 		all := skillStore.ListMeta(novelID)
+		// #282：若本书已将该 mental 设为写作人格（kind=skill），从其常驻（always/勾选启用）
+		// 与目录候选中排除，避免心智同时经 Always 与 Persona 两条通道重复注入、浪费 token。
+		// 人格通道已常驻注入，无需在 Always 块或 auto 目录中再列一次。
+		if persona != nil && persona.Kind == "skill" && persona.Ref != "" {
+			all = excludeNames(all, []string{persona.Ref})
+		}
 		msg.Always = BuildAlwaysSkillsContent(all, skillStore, novelID)
 		catalogMeta := skillStore.ListMetaForCatalog(all)
 		// 已勾选启用的技能已常驻注入，从 auto 目录中排除，避免重复占 token。

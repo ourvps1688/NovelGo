@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { SaveContent } from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
-import { contentKeys, skillKeys } from "@/lib/queryKeys";
+import { contentKeys, personaSettingKeys, skillKeys } from "@/lib/queryKeys";
 
 // useSaveContent: 保存文件内容 mutation。
 // mutationFn 直接 import wailsjs SaveContent（不用 useApp），单参 input（含 novel_id + path + content）。
@@ -29,6 +29,19 @@ export function useSaveContent() {
           void qc.invalidateQueries({
             queryKey: skillKeys.list(input.novel_id),
           });
+      }
+      // 心智（kind=mental）保存后后端会自动勾选常驻 + 设为本书写作人格，
+      // 失效启用清单与人格设置缓存，让聊天 + 号菜单与 PenLine 立即反映新状态。
+      if (
+        input.path.startsWith("skills/") ||
+        input.path.startsWith("~/.novelgo/skills/")
+      ) {
+        void qc.invalidateQueries({
+          queryKey: skillKeys.enabled(input.novel_id),
+        });
+        void qc.invalidateQueries({
+          queryKey: personaSettingKeys.detail(input.novel_id),
+        });
       }
     },
   });
