@@ -192,6 +192,22 @@ func (s *Store) GetReadingNumbersByNovel(ctx context.Context, tx *gorm.DB, novel
 	return numbers, nil
 }
 
+// GetChapterIDByReadingNumber 是 GetReadingNumberByID 的互逆操作：返回阅读顺序中
+// 第 N 章（1-based）对应的稳定章节 ID。N 越界（<1 或 > 当前章节总数）返回
+// gorm.ErrRecordNotFound，调用方据此给出「未找到第N章」的业务错误。
+func (s *Store) GetChapterIDByReadingNumber(ctx context.Context, tx *gorm.DB, novelID int64, n int) (int64, error) {
+	var ids []int64
+	if err := s.orderedByNovel(ctx, tx, novelID).
+		Order(chapterOrderAsc).
+		Pluck("chapters.id", &ids).Error; err != nil {
+		return 0, fmt.Errorf("chapter store: list reading order: %w", err)
+	}
+	if n < 1 || n > len(ids) {
+		return 0, fmt.Errorf("chapter store: get chapter id by reading number %d: %w", n, gorm.ErrRecordNotFound)
+	}
+	return ids[n-1], nil
+}
+
 // GetByID 按 novel_id + id 取单章。
 func (s *Store) GetByID(ctx context.Context, tx *gorm.DB, novelID, chapterID int64) (*Chapter, error) {
 	var ch Chapter

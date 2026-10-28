@@ -48,18 +48,24 @@ func VolumePath(volumeID int64) string {
 
 // ChapterPathRef 是章节正文或章节大纲虚拟路径的解析结果。
 // VolumeID 仅来自两级容错路径，不参与物理文件定位；IsNew 表示 new.md 创建通道。
+// ByReadingNumber/ReadingNumber 表示 no_{N} 形式：按实时阅读序号（第N章）寻址，
+// 物理 ID 需后续由 chapter.Store 反查，解析阶段只记录序号、不落物理路径。
 type ChapterPathRef struct {
-	ID        int64
-	VolumeID  int64
-	IsOutline bool
-	IsNew     bool
+	ID              int64
+	VolumeID        int64
+	IsOutline       bool
+	IsNew           bool
+	ByReadingNumber bool
+	ReadingNumber   int
 }
 
-var chapterLikePathRe = regexp.MustCompile(`^(chapters|outlines)/(?:([0-9]+)/)?(?:id_([0-9]+)|new)\.md$`)
+var chapterLikePathRe = regexp.MustCompile(`^(chapters|outlines)/(?:([0-9]+)/)?(?:id_([0-9]+)|no_([0-9]+)|new)\.md$`)
 var volumePathRe = regexp.MustCompile(`^volumes/id_([1-9][0-9]*)\.md$`)
 
 // ParseChapterLikePath 解析 rw_tools 支持的章节正文或大纲虚拟路径。
-// 支持扁平主格式和带卷 ID 的容错别名；旧的纯数字章节号路径不被接受。
+// 支持三种定位形式：id_{id}（按稳定 ID）、no_{N}（按实时阅读序号第N章）、
+// new（新建通道）；旧的纯数字章节号路径不被接受。no_{N} 仅记录序号，物理
+// ID 由调用方经 chapter.Store.GetChapterIDByReadingNumber 反查后再落盘。
 func ParseChapterLikePath(path string) (ChapterPathRef, bool) {
 	matches := chapterLikePathRe.FindStringSubmatch(path)
 	if matches == nil {
@@ -74,16 +80,23 @@ func ParseChapterLikePath(path string) (ChapterPathRef, bool) {
 		}
 		ref.VolumeID = volumeID
 	}
-	if matches[3] == "" {
+	switch {
+	case matches[3] != "":
+		id, err := strconv.ParseInt(matches[3], 10, 64)
+		if err != nil {
+			return ChapterPathRef{}, false
+		}
+		ref.ID = id
+	case matches[4] != "":
+		n, err := strconv.Atoi(matches[4])
+		if err != nil || n <= 0 {
+			return ChapterPathRef{}, false
+		}
+		ref.ByReadingNumber = true
+		ref.ReadingNumber = n
+	default:
 		ref.IsNew = true
-		return ref, true
 	}
-
-	id, err := strconv.ParseInt(matches[3], 10, 64)
-	if err != nil {
-		return ChapterPathRef{}, false
-	}
-	ref.ID = id
 	return ref, true
 }
 

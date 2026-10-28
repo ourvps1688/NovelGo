@@ -19,6 +19,14 @@ func TestParseChapterLikePath(t *testing.T) {
 		{"volume outline", "outlines/7/id_12.md", ChapterPathRef{ID: 12, VolumeID: 7, IsOutline: true}, true},
 		{"new outline", "outlines/7/new.md", ChapterPathRef{VolumeID: 7, IsOutline: true, IsNew: true}, true},
 
+		// no_{N} 阅读序号寻址形式（第N章），与 id_ 互不冲突
+		{"flat no", "chapters/no_1.md", ChapterPathRef{ByReadingNumber: true, ReadingNumber: 1}, true},
+		{"volume no", "chapters/3/no_14.md", ChapterPathRef{ByReadingNumber: true, ReadingNumber: 14, VolumeID: 3}, true},
+		{"outline no", "outlines/no_7.md", ChapterPathRef{ByReadingNumber: true, ReadingNumber: 7, IsOutline: true}, true},
+		{"no zero invalid", "chapters/no_0.md", ChapterPathRef{}, false},
+		{"no non-numeric invalid", "chapters/no_abc.md", ChapterPathRef{}, false},
+		{"no overflow invalid", "chapters/no_99999999999999999999.md", ChapterPathRef{}, false},
+
 		{"legacy chapter number", "chapters/001.md", ChapterPathRef{}, false},
 		{"legacy outline number", "outlines/012.md", ChapterPathRef{}, false},
 		{"ID overflow", "chapters/id_99999999999999999999.md", ChapterPathRef{}, false},
