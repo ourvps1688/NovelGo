@@ -37,13 +37,14 @@ type ModelInfo struct {
 	SupportsVision   bool     `json:"supports_vision"`            // 是否支持图片输入
 }
 
-// APIError 表示 LLM API 的调用错误，包含可重试标记。
+// APIError 表示 LLM API 的调用错误，包含可重试标记与硬失败标记。
 type APIError struct {
 	StatusCode int
 	Message    string
 	Retryable  bool
 	RetryAfter time.Duration // 服务商指定的重试等待时间（来自 Retry-After header），0 表示无指定
 	Kind       string        // 错误类型标记，用于 agent 层区分处理路径（如 "tool_args_invalid"）；空字符串=普通错误
+	Hard       bool          // 硬失败标记：连接拒绝 / DNS 不可达 / 首字节超时 / >=5xx。供 provider 熔断器识别「真故障」，空闲超时等非硬失败必须为 false
 }
 
 func (e *APIError) Error() string {

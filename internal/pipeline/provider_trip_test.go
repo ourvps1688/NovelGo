@@ -7,22 +7,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
-// ── 供应商熔断扩展（WBS p4 T1.2）────────────────────────────────
+// ── 供应商熔断扩展（P0 重设计 · 基于 breaker）────────────────────────────────
 //
 // 验收：①全派发点覆盖断言（源码锁定 skillRunner 调用点均过熔断判定）；
 // ②熔断触发零 agent 派发 + 各点失败通道语义不变；③未触发逐字一致（既有 pipeline 测试零回退）。
 
-// forceProviderTrip 把取数接缝钉在阈值之上，确定性触发熔断判定（测试专用）。
+// forceProviderTrip 把取数接缝钉在某 provider 处于 Open，确定性触发熔断判定（测试专用）。
 func forceProviderTrip(t *testing.T) {
 	t.Helper()
-	orig := idleTimeoutCount
-	idleTimeoutCount = func(time.Duration) int { return fixProviderIdleTrip }
-	t.Cleanup(func() { idleTimeoutCount = orig })
+	orig := breakerOpenProviders
+	breakerOpenProviders = func() []string { return []string{"deepseek"} }
+	t.Cleanup(func() { breakerOpenProviders = orig })
 }
 
 // countSkillCalls 给 skillRunner 包一层计数桩（断言熔断触发时零 agent 派发）。
@@ -35,38 +34,35 @@ func countSkillCalls(svc *Service) *int {
 	return n
 }
 
-// TestProviderTrippedJudgment 锁定共享熔断判定语义（单源）：阈值/窗口常量、
-// 计数口径、以及降级纪律「判定自身异常 → 照常派发（绝不误熔断）」。
+// TestProviderTrippedJudgment 锁定共享熔断判定语义（单源）：基于 breaker 的取数接缝、
+// 触发口径（存在 Open provider 即熔断）、以及降级纪律「判定自身异常 → 照常派发（绝不误熔断）」。
 func TestProviderTrippedJudgment(t *testing.T) {
-	orig := idleTimeoutCount
-	t.Cleanup(func() { idleTimeoutCount = orig })
+	orig := breakerOpenProviders
+	t.Cleanup(func() { breakerOpenProviders = orig })
 
-	var gotWindow time.Duration
-	idleTimeoutCount = func(window time.Duration) int {
-		gotWindow = window
-		return fixProviderIdleTrip - 1
-	}
-	tripped, n := providerTripped()
-	require.False(t, tripped, "低于阈值不应熔断")
-	require.Equal(t, fixProviderIdleTrip-1, n)
-	require.Equal(t, providerIdleWindow, gotWindow, "判定窗口应为单源常量 providerIdleWindow")
+	// 空 → 不熔断（无 Open provider，行为与判定引入前逐字一致）
+	breakerOpenProviders = func() []string { return nil }
+	tripped, open := providerTripped()
+	require.False(t, tripped, "无 Open provider 不应熔断")
+	require.Empty(t, open)
 
-	idleTimeoutCount = func(time.Duration) int { return fixProviderIdleTrip }
-	tripped, n = providerTripped()
-	require.True(t, tripped, "达到阈值应熔断（语义与 RecentIdleTimeouts >= fixProviderIdleTrip 一致）")
-	require.Equal(t, fixProviderIdleTrip, n)
+	// 非空 → 熔断（存在 Open provider）
+	breakerOpenProviders = func() []string { return []string{"deepseek"} }
+	tripped, open = providerTripped()
+	require.True(t, tripped, "存在 Open provider 应熔断")
+	require.Equal(t, []string{"deepseek"}, open)
 
 	// 降级纪律（最高验收）：判定自身异常 → 照常派发，宁缺勿错。
-	idleTimeoutCount = func(time.Duration) int { panic("count boom") }
-	tripped, n = providerTripped()
+	breakerOpenProviders = func() []string { panic("count boom") }
+	tripped, open = providerTripped()
 	require.False(t, tripped, "判定自身异常必须照常派发（绝不误熔断）")
-	require.Equal(t, 0, n)
+	require.Empty(t, open)
 
-	// 哨兵错误可被 errors.Is 识别，提示统一「疑似供应商挂起」口径且附近期超时次数。
-	err := providerTripErr(12)
+	// 哨兵错误可被 errors.Is 识别，提示统一「疑似供应商挂起」口径且附 Open 的 provider 名。
+	err := providerTripErr([]string{"deepseek"})
 	require.ErrorIs(t, err, errProviderTripped)
 	require.Contains(t, err.Error(), "疑似供应商挂起")
-	require.Contains(t, err.Error(), "12 次", "提示应附近期空闲超时次数")
+	require.Contains(t, err.Error(), "deepseek", "提示应附 Open 的 provider 名")
 }
 
 // TestSkillRunnerDispatchOnlyViaTripGuard 源码锁定（验收①）：internal/pipeline 生产代码里

@@ -4,63 +4,60 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/llm"
 )
 
-// ── 供应商熔断共享判定（WBS p4 §0.2）────────────────────────────────
+// ── 供应商熔断共享判定（P0 重设计）────────────────────────────────
 //
-// 全部 skillRunner 派发点共用一个熔断判定：近 providerIdleWindow 内 LLM 流式空闲超时
-// 达到 fixProviderIdleTrip 次，说明 Provider 基本不可用（正常任务期间接近 0），再派发
-// agent 只会白烧整轮墙钟（每轮白等 3 分钟被看门狗取消）。此时跳过派发、走各派发点
-// 原有失败通道（S5 批次计数/闸门、S3 逐章进度 error、S4/S6 落 paused、巡检跳过），
-// 提示统一「疑似供应商挂起」口径（附近期空闲超时次数）。
+// 重设计（docs/future/llm-provider-breaker-idle-timeout-redesign.md）把「空闲超时」从熔断
+// 触发信号剥离：熔断只认硬失败（连接拒绝 / DNS 不可达 / 首字节超时 / >=5xx），三态（Closed/
+// Open/Half-Open）自愈、按 provider 隔离、chat/pipeline 共用（P1 补齐 chat 接线）。
 //
-// 降级纪律（最高验收）：判定自身异常 → 照常派发（绝不误熔断）；窗口内超时为 0 →
-// 行为与判定引入前逐字一致。
+// 本文件的 providerTripped 改为基于 llm.ProviderBreaker.AnyOpen 的取数接缝——熔断状态机
+// （阈值/冷却/自愈/按 provider 隔离）全部收敛在 breaker.go，本文件只做「取数 + 派发拦截」。
+//
+// 空闲超时（idle watchdog）仅作观测（沿用 llm.idleFires），绝不再驱动熔断，避免 thinking
+// 模型长静默 / 代理缓冲被误杀。
+//
+// 降级纪律（最高验收）：判定自身异常 → 照常派发（绝不误熔断）；无任何 provider 处于 Open
+// → 行为与判定引入前逐字一致（零 agent 派发拦截）。
 
-const (
-	// providerIdleWindow 是供应商熔断判定的观察窗口，与 fixProviderIdleTrip 阈值构成
-	// 「熔断判定」唯一常量对（单源纪律：窗口/阈值只在此一处定义）。
-	providerIdleWindow = 10 * time.Minute
-	// fixProviderIdleTrip 是供应商熔断阈值：近 providerIdleWindow 内 LLM 流式空闲超时
-	// 达到该次数说明 Provider 基本不可用，全部 skillRunner 派发点派发前据此跳过派发、
-	// 快速走各点原有失败通道（沿用 S5 修复既有阈值语义，值不变）。
-	fixProviderIdleTrip = 10
-)
-
-// idleTimeoutCount 是「近 window 内流式空闲超时次数」的取数接缝（生产=llm.RecentIdleTimeouts，
-// 测试可替换以确定性驱动熔断判定）。判定逻辑本身单源在 providerTripped。
-var idleTimeoutCount = llm.RecentIdleTimeouts
+// breakerOpenProviders 是「当前处于 Open 的 provider 列表」的取数接缝（生产=llm.ProviderBreaker.
+// AnyOpen，测试可替换以确定性驱动熔断判定）。判定逻辑单源在 providerTripped。
+var breakerOpenProviders = llm.ProviderBreaker.AnyOpen
 
 // errProviderTripped 是熔断跳派发的哨兵错误（提示统一「疑似供应商挂起」口径），
 // 供调用方（如 S3 逐章循环）用 errors.Is 识别「失败=熔断」并做整循环中断等差异化落地。
 var errProviderTripped = errors.New("疑似供应商挂起")
 
 // providerTripped 是全部 skillRunner 派发点共用的供应商熔断判定（单源）：
-// 返回触发与否与窗口内空闲超时次数（次数供「疑似供应商挂起」提示口径使用）。
-// 语义与既有 `llm.RecentIdleTimeouts(10*time.Minute) >= fixProviderIdleTrip` 逐字一致。
-func providerTripped() (tripped bool, idleCount int) {
+// 返回触发与否与处于 Open 的 provider 列表（列表供「疑似供应商挂起」提示口径使用）。
+func providerTripped() (tripped bool, openProviders []string) {
 	// 降级纪律：判定自身异常 → 照常派发（返回 false），绝不误熔断。
 	defer func() {
 		if r := recover(); r != nil {
-			tripped, idleCount = false, 0
+			tripped, openProviders = false, nil
 		}
 	}()
-	n := idleTimeoutCount(providerIdleWindow)
-	return n >= fixProviderIdleTrip, n
+	open := breakerOpenProviders()
+	return len(open) > 0, open
 }
 
-// providerTripErr 构造熔断哨兵错误（统一「疑似供应商挂起」口径，附近期空闲超时次数）。
+// providerTripErr 构造熔断哨兵错误（统一「疑似供应商挂起」口径，附 Open 的 provider 列表）。
 // errors.Is(err, errProviderTripped) 可识别。
-func providerTripErr(idleCount int) error {
-	return fmt.Errorf("%w（近 %d 分钟 LLM 流式空闲超时 %d 次），已跳过派发，请稍后重试",
-		errProviderTripped, int(providerIdleWindow.Minutes()), idleCount)
+func providerTripErr(openProviders []string) error {
+	who := "供应商"
+	if len(openProviders) > 0 {
+		who = "供应商（" + strings.Join(openProviders, "、") + "）"
+	}
+	return fmt.Errorf("%w（%s疑似挂起，已跳过派发，请稍后重试）", errProviderTripped, who)
 }
 
-// dispatchSkill 是 skillRunner 的唯一派发口：派发前做供应商熔断判定（WBS p4 §0.2），
+// dispatchSkill 是 skillRunner 的唯一派发口：派发前做供应商熔断判定（P0 重设计），
 // 熔断 → 返回 errProviderTripped 哨兵错误、零 agent 派发，由各派发点按自身原有失败
 // 通道落地（各接各的，勿统一成一种）；未触发 → 照常派发（行为与判定引入前逐字一致）。
 //
@@ -72,12 +69,12 @@ func providerTripErr(idleCount int) error {
 // （测试 TestSkillRunnerDispatchOnlyViaTripGuard 源码锁定）——任何新增派发点必须走
 // dispatchSkill，天然过熔断判定与 R0 观测。
 func (s *Service) dispatchSkill(ctx context.Context, name string, input SkillInput) (SkillOutput, error) {
-	if tripped, n := providerTripped(); tripped {
+	if tripped, open := providerTripped(); tripped {
 		s.recordExecStat(ctx, activity.ExecStat{
 			NovelID: input.NovelID, RunID: input.RunID, Skill: name,
 			Turns: 0, MaxTurns: input.MaxTurns, Status: activity.ExecStatusTripped,
 		})
-		return SkillOutput{}, providerTripErr(n)
+		return SkillOutput{}, providerTripErr(open)
 	}
 	start := time.Now()
 	out, err := s.skillRunner(ctx, name, input)

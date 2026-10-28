@@ -202,14 +202,20 @@ func (c *Client) ChatStream(
 
 		resp, err := c.http.Do(req)
 		if err != nil {
-			// 网络错误分类走重试矩阵单源（retry_matrix.go），此处只负责日志。
+			// 网络错误分类走重试矩阵单源（retry_matrix.go），此处只负责日志与熔断喂信。
 			if isTimeoutErr(err) {
 				c.logger.Warn("llm first byte timeout", "err", err, "url", req.URL.String())
 			} else {
 				c.logger.Warn("llm network error", "err", err, "url", req.URL.String())
 			}
 
-			ch <- StreamEvent{Type: EventError, Error: apiErrorFromNetErr(err)}
+			apiErr := apiErrorFromNetErr(err)
+			// 硬失败（首字节超时 / 连接拒绝 / DNS 不可达）喂入 provider 熔断器；
+			// 空闲超时等非硬失败绝不走此路径（由 idle watchdog 单独观测）。
+			if apiErr.Hard {
+				ProviderBreaker.RecordHardFailure(providerName)
+			}
+			ch <- StreamEvent{Type: EventError, Error: apiErr}
 			return
 		}
 		defer resp.Body.Close()
@@ -226,9 +232,14 @@ func (c *Client) ChatStream(
 				"status", resp.StatusCode,
 				"body", bodyStr,
 				"url", req.URL.String())
-			// 错误分类（Retryable/Retry-After/消息解析）走重试矩阵单源（retry_matrix.go）。
-			ch <- StreamEvent{Type: EventError, Error: apiErrorFromHTTP(
-				resp.StatusCode, errBody, p.ParseError, resp.Header.Get("Retry-After"))}
+			// 错误分类（Retryable/Retry-After/消息解析/硬失败）走重试矩阵单源（retry_matrix.go）。
+			apiErr := apiErrorFromHTTP(
+				resp.StatusCode, errBody, p.ParseError, resp.Header.Get("Retry-After"))
+			// 仅 5xx 硬失败喂入 provider 熔断器；429/408/4xx 为软拒绝/客户端错误，非硬失败。
+			if apiErr.Hard {
+				ProviderBreaker.RecordHardFailure(providerName)
+			}
+			ch <- StreamEvent{Type: EventError, Error: apiErr}
 			return
 		}
 
@@ -236,7 +247,12 @@ func (c *Client) ChatStream(
 		// 把 resp.Body 换成带活动刷新的包装 reader；defer 关闭的是包装前捕获的原始 body。
 		wd := newIdleWatchdog(cancelStream, c.logger)
 		resp.Body = io.NopCloser(wd.wrapBody(resp.Body))
-		c.parseSSE(ch, resp)
+		// parseSSE 返回是否发生过错误事件：仅当流完全正常结束（无 EventError）时
+		// 才喂入熔断器的成功探针（Half-Open 回 Closed），空闲超时等软错误不回血。
+		hadError := c.parseSSE(ch, resp, providerName)
+		if !hadError {
+			ProviderBreaker.RecordSuccess(providerName)
+		}
 	}()
 
 	return ch
@@ -368,8 +384,11 @@ func mergeSystemMessages(messages []map[string]any) []map[string]any {
 	return out
 }
 
-// parseSSE 解析 SSE 流，产出 StreamEvent。
-func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
+// parseSSE 解析 SSE 流，产出 StreamEvent。返回 hadError：本次流是否产生过任何 EventError
+// （空闲超时 / tool_args_invalid / empty_stream 均计）。仅当流完全正常结束（hadError=false）
+// 时，调用方才喂入 provider 熔断器的成功探针——软错误不回血，避免误 healed 未恢复的供应商。
+func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerName string) bool {
+	hadError := false
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 行最长 2MB
 
@@ -527,6 +546,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 				idleErr.timeout.String())
 		}
 		c.logger.Warn("sse stream interrupted", "err", err)
+		hadError = true
 		ch <- StreamEvent{Type: EventError, Error: &APIError{
 			StatusCode: 0,
 			Message:    msg,
@@ -534,7 +554,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 		}}
 		// 流异常中断：不再做 tool call 收尾，避免与 invalidToolErrors 分支叠加
 		// 产生第二个 EventError（scanner.Err 后 accumulated 数据不可信，保守丢弃）
-		return
+		return hadError
 	}
 
 	// 流正常结束：发送本次 stream 的最终 usage（只发一次，见循环内缓冲说明）。
@@ -599,6 +619,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 			errMsg = "输出因 max_tokens 预算被截断（思考模型的推理 token 也计入预算），" +
 				"建议提高输出预算或换模型。原错误：" + errMsg
 		}
+		hadError = true
 		ch <- StreamEvent{Type: EventError, Error: &APIError{
 			StatusCode: 0,
 			Message:    errMsg,
@@ -635,6 +656,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 			if diag.hasReason {
 				msg = "流式响应只有推理内容，未生成最终结果（可能 max_tokens 不足或推理失控）"
 			}
+			hadError = true
 			ch <- StreamEvent{Type: EventError, Error: &APIError{
 				StatusCode: 0,
 				Message:    msg,
@@ -643,6 +665,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response) {
 			}}
 		}
 	}
+	return hadError
 }
 
 // buildToolArgsInvalidMsg 构造 tool arguments 解析失败的错误信息。

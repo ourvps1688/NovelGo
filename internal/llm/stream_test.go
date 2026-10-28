@@ -358,7 +358,7 @@ func runParseSSE(t *testing.T, body string) []StreamEvent {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c.parseSSE(ch, resp)
+		c.parseSSE(ch, resp, "test-provider")
 		close(ch)
 	}()
 
