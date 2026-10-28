@@ -132,6 +132,40 @@ func TestRunConsistencyPatrolDegradesOnFailure(t *testing.T) {
 	}
 }
 
+// TestRunConsistencyPatrolRejectionStoredAsError 验证回归：模型以「拒绝/安全审核拦截」
+// 形式返回（err==nil，但 content 是拒绝语）时，不得被 parseAudit 兜底成 needs_fix 的
+// 假张力报告；应落地清晰的 verdict=error 失败态并广播事件，让面板展示失败原因。
+func TestRunConsistencyPatrolRejectionStoredAsError(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	run, err := svc.StartPipeline(ctx, 706, "new", nil, false)
+	require.NoError(t, err)
+
+	emitted := capturePatrolEmit(t)
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		require.Equal(t, "consistency-patrol", name)
+		return SkillOutput{Text: "The request was rejected because it was considered high risk"}, nil
+	}
+	svc.runConsistencyPatrol(ctx, run.RunID, run.NovelID)
+
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.NotEmpty(t, ctxt.PatrolReport, "拒绝应落地失败态而非丢弃")
+
+	var report AuditData
+	require.NoError(t, json.Unmarshal([]byte(ctxt.PatrolReport), &report))
+	require.Equal(t, "error", report.Verdict, "拒绝应标记为 error 而非 needs_fix")
+	require.Empty(t, report.Issues, "拒绝不应产生任何张力项（杜绝垃圾清单）")
+	require.Contains(t, report.Summary, "模型拒绝", "失败态应给出可读的原因与建议")
+
+	p := <-emitted
+	require.Equal(t, run.RunID, p["run_id"])
+	require.Equal(t, run.NovelID, p["novel_id"])
+}
+
 // TestControlPipelinePatrolDispatch 验证手动触发：控制指令 "patrol" 后台跑张力报告，
 // 不改变当前阶段（WBS 3.3 触发=卷末+手动）。
 func TestControlPipelinePatrolDispatch(t *testing.T) {

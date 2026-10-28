@@ -2223,6 +2223,56 @@ func parseAudit(text string) AuditData {
 	return data
 }
 
+// isLLMRefusal 识别 LLM 以「拒绝 / 安全审核拦截」形式返回的无效产出（而非真实分析）。
+// 这类返回被上游模型 / 网关当成正常 content 回传（err == nil），若不拦截，会被 parseAudit
+// 的兜底包装成 needs_fix 的假张力报告污染界面（见 runConsistencyPatrol）。
+//
+// 仅匹配「机器生成的拒绝签名」：英文拒绝短语在中文张力报告里几乎不可能自然出现，
+// 中文签名亦为 unambiguously 拒绝式措辞，避免误伤正文中含「违反 / 高风险」等词的合法分析。
+func isLLMRefusal(text string) (bool, string) {
+	if strings.TrimSpace(text) == "" {
+		return false, ""
+	}
+	t := strings.ToLower(text)
+	type sig struct {
+		needle string
+		reason string
+	}
+	sigs := []sig{
+		{"rejected because", "请求被上游模型/网关判定为高风险并拒绝"},
+		{"high risk", "请求被判定为高风险"},
+		{"i cannot fulfill", "模型拒绝执行该请求"},
+		{"i'm sorry, but i cannot", "模型返回了拒绝式回复"},
+		{"i am unable to", "模型表示无法完成该请求"},
+		{"as a language model", "模型以「作为语言模型」身份拒绝"},
+		{"content policy", "请求命中内容策略被拒绝"},
+		{"safety policy", "请求命中安全策略被拒绝"},
+		{"your request has been flagged", "请求被内容审核标记"},
+		{"moderation", "请求被内容审核拦截"},
+		{"我无法协助", "模型拒绝执行该请求"},
+		{"我无法完成您的请求", "模型拒绝执行该请求"},
+		{"抱歉，我无法", "模型返回了拒绝式回复"},
+		{"根据我的安全准则", "请求命中安全准则被拒绝"},
+		{"我不能满足这个请求", "模型拒绝执行该请求"},
+	}
+	for _, s := range sigs {
+		if strings.Contains(t, s.needle) {
+			return true, s.reason
+		}
+	}
+	return false, ""
+}
+
+// firstN 截取文本前 n 个字符（按 rune，中文安全）用作日志摘要，超出加省略号。
+func firstN(s string, n int) string {
+	s = strings.TrimSpace(s)
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
 // parseFreshAudit 解析 skill 刚产出的体检文本并补标 schema_version（见 contract.go）：
 // LLM 未 echo schema_version 时按当前契约版本补标——产出方是当前代码的提示词，语义即当前
 // 契约版本，供后续 executeFix 版本门判定新旧。已落库历史 JSON 的再解析必须走 parseAudit

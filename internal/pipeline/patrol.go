@@ -59,6 +59,25 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		s.logger.Warn("一致性巡检执行失败（非阻断，跳过）", "run_id", runID, "err", err)
 		return
 	}
+	// 拒绝 / 安全审核拦截：上游把拒绝语当正常 content 返回（err == nil），必须在此拦截，
+	// 否则会被 parseAudit 兜底包装成 needs_fix 的假张力报告污染界面。命中时落地清晰的
+	// 「巡检失败」状态（verdict=error）而非垃圾张力项，并广播事件让面板刷新展示。
+	if refused, reason := isLLMRefusal(out.Text); refused {
+		s.logger.Warn("一致性巡检：模型拒绝/安全审核拦截（落地失败态，非阻断）",
+			"run_id", runID, "reason", reason, "snippet", firstN(out.Text, 120))
+		if serr := s.storePatrolReport(bg, runID, AuditData{
+			Verdict: "error",
+			Summary: "一致性巡检未能完成：模型拒绝了本次请求（" + reason + "）。" +
+				"这通常是因为发送给模型的章节/台账内容触发了上游模型的安全审核。" +
+				"建议：①更换内容审核更宽松的模型或供应商；②确认当前模型支持长上下文（全书巡检会拼入大量章节）；" +
+				"③如确为内容命中，可先对该卷做局部脱敏后再巡检。本次原始返回已忽略，未写入张力清单。",
+			Issues: []AuditIssue{},
+		}); serr != nil {
+			s.logger.Warn("一致性巡检：写回失败态失败", "err", serr)
+		}
+		emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
+		return
+	}
 	data := parseFreshAudit(out.Text)
 	if err := s.storePatrolReport(bg, runID, data); err != nil {
 		s.logger.Warn("一致性巡检：写回张力报告失败", "err", err)

@@ -2043,7 +2043,8 @@
       "noReport": "No patrol report yet: one runs automatically after a volume freeze; you can also trigger it with Run Patrol.",
       "verdict": {
         "pass": "No tension",
-        "needs_fix": "Tensions found"
+        "needs_fix": "Tensions found",
+        "error": "Patrol failed"
       }
     },
     "retcon": {

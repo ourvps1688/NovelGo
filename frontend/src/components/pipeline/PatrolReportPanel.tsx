@@ -46,6 +46,11 @@ export default function PatrolReportPanel({
               <ShieldCheck className="h-3 w-3" />
               {t("pipeline.patrol.verdict.pass")}
             </span>
+          ) : data.verdict === "error" ? (
+            <span className="flex items-center gap-1 rounded bg-danger/10 px-1.5 py-0.5 text-danger-foreground text-xs">
+              <ShieldAlert className="h-3 w-3" />
+              {t("pipeline.patrol.verdict.error")}
+            </span>
           ) : (
             <span className="flex items-center gap-1 rounded bg-warning/10 px-1.5 py-0.5 text-warning-foreground text-xs">
               <ShieldAlert className="h-3 w-3" />
