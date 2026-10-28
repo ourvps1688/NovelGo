@@ -50,6 +50,8 @@ func TestBuildDisplay_ChapterLookupFallbackUsesID(t *testing.T) {
 }
 
 func TestChapterID(t *testing.T) {
+	a := &Agent{chapterStore: chapter.NewStore(newDisplayTestDB(t), slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	ctx := context.Background()
 	tests := []struct {
 		name string
 		args map[string]any
@@ -59,6 +61,7 @@ func TestChapterID(t *testing.T) {
 		{name: "argument", args: map[string]any{"chapter_id": float64(42)}, want: 42, ok: true},
 		{name: "path", args: map[string]any{"path": "chapters/id_42.md"}, want: 42, ok: true},
 		{name: "volume path", args: map[string]any{"path": "outlines/8/id_42.md"}, want: 42, ok: true},
+		{name: "no form resolves by reading number", args: map[string]any{"path": "chapters/no_1.md"}, want: 0, ok: false},
 		{name: "legacy number ignored", args: map[string]any{"chapter_number": float64(42)}, ok: false},
 		{name: "legacy path ignored", args: map[string]any{"path": "chapters/042.md"}, ok: false},
 		{name: "fraction rejected", args: map[string]any{"chapter_id": 42.5}, ok: false},
@@ -66,11 +69,35 @@ func TestChapterID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := chapterID(tt.args)
+			got, ok := a.chapterID(ctx, 1, tt.args)
 			if got != tt.want || ok != tt.ok {
 				t.Errorf("chapterID() = (%d, %t), want (%d, %t)", got, ok, tt.want, tt.ok)
 			}
 		})
+	}
+}
+
+func TestChapterID_ByReadingNumber(t *testing.T) {
+	db := newDisplayTestDB(t)
+	requireCreate(t, db.Create(&volume.Volume{ID: 8, NovelID: 1, Name: "第一卷", SortOrder: 1}))
+	volumeID := int64(8)
+	requireCreate(t, db.Create(&chapter.Chapter{ID: 42, NovelID: 1, VolumeID: &volumeID, SortOrder: 1, Title: "开篇"}))
+	requireCreate(t, db.Create(&chapter.Chapter{ID: 7, NovelID: 1, VolumeID: &volumeID, SortOrder: 2, Title: "后续"}))
+
+	a := &Agent{chapterStore: chapter.NewStore(db, slog.New(slog.NewTextHandler(io.Discard, nil)))}
+	ctx := context.Background()
+
+	if got, ok := a.chapterID(ctx, 1, map[string]any{"path": "chapters/no_1.md"}); !ok || got != 42 {
+		t.Errorf("chapterID(no_1) = (%d, %t), want (42, true)", got, ok)
+	}
+	if got, ok := a.chapterID(ctx, 1, map[string]any{"path": "chapters/no_2.md"}); !ok || got != 7 {
+		t.Errorf("chapterID(no_2) = (%d, %t), want (7, true)", got, ok)
+	}
+	if got, ok := a.chapterID(ctx, 1, map[string]any{"path": "outlines/no_2.md"}); !ok || got != 7 {
+		t.Errorf("chapterID(outlines/no_2) = (%d, %t), want (7, true)", got, ok)
+	}
+	if got, ok := a.chapterID(ctx, 1, map[string]any{"path": "chapters/no_99.md"}); ok || got != 0 {
+		t.Errorf("chapterID(no_99) = (%d, %t), want (0, false)", got, ok)
 	}
 }
 

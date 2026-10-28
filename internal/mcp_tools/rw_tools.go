@@ -34,7 +34,7 @@ import (
 
 // EditArgs 是 edit 工具的参数。
 type EditArgs struct {
-	Path       string `json:"path" jsonschema:"required,description=要编辑的文件路径。章节正文：chapters/id_{章节id}.md（主格式）或 chapters/{卷id}/id_{章节id}.md（等价容错写法）；章节大纲：outlines/id_{章节id}.md 或 outlines/{卷id}/id_{章节id}.md；新建章节：chapters/{卷id}/new.md 或 chapters/new.md（不带卷时默认分进最后一卷，整本书未建卷则创建未分卷章节）；新建大纲：outlines/{卷id}/new.md 或 outlines/new.md（规则同章节，只能 full_replace）；卷纲：volumes/id_{卷id}.md（卷 ID 请先用 list_volumes 获取，不要猜测序号）；故事状态 novelgo.md；小说级技能 skills/<name>.md；用户级技能 ~/.novelgo/skills/<name>.md" validate:"required"`
+	Path       string `json:"path" jsonschema:"required,description=要编辑的文件路径。推荐按阅读序号（第N章）定位以避免找错章：chapters/no_{N}.md（正文第N章）、outlines/no_{N}.md（大纲第N章）；也可按稳定 ID 定位：chapters/id_{章节id}.md（主格式）或 chapters/{卷id}/id_{章节id}.md（等价容错写法）、outlines/id_{章节id}.md 或 outlines/{卷id}/id_{章节id}.md。注意：chapter_id 是数据库主键（稳定），不等于阅读序号；换卷/重排后两者对应关系会变，因此精修「第N章」务必用 no_{N} 而非自行用序号推算 id。新建章节：chapters/{卷id}/new.md 或 chapters/new.md（不带卷时默认分进最后一卷，整本书未建卷则创建未分卷章节）；新建大纲：outlines/{卷id}/new.md 或 outlines/new.md（规则同章节，只能 full_replace）；卷纲：volumes/id_{卷id}.md（卷 ID 请先用 list_volumes 获取，不要猜测序号）；故事状态 novelgo.md；小说级技能 skills/<name>.md；用户级技能 ~/.novelgo/skills/<name>.md" validate:"required"`
 	ChangeType string `json:"change_type" jsonschema:"required,enum=full_replace,enum=search_replace,enum=line_range_replace,description=编辑方式。full_replace：全文替换；search_replace：查找并替换指定文本；line_range_replace：替换指定行范围" validate:"required,oneof=full_replace search_replace line_range_replace"`
 	SearchText string `json:"search_text" jsonschema:"description=要查找的原文片段（search_replace 时必填）。请从文件中精确复制" validate:"omitempty"`
 	NewContent string `json:"new_content" jsonschema:"description=新内容。full_replace 时为完整全文（必填，传空会报错；若要清空整个文件请改用 line_range_replace(1, total_lines, \"\")，total_lines 从 read 返回获取）；search_replace 时为替换后的文本（传空则删除匹配到的文本）；line_range_replace 时为替换该行范围的新内容（传空则删除该范围行）" validate:"omitempty"`
@@ -80,7 +80,7 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 }
 
 // invalidPathHint 是 edit/read 共用的非法路径提示。
-const invalidPathHint = "无效文件路径。章节正文 chapters/id_{id}.md、大纲 outlines/id_{id}.md、卷纲 volumes/id_{卷ID}.md、新建 chapters/{卷ID}/new.md 或 chapters/new.md、outlines/{卷ID}/new.md 或 outlines/new.md、novelgo.md、skills/<name>.md、~/.novelgo/skills/<name>.md"
+const invalidPathHint = "无效文件路径。按稳定 ID 定位：章节正文 chapters/id_{id}.md、大纲 outlines/id_{id}.md；按实时阅读序号（第N章）定位：chapters/no_{N}.md、outlines/no_{N}.md（推荐，避免用序号推算错误）；卷纲 volumes/id_{卷ID}.md；新建 chapters/{卷ID}/new.md 或 chapters/new.md、outlines/{卷ID}/new.md 或 outlines/new.md；novelgo.md、skills/<name>.md、~/.novelgo/skills/<name>.md"
 
 // readFileForEdit 读取待编辑文件的当前内容。
 // 文件不存在时 full_replace 视为从空文件创建，其余模式返回 os.ErrNotExist。
@@ -206,6 +206,25 @@ func physicalRWPath(isOutline bool, id int64) string {
 	return git.ChapterPath(id)
 }
 
+// resolveChapterRef 将 no_{N} 阅读序号寻址解析为按稳定 ID 寻址的 ref。
+// id_ 与 new 形式原样返回；no_{N} 经 chapter.Store 反查为对应的 chapter_id 后，
+// 清除 ByReadingNumber/ReadingNumber 标志，使后续物理路径与记录查询逻辑完全统一
+// （第N章与 id 的对应关系会随换卷/重排变化，必须实时反查，不能缓存）。
+// 返回的业务错误（第N章越界）以 Error 形式回传给 LLM，便于其纠正目标章节。
+func resolveChapterRef(ctx context.Context, tc ToolContext, ref git.ChapterPathRef) (git.ChapterPathRef, error) {
+	if !ref.ByReadingNumber || ref.IsNew {
+		return ref, nil
+	}
+	id, err := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).GetChapterIDByReadingNumber(ctx, nil, tc.NovelID, ref.ReadingNumber)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return git.ChapterPathRef{}, fmt.Errorf("未找到第%d章（阅读序号越界或本书章节数不足）", ref.ReadingNumber)
+		}
+		return git.ChapterPathRef{}, fmt.Errorf("resolve chapter by reading number: %w", err)
+	}
+	return git.ChapterPathRef{ID: id, VolumeID: ref.VolumeID, IsOutline: ref.IsOutline}, nil
+}
+
 // ── 大纲写前门禁辅助 ─────────────────────────────────────
 
 // outlineMinContent 是大纲判空的阈值（有效非空白字符数），复用 oh-story 的
@@ -328,6 +347,13 @@ func (t *EditTool) editVolumeOutline(ctx context.Context, a *EditArgs, tc ToolCo
 //     两级路径 chapters/{vid}/id_{id}.md 仅为容错别名，读写时归一化为扁平路径
 //   - 新建走 new.md 通道：先建章节记录拿 id，再写物理文件；写文件失败补偿删记录
 func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolContext, ref git.ChapterPathRef) (*ToolResult, error) {
+	// no_{N} 阅读序号寻址 → 解析为稳定 chapter_id（第N章与 id 的映射会随重排变化）
+	if resolved, rerr := resolveChapterRef(ctx, tc, ref); rerr != nil {
+		return &ToolResult{Success: false, Error: rerr.Error()}, nil
+	} else {
+		ref = resolved
+	}
+
 	physical := physicalRWPath(ref.IsOutline, ref.ID)
 	chStore := chapter.NewStore(tc.DB, tc.LoggerOrDefault())
 
@@ -1106,6 +1132,11 @@ func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapte
 
 const editDescription = `编辑小说文件（章节正文、大纲、卷纲、故事状态 novelgo.md 或技能文件）。支持三种编辑模式：full_replace（全文替换）、search_replace（查找替换）、line_range_replace（行范围替换）。
 
+定位章节——务必用阅读序号或稳定 ID，不要自行推算 chapter_id：
+- 精修/修改「第N章」请直接用 no_{N} 路径：正文 chapters/no_{N}.md、大纲 outlines/no_{N}.md。系统会按实时阅读顺序确定性解析到第N章对应的稳定 chapter_id，换卷/重排后依然准确。
+- 也可用稳定 ID 路径 chapters/id_{id}.md / outlines/id_{id}.md，但 id 是数据库主键、不等于阅读序号，严禁把 get_chapter_list 里的「第N章」直接当成 id 去猜。
+- 错误示例：用户说「精修第1章」却用 chapters/id_1.md——id_1 往往不是阅读顺序里的第1章。正确做法是 chapters/no_1.md。
+
 大纲写前门禁（系统硬规则）：若本书已存在任意大纲，则正文必须走「先 outlines/new.md 建纲 → 再写 chapters/id_{chapter_id}.md 正文」流程；严禁用 chapters/new.md 直接建正文（会被拒绝）。已有章节若大纲文件存在但实质为空（不足 30 字有效内容），写正文也会被拒绝，需先补细纲。无大纲的本书按即兴写作放行。
 
 新建章节或大纲：path 使用 new.md 形式（格式见 path 参数说明），且只能 full_replace；成功后返回值携带分配的 chapter_id、volume_id 与物理路径，后续编辑一律使用返回的物理路径。
@@ -1129,7 +1160,7 @@ const editDescription = `编辑小说文件（章节正文、大纲、卷纲、�
 
 // ReadArgs 是 read 工具的参数。
 type ReadArgs struct {
-	Path         string `json:"path" jsonschema:"required,description=要读取的文件路径。章节正文：chapters/id_{章节id}.md（主格式）或 chapters/{卷id}/id_{章节id}.md（等价容错写法）；章节大纲：outlines/id_{章节id}.md 或 outlines/{卷id}/id_{章节id}.md；卷纲：volumes/id_{卷id}.md（卷 ID 请先用 list_volumes 获取，不要猜测序号）；故事状态 novelgo.md；小说级技能 skills/<name>.md；用户级技能 ~/.novelgo/skills/<name>.md；内置技能 /builtin/skills/<name>.md（只读）" validate:"required"`
+	Path         string `json:"path" jsonschema:"required,description=要读取的文件路径。推荐按阅读序号（第N章）定位以避免找错章：chapters/no_{N}.md（正文第N章）、outlines/no_{N}.md（大纲第N章）；也可按稳定 ID 定位：chapters/id_{章节id}.md（主格式）或 chapters/{卷id}/id_{章节id}.md（等价容错写法）、outlines/id_{章节id}.md 或 outlines/{卷id}/id_{章节id}.md。注意：chapter_id 是数据库主键（稳定），不等于阅读序号；换卷/重排后两者对应关系会变，因此「读取第N章」务必用 no_{N} 而非自行用序号推算 id。卷纲：volumes/id_{卷id}.md（卷 ID 请先用 list_volumes 获取，不要猜测序号）；故事状态 novelgo.md；小说级技能 skills/<name>.md；用户级技能 ~/.novelgo/skills/<name>.md；内置技能 /builtin/skills/<name>.md（只读）" validate:"required"`
 	IncludeLines *bool  `json:"include_lines" jsonschema:"default=true,description=是否包含行号前缀（如 123|）。默认 true，用于精确引用和行范围编辑。传 false 获取纯文本"`
 	StartLine    int    `json:"start_line" jsonschema:"default=1,description=起始行号 1-based 含此行，必须 <= end_line" validate:"omitempty,min=1"`
 	EndLine      int    `json:"end_line" jsonschema:"default=2000,description=结束行号 1-based 含此行，超出自动截到文末。不传或传 0 均按默认 2000 处理" validate:"omitempty,min=0"`
@@ -1183,6 +1214,13 @@ func (t *ReadTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 func (t *ReadTool) readChapterLike(ctx context.Context, a *ReadArgs, tc ToolContext, ref git.ChapterPathRef) (*ToolResult, error) {
 	if ref.IsNew {
 		return &ToolResult{Success: false, Error: "new.md 仅用于 edit 新建章节/大纲，不可读取"}, nil
+	}
+
+	// no_{N} 阅读序号寻址 → 解析为稳定 chapter_id（第N章与 id 的映射会随重排变化）
+	if resolved, rerr := resolveChapterRef(ctx, tc, ref); rerr != nil {
+		return &ToolResult{Success: false, Error: rerr.Error()}, nil
+	} else {
+		ref = resolved
 	}
 
 	physical := git.ChapterPath(ref.ID)
@@ -1346,6 +1384,10 @@ func (t *ReadTool) readBuiltinSkill(a *ReadArgs, tc ToolContext) (*ToolResult, e
 // ── 工具描述 ──────────────────────────────────────────────
 
 const readDescription = `读取小说文件、卷纲或技能文件。
+
+定位章节——务必用阅读序号或稳定 ID，不要自行推算 chapter_id：
+- 读取「第N章」请直接用 no_{N} 路径：正文 chapters/no_{N}.md、大纲 outlines/no_{N}.md。系统会按实时阅读顺序确定性解析到第N章对应的稳定 chapter_id，换卷/重排后依然准确。
+- 也可用稳定 ID 路径 chapters/id_{id}.md / outlines/id_{id}.md，但 id 是数据库主键、不等于阅读序号，严禁把 get_chapter_list 里的「第N章」直接当成 id 去猜。
 
 特性：
 - 默认添加行号前缀，方便后续 edit 工具进行 line_range_replace 和 search_replace

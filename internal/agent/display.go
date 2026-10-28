@@ -168,7 +168,7 @@ func (a *Agent) buildDisplay(ctx context.Context, name string, args map[string]a
 
 	// chapter 工具：查 DB 取章节标题
 	if chapterTools[name] {
-		if chapterID, ok := chapterID(args); ok {
+		if chapterID, ok := a.chapterID(ctx, novelID, args); ok {
 			label := a.lookupChapterBrief(ctx, novelID, chapterID)
 			if isOutlinePath(args) {
 				label += "大纲"
@@ -215,7 +215,11 @@ func (a *Agent) buildDisplay(ctx context.Context, name string, args map[string]a
 	}
 }
 
-func chapterID(args map[string]any) (int64, bool) {
+// chapterID 从工具的入参（chapter_id 或 path）提取目标章节的稳定 ID。
+// path 支持 id_{id} 与 no_{N} 两种形式：no_{N} 按实时阅读顺序反查为对应的
+// chapter_id（第N章与 id 的对应关系会随重排变化，必须实时解析），避免展示文本
+// 把「第N章」错配到错误的章节标题。
+func (a *Agent) chapterID(ctx context.Context, novelID int64, args map[string]any) (int64, bool) {
 	if args == nil {
 		return 0, false
 	}
@@ -238,10 +242,20 @@ func chapterID(args map[string]any) (int64, bool) {
 			return 0, false
 		}
 	}
-	// rw 工具使用 path 参数，如 "chapters/id_42.md" 或 "outlines/7/id_42.md"。
+	// rw 工具使用 path 参数，如 "chapters/id_42.md"、"chapters/no_1.md" 或 "outlines/7/id_42.md"。
 	if path, ok := args["path"].(string); ok {
 		ref, ok := git.ParseChapterLikePath(path)
-		return ref.ID, ok && !ref.IsNew && ref.ID > 0
+		if !ok || ref.IsNew {
+			return 0, false
+		}
+		if ref.ByReadingNumber {
+			id, err := a.chapterStore.GetChapterIDByReadingNumber(ctx, nil, novelID, ref.ReadingNumber)
+			if err != nil {
+				return 0, false
+			}
+			return id, true
+		}
+		return ref.ID, ref.ID > 0
 	}
 	return 0, false
 }
