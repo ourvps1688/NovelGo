@@ -21,8 +21,19 @@ type UpsertPreferenceItem struct {
 }
 
 // UpsertPreferenceArgs 是 upsert_preference 的参数。
+//
+// 主形态是 preferences 数组（传 preference_id=更新，不传=创建）。额外提供顶层平铺字段
+// PreferenceID/Category/Content/IsGlobal 作为容错：LLM 偶发会把 preferences 数组包裹漏掉、
+// 直接把 category/content 平铺到顶层（upsert_setting 截图实测同构行为），这里接收后由
+// Execute 归一化进 Preferences。id/novel_id 等不可变字段不在本结构体，Registry 的
+// DisallowUnknownFields 仍会拒绝，安全不受影响。
 type UpsertPreferenceArgs struct {
-	Preferences []UpsertPreferenceItem `json:"preferences" jsonschema:"required,description=要upsert的偏好列表(1-5个，传preference_id=更新，不传=创建)" validate:"required,min=1,max=5,dive"`
+	Preferences []UpsertPreferenceItem `json:"preferences" jsonschema:"required,description=要upsert的偏好列表(1-5个，传preference_id=更新，不传=创建)；也支持平铺单条：直接传顶层 category/content（可选 preference_id/is_global）" validate:"max=5,dive"`
+	// 容错平铺单条：LLM 漏 preferences 包裹时的兜底入口。
+	PreferenceID *int64 `json:"preference_id,omitempty" jsonschema:"description=平铺单条更新时：已存在偏好ID；不传=新建"`
+	Category     string `json:"category,omitempty" jsonschema:"description=平铺单条时：偏好分类(自由文本标签)"`
+	Content      string `json:"content,omitempty" jsonschema:"description=平铺单条时：偏好内容"`
+	IsGlobal     *bool  `json:"is_global,omitempty" jsonschema:"description=平铺单条时：是否全局偏好(对所有小说生效)"`
 }
 
 // UpsertPreferenceTool 批量 upsert 创作偏好（创建或更新，单事务原子性）。
@@ -33,7 +44,9 @@ func (t *UpsertPreferenceTool) Description() string {
 	return "批量创建或更新创作偏好（1-5个，单事务原子性，失败全部回滚）。" +
 		"传 preference_id=更新该条（PATCH 语义，只覆盖传入字段），不传=新建。" +
 		"开局已全量注入偏好到上下文(带 [preference_id:N | 分类] 前缀)，更新时从注入里取 preference_id 传入。" +
-		"新增相似分类的偏好前，应优先更新已有条目(在原文基础上合并)而非创建重复条目。"
+		"新增相似分类的偏好前，应优先更新已有条目(在原文基础上合并)而非创建重复条目。" +
+		"参数主形态为 {\"preferences\":[{\"category\":\"分类\",\"content\":\"内容\",\"preference_id\":可选,\"is_global\":可选}]}；" +
+		"也支持平铺单条 {\"category\":\"分类\",\"content\":\"内容\",\"preference_id\":可选,\"is_global\":可选}（漏 preferences 包裹时自动归一化）。"
 }
 func (t *UpsertPreferenceTool) Category() ToolCategory { return CategoryWritingAssistant }
 
@@ -44,6 +57,29 @@ func (t *UpsertPreferenceTool) NewArgs() any                { return &UpsertPref
 func (t *UpsertPreferenceTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*UpsertPreferenceArgs)
 
+	// 容错：LLM 偶发把 preferences 数组包裹漏掉、直接平铺单条
+	// category/content/preference_id/is_global，这里归一化为 preferences 列表，
+	// 再走同一套 upsert 逻辑（安全：id/novel_id 仍被框架层 DisallowUnknownFields 拒绝）。
+	items := a.Preferences
+	if len(items) == 0 {
+		if a.PreferenceID == nil && a.Category == "" && a.Content == "" && a.IsGlobal == nil {
+			return &ToolResult{
+				Success: false,
+				Error:   "参数校验失败: 需提供 preferences 数组，或平铺的 category/content（可选 preference_id/is_global）",
+			}, nil
+		}
+		items = []UpsertPreferenceItem{{PreferenceID: a.PreferenceID, Category: a.Category, Content: a.Content, IsGlobal: a.IsGlobal}}
+	}
+	// 兜底校验每条必填字段（平铺归一化的条目未走框架层 dive 校验）。
+	for i, item := range items {
+		if item.Category == "" || item.Content == "" {
+			return &ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("第 %d 条偏好缺少 category 或 content", i),
+			}, nil
+		}
+	}
+
 	type failure struct {
 		index    int
 		category string
@@ -53,7 +89,7 @@ func (t *UpsertPreferenceTool) Execute(ctx context.Context, args any, tc ToolCon
 	var ids []int64
 
 	err := tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for i, item := range a.Preferences {
+		for i, item := range items {
 			id, err := upsertOnePreference(tx, tc.NovelID, item)
 			if err != nil {
 				failed = &failure{index: i, category: item.Category, err: err}

@@ -20,8 +20,18 @@ type UpsertSettingItem struct {
 }
 
 // UpsertSettingArgs 是 upsert_setting 的参数。
+//
+// 主形态是 settings 数组（传 setting_id=更新，不传=创建）。额外提供顶层平铺字段
+// SettingID/Category/Content 作为容错：LLM 偶发会把 settings 数组包裹漏掉、直接把
+// category/content 平铺到顶层（截图实测：json: unknown field "category"/"content"），
+// 这里接收后由 Execute 归一化进 Settings。id/novel_id 等不可变字段不在本结构体，
+// Registry 的 DisallowUnknownFields 仍会拒绝，安全不受影响。
 type UpsertSettingArgs struct {
-	Settings []UpsertSettingItem `json:"settings" jsonschema:"required,description=要upsert的设定列表(1-5个，传setting_id=更新，不传=创建)" validate:"required,min=1,max=5,dive"`
+	Settings []UpsertSettingItem `json:"settings" jsonschema:"required,description=要upsert的设定列表(1-5个，传setting_id=更新，不传=创建)；也支持平铺单条：直接传顶层 category/content（可选 setting_id）" validate:"max=5,dive"`
+	// 容错平铺单条：LLM 漏 settings 包裹时的兜底入口。
+	SettingID *int64 `json:"setting_id,omitempty" jsonschema:"description=平铺单条更新时：已存在设定ID；不传=新建"`
+	Category  string `json:"category,omitempty" jsonschema:"description=平铺单条时：设定分类(自由文本，如世界观/力量体系/角色/地理/历史/物品)"`
+	Content   string `json:"content,omitempty" jsonschema:"description=平铺单条时：设定内容"`
 }
 
 // UpsertSettingTool 批量 upsert 世界观设定（创建或更新，单事务原子性）。
@@ -32,7 +42,9 @@ func (t *UpsertSettingTool) Description() string {
 	return "批量创建或更新小说设定（1-5个，单事务原子性，失败全部回滚）。" +
 		"传 setting_id=更新该条（PATCH 语义，只覆盖传入字段），不传=新建。" +
 		"开局已全量注入设定到上下文(带 [setting_id:N | 分类] 前缀)，更新时从注入里取 setting_id 传入。" +
-		"新增相似分类的设定前，应优先更新已有条目(在原文基础上合并)而非创建重复条目。"
+		"新增相似分类的设定前，应优先更新已有条目(在原文基础上合并)而非创建重复条目。" +
+		"参数主形态为 {\"settings\":[{\"category\":\"分类\",\"content\":\"内容\",\"setting_id\":可选}]}；" +
+		"也支持平铺单条 {\"category\":\"分类\",\"content\":\"内容\",\"setting_id\":可选}（漏 settings 包裹时自动归一化）。"
 }
 func (t *UpsertSettingTool) Category() ToolCategory { return CategoryWritingAssistant }
 
@@ -43,6 +55,29 @@ func (t *UpsertSettingTool) NewArgs() any                { return &UpsertSetting
 func (t *UpsertSettingTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*UpsertSettingArgs)
 
+	// 容错：LLM 偶发把 settings 数组包裹漏掉、直接平铺单条 category/content/setting_id，
+	// 这里归一化为 settings 列表，再走同一套 upsert 逻辑（安全：id/novel_id 仍被框架层
+	// DisallowUnknownFields 拒绝，不会进入本结构体的任何字段）。
+	items := a.Settings
+	if len(items) == 0 {
+		if a.SettingID == nil && a.Category == "" && a.Content == "" {
+			return &ToolResult{
+				Success: false,
+				Error:   "参数校验失败: 需提供 settings 数组，或平铺的 category/content（可选 setting_id）",
+			}, nil
+		}
+		items = []UpsertSettingItem{{SettingID: a.SettingID, Category: a.Category, Content: a.Content}}
+	}
+	// 兜底校验每条必填字段（平铺归一化的条目未走框架层 dive 校验）。
+	for i, item := range items {
+		if item.Category == "" || item.Content == "" {
+			return &ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("第 %d 条设定缺少 category 或 content", i),
+			}, nil
+		}
+	}
+
 	type failure struct {
 		index    int
 		category string
@@ -52,7 +87,7 @@ func (t *UpsertSettingTool) Execute(ctx context.Context, args any, tc ToolContex
 	var ids []int64
 
 	err := tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for i, item := range a.Settings {
+		for i, item := range items {
 			id, err := upsertOneSetting(tx, tc.NovelID, item)
 			if err != nil {
 				failed = &failure{index: i, category: item.Category, err: err}
