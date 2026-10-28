@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -165,6 +166,46 @@ func (m *providerBreakerManager) AnyOpen() []string {
 		b.mu.Unlock()
 	}
 	return open
+}
+
+// IsOpen 返回指定 provider 当前是否处于 Open（拦截）状态：若该 provider 的熔断器处于 Open
+// 且冷却到期，则自动转为 Half-Open（放行一次探针）并返回 false；仍处于 Open（冷却中）返回 true；
+// Closed / Half-Open / 无熔断器记录均返回 false。与 AnyOpen 共享同一自愈状态机推进逻辑，
+// 但只针对单 provider 定向判断，供 LLM 调用入口（ChatStream / GenerateText）做调用前拦截——
+// 这样 pipeline 与 chat 经同一 ProviderBreaker 单例共用同一熔断状态（P1 验收点：状态一致）。
+func (m *providerBreakerManager) IsOpen(providerName string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, ok := m.breakers[providerName]
+	if !ok {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	// 状态机推进：Open 冷却到期 → Half-Open。
+	if b.state == stateOpen && now.Sub(b.openAt) >= breakerCooldown {
+		b.state = stateHalfOpen
+		b.probeSuccesses = 0
+	}
+	return b.state == stateOpen
+}
+
+// breakerBlockedProvider 是「指定 provider 当前是否被熔断拦截」的取数接缝
+// （生产=ProviderBreaker.IsOpen，测试可替换为确定性驱动拦截）。判定逻辑单源在 breaker.go。
+var breakerBlockedProvider = ProviderBreaker.IsOpen
+
+// breakerOpenError 构造「供应商熔断拦截」错误（Kind=provider_breaker_open，Retryable=false）：
+// 经 LLM 调用入口（ChatStream / GenerateText）快速失败——agent 层只对 Retryable 错误重试，
+// 非可重试错误立即快速失败，避免 pipeline 已熔断、chat 仍在狂打该供应商的假阳性狂打。
+// 该错误不喂入熔断器（不重复计数），只是被拦截调用方的出口。
+func breakerOpenError(providerName string) error {
+	return &APIError{
+		StatusCode: 0,
+		Message:    fmt.Sprintf("供应商（%s）疑似挂起，已熔断跳过本次调用，请稍后重试", providerName),
+		Retryable:  false,
+		Kind:       "provider_breaker_open",
+	}
 }
 
 // BreakerSnapshot 是单个 provider 熔断器的只读快照（供测试 / 调试 / 未来 UI）。

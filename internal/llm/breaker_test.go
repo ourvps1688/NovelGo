@@ -6,7 +6,8 @@ import (
 )
 
 // 这些测试直接构造 providerBreakerManager 隔离实例（不触碰全局 ProviderBreaker 单例），
-// 验证 P0 熔断重设计的三态迁移 / 阈值 / 按 provider 隔离 / 自愈 / 空闲不触发。
+// 验证 P0 熔断重设计的三态迁移 / 阈值 / 按 provider 隔离 / 自愈 / 空闲不触发，
+// 以及 P1 新增的 IsOpen 定向拦截（与 AnyOpen 共享自愈状态机）。
 
 // TestBreakerClosedByDefault 新熔断器默认 Closed，未达阈值不熔断。
 func TestBreakerClosedByDefault(t *testing.T) {
@@ -133,5 +134,84 @@ func TestBreakerIdleDoesNotTrip(t *testing.T) {
 	}
 	if open := m.AnyOpen(); len(open) != 0 {
 		t.Fatalf("idle-only signal must never trip, got %v", open)
+	}
+}
+
+// --- P1：IsOpen 定向拦截（供 LLM 调用入口 ChatStream / GenerateText）---
+
+// TestBreaker_IsOpen_UnknownProvider 未知 provider 不应被判为 Open。
+func TestBreaker_IsOpen_UnknownProvider(t *testing.T) {
+	m := &providerBreakerManager{breakers: make(map[string]*breaker)}
+	if m.IsOpen("nope") {
+		t.Errorf("unknown provider should not be open")
+	}
+}
+
+// TestBreaker_IsOpen_ClosedBelowThreshold 窗口内硬失败未达阈值 → Closed → IsOpen=false。
+func TestBreaker_IsOpen_ClosedBelowThreshold(t *testing.T) {
+	m := &providerBreakerManager{breakers: make(map[string]*breaker)}
+	m.RecordHardFailure("p")
+	m.RecordHardFailure("p") // 2 < hardFailureTrip(5)，仍 Closed
+	if m.IsOpen("p") {
+		t.Errorf("expected IsOpen=false for closed breaker (below trip threshold)")
+	}
+}
+
+// TestBreaker_IsOpen_TripViaFailures 窗口内硬失败达阈值 → Open → IsOpen=true。
+func TestBreaker_IsOpen_TripViaFailures(t *testing.T) {
+	m := &providerBreakerManager{breakers: make(map[string]*breaker)}
+	for i := 0; i < hardFailureTrip; i++ {
+		m.RecordHardFailure("p")
+	}
+	if !m.IsOpen("p") {
+		t.Errorf("expected IsOpen=true after %d hard failures", hardFailureTrip)
+	}
+}
+
+// TestBreaker_IsOpen_OpenWithinCooldown Open 态冷却期内 → IsOpen 仍返回 true（拦截）。
+func TestBreaker_IsOpen_OpenWithinCooldown(t *testing.T) {
+	m := &providerBreakerManager{breakers: make(map[string]*breaker)}
+	b := &breaker{state: stateOpen, openAt: time.Now()}
+	m.breakers["p"] = b
+	if !m.IsOpen("p") {
+		t.Errorf("expected IsOpen=true within cooldown")
+	}
+}
+
+// TestBreaker_IsOpen_CooldownExpiryAutoHalfOpen Open 态冷却到期 → 自动转 Half-Open →
+// IsOpen 返回 false（放行一次探针），且与 AnyOpen 共享同一自愈状态机推进逻辑。
+func TestBreaker_IsOpen_CooldownExpiryAutoHalfOpen(t *testing.T) {
+	m := &providerBreakerManager{breakers: make(map[string]*breaker)}
+	b := &breaker{state: stateOpen, openAt: time.Now().Add(-time.Hour)} // 冷却早已到期
+	m.breakers["p"] = b
+	if m.IsOpen("p") {
+		t.Errorf("expected IsOpen=false after cooldown (auto half-open)")
+	}
+	if b.state != stateHalfOpen {
+		t.Errorf("expected state half-open after cooldown, got %v", b.state)
+	}
+}
+
+// TestBreaker_IsOpen_ConsistentWithAnyOpen 同一 provider 经 IsOpen 与 AnyOpen 观测到的
+// 熔断状态一致（P1 验收点：chat 与 pipeline 共用同一 ProviderBreaker）。
+func TestBreaker_IsOpen_ConsistentWithAnyOpen(t *testing.T) {
+	m := &providerBreakerManager{breakers: make(map[string]*breaker)}
+	// 触发熔断
+	for i := 0; i < hardFailureTrip; i++ {
+		m.RecordHardFailure("shared")
+	}
+	// IsOpen 与 AnyOpen 对同一个 Open provider 应同时判定为熔断。
+	if !m.IsOpen("shared") {
+		t.Errorf("IsOpen should report shared as open")
+	}
+	open := m.AnyOpen()
+	found := false
+	for _, name := range open {
+		if name == "shared" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("AnyOpen should include shared, got %v", open)
 	}
 }

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -478,5 +479,89 @@ func TestParseSSE_NormalStop_CompleteJSON_NoTruncation(t *testing.T) {
 	}
 	if !gotEnd {
 		t.Errorf("expected EventToolCallEnd for complete JSON, got events: %+v", events)
+	}
+}
+
+// --- P1：LLM 调用入口熔断拦截 + 空闲预算按模型放宽 ---
+
+// TestChatStream_BreakerBlocked 命中熔断时 ChatStream 应立即发出 provider_breaker_open
+// 的 EventError，且 Retryable=false（agent 层不重试、干净快速失败）。通过替换接缝
+// breakerBlockedProvider 确定性驱动，不污染全局 ProviderBreaker。
+func TestChatStream_BreakerBlocked(t *testing.T) {
+	orig := breakerBlockedProvider
+	defer func() { breakerBlockedProvider = orig }()
+	breakerBlockedProvider = func(string) bool { return true }
+
+	c := NewClient(
+		map[string]Provider{"test-provider": {ChatURL: "http://example.com"}},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	ch := c.ChatStream(context.Background(), "test-provider",
+		[]map[string]any{{"role": "user", "content": "hi"}}, nil, "m", nil)
+
+	var gotErr error
+	for ev := range ch {
+		if ev.Type == EventError {
+			gotErr = ev.Error
+			break
+		}
+	}
+	if gotErr == nil {
+		t.Fatalf("expected EventError from breaker guard")
+	}
+	apiErr, ok := gotErr.(*APIError)
+	if !ok {
+		t.Fatalf("EventError.Error should be *APIError, got %T", gotErr)
+	}
+	if apiErr.Kind != "provider_breaker_open" {
+		t.Errorf("Kind: got %q, want %q", apiErr.Kind, "provider_breaker_open")
+	}
+	if apiErr.Retryable {
+		t.Errorf("breaker-open error must be non-retryable (agent should fast-fail, not retry)")
+	}
+}
+
+// TestGenerateText_BreakerBlocked 命中熔断时 GenerateText 应返回 provider_breaker_open 错误，
+// 且 Retryable=false。同样经接缝替换确定性驱动。
+func TestGenerateText_BreakerBlocked(t *testing.T) {
+	orig := breakerBlockedProvider
+	defer func() { breakerBlockedProvider = orig }()
+	breakerBlockedProvider = func(string) bool { return true }
+
+	c := NewClient(
+		map[string]Provider{"test-provider": {ChatURL: "http://example.com"}},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	_, err := c.GenerateText(context.Background(), "test-provider",
+		[]map[string]any{{"role": "user", "content": "hi"}}, "m")
+	if err == nil {
+		t.Fatalf("expected error from breaker guard")
+	}
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	if apiErr.Kind != "provider_breaker_open" {
+		t.Errorf("Kind: got %q, want %q", apiErr.Kind, "provider_breaker_open")
+	}
+	if apiErr.Retryable {
+		t.Errorf("breaker-open error must be non-retryable (agent should fast-fail, not retry)")
+	}
+}
+
+// TestIdleTimeoutFor 验证空闲预算按模型能力放宽：思考模型取 thinkingIdleTimeout，其余取
+// streamIdleTimeout（提案 §7 Step5，P1）。
+func TestIdleTimeoutFor(t *testing.T) {
+	thinking := Provider{Models: []ModelInfo{{ID: "m", SupportsThinking: true}}}
+	plain := Provider{Models: []ModelInfo{{ID: "m", SupportsThinking: false}}}
+	if got := idleTimeoutFor(thinking, "m"); got != thinkingIdleTimeout {
+		t.Errorf("thinking model: got %v, want %v", got, thinkingIdleTimeout)
+	}
+	if got := idleTimeoutFor(plain, "m"); got != streamIdleTimeout {
+		t.Errorf("non-thinking model: got %v, want %v", got, streamIdleTimeout)
+	}
+	// 未知模型 → 回落到 streamIdleTimeout（不误放宽）
+	if got := idleTimeoutFor(thinking, "unknown"); got != streamIdleTimeout {
+		t.Errorf("unknown model should fall back to streamIdleTimeout, got %v", got)
 	}
 }

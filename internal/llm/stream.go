@@ -70,6 +70,12 @@ func (c *Client) Reload(providers map[string]Provider) {
 // body 读取阶段此前没有任何超时，是 S5 修复等长任务卡死的根因。
 const streamIdleTimeout = 3 * time.Minute
 
+// thinkingIdleTimeout 是支持思考（SupportsThinking）模型的空闲预算：思考模型在产出推理 token
+// 时相邻 chunk 间隔可能远大于普通模型（甚至长时间静默纯推理），普通 3min 预算会误杀长推理。
+// 提案 §7 Step5（P1）把思考模型的纯 content 真空放宽到「思考大预算」，这里取 9min 折中
+// （建议区间 8~10min），既覆盖极长单步推理，又明显短于「永远卡死」以保留真正的挂起检测能力。
+const thinkingIdleTimeout = 9 * time.Minute
+
 // idleTimeoutError 标记由空闲 watchdog 触发的中断，供 parseSSE 生成可读错误文案。
 type idleTimeoutError struct{ timeout time.Duration }
 
@@ -88,8 +94,24 @@ type idleWatchdog struct {
 	logger  *slog.Logger
 }
 
-func newIdleWatchdog(cancel context.CancelFunc, logger *slog.Logger) *idleWatchdog {
-	wd := &idleWatchdog{timeout: streamIdleTimeout, cancel: cancel, logger: logger}
+// idleTimeoutFor 根据 provider 中指定模型是否支持思考返回 SSE body 读取的空闲超时预算：
+// 支持思考（ModelInfo.SupportsThinking）的模型放宽到 thinkingIdleTimeout（思考可长时间静默
+// 产出推理 token，相邻 chunk 间隔可能远大于普通模型），其余维持 streamIdleTimeout；
+// 模型未找到时回落到 streamIdleTimeout（不误放宽）。提案 §7 Step5（P1）。
+func idleTimeoutFor(p Provider, model string) time.Duration {
+	for i := range p.Models {
+		if p.Models[i].ID == model {
+			if p.Models[i].SupportsThinking {
+				return thinkingIdleTimeout
+			}
+			return streamIdleTimeout
+		}
+	}
+	return streamIdleTimeout
+}
+
+func newIdleWatchdog(cancel context.CancelFunc, logger *slog.Logger, timeout time.Duration) *idleWatchdog {
+	wd := &idleWatchdog{timeout: timeout, cancel: cancel, logger: logger}
 	wd.last.Store(time.Now().UnixNano())
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
@@ -161,6 +183,16 @@ func (c *Client) ChatStream(
 	if !ok {
 		ch := make(chan StreamEvent, 1)
 		ch <- StreamEvent{Type: EventError, Error: fmt.Errorf("unknown provider: %s", providerName)}
+		close(ch)
+		return ch
+	}
+
+	// 熔断拦截（P1）：LLM 调用入口共用同一 ProviderBreaker 单例——pipeline 已熔断时
+	// chat 也立即跳过，避免同一 provider 被两条路径同时狂打（假阳性）。命中即快速失败
+	// （Retryable=false，agent 层不重试）。
+	if breakerBlockedProvider(providerName) {
+		ch := make(chan StreamEvent, 1)
+		ch <- StreamEvent{Type: EventError, Error: breakerOpenError(providerName)}
 		close(ch)
 		return ch
 	}
@@ -245,7 +277,7 @@ func (c *Client) ChatStream(
 
 		// SSE 逐行解析（body 空闲超过 streamIdleTimeout 时 watchdog 取消请求 → 读报错 → EventError）。
 		// 把 resp.Body 换成带活动刷新的包装 reader；defer 关闭的是包装前捕获的原始 body。
-		wd := newIdleWatchdog(cancelStream, c.logger)
+		wd := newIdleWatchdog(cancelStream, c.logger, idleTimeoutFor(p, model))
 		resp.Body = io.NopCloser(wd.wrapBody(resp.Body))
 		// parseSSE 返回是否发生过错误事件：仅当流完全正常结束（无 EventError）时
 		// 才喂入熔断器的成功探针（Half-Open 回 Closed），空闲超时等软错误不回血。

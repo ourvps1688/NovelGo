@@ -25,6 +25,11 @@ func (c *Client) GenerateText(
 		return "", fmt.Errorf("unknown provider: %s", providerName)
 	}
 
+	// 熔断拦截（P1）：与 ChatStream 共用同一 ProviderBreaker，pipeline 已熔断时同步跳过。
+	if breakerBlockedProvider(providerName) {
+		return "", breakerOpenError(providerName)
+	}
+
 	payload := map[string]any{
 		"model":    model,
 		"messages": messages,
@@ -69,7 +74,7 @@ func (c *Client) GenerateText(
 	}
 	defer resp.Body.Close()
 
-	wd := newIdleWatchdog(cancelGen, c.logger)
+	wd := newIdleWatchdog(cancelGen, c.logger, idleTimeoutFor(p, model))
 	respBody, err := io.ReadAll(wd.wrapBody(resp.Body))
 	if err != nil {
 		var idleErr *idleTimeoutError
