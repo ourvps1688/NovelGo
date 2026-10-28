@@ -541,7 +541,6 @@ export default function WorkspaceView({
                   onSkillMatrixModeFilterChange={setSkillMatrixModeFilter}
                   activeWorkflow={activeWorkflow}
                   onSelectWorkflow={setActiveWorkflow}
-                  onStageRailClick={() => setActivePanel("pipeline")}
                 />
               )}
 
