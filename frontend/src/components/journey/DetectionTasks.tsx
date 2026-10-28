@@ -52,6 +52,7 @@ const VERDICT_KEYS: Record<string, string> = {
   checked: "journey.quality.detect.verdict.checked",
   pending: "journey.quality.detect.verdict.pending",
   skipped: "journey.quality.detect.verdict.skipped",
+  error: "journey.quality.detect.verdict.error",
 };
 
 export default function DetectionTasks() {

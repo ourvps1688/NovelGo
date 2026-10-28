@@ -2177,7 +2177,8 @@
           "needs_fix": "Needs fix",
           "checked": "Checked",
           "pending": "Pending",
-          "skipped": "Skipped"
+          "skipped": "Skipped",
+          "error": "Detection failed"
         }
       },
       "writingConfig": "Writing score config",

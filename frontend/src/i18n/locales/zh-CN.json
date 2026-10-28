@@ -2137,7 +2137,8 @@
           "needs_fix": "待修复",
           "checked": "已检查",
           "pending": "待检查",
-          "skipped": "已跳过"
+          "skipped": "已跳过",
+          "error": "检测失败"
         }
       },
       "writingConfig": "写作评分配置",

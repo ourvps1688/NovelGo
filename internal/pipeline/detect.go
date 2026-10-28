@@ -83,6 +83,32 @@ func (s *Service) runDetection(ctx context.Context, req detectRequest, ctxt *Gat
 	if err != nil {
 		return detectOutcome{}, err
 	}
+	// 拒绝 / 安全审核拦截：上游把拒绝语当正常 content 回传（err == nil），必须在此拦截，
+	// 否则会被 parseFreshAudit 兜底成 needs_fix 的假体检结果（含假工单）。命中时落地清晰的
+	// error 态（零 issue、零工单）而非假问题清单，并照常走落库/广播，让前端看到失败原因。
+	if refused, reason := isLLMRefusal(out.Text); refused {
+		s.logger.Warn(req.label+"：模型拒绝/安全审核拦截（落地失败态，非阻断）",
+			"run_id", req.runID, "skill", req.skill, "reason", reason, "snippet", firstN(out.Text, 120))
+		failed := AuditData{
+			Verdict: "error",
+			Summary: "检测未能完成：模型拒绝了本次请求（" + reason + "）。" +
+				"通常是因为发送给模型的章节/台账内容触发了上游模型的安全审核。建议：①更换内容审核更宽松的模型或供应商；" +
+				"②确认当前模型支持长上下文；③如确为内容命中，可先对该卷做局部脱敏后再检测。" +
+				"本次原始返回已忽略，未生成任何工单。",
+			Issues: []AuditIssue{},
+		}
+		failedJSON, _ := json.Marshal(failed)
+		if req.kind == "blueprint" {
+			ctxt.BlueprintAudit = string(failedJSON)
+		} else {
+			ctxt.Audit = string(failedJSON)
+		}
+		// 声明零问题时清掉重写/retcon 投影，避免残留旧清单（与正常落地语义一致）。
+		ctxt.RewriteBacklog = nil
+		ctxt.RetconBacklog = nil
+		updated, _ := json.Marshal(ctxt)
+		return detectOutcome{Audit: failed, Context: *ctxt, Updated: updated}, nil
+	}
 	audit := parseFreshAudit(out.Text)
 	// P2 文风漂移（WBS p2 §0.3）：确定性检测的 V 系 issue 追加到清单尾部（warning 级，
 	// 经 bodyIssuesOf/retconItemsOf 自然收口进既有修复/重写路由）。verdict 不翻转——

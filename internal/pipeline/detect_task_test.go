@@ -203,6 +203,49 @@ func TestRunDetectionTaskStructureLandsPatrolReport(t *testing.T) {
 	require.Empty(t, rows, "巡检只报告不改写：零发现项工单")
 }
 
+// TestRunDetectionTaskAuditRejectionLandsNoTickets 验收回归：签约体检（S4）被模型拒绝/
+// 安全审核拦截（err==nil，content 为拒绝语）时，不得被 parseFreshAudit 兜底成 needs_fix
+// 的假体检结果并生成假工单；应落地 verdict=error 失败态、零发现项工单，并广播完成事件。
+func TestRunDetectionTaskAuditRejectionLandsNoTickets(t *testing.T) {
+	db := newTestDB(t) // 无 tasks 表→legacy 直跑（验收③）
+	require.NoError(t, db.AutoMigrate(&volume.Volume{}))
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		assert.Equal(t, "signability-audit", name)
+		return SkillOutput{Text: "The request was rejected because it was considered high risk"}, nil
+	}
+	vol := &volume.Volume{NovelID: 904, Name: "第一卷", SortOrder: 1}
+	require.NoError(t, db.Create(vol).Error)
+
+	doneCh := make(chan map[string]any, 4)
+	t.Cleanup(swapEmitDetectDone(func(_ context.Context, p map[string]any) { doneCh <- p }))
+
+	res, err := svc.RunDetectionTask(ctx, 904, DetectionKindVolume, &vol.ID)
+	require.NoError(t, err)
+	require.True(t, res.Dispatched)
+
+	p := waitForDetectDone(t, doneCh)
+	require.Equal(t, DetectionKindVolume, p["kind"])
+	require.Equal(t, "error", p["verdict"], "拒绝应标记为 error 而非 needs_fix")
+	require.Equal(t, 0, p["issue_count"], "拒绝不应产生任何发现项")
+
+	run, gerr := svc.store.GetByRunID(ctx, res.RunID)
+	require.NoError(t, gerr)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(run.ContextJSON), &ctxt))
+	require.NotEmpty(t, ctxt.Audit, "失败态应落地（verdict=error）")
+	var audit AuditData
+	require.NoError(t, json.Unmarshal([]byte(ctxt.Audit), &audit))
+	require.Equal(t, "error", audit.Verdict)
+	require.Empty(t, audit.Issues, "拒绝不应产生任何张力/问题项")
+	require.Contains(t, audit.Summary, "模型拒绝", "失败态应给出可读原因")
+
+	rows, lerr := svc.store.ListIssues(ctx, 904, res.RunID)
+	require.NoError(t, lerr)
+	require.Empty(t, rows, "拒绝绝不应生成假工单")
+}
+
 // TestRunDetectionTaskQueueDedup 验收④（幂等重入）：队列可用时同 kind+run 在执行中
 // 重复派发被 dedup 合并（只跑一次），检测容器同 scope 复用同 RunID。
 func TestRunDetectionTaskQueueDedup(t *testing.T) {
