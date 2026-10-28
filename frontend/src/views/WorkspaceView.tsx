@@ -37,6 +37,7 @@ import SkillMatrixView, {
   type ModeFilter,
 } from "@/components/skill/SkillMatrixView";
 import SignabilityWorkflowView from "@/components/skill/SignabilityWorkflowView";
+import DetectionWorkflowView from "@/components/skill/DetectionWorkflowView";
 import BookPitchWorkflowView from "@/components/skill/BookPitchWorkflowView";
 import DetectionCorePanel from "@/components/pipeline/DetectionCorePanel";
 import GitCommitView from "@/components/git/GitCommitView";
@@ -647,7 +648,16 @@ export default function WorkspaceView({
                     </ErrorBoundary>
                   ) : activePanel === "signability" ? (
                     <ErrorBoundary>
-                      <SignabilityWorkflowView novelId={activeNovelId} />
+                      {activeWorkflow === "signability" ? (
+                        <SignabilityWorkflowView novelId={activeNovelId} />
+                      ) : (
+                        <DetectionWorkflowView
+                          novelId={activeNovelId}
+                          kind={
+                            activeWorkflow as "chapter" | "volume" | "structure"
+                          }
+                        />
+                      )}
                     </ErrorBoundary>
                   ) : activePanel === "bookpitch" ? (
                     <ErrorBoundary>

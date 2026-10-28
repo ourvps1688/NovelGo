@@ -1855,7 +1855,7 @@
   },
   "workflow": {
     "title": "Workflow",
-    "subtitle": "Select a workflow to begin; new workflows will be listed here one by one.",
+    "subtitle": "Pick a detection task to start: chapter / volume / full-book signability audit / structure patrol each have their own entry; results are summarized in Detection Core.",
     "signability": "Signability Workflow",
     "signabilityDesc": "Assess signing potential with a guided blueprint-to-audit loop",
     "bookpitch": "New Book Pitch Workflow",

@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { Target, Check } from "lucide-react";
+import { Target, FileText, BookOpen, Radar, Check } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-// 工作流注册表：只保留「在当前书上运行」的工作流。
+// 工作流注册表：只保留「在当前书上运行」的检测任务入口。
 // 新书孵化（book-pitch）是书架级动作，已迁移到 BookshelfView 顶部入口，
 // 不再放在工作流面板里，避免和当前 active 书混淆。
+// 四种检测（章节/卷/书/结构）各有独立选择项，避免用户找不到能跑哪些检测。
 interface WorkflowDef {
   id: string;
   labelKey: string;
@@ -18,6 +19,24 @@ const WORKFLOWS: WorkflowDef[] = [
     labelKey: "workflow.signability",
     descKey: "workflow.signabilityDesc",
     icon: Target,
+  },
+  {
+    id: "chapter",
+    labelKey: "journey.quality.detect.chapter",
+    descKey: "journey.quality.detect.chapterDesc",
+    icon: FileText,
+  },
+  {
+    id: "volume",
+    labelKey: "journey.quality.detect.volume",
+    descKey: "journey.quality.detect.volumeDesc",
+    icon: BookOpen,
+  },
+  {
+    id: "structure",
+    labelKey: "journey.quality.detect.structure",
+    descKey: "journey.quality.detect.structureDesc",
+    icon: Radar,
   },
 ];
 
