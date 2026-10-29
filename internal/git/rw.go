@@ -196,6 +196,49 @@ func RemoveFile(novelID int64, path string) error {
 	return nil
 }
 
+// chapterFileRe 匹配章节正文/大纲文件命名：chapters/id_N.md、outlines/id_N.md。
+var chapterFileRe = regexp.MustCompile(`^id_\d+\.md$`)
+
+// ListChapterFiles 返回小说目录下 chapters/ 与 outlines/ 子目录中符合
+// id_<N>.md 命名的相对路径（不含未分卷等其他文件）。用于孤儿文件回收时
+// 枚举磁盘上的章节文件，再与 DB 存活章节比对。
+func ListChapterFiles(novelID int64) ([]string, error) {
+	dir := novelDir(novelID)
+	var out []string
+	for _, sub := range []string{"chapters", "outlines"} {
+		entries, err := os.ReadDir(filepath.Join(dir, sub))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("git: read %s: %w", sub, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if chapterFileRe.MatchString(e.Name()) {
+				out = append(out, filepath.Join(sub, e.Name()))
+			}
+		}
+	}
+	return out, nil
+}
+
+// ParseChapterFileID 从 chapters/id_N.md 或 outlines/id_N.md 解析章节 ID。
+// 返回 (id, true) 表示匹配成功；否则 (0, false)。
+func ParseChapterFileID(rel string) (int64, bool) {
+	base := filepath.Base(rel)
+	if !chapterFileRe.MatchString(base) {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(base[len("id_"):len(base)-len(".md")], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
 var ErrPathEscape = errors.New("git: path escapes novel directory")
 
 func novelDir(novelID int64) string {

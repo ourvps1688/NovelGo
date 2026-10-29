@@ -159,6 +159,21 @@ func (a *App) runInit(cfg *config.AppConfig) error {
 	return nil
 }
 
+// reconcileOrphanChapterFiles 对所有小说执行孤儿章节文件回收（best-effort）。
+// 依赖 a.chapterService 与 a.novel，均在 initWithConfig 中先于本调用就绪。
+func (a *App) reconcileOrphanChapterFiles() error {
+	novels, err := a.GetNovels()
+	if err != nil {
+		return fmt.Errorf("列出小说失败: %w", err)
+	}
+	for _, n := range novels {
+		if _, err := a.chapterService.ReconcileOrphanFiles(a.ctx, n.ID); err != nil {
+			a.logger.Warn("孤儿章节文件回收失败", "novel_id", n.ID, "err", err)
+		}
+	}
+	return nil
+}
+
 // OnBeforeClose 在窗口关闭前调用，返回 true 表示阻止关闭。
 //
 // 初始化进行中（含数据库迁移）时劝阻退出：迁移本身可断点续跑，但用户往往
@@ -408,6 +423,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 			return nil
 		},
 	)
+	// 启动期孤儿章节文件回收（E1 崩溃窗口兜底）：DB 已删但文件未删的残留文件。
+	if err := a.reconcileOrphanChapterFiles(); err != nil {
+		a.logger.Warn("启动期孤儿章节文件清理失败", "err", err)
+	}
 	s, err := skill.NewStore(a.logger, config.UserSkillsDir())
 	if err != nil {
 		a.logger.Error("初始化 skill store 失败", "err", err)

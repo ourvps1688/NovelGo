@@ -118,22 +118,22 @@ func (s *Service) Delete(ctx context.Context, novelID, chapterID int64) (*Delete
 	if len(references) > 0 {
 		return &DeleteResult{References: references}, nil
 	}
-	// TODO: 如需跨文件系统与数据库的崩溃一致性，可先将文件原子移动到暂存目录，
-	// 待事务提交后再异步删除，并在启动时按 DB 状态恢复或清理暂存文件。
+	// 1. 事务内只删 DB 记录，绝不碰文件系统——保证 DB 是真相源，避免「文件已删但
+	//    事务回滚导致记录还在」或「事务提交前崩溃导致文件没了记录还在」的不一致。
 	err = s.store.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := s.store.Delete(ctx, tx, novelID, chapterID); err != nil {
-			return err
-		}
-		for _, path := range []string{git.ChapterPath(chapterID), git.OutlinePath(chapterID)} {
-			if err := git.RemoveFile(novelID, path); err != nil {
-				return fmt.Errorf("remove chapter file: %w", err)
-			}
-		}
-		return nil
+		return s.store.Delete(ctx, tx, novelID, chapterID)
 	})
 	if err != nil {
 		return nil, err
 	}
+	// 2. DB 提交成功后才删文件，带有限重试。即使进程崩溃未删完，最坏情况是残留
+	//    孤立文件，由启动期 ReconcileOrphanFiles 回收；不会与 DB 记录产生矛盾。
+	for _, path := range []string{git.ChapterPath(chapterID), git.OutlinePath(chapterID)} {
+		if err := s.removeFileWithRetry(ctx, novelID, path); err != nil {
+			s.logger.Error("删除章节文件失败（已重试）", "novel_id", novelID, "chapter_id", chapterID, "path", path, "err", err)
+		}
+	}
+	// 3. 派生索引清理（best-effort，可重放：按 chapterID 删除，重复执行无副作用）。
 	if s.chunkCleaner != nil {
 		if cleaner := s.chunkCleaner(); cleaner != nil {
 			if err := cleaner.DeleteChapterChunks(ctx, novelID, chapterID); err != nil {
@@ -147,4 +147,54 @@ func (s *Service) Delete(ctx context.Context, novelID, chapterID int64) (*Delete
 		}
 	}
 	return &DeleteResult{Deleted: true}, nil
+}
+
+// removeFileWithRetry 以有限重试删除单文件，规避瞬时 IO 失败；文件不存在视为成功。
+func (s *Service) removeFileWithRetry(_ context.Context, novelID int64, path string) error {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := git.RemoveFile(novelID, path); err != nil {
+			lastErr = err
+			s.logger.Warn("删除章节文件重试", "attempt", attempt, "path", path, "err", err)
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+// ReconcileOrphanFiles 回收「DB 已删但磁盘文件未删」的孤儿章节文件，作为 Delete
+// 因崩溃未能完成文件清理时的启动期兜底。DB 存活章节列表为真相源，不在其中的
+// id_<N>.md 一律视为孤儿删除。返回实际删除的文件数。
+func (s *Service) ReconcileOrphanFiles(ctx context.Context, novelID int64) (int, error) {
+	live, err := s.store.ListAllByNovel(ctx, nil, novelID)
+	if err != nil {
+		return 0, fmt.Errorf("list chapters: %w", err)
+	}
+	liveIDs := make(map[int64]struct{}, len(live))
+	for _, c := range live {
+		liveIDs[c.ID] = struct{}{}
+	}
+	files, err := git.ListChapterFiles(novelID)
+	if err != nil {
+		return 0, fmt.Errorf("list chapter files: %w", err)
+	}
+	removed := 0
+	for _, rel := range files {
+		id, ok := git.ParseChapterFileID(rel)
+		if !ok {
+			continue
+		}
+		if _, live := liveIDs[id]; live {
+			continue
+		}
+		if err := git.RemoveFile(novelID, rel); err != nil {
+			s.logger.Warn("回收孤儿章节文件失败", "novel_id", novelID, "path", rel, "err", err)
+			continue
+		}
+		removed++
+		s.logger.Info("回收孤儿章节文件", "novel_id", novelID, "path", rel, "chapter_id", id)
+	}
+	return removed, nil
 }
