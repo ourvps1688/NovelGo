@@ -22,6 +22,10 @@ export function CancelChat(arg1) {
   return window['go']['app']['App']['CancelChat'](arg1);
 }
 
+export function CancelDetectionTask(arg1, arg2, arg3) {
+  return window['go']['app']['App']['CancelDetectionTask'](arg1, arg2, arg3);
+}
+
 export function CancelExtract(arg1) {
   return window['go']['app']['App']['CancelExtract'](arg1);
 }
@@ -522,10 +526,6 @@ export function RejectRetconCase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RejectRetconCase'](arg1, arg2, arg3);
 }
 
-export function RunDetectionTask(arg1, arg2, arg3) {
-  return window['go']['app']['App']['RunDetectionTask'](arg1, arg2, arg3);
-}
-
 export function ResumePipeline(arg1, arg2, arg3) {
   return window['go']['app']['App']['ResumePipeline'](arg1, arg2, arg3);
 }
@@ -536,6 +536,10 @@ export function RetryStartup() {
 
 export function RollbackRetconCase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RollbackRetconCase'](arg1, arg2, arg3);
+}
+
+export function RunDetectionTask(arg1, arg2, arg3) {
+  return window['go']['app']['App']['RunDetectionTask'](arg1, arg2, arg3);
 }
 
 export function SaveAuthorAliases(arg1) {

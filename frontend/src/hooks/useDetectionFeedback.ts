@@ -2,6 +2,7 @@
 // 复用既有事件协议零改动（WBS §10.4）：
 //   pipeline:detect_done        — 卷/书体检完成 {novel_id, kind, verdict, issue_count}（T1.2 增量通道）
 //   pipeline:consistency_patrol — 巡检·结构完成 {novel_id}（既有通道）
+//   pipeline:detect_cancelled   — 检测任务被取消（B5）{novel_id, kind}：即时刷新状态行（进行态已注销）
 // 事件到达=结果已更新：检测状态查询失效（状态行刷新）+ 该 kind 记「新结果」，
 // 用户点「查看结果」后消隐。章节检测无完成事件（直写质量档案），进行态由
 // 检测状态轮询收口即可见，结果跳转不依赖事件。降级零提示：事件缺失/载荷
@@ -42,10 +43,28 @@ export function useDetectionFeedback(novelId: number): DetectionFeedback {
         mark("structure");
       },
     );
+    // B5：取消事件=进行态已注销，仅刷新状态行即可（running→false），
+    // 并清掉该 kind 的「新结果」标记（取消不产生结果）。
+    const offCancel = EventsOn(
+      "pipeline:detect_cancelled",
+      (p: { novel_id?: number; kind?: string }) => {
+        if (p.novel_id !== novelId || !p.kind) return;
+        queryClient.invalidateQueries({
+          queryKey: detectionKeys.list(novelId),
+        });
+        setFreshKinds((prev) => {
+          if (!prev.has(p.kind!)) return prev;
+          const next = new Set(prev);
+          next.delete(p.kind!);
+          return next;
+        });
+      },
+    );
     return () => {
       // 测试环境 EventsOn 可能无返回值（setup Proxy mock），可选调用防卸载报错。
       offDetect?.();
       offPatrol?.();
+      offCancel?.();
     };
   }, [novelId, queryClient]);
 

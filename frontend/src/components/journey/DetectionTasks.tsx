@@ -11,6 +11,7 @@ import { useNovelStore } from "@/components/novel/useNovelStore";
 import { useChapters } from "@/components/chapter/useChapters";
 import { useVolumes } from "@/components/volume/useVolumes";
 import {
+  CancelDetectionTask,
   ListDetectionTaskStatuses,
   RunDetectionTask,
 } from "@/lib/wailsjs/go/app/App";
@@ -99,6 +100,18 @@ export default function DetectionTasks() {
       .catch(() => {});
   };
 
+  // B5 取消在飞检测任务：best-effort——取消成功或在队列未起执行体均静默（契约 0.1）。
+  const cancel = (kind: DetectKind, scopeID: number | null) => {
+    if (!novelId) return;
+    CancelDetectionTask(novelId, kind, scopeID)
+      .then(() =>
+        queryClient.invalidateQueries({
+          queryKey: detectionKeys.list(novelId),
+        }),
+      )
+      .catch(() => {});
+  };
+
   const renderStatus = (kind: DetectKind): ReactNode => {
     const st = statusOf(kind);
     if (st?.running) {
@@ -179,6 +192,17 @@ export default function DetectionTasks() {
               ? t("journey.quality.detect.running")
               : t("journey.quality.detect.start")}
           </button>
+          {/* B5 取消在飞检测：仅在检测进行中呈现，best-effort 静默（契约 0.1）。 */}
+          {running ? (
+            <button
+              type="button"
+              data-testid={`detection-cancel-${kind}`}
+              onClick={() => cancel(kind, scopeID)}
+              className="h-8 rounded-md border border-destructive/30 bg-destructive/10 px-3 text-xs text-foreground/90 transition-colors hover:bg-destructive/20"
+            >
+              {t("journey.quality.detect.cancel")}
+            </button>
+          ) : null}
           {/* T2.2 结果可达闭环：有结果（上次检测已落库）才提供跳转，
               落点复用既有面板（工单/张力报告/质量档案），零重复视图。 */}
           {st?.last_run_at ? (

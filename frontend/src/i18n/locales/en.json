@@ -2092,6 +2092,8 @@
         "viewResult": "View results",
         "fresh": "New",
         "running": "Detecting…",
+        "cancel": "Cancel",
+        "cancelled": "Cancelled",
         "never": "Not run yet",
         "lastRun": "Last run {{at}} · {{count}} findings",
         "chapter": "Chapter check",

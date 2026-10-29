@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   GetVolumes: vi.fn(),
   ListDetectionTaskStatuses: vi.fn(),
   RunDetectionTask: vi.fn(),
+  CancelDetectionTask: vi.fn(),
   RecordFeatureUsage: vi.fn(),
 }));
 
@@ -51,6 +52,7 @@ describe("JourneyQuality：写作评分配置卡（T3.1 挂载点迁移）", () 
     mocks.GetVolumes.mockResolvedValue([]);
     mocks.ListDetectionTaskStatuses.mockResolvedValue([]);
     mocks.RunDetectionTask.mockResolvedValue({ dispatched: true });
+    mocks.CancelDetectionTask.mockResolvedValue(true);
     useNovelStore.setState({ activeNovelId: 1 });
   });
 
@@ -284,17 +286,39 @@ describe("JourneyQuality：T2.1 检测任务卡（R5-3 检测任务独立入口�
     expect(
       within(chapter).getByText("journey.quality.detect.lastRun"),
     ).toBeInTheDocument();
-    // 卷：进行态（状态行 + 按钮同文且收口禁用）
+    // 卷：进行态（状态行 + 启动按钮同文且收口禁用；取消按钮另呈）
     const volume = await screen.findByTestId("detection-task-volume");
-    await within(volume).findByRole("button", {
+    const runningBtn = await within(volume).findByRole("button", {
       name: "journey.quality.detect.running",
     });
-    expect(within(volume).getByRole("button")).toBeDisabled();
+    expect(runningBtn).toBeDisabled();
+    expect(
+      await within(volume).findByTestId("detection-cancel-volume"),
+    ).toBeInTheDocument();
     // 书：未检测
     const book = await screen.findByTestId("detection-task-book");
     expect(
       await within(book).findByText("journey.quality.detect.never"),
     ).toBeInTheDocument();
+  });
+
+  it("B5 进行态呈现取消按钮：点击调用 CancelDetectionTask（含作用域）", async () => {
+    mocks.ListDetectionTaskStatuses.mockResolvedValue([
+      { kind: "book", novel_id: 1, running: true, last_issue_count: 0 },
+      {
+        kind: "chapter",
+        novel_id: 1,
+        running: false,
+        last_issue_count: 0,
+      },
+    ]);
+    render(<JourneyQuality />, { wrapper });
+    const book = await screen.findByTestId("detection-task-book");
+    const cancelBtn = await within(book).findByTestId("detection-cancel-book");
+    fireEvent.click(cancelBtn);
+    await waitFor(() =>
+      expect(mocks.CancelDetectionTask).toHaveBeenCalledWith(1, "book", null),
+    );
   });
 
   it("未选书降级：提示先选书且零查询零启动", () => {

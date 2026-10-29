@@ -122,3 +122,12 @@ func EmitRewriteBacklog(ctx context.Context, p map[string]any) {
 func EmitDetectDone(ctx context.Context, p map[string]any) {
 	eventBus.Emit(ctx, EvDetectDone, p)
 }
+
+// EvDetectCancelled 检测任务被用户取消（B5）：{novel_id, kind, scope_id}。
+// 前端据此即时刷新检测状态行（进行态已注销）并清「新结果」标记。
+const EvDetectCancelled = "pipeline:detect_cancelled"
+
+// EmitDetectCancelled 广播检测任务被取消，通知前端刷新检测状态（B5）。
+func EmitDetectCancelled(ctx context.Context, p map[string]any) {
+	eventBus.Emit(ctx, EvDetectCancelled, p)
+}

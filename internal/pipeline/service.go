@@ -124,6 +124,12 @@ type Service struct {
 	// 纯进程内单源：任务队列启动清扫（AbandonActive）会把跨进程残留活跃任务置 dead，
 	// 「进行态」与执行体生命周期同进程，无需回查 task 表。
 	detectRunning sync.Map
+	// detectCancelFns 是检测任务取消函数登记表（B5 取消/超时）：key=detectKey
+	// （同 detectRunning），value=context.CancelFunc（执行体启动时注册，持有带超时+
+	// 取消的派生 ctx）。CancelDetectionTask 按 key 取出并调用 cancel，使执行体 ctx
+	// 立即 Done（agent loop / dispatchSkill 感知后安全退出）。注册/注销与 detectRunning
+	// 同生命周期（执行体收口 defer 调用 endDetectCtx 注销）。
+	detectCancelFns sync.Map
 }
 
 // NewService 构造流水线服务。

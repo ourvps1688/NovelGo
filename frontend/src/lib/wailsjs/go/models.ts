@@ -2728,18 +2728,18 @@ export namespace personasetting {
 }
 
 export namespace pipeline {
-
+	
 	export class DetectionTaskResult {
 	    kind: string;
 	    novel_id: number;
 	    scope_id?: number;
 	    run_id?: string;
 	    dispatched: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DetectionTaskResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -2759,11 +2759,11 @@ export namespace pipeline {
 	    last_issue_count: number;
 	    // Go type: time
 	    last_run_at?: any;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new DetectionTaskStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.kind = source["kind"];
@@ -2775,7 +2775,7 @@ export namespace pipeline {
 	        this.last_issue_count = source["last_issue_count"];
 	        this.last_run_at = this.convertValues(source["last_run_at"], null);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2832,11 +2832,11 @@ export namespace pipeline {
 	    source: string;
 	    // Go type: time
 	    updated_at: any;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PatrolReportView(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.report = source["report"];
@@ -2844,7 +2844,7 @@ export namespace pipeline {
 	        this.source = source["source"];
 	        this.updated_at = this.convertValues(source["updated_at"], null);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2934,7 +2934,6 @@ export namespace pipeline {
 		    return a;
 		}
 	}
-
 	export class PipelineRun {
 	    ID: number;
 	    NovelID: number;

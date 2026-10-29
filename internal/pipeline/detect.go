@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -185,6 +186,21 @@ const (
 // 只作容器身份标识；容器出生即 StatusFinished，阶段永不推进）。
 const detectContainerStage = "detect"
 
+// detectTaskTimeout 是检测任务执行体的硬超时上限（安全兜底，对应审计 B5）：防止大书/
+// 慢供应商下检测任务无限卡死无退出。交互式退出走 CancelDetectionTask。
+// 该值为墙钟上限而非「无进度」判定——正常慢速大书检测可能因超时被中断，故取值较宽；
+// 以 var 暴露便于测试收缩与后续按 kind 细分。
+var detectTaskTimeout = 60 * time.Minute
+
+// detectKindOfMode 由容器 mode 反推检测 kind（卷体检 / 书体检；默认书体检），
+// 供执行体创建带取消的派生 ctx 时定位 detectKey（与 beginDetect 登记键一致）。
+func detectKindOfMode(mode string, volumeID *int64) string {
+	if mode == detectModeOf(DetectionKindVolume) {
+		return DetectionKindVolume
+	}
+	return DetectionKindBook
+}
+
 // DetectionTaskResult 是 RunDetectionTask 的启动回执：检测异步执行，回执只反映
 // 「是否成功派发」；结果落容器后由检测状态查询/结果面板消费（WBS T1.3）。
 type DetectionTaskResult struct {
@@ -244,9 +260,11 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 	}
 	runner := s.chapterCIRunner
 	s.beginDetect(DetectionKindChapter, novelID, &chapterID, "")
+	ctx := s.beginDetectCtx(DetectionKindChapter, novelID, &chapterID)
 	go func() {
-		defer s.endDetect(DetectionKindChapter, novelID, &chapterID)
-		if err := runner(s.appCtx, novelID, chapterID); err != nil {
+		// 收口注销：撤销超时/取消派生 ctx + 注销检测进行态（T1.3）。
+		defer s.endDetectCtx(DetectionKindChapter, novelID, &chapterID)
+		if err := runner(ctx, novelID, chapterID); err != nil && ctx.Err() == nil {
 			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "err", err)
 		}
 	}()
@@ -305,14 +323,18 @@ func (s *Service) ensureDetectRun(ctx context.Context, novelID int64, kind strin
 // 新一轮清单落法）后把结果落检测容器并广播完成——零 auto-advance、零闸门广播、
 // 零阶段推进（检测-only 语义）；失败静默降级（零提示零报错，不改检测口径）。
 func (s *Service) executeDetectAudit(runID string, novelID int64) {
-	ctx := s.appCtx
 	// 检测进行态注销（T1.3）：按 runID 注销派发时登记的条目（含加载失败早退路径）。
 	defer s.endDetectByRunID(runID)
-	run, err := s.store.GetByRunID(ctx, runID)
+	run, err := s.store.GetByRunID(s.appCtx, runID)
 	if err != nil {
 		s.logger.Warn("检测任务：加载检测容器失败（非阻断）", "run_id", runID, "err", err)
 		return
 	}
+	// B5：创建带超时+取消的派生 ctx（登记 cancel 供 CancelDetectionTask 触发）替代
+	// 无限期的 appCtx，使大书/慢供应商下检测任务不会永久卡死；kind 由容器 mode 反推。
+	kind := detectKindOfMode(run.Mode, run.VolumeID)
+	ctx := s.beginDetectCtx(kind, novelID, run.VolumeID)
+	defer s.endDetectCtx(kind, novelID, run.VolumeID)
 	var ctxt GateContext
 	if run.ContextJSON != "" {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)

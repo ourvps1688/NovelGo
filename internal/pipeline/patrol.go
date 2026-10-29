@@ -49,6 +49,14 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	// 检测进行态注销（T1.3）：巡检·结构检测派发时按容器 runID 登记，收口（含失败）注销；
 	// 流水线侧巡检无登记条目，注销为 no-op。
 	defer s.endDetectByRunID(runID)
+	// B5：仅当本巡逻是「巡检·结构」检测任务容器时，套一层带超时+取消的派生 ctx
+	// （登记 cancel 供 CancelDetectionTask 触发），避免大书巡检永久卡死；流水线侧
+	// 自动巡检（G_freeze / 控制指令 patrol）沿用 appCtx，行为零变化。
+	if run, rerr := s.store.GetByRunID(s.appCtx, runID); rerr == nil && run != nil && run.Mode == detectModeOf(DetectionKindStructure) {
+		dctx := s.beginDetectCtx(DetectionKindStructure, novelID, nil)
+		defer s.endDetectCtx(DetectionKindStructure, novelID, nil)
+		bg = dctx
+	}
 	out, err := s.dispatchSkill(bg, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)),

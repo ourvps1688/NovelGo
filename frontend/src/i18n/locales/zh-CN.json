@@ -2052,6 +2052,8 @@
         "viewResult": "查看结果",
         "fresh": "新结果",
         "running": "检测中…",
+        "cancel": "取消检测",
+        "cancelled": "已取消",
         "never": "尚未检测",
         "lastRun": "上次检测 {{at}} · {{count}} 项发现",
         "chapter": "章节检测",

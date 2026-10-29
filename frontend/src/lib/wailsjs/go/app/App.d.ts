@@ -5,6 +5,7 @@ import {snapshot} from '../models';
 import {app} from '../models';
 import {update} from '../models';
 import {style} from '../models';
+import {pipeline} from '../models';
 import {storyarc} from '../models';
 import {chapter} from '../models';
 import {character} from '../models';
@@ -20,7 +21,6 @@ import {storage} from '../models';
 import {git} from '../models';
 import {activity} from '../models';
 import {personasetting} from '../models';
-import {pipeline} from '../models';
 import {apperr} from '../models';
 import {session} from '../models';
 import {config} from '../models';
@@ -41,6 +41,8 @@ export function AuditSeriesBible(arg1:number):Promise<snapshot.AuditReport>;
 export function BeginRetconEdit(arg1:number,arg2:number,arg3:string):Promise<retcon.RetconCase>;
 
 export function CancelChat(arg1:string):Promise<void>;
+
+export function CancelDetectionTask(arg1:number,arg2:string,arg3:any):Promise<boolean>;
 
 export function CancelExtract(arg1:string):Promise<void>;
 
@@ -171,6 +173,7 @@ export function GetCommitFileList(arg1:number,arg2:string):Promise<app.CommitFil
 export function GetCommitLog(arg1:number,arg2:number,arg3:string):Promise<Array<git.CommitInfo>>;
 
 export function GetContent(arg1:number,arg2:string):Promise<string>;
+
 export function GetDetectionTaskStatus(arg1:number,arg2:string,arg3:any):Promise<pipeline.DetectionTaskStatus>;
 
 export function GetEnabledSkills(arg1:number):Promise<Array<string>>;
@@ -192,6 +195,7 @@ export function GetModels():Promise<Array<llm.AvailableModel>>;
 export function GetNovelSettings(arg1:number):Promise<app.SettingResult>;
 
 export function GetNovels():Promise<Array<novel.Novel>>;
+
 export function GetPatrolReport(arg1:number):Promise<pipeline.PatrolReportView>;
 
 export function GetPersonaSetting(arg1:number):Promise<personasetting.PersonaSetting>;
@@ -251,6 +255,7 @@ export function InstallRemoteSkill(arg1:app.InstallRemoteSkillInput):Promise<app
 export function IsInitialized():Promise<boolean>;
 
 export function ListDetectionTaskStatuses(arg1:number):Promise<Array<pipeline.DetectionTaskStatus>>;
+
 export function ListIssueTickets(arg1:number):Promise<Array<pipeline.PipelineIssue>>;
 
 export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_novelgo_novelgo_internal_storage_PageResult_github_com_novelgo_novelgo_internal_skill_remote_RemoteSkillMeta__>;
@@ -289,13 +294,13 @@ export function RecordRetconEdit(arg1:number,arg2:string):Promise<retcon.RetconC
 
 export function RejectRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
 
-export function RunDetectionTask(arg1:number,arg2:string,arg3:any):Promise<pipeline.DetectionTaskResult>;
-
 export function ResumePipeline(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RetryStartup():Promise<void>;
 
 export function RollbackRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
+
+export function RunDetectionTask(arg1:number,arg2:string,arg3:any):Promise<pipeline.DetectionTaskResult>;
 
 export function SaveAuthorAliases(arg1:app.SaveAuthorAliasesInput):Promise<void>;
 

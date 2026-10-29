@@ -20,6 +20,16 @@ func (a *App) RunDetectionTask(novelID int64, kind string, scopeID *int64) (*pip
 	return a.pipeline.RunDetectionTask(a.ctx, novelID, kind, scopeID)
 }
 
+// CancelDetectionTask 取消一个正在进行的检测任务（B5 交互式退出）。按 kind 与作用域
+// 取执行体 cancel 触发：在飞执行体立即感知 ctx.Done 安全退出；已收口/仍在队列则 best-effort
+// （返回 cancelled=false，前端据此如实反馈）。作用域语义同 RunDetectionTask。
+func (a *App) CancelDetectionTask(novelID int64, kind string, scopeID *int64) (bool, error) {
+	if a.pipeline == nil {
+		return false, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.CancelDetectionTask(novelID, kind, scopeID)
+}
+
 // GetDetectionTaskStatus 返回某类检测任务的状态（进行态 + 最近一次结果摘要，
 // R5-3 T1.3）。scopeID 为空取该 kind「最近一次检测」概览口径。
 func (a *App) GetDetectionTaskStatus(novelID int64, kind string, scopeID *int64) (*pipeline.DetectionTaskStatus, error) {

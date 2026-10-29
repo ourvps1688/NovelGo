@@ -124,6 +124,66 @@ func (s *Service) anyDetectRunning(kind string, novelID int64) bool {
 	return found
 }
 
+// ── 检测任务取消/超时（B5）────────────────────────────────────────────────
+
+// beginDetectCtx 为一次检测执行体创建「带超时+取消」的派生 ctx：从 appCtx 派生，
+// 挂 detectTaskTimeout 硬上限，并把 cancel 存入 detectCancelFns（key=detectKey），
+// 供 CancelDetectionTask 按 key 取出触发。返回派生 ctx 供执行体使用。
+func (s *Service) beginDetectCtx(kind string, novelID int64, scopeID *int64) context.Context {
+	ctx, cancel := context.WithTimeout(s.appCtx, detectTaskTimeout)
+	s.detectCancelFns.Store(detectKey(kind, novelID, scopeID), cancel)
+	return ctx
+}
+
+// endDetectCtx 收口一次检测执行体：撤销派生 ctx（cancel）+ 注销 cancel 登记 + 注销
+// 检测进行态（T1.3）。幂等：cancel 已被 CancelDetectionTask 取走时仅做注销。
+// 在 beginDetectCtx 之后调用（执行体 defer），与 beginDetect/endDetect 同生命周期。
+func (s *Service) endDetectCtx(kind string, novelID int64, scopeID *int64) {
+	key := detectKey(kind, novelID, scopeID)
+	if v, ok := s.detectCancelFns.LoadAndDelete(key); ok {
+		if cancel, ok := v.(context.CancelFunc); ok {
+			cancel()
+		}
+	}
+	s.endDetect(kind, novelID, scopeID)
+}
+
+// CancelDetectionTask 取消一个正在进行的检测任务（B5 交互式退出）：按 detectKey 取出
+// 执行体的 cancel 并触发，使执行体 ctx 立即 Done（agent loop / dispatchSkill 感知后
+// 安全退出，收口照常落库为 error 态而非假结果）。同时立即注销检测进行态，让前端状态
+// 行（轮询/事件）瞬时从「检测中」切回，无需等待执行体 unwind。
+//
+// 返回 cancelled=true 表示确有在飞执行体被取消；false 表示该方法/作用域当前无在飞
+// 执行体（已收口、或仍在队列尚未起执行体——队列排队态无法跨进程取消，属已知限制，
+// 桌面单进程下排队窗口极小）。CancelDetectionTask 本身不写运行时状态，调用方据此反馈。
+// 未知 kind 回错（API 误用，同 RunDetectionTask）。
+func (s *Service) CancelDetectionTask(novelID int64, kind string, scopeID *int64) (bool, error) {
+	switch kind {
+	case DetectionKindChapter, DetectionKindVolume, DetectionKindBook, DetectionKindStructure:
+	default:
+		return false, fmt.Errorf("检测取消：未知 kind %q", kind)
+	}
+	key := detectKey(kind, novelID, scopeID)
+	v, ok := s.detectCancelFns.LoadAndDelete(key)
+	cancelled := false
+	if ok {
+		if cancel, ok := v.(context.CancelFunc); ok {
+			cancel()
+			cancelled = true
+		}
+	}
+	// 立即注销进行态，前端瞬时可见「已取消」。
+	s.endDetect(kind, novelID, scopeID)
+	if cancelled {
+		EmitDetectCancelled(s.appCtx, map[string]any{
+			"novel_id": novelID,
+			"kind":     kind,
+			"scope_id": scopeID,
+		})
+	}
+	return cancelled, nil
+}
+
 // ── 检测状态查询 ──────────────────────────────────────────────────────────
 
 // GetDetectionTaskStatus 返回某 kind 检测任务的状态（进行态 + 最近一次结果摘要）。
