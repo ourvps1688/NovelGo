@@ -114,6 +114,10 @@ func TestSignabilityAuditE2E(t *testing.T) {
 		{"role": "user", "content": userPrompt},
 	}, mid)
 	if err != nil {
+		if isLLMInfraError(err) {
+			// 供应商侧/账户类错误（欠费/鉴权/限流/5xx/网络）属基础设施问题，不应阻断 CI。
+			t.Skipf("signability-audit LLM 调用失败（供应商侧/基础设施错误，非代码回归，跳过）: %v", err)
+		}
 		t.Fatalf("signability-audit LLM 调用失败: %v", err)
 	}
 

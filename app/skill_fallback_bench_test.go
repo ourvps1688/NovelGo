@@ -142,6 +142,21 @@ func TestSkillFallbackHitRate(t *testing.T) {
 	}
 	t.Logf("使用 provider=%s model=%s 进行真实兜底分类", pn, mid)
 
+	// 探针：先用一次最小调用探明 LLM 可达性。供应商侧错误（欠费/鉴权/限流/5xx/网络）
+	// 属基础设施问题，不应阻断 CI —— 直接 Skip；API 可达时再跑完整命中率测量
+	// （命中率门槛等断言仍保留，能抓住真正的路由/分类回归）。
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_, probeErr := llmClient.GenerateText(probeCtx, pn, []map[string]any{
+		{"role": "user", "content": "ping"},
+	}, mid)
+	probeCancel()
+	if probeErr != nil {
+		if isLLMInfraError(probeErr) {
+			t.Skipf("LLM 供应商侧不可达（%v），跳过真实兜底命中率测试（非代码回归，属基础设施/账户问题）", probeErr)
+		}
+		t.Fatalf("LLM 探针调用失败（疑似配置/代码问题）: %v", probeErr)
+	}
+
 	a := &App{llmClient: llmClient, skill: store, logger: logger}
 	classifier := func(ctx context.Context, m string, cands []skill.IntentCandidate) (string, float64) {
 		return a.classifyIntent(ctx, m, cands, pn, mid)

@@ -178,6 +178,21 @@ func TestRewriteVoiceABE2E(t *testing.T) {
 	require.NotEmpty(t, mid, "未找到可用模型")
 	t.Logf("voice A/B 使用 provider=%s model=%s（可选：%v）", pn, mid, allIDs)
 
+	// 探针：先用一次最小调用探明 LLM 可达性。供应商侧错误（欠费/鉴权/限流/5xx/网络）
+	// 属基础设施问题，不应阻断 CI —— 直接 Skip；API 可达时再跑双臂真实生成
+	// （指纹归因等断言仍保留，能抓住真正的 voice 块回归）。
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_, probeErr := llmClient.GenerateText(probeCtx, pn, []map[string]any{
+		{"role": "user", "content": "ping"},
+	}, mid)
+	probeCancel()
+	if probeErr != nil {
+		if isLLMInfraError(probeErr) {
+			t.Skipf("LLM 供应商侧不可达（%v），跳过 voice A/B 真实验收（非代码回归，属基础设施/账户问题）", probeErr)
+		}
+		t.Fatalf("LLM 探针调用失败（疑似配置/代码问题）: %v", probeErr)
+	}
+
 	// 系统提示 = chapter-rewrite 方法论的去工具化提炼（两臂共享，非 A/B 变量）。
 	sysPrompt := "你是一名资深网文作者，负责按签约体检意见对章节做整章重写。" +
 		"重写要真正解决问题（立人设/补爽点/修节奏/兑现伏笔），而不是润色表面；" +
@@ -192,7 +207,13 @@ func TestRewriteVoiceABE2E(t *testing.T) {
 			{"role": "system", "content": sysPrompt},
 			{"role": "user", "content": prompt},
 		}, mid)
-		require.NoError(t, err, "voice A/B LLM 调用失败")
+		if err != nil {
+			if isLLMInfraError(err) {
+				// 供应商侧/账户类错误属基础设施问题，不应阻断 CI。
+				t.Skipf("voice A/B LLM 调用失败（供应商侧/基础设施错误，非代码回归，跳过）: %v", err)
+			}
+			require.NoError(t, err, "voice A/B LLM 调用失败")
+		}
 		require.NotEmpty(t, strings.TrimSpace(out), "LLM 返回空产出")
 		return out
 	}
