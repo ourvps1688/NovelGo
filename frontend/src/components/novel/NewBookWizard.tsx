@@ -3,8 +3,8 @@ import { PenLine, Plus, Sparkles, Target, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   CreatePreference,
+  RunDetectionTask,
   SetEnabledSkills,
-  StartPipeline,
 } from "@/lib/wailsjs/go/app/App";
 import type { app } from "@/lib/wailsjs/go/models";
 import { toErrorMessage } from "@/utils/error";
@@ -187,16 +187,16 @@ export default function NewBookWizard({ open, onClose, onCreated }: Props) {
     }
   }
 
-  // 「立即启动」：建书后直接启动签约潜力流水线并切到流水线面板。
-  // PR3 后该工作流由 pipeline 状态机驱动，不再走 chat skill kickoff。
+  // 「立即启动」：建书后直接启动全书签约体检（检测核心），并切到签约体检面板。
+  // 走 RunDetectionTask(novelId, "book", null)，不再走旧 StartPipeline 流水线。
   async function handleLaunchConfirm() {
     const id = launchPromptId;
     if (id == null || saving) return;
     setSaving(true);
     try {
       await onCreated(id);
-      await StartPipeline(id, "new", null, false);
-      setActivePanel("pipeline");
+      await RunDetectionTask(id, "book", null);
+      setActivePanel("signability");
       toastSuccess(
         t("wizard.launchedToast", { workflow: t("workflow.signability") }),
       );

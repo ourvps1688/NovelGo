@@ -16,7 +16,7 @@ export default function PatrolReportPanel({
 }: {
   // 最近一次张力报告（run.ContextJSON.patrol_report 解析结果，可空）。
   data: AuditData | null;
-  // 一致性巡检完成计数（usePipeline 维护）：变化即清除「运行中」提示。
+  // 一致性巡检完成计数（由 DetectionCorePanel 的 pipeline:consistency_patrol 事件驱动）：变化即清除「运行中」提示。
   tick: number;
   onRun: () => void;
 }) {

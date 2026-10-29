@@ -704,10 +704,28 @@
     "typePalace": "Building",
     "typeWater": "Water",
     "typeKeywords": {
-      "nature": ["Forest", "Cave", "Mountain", "Swamp"],
-      "settlement": ["City", "Town", "Village", "Market"],
-      "palace": ["Palace", "Castle", "Temple"],
-      "water": ["Ocean", "River", "Lake"]
+      "nature": [
+        "Forest",
+        "Cave",
+        "Mountain",
+        "Swamp"
+      ],
+      "settlement": [
+        "City",
+        "Town",
+        "Village",
+        "Market"
+      ],
+      "palace": [
+        "Palace",
+        "Castle",
+        "Temple"
+      ],
+      "water": [
+        "Ocean",
+        "River",
+        "Lake"
+      ]
     }
   },
   "storyarc": {
@@ -1096,11 +1114,11 @@
     "appliedToast": "Applied \"{{strategy}}\" strategy: enabled {{count}} skills",
     "success": "New book created",
     "launchPrompt": "Launch the Signability Workflow (incl. golden opening chapters) now?",
-    "launchHint": "Launching opens the pipeline panel; the stage bar drives blueprint, worldbuilding, writing, audit and repair.",
+    "launchHint": "Launching starts the book-wide signability check (detection core); results land in the Quality journey's tickets and tension report for your review.",
     "launchNow": "Launch Workflow",
     "launchLater": "Later",
-    "launchedToast": "Launched {{workflow}}. Continue in the pipeline panel.",
-    "launchFailed": "Failed to start workflow. Start it later from the Workflows panel.",
+    "launchedToast": "Launched {{workflow}}. Track progress in the Quality panel.",
+    "launchFailed": "Failed to start the signability check. Start it later from the Quality panel.",
     "genreDefault": {
       "signing": "Urban rebirth power fantasy",
       "experimental": "Mind-bending sci-fi"
@@ -1782,10 +1800,10 @@
     "startButton": "Run Signability Audit",
     "auditing": "Signability audit in progress…",
     "continueButton": "Continue Current Workflow",
-    "continueHint": "A signability pipeline is already running at stage {{stage}}. Click to return to the pipeline panel and continue.",
+    "continueHint": "A signability check is already running at stage {{stage}}. Click to return to the Quality panel and continue.",
     "selectNovelFirst": "Select a book on the left first",
     "configureModelFirst": "Configure a model in Settings first",
-    "launchFailed": "Failed to start the pipeline. Please retry.",
+    "launchFailed": "Failed to start the signability check. Please retry.",
     "evaluation": "Signability Assessment",
     "evaluationHint": "Findings overview from this whole-book audit. Confirm each item, then Start Fix, or send it to chat to collaborate with the AI on edits."
   },
@@ -1869,30 +1887,8 @@
     "autoRun": "Auto Run",
     "alignFull": "Full Align",
     "alignFullHint": "Run full alignment on the imported book: build volume, backfill ledger, and run a whole-book signability audit",
-    "control": {
-      "pause": "Pause",
-      "resume": "Resume",
-      "stop": "Stop",
-      "noRun": "No active pipeline. Start one or re-run the audit first."
-    },
-    "gate": {
-      "summaryTitle": "Detection Summary",
-      "verdictPass": "Audit Passed",
-      "verdictNeedsFix": "Issues Found",
-      "foundCount": "Detection finished — {{n}} open ticket(s) found",
-      "foundNone": "Detection finished — no open tickets",
-      "suggestedActions": "Suggested actions (you decide whether to proceed)",
-      "continue": "Continue",
-      "modify": "Continue after editing",
-      "fix": "Enter fix loop",
-      "auditNow": "Enter Signability Audit",
-      "finishBook": "Final Audit",
-      "finishBookHint": "Run a signability-level final audit on the whole book, then finish once no fatal issues remain",
-      "finish": "Confirm Completion",
-      "abort": "Abort"
-    },
     "empty": "No pipeline run is in progress.",
-    "presetHint": "Orchestration preset: a one-click shell chaining writing → detection. Running detection only (entries live in the Quality journey) or running the pipeline only without manual detection — both are legitimate.",
+    "presetHint": "Orchestration preset: a one-click shell chaining writing → detection. Detection entries live in the Quality journey; running detection only or the preset only are both legitimate. The preset orchestrates but does not replace the detection core.",
     "start": "Start Pipeline",
     "continue": "Continue",
     "checkProgress": "Check Writing Progress",
@@ -1901,65 +1897,6 @@
     "hint": {
       "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
       "s3": "Writing chapter by chapter — keep writing according to the volume outline. Every 5 chapters, or when crossing into a new volume, the system suggests an audit re-check (non-blocking; writing is never interrupted). Click \"Check Writing Progress\" to trigger that check, or use \"Run Audit / Re-check\" anytime."
-    },
-    "blueprint": {
-      "generating": "Generating blueprint…",
-      "title": "Book Volume Structure",
-      "volumeCount": "{{n}} volumes",
-      "empty": "No volume structure generated yet; click Continue to skip.",
-      "auditing": "Running blueprint audit…",
-      "auditTitle": "Blueprint Audit",
-      "fixing": "Fixing blueprint issues…",
-      "fixNote": "Blueprint fixes done; re-auditing automatically.",
-      "score": "Score {{n}}/30"
-    },
-    "signability": {
-      "title": "Signability Audit",
-      "finalTitle": "Final Audit",
-      "auditing": "Running signability audit…",
-      "finalAuditing": "Running final audit…",
-      "fixing": "Fixing issues from audit…",
-      "score": "Score {{n}}/40",
-      "issues": "Issue List",
-      "noIssues": "No significant issues found.",
-      "noAudit": "No audit result yet (audit not finished or last run failed). Resume to re-run the audit.",
-      "fixNote": "Fixes done; re-auditing automatically."
-    },
-    "fixProgress": {
-      "idle": "Waiting for the fix to start…",
-      "batch": "Batch {{index}}/{{total}}",
-      "checklist": "Fix checklist ({{fixed}}/{{total}} fixed)",
-      "resumeHint": "Fix interrupted: click Resume to continue with the remaining issues (completed ones are kept).",
-      "done": "Fix finished",
-      "failed": "Fix failed",
-      "reAuditing": "Fix finished; the re-audit result will arrive as an audit gate shortly.",
-      "retconHandoff": "Handed off for manual decision ({{count}} items hit frozen-volume write protection / retcon candidates); auto-fix is blocked. Prefer forward adaptation of this volume; changes to earlier volumes require retcon approval.",
-      "stale": "Audit data incompatible, paused",
-      "staleHint": "This run's audit result is missing the fix_type field (legacy data); the auto-rewrite route cannot engage. Do NOT click Resume — re-run the audit/pipeline instead."
-    },
-    "fixStatus": {
-      "pending": "Pending",
-      "fixing": "Fixing",
-      "fixed": "Fixed",
-      "skipped": "Skipped",
-      "rewrite": "Rewrites",
-      "retcon": "Manual review"
-    },
-    "rewriteBacklog": {
-      "title": "Body issues routed back to S3 rewrite loop",
-      "hint": "These issues are body-level and cannot be patched by S5. They have been explicitly routed back to the S3 chapter-rewrite loop. Prioritize rewriting the affected chapters in writing, then return to re-audit.",
-      "chapters": "Chapters: {{chapters}}",
-      "noChapters": "(chapter numbers not parsed)"
-    },
-    "stageActivity": {
-      "title": "Live activity",
-      "hint": "Live agent activity for the current stage (newest first).",
-      "waiting": "Starting agent, waiting for actions…"
-    },
-    "stockAudit": {
-      "title": "Full Align · Current-state Audit",
-      "issues": "Issue List",
-      "noIssues": "No significant issues found."
     },
     "issueTags": {
       "direction": {
@@ -2183,7 +2120,7 @@
     }
   },
   "narrative": {
-    "tagline": "The pipeline guarantees the signability floor; mindset extraction raises the style ceiling",
+    "tagline": "The detection core guards the signability floor; mindset extraction raises the style ceiling",
     "upper": "style ceiling",
     "lower": "signability floor"
   },

@@ -685,10 +685,28 @@
     "typePalace": "建筑",
     "typeWater": "水域",
     "typeKeywords": {
-      "nature": ["森林", "洞穴", "山脉", "沼泽"],
-      "settlement": ["城市", "城镇", "村庄", "市场"],
-      "palace": ["王宫", "城堡", "神殿"],
-      "water": ["海洋", "河流", "湖泊"]
+      "nature": [
+        "森林",
+        "洞穴",
+        "山脉",
+        "沼泽"
+      ],
+      "settlement": [
+        "城市",
+        "城镇",
+        "村庄",
+        "市场"
+      ],
+      "palace": [
+        "王宫",
+        "城堡",
+        "神殿"
+      ],
+      "water": [
+        "海洋",
+        "河流",
+        "湖泊"
+      ]
     }
   },
   "storyarc": {
@@ -1073,11 +1091,11 @@
     "appliedToast": "已应用「{{strategy}}」策略：启用 {{count}} 个技能",
     "success": "新作品已创建",
     "launchPrompt": "是否立即启动签约潜力工作流（含黄金三章）？",
-    "launchHint": "启动后将直接打开创作流水线面板，由顶部阶段条驱动蓝图、设定、写作、签约体检与修复闭环。",
+    "launchHint": "启动后将直接开始全书签约体检（检测核心），检测结果会落在质检旅程的工单与张力报告中，由你确认后推进修复闭环。",
     "launchNow": "立即启动工作流",
     "launchLater": "稍后再说",
-    "launchedToast": "已启动 {{workflow}}，请在流水线面板继续",
-    "launchFailed": "启动工作流失败，可稍后从「工作流」入口手动启动",
+    "launchedToast": "已启动 {{workflow}}，可在「质检」面板查看检测进度与结果",
+    "launchFailed": "启动签约体检失败，可稍后从「质检」入口手动启动",
     "genreDefault": {
       "signing": "都市重生爽文",
       "experimental": "脑洞科幻"
@@ -1742,10 +1760,10 @@
     "startButton": "开始签约体检",
     "auditing": "签约体检进行中…",
     "continueButton": "继续当前工作流",
-    "continueHint": "当前已有运行中的签约潜力流水线，阶段：{{stage}}。点击返回流水线面板继续推进。",
+    "continueHint": "当前已有运行中的签约体检，阶段：{{stage}}。点击返回「质检」面板继续推进。",
     "selectNovelFirst": "请先在左侧选择一部作品",
     "configureModelFirst": "请先在设置中配置模型",
-    "launchFailed": "启动流水线失败，请稍后重试",
+    "launchFailed": "启动签约体检失败，请稍后重试",
     "evaluation": "签约潜力评估",
     "evaluationHint": "以下为本次全书签约体检的发现概览；逐项确认后可「去修复」，或发送到聊天与 AI 协作修改。"
   },
@@ -1829,30 +1847,8 @@
     "autoRun": "自动运行",
     "alignFull": "全量对齐",
     "alignFullHint": "对存量书做全量对齐：建卷归并 + 批量回填台账 + 全本签约级体检",
-    "control": {
-      "pause": "暂停",
-      "resume": "继续",
-      "stop": "停止",
-      "noRun": "当前没有活跃的流水线，请先开始或重新发起体检"
-    },
-    "gate": {
-      "summaryTitle": "检测汇总",
-      "verdictPass": "体检通过",
-      "verdictNeedsFix": "发现问题",
-      "foundCount": "检测完毕，发现 {{n}} 项待处理工单",
-      "foundNone": "检测完毕，无待处理工单",
-      "suggestedActions": "建议动作（是否推进由你决定）",
-      "continue": "继续",
-      "modify": "修改后继续",
-      "fix": "进入修复闭环",
-      "auditNow": "进入签约体检",
-      "finishBook": "完本终检",
-      "finishBookHint": "对全书做签约级终检，确认无致命伤后完本收口",
-      "finish": "确认完本",
-      "abort": "终止"
-    },
     "empty": "还没有运行中的创作流水线。",
-    "presetHint": "编排预设：「写→检测」一键串起的便捷壳——只跑检测不跑流水线（检测任务入口在质检旅程）、只跑流水线不手动跑检测，皆合法。",
+    "presetHint": "编排预设：「写→检测」一键串起的便捷壳——检测任务入口在质检旅程，手动跑检测或走编排预设都合法；本预设只编排、不替代检测核心。",
     "start": "开始流水线",
     "continue": "继续",
     "checkProgress": "检查写作进度",
@@ -1861,65 +1857,6 @@
     "hint": {
       "s1": "蓝图孵化中——请在左侧完成大纲与设定后点击「继续」。",
       "s3": "逐章写作中——按卷纲持续写作即可。系统会在「累计写满 5 章」或「进入新卷」时给出体检复检建议（非阻塞提示，不打断写作）；点击「检查写作进度」即可触发该判定，也可随时用「进入体检/复检」。"
-    },
-    "blueprint": {
-      "generating": "蓝图生成中……",
-      "title": "全书卷结构",
-      "volumeCount": "共 {{n}} 卷",
-      "empty": "尚未生成卷结构，可点击「继续」跳过。",
-      "auditing": "蓝图体检中……",
-      "auditTitle": "蓝图体检",
-      "fixing": "按蓝图问题修复中……",
-      "fixNote": "蓝图修复完成，正在自动复评。",
-      "score": "总分 {{n}}/30"
-    },
-    "signability": {
-      "title": "签约体检",
-      "finalTitle": "完本终检",
-      "auditing": "签约体检中……",
-      "finalAuditing": "完本终检中……",
-      "fixing": "按体检问题修复中……",
-      "score": "总分 {{n}}/40",
-      "issues": "问题清单",
-      "noIssues": "未发现明显问题。",
-      "noAudit": "暂无体检结果（体检尚未完成或上次体检失败），请点击恢复重新体检。",
-      "fixNote": "修复完成，正在自动复评。"
-    },
-    "fixProgress": {
-      "idle": "等待修复启动……",
-      "batch": "第 {{index}}/{{total}} 批",
-      "checklist": "修复清单（已修复 {{fixed}} / 共 {{total}} 项）",
-      "resumeHint": "修复已中断：点击「恢复」将从剩余未修复问题继续（已完成项保留）。",
-      "done": "修复执行完毕",
-      "failed": "修复失败",
-      "reAuditing": "修复已完成，复评结果稍后以体检闸门形式展示。",
-      "retconHandoff": "已转交人工裁决（{{count}} 项命中冻结卷写保护/retcon 候选），自动修复已拦截；请优先前向适配本卷，确需回改前卷的待 retcon 审批。",
-      "stale": "体检数据不兼容，已暂停",
-      "staleHint": "本次运行的体检结果缺少 fix_type 字段（旧版数据），自动重写路由无法启用；请勿点击「恢复」，请重新发起体检/流水线。"
-    },
-    "fixStatus": {
-      "pending": "待修复",
-      "fixing": "正在修复",
-      "fixed": "已修复",
-      "skipped": "已跳过",
-      "rewrite": "回流重写",
-      "retcon": "转人工裁决"
-    },
-    "rewriteBacklog": {
-      "title": "需回流 S3 重写的正文问题",
-      "hint": "以下问题属正文级，S5 无法用补丁修好，已显式回流到 S3 章节重写回路。请在写作中优先重写对应章节，再回到体检复评。",
-      "chapters": "涉及章节：{{chapters}}",
-      "noChapters": "（章节号未解析）"
-    },
-    "stageActivity": {
-      "title": "实时动态",
-      "hint": "以下为当前环节 agent 的实时工作动态（最新在上）。",
-      "waiting": "正在启动 agent，等待执行动作……"
-    },
-    "stockAudit": {
-      "title": "全量对齐 · 现状体检",
-      "issues": "问题清单",
-      "noIssues": "未发现明显问题。"
     },
     "issueTags": {
       "direction": {
@@ -2143,7 +2080,7 @@
     }
   },
   "narrative": {
-    "tagline": "流水线保证签约下限，心智提取抬高文风上限",
+    "tagline": "检测核心守住签约下限，心智提取抬高文风上限",
     "upper": "文风上限",
     "lower": "签约下限"
   },
