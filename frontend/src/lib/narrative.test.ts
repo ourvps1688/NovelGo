@@ -170,7 +170,7 @@ describe("叙案单源（WBS T2.1 §0.2）", () => {
 
   it("zh 叙案逐字=北极星原文（plan §0）", () => {
     expect(zhCN.narrative.tagline).toBe(
-      "流水线保证签约下限，心智提取抬高文风上限",
+      "检测核心守住签约下限，心智提取抬高文风上限",
     );
     expect(zhCN.narrative.upper).toBe("文风上限");
     expect(zhCN.narrative.lower).toBe("签约下限");
