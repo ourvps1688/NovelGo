@@ -37,6 +37,14 @@
 - #262 i18n（pipeline.title→检测核心，zh/en）+ featureKeys.test.tsx 移除 PipelineGateCard 引用。
 - #263 四道闸 + vitest 验证（format:check/i18n:check/lint 0 error/build/vitest 全绿）→ 一任务一提交推送核 0 0。
 
+## 复验 L0 快路径（P1 已落地，commit a16b1305）
+- 目的：复验去 LLM 化——机械类工单（字数/章尾钩子/AI味/称呼混用/死人出镜/战力数值序/文风漂移）走 quality.RunL0Checks
+  确定性判定，修复即自动确认（免 LLM）；仅语义矛盾（矛盾/冲突/逻辑/人设/情节/崩/伏笔…）与依赖台账缺失无法判定者退回 LLM。
+- 核心文件：internal/pipeline/l0_verify.go（classifyMechanicalChecks / l0Verdict / tryL0Verify / defaultL0ChapterReader）。
+  service.go 加 l0Reader 接缝；issue_tickets.go verifyOneTicket 顶部插入 L0 快路径。复用 propagation.go 的 l0Characters/novelGenre，勿重复定义。
+- 安全口径：l0Verdict 三分支——有效项仍命中→退回待修；零命中且 allVerifiable→自动确认；零命中但有依赖缺失项→保守退回 LLM。
+  依赖齐备性过滤：style_drift 需 voice 基线、name_drift/dead_appearance 需角色台账、power_upset/crush 需境界表，缺失降级移除，全缺失→退回 LLM。
+
 ## 供应商熔断重设计（P0 已落地，commit 74800a1b）
 - **根因修复**：原 `provider_trip.go` 用「近 10min 空闲超时 ≥10 次」当硬信号误熔断（thinking 模型长静默/代理缓冲被误杀）。P0 把「空闲超时」从熔断触发信号**剥离**，熔断只认**硬失败**。
 - **三态自愈熔断器** `internal/llm/breaker.go`：`providerBreakerManager` 全局单例 `ProviderBreaker`，按 provider 隔离；三态 Closed/Open/Half-Open；阈值初值 `hardFailureTrip=5`、`hardFailureWindow=2min`、`breakerCooldown=30s`、`breakerProbeSuccess=1`；Open 冷却到期→自动 Half-Open 探针，探针成功→Closed、失败→回 Open（自愈）。
