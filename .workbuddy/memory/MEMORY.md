@@ -46,3 +46,26 @@
 - **P1 已落地（commit `1636f9bc`，命题 §7 Step4/5）**：①**熔断下沉到 LLM 调用入口**——`breaker.go` 新增 `IsOpen(providerName)` 定向判断（冷却到期自动转 Half-Open，与 `AnyOpen` 共享自愈状态机）与取数接缝 `breakerBlockedProvider = ProviderBreaker.IsOpen`；`ChatStream`/`GenerateText` 在 provider 查找后插守卫，命中即 `breakerOpenError`（Kind=`provider_breaker_open`、`Retryable=false`）快速失败——agent 只对 `Retryable` 错误重试，故非可重试错误干净快速失败、不狂打。pipeline（`dispatchSkill`→`AnyOpen`）与 chat（入口→`IsOpen`）共用同一 `ProviderBreaker` 单例，**验收点 3（状态一致）达成**。②**空闲预算按模型放宽**——`thinkingIdleTimeout=9min`，`newIdleWatchdog` 加 `timeout` 参数，`idleTimeoutFor(provider,model)` 按 `ModelInfo.SupportsThinking` 选预算（思考模型 9min、其余 3min、未知回落 3min）。
 - 测试：`breaker_test.go` 保留 P0 6 项并新增 6 项 `IsOpen`（含与 `AnyOpen` 一致性）；`stream_test.go` 新增 `ChatStream`/`GenerateText` 拦截测试（经接缝确定性驱动、不污染全局 `ProviderBreaker`）+ `idleTimeoutFor` 测试。gofmt/lint/build/test 四道闸全绿、推送核 `0 0`。
 - **Step10 度量对齐（WBS 收口，commit `2f05eb6b`）**：主体已被 P0/P1 顺带完成——pipeline `tripped`(`ExecStatusTripped`，`dispatchSkill` 在 `providerTripped()` 真时记)↔`breakerOpenProviders()=AnyOpen` 已对齐；`idleFires`(`recordIdleFire`/`RecentIdleTimeouts`，`stream.go:130`)保留作长期观测（不驱动熔断）。唯一真实未对齐：前端 `tripHint`(zh-CN:1974/en:2014)仍称「空闲超时触发熔断」，已改为「硬失败(连接拒绝/5xx/首字节超时)口径 + 冷却后自动半开探针恢复」与 P0 事实一致。chat 度量**按设计排除**——`ExecStat` 是 pipeline-run 概念，chat 走独立 UX 且已与 pipeline 共用同一 `ProviderBreaker` 单例（状态一致），不补记 `tripped`。前端四道闸(含 lint 0 error)全绿。
+
+## 后端维度 A 收官（2026-10-29，已推送 origin/master 核 0 0）
+- 四任务 E1/A1/A3,D3/A2 全落地：commit `856af2eb`/`fcc448c5`/`b83611e7`/`ef1f7593`，`git push origin master` 核 `0 0`。
+- 分层铁律固化（审计整改验收点）：`app` 绑定层只做 DTO+委托；领域编排在 `internal/<domain>.Service`；`internal` 领域包**不得直接 import wails**，事件经 `internal/event.Emitter` 注入；跨介质一致性以 DB 为真相源，文件/向量清理移出事务 + 启动期孤儿回收（见 E1）。
+- 新增领域包：`internal/event`(`Emitter`/`NopEmitter`，A3/D3)、`internal/content`(`ContentService.DeriveAfterSave`，A1)、`internal/commit`(`Service`：git 自动提交+turn_commits 落库，全 best-effort，A2)。
+- chat.go 已无 `commitUserChanges`/`commitAIChanges`/`doCommit`/`writeSystemMessages` 与 git/gorm/rollback 直连；落库走 `session.Store`，git 收尾走 `commit.Service`。
+
+## 维度 B 产品缺口（2026-10-29 起推进，已推送 origin/master 核 0 0）
+- 总览见 `docs/CODE_AUDIT_OVERVIEW_2026-10-29.md` 维度 B（P1 关键项 9 条 + 前端工程债）。已建任务 #5–#10（B1–B6）。
+- **B1 消息排序 id tiebreaker（commit `125e78db`）**：`internal/session/store.go` 的
+  `GetMessagesForAPI/ForFrontend/AllMessages` 排序由 `created_at ASC` 改为 `created_at ASC, id ASC`，
+  以自增 id 作同秒消息稳定排序；新增 `store_test.go` 内存 SQLite 强制同秒断言按 id 升序。
+- **B2 检测发现项跳转章节原文（commit `d8f56b84`）**：闭环「检测→确认→去修复→复验」最后一跳。
+  新增 `frontend/src/stores/useNavigationStore.ts`（范式同 `useChatLaunchStore`，深层面板零侵入）；
+  `WorkspaceView` 经 `useChapters` 按阅读序号反查 chapter 对象并委托 `handleSelectChapter` 打开；
+  `IssueTicketsPanel` 把涉及章节号渲染为可点击按钮 → `openChapterByReadingNumber`（沿用阅读序号→章节寻址约定）。
+  另修维度A遗留：`narrative.test.ts` tagline 断言同步到「检测核心」文案（commit `f2e1fcbe`，此前 2a5d926f 改了源文案却漏改测试，导致 vitest 基线红）。
+- 验证纪律：后端 `go build ./...`+`go test ./...`+gofmt+pre-commit 双闸；前端四道闸
+  format:check/i18n:check/lint(0 error)/build/vitest 全绿（vitest 默认 threads 池偶发 worker 超时，
+  用 `--pool=forks` 稳定全绿，384 测试通过）。
+- **B3 放开 SQLite 连接池提升读写并发（commit `4311be43`）**：WAL 已启用，瓶颈是 `SetMaxOpenConns(1)` 强制串行。放开为 `max(4, min(NumCPU,8))`；DSN 注入 `_busy_timeout=5s` 让并发写自旋等待写锁而非报 locked；保留 idle/lifetime。新增 `sqlite_concurrency_test.go` 验证并发读写不报 locked 且自增无丢失更新。
+- 待办 B4–B6（未动）：写章前情注入(B4)、检测任务取消/超时(B5)、失败 turn 重试(B6)。
+- **环境坑（重要，勿回退）**：本机 `%LocalAppData%` 未定义，bare `go`/`golangci-lint` 因 GOCACHE 缺失会报 "no go files to analyze" 或 "build cache required"。提交/跑 lint 必须带 `GOCACHE=$HOME/.cache/go-build`（及 `GOLANGCI_LINT_CACHE`/`CGO_*`/`PATH`）。`run.go:"1.25"` 与实际 go1.27 不冲突——GOCACHE 一设即可。
