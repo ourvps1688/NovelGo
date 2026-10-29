@@ -70,7 +70,7 @@ func TestWriteSystemMessages_PersonaBlockPersisted(t *testing.T) {
 	require.Contains(t, sysMsgs.Persona, agentcfg.PersonaMarker, "persona 引导段应被构建")
 
 	sysContents := []string{sysMsgs.Identity, sysMsgs.Always, sysMsgs.Catalog, sysMsgs.Profile, sysMsgs.State, sysMsgs.Persona}
-	require.NoError(t, app.session.PersistTurnMessages(ctx, sessionID, turnID, 1, sysContents, "", "", nil))
+	require.NoError(t, app.session.PersistTurnMessages(ctx, sessionID, turnID, 1, sysContents, "", "", "", nil))
 
 	msgs, _, err := app.loadAPIMessages(ctx, sessionID, 1)
 	require.NoError(t, err)

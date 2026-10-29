@@ -50,12 +50,18 @@ func (s *Store) AppendMessage(ctx context.Context, msg *Message) error {
 }
 
 // PersistTurnMessages 在单事务内持久化一轮的消息：sysContents（新会话预构建 system 段，按序写入）
-// + slash inject + auto inject + 用户消息。userMsg 为 nil 时仅写入前三者。
+// + slash inject + auto inject + preCtx inject（写章前情回顾，见 B4）+ 用户消息。userMsg 为 nil 时仅写入前四者。
 // 系统消息与 inject 均标记为 ToAPI=true/ToFrontend=false（仅用户消息可同时前端可见）。
-func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnID, version int, sysContents []string, slashInject, autoInject string, userMsg *Message) error {
+func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnID, version int, sysContents []string, slashInject, autoInject, preCtxInject string, userMsg *Message) error {
 	sysMsg := func(content string) *Message {
 		return &Message{
 			SessionID: sessionID, TurnID: turnID, Role: "system", Content: content,
+			Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
+		}
+	}
+	injectMsg := func(content string) *Message {
+		return &Message{
+			SessionID: sessionID, TurnID: turnID, Role: "user", Content: content,
 			Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
 		}
 	}
@@ -69,18 +75,17 @@ func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnI
 			}
 		}
 		if slashInject != "" {
-			if err := tx.Create(&Message{
-				SessionID: sessionID, TurnID: turnID, Role: "user", Content: slashInject,
-				Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
-			}).Error; err != nil {
+			if err := tx.Create(injectMsg(slashInject)).Error; err != nil {
 				return err
 			}
 		}
 		if autoInject != "" {
-			if err := tx.Create(&Message{
-				SessionID: sessionID, TurnID: turnID, Role: "user", Content: autoInject,
-				Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
-			}).Error; err != nil {
+			if err := tx.Create(injectMsg(autoInject)).Error; err != nil {
+				return err
+			}
+		}
+		if preCtxInject != "" {
+			if err := tx.Create(injectMsg(preCtxInject)).Error; err != nil {
 				return err
 			}
 		}
