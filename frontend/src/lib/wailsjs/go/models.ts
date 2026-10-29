@@ -2808,24 +2808,26 @@ export namespace pipeline {
 	        this.issue_key = source["issue_key"];
 	    }
 	}
-	export class IssueVerifySummary {
-	    confirmed: number;
-	    rejected: number;
-	    unverified: number;
-	    detail: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new IssueVerifySummary(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.confirmed = source["confirmed"];
-	        this.rejected = source["rejected"];
-	        this.unverified = source["unverified"];
-	        this.detail = source["detail"];
-	    }
-	}
+export class IssueVerifySummary {
+    confirmed: number;
+    rejected: number;
+    unverified: number;
+    queued: number;
+    detail: string;
+
+    static createFrom(source: any = {}) {
+        return new IssueVerifySummary(source);
+    }
+
+    constructor(source: any = {}) {
+        if ('string' === typeof source) source = JSON.parse(source);
+        this.confirmed = source["confirmed"];
+        this.rejected = source["rejected"];
+        this.unverified = source["unverified"];
+        this.queued = source["queued"];
+        this.detail = source["detail"];
+    }
+}
 	export class PatrolReportView {
 	    report: string;
 	    run_id: string;

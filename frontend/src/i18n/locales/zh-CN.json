@@ -1892,6 +1892,9 @@
       "verifying": "复验中……",
       "verifyHint": "按增量复验契约定点核验修复效果，逐条落复验回执；只记结论，不自动修复。",
       "verifyOk": "复验完成：通过 {{confirmed}} 项、未通过 {{rejected}} 项、跳过 {{unverified}} 项",
+      "verifyStarted": "已启动复验 {{count}} 项，后台执行中（进度见下方状态）",
+      "cancelVerify": "取消复验",
+      "verifyCancelled": "已取消复验",
       "dismiss": "驳回",
       "dismissReason": "驳回理由（必填，留痕）",
       "dismissPlaceholder": "例如：误报 / 已被其他改动覆盖……",
@@ -1924,7 +1927,8 @@
         "dismissed": "已驳回",
         "skipped": "已跳过",
         "rewrite": "回流重写",
-        "retcon": "转人工裁决"
+        "retcon": "转人工裁决",
+        "verifying": "复验中"
       }
     },
     "patrol": {

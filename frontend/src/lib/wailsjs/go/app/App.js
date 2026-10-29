@@ -701,3 +701,7 @@ export function UpsertVoiceDimension(arg1) {
 export function VerifyIssueTickets(arg1, arg2) {
   return window['go']['app']['App']['VerifyIssueTickets'](arg1, arg2);
 }
+
+export function CancelIssueVerify(arg1, arg2) {
+  return window['go']['app']['App']['CancelIssueVerify'](arg1, arg2);
+}

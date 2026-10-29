@@ -9,12 +9,14 @@ import {
 } from "lucide-react";
 import type { pipeline } from "@/lib/wailsjs/go/models";
 import {
+  CancelIssueVerify,
   ConfirmIssueTickets,
   DismissIssueTickets,
   ListIssueTickets,
   StartIssueFixTickets,
   VerifyIssueTickets,
 } from "@/lib/wailsjs/go/app/App";
+import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
@@ -41,6 +43,7 @@ const STATUS_CLS: Record<string, string> = {
   skipped: "bg-muted text-muted-foreground",
   rewrite: "bg-warning/10 text-warning-foreground",
   retcon: "bg-warning/10 text-warning-foreground",
+  verifying: "bg-primary/10 text-primary",
 };
 
 const TERMINAL = new Set(["verified", "dismissed"]);
@@ -83,6 +86,11 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   // 供应商疑似挂起弹窗（#271 中期方案）：复验遇熔断时给可操作弹窗，区分可重试与真错误。
   const [tripOpen, setTripOpen] = useState(false);
   const [tripError, setTripError] = useState("");
+  // 复验进行态（审计 P0：后台异步、逐工单、可取消）：按 run_id 跟踪在飞复验与逐工单进度。
+  const [verifyingRuns, setVerifyingRuns] = useState<Set<string>>(new Set());
+  const [verifyProgress, setVerifyProgress] = useState<
+    Record<string, { done: number; total: number }>
+  >({});
 
   const load = useCallback(() => {
     ListIssueTickets(novelId)
@@ -94,6 +102,85 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // 订阅复验事件流（审计 P0）：progress 推逐工单进度、done 收口并刷新、cancelled 取消清态。
+  // 置于 load 声明之后，避免 effect 依赖在 TDZ 内被提前引用（React Compiler/eslint 约束）。
+  useEffect(() => {
+    if (!novelId) return;
+    const offProgress = EventsOn(
+      "pipeline:verify_progress",
+      (p: {
+        novel_id?: number;
+        run_id?: string;
+        done?: number;
+        total?: number;
+      }) => {
+        if (p?.novel_id !== novelId || !p.run_id) return;
+        setVerifyingRuns((prev) => {
+          const next = new Set(prev);
+          next.add(p.run_id!);
+          return next;
+        });
+        setVerifyProgress((prev) => ({
+          ...prev,
+          [p.run_id!]: { done: p.done ?? 0, total: p.total ?? 0 },
+        }));
+      },
+    );
+    const offDone = EventsOn(
+      "pipeline:verify_done",
+      (p: {
+        novel_id?: number;
+        run_id?: string;
+        confirmed?: number;
+        rejected?: number;
+        unverified?: number;
+      }) => {
+        if (p?.novel_id !== novelId || !p.run_id) return;
+        setVerifyingRuns((prev) => {
+          const next = new Set(prev);
+          next.delete(p.run_id!);
+          return next;
+        });
+        setVerifyProgress((prev) => {
+          const next = { ...prev };
+          delete next[p.run_id!];
+          return next;
+        });
+        toastSuccess(
+          t("pipeline.tickets.verifyOk", {
+            confirmed: p.confirmed ?? 0,
+            rejected: p.rejected ?? 0,
+            unverified: p.unverified ?? 0,
+          }),
+        );
+        load();
+      },
+    );
+    const offCancel = EventsOn(
+      "pipeline:verify_cancelled",
+      (p: { novel_id?: number; run_id?: string }) => {
+        if (p?.novel_id !== novelId || !p.run_id) return;
+        setVerifyingRuns((prev) => {
+          const next = new Set(prev);
+          next.delete(p.run_id!);
+          return next;
+        });
+        setVerifyProgress((prev) => {
+          const next = { ...prev };
+          delete next[p.run_id!];
+          return next;
+        });
+        toastInfo(t("pipeline.tickets.verifyCancelled"));
+        load();
+      },
+    );
+    return () => {
+      offProgress?.();
+      offDone?.();
+      offCancel?.();
+    };
+  }, [novelId, t, load]);
 
   // 默认只看未收口工单（verified/dismissed 终态收起），可切「全部」回看历史留痕。
   const visible = useMemo(
@@ -212,8 +299,9 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
     }
   }, [selectedRows, novelId, t, load]);
 
-  // 「复验」遇供应商挂起（#271 中期方案）：弹可操作弹窗（重试/切换模型/关闭），
-  // 区分可重试的挂起与真错误；真错误仍走纯文本提示。
+  // 「复验」审计 P0：入口只派发后台复验（立即返回已派发数），不再整段阻塞 LLM 调用；
+  // 进度/结果经 pipeline:verify_progress / verify_done 事件推送，进行态由 verifyingRuns 呈现，
+  // 不再全局 busy 冻结面板。供应商熔断不再发生在同步入口（延后到后台逐工单，且逐工单故障隔离）。
   const onVerify = useCallback(async () => {
     const refs = selectedRefs;
     if (refs.length === 0) {
@@ -222,14 +310,15 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
     }
     setBusy("verify");
     try {
-      const sum = await VerifyIssueTickets(novelId, refs);
-      toastSuccess(
-        t("pipeline.tickets.verifyOk", {
-          confirmed: sum?.confirmed ?? 0,
-          rejected: sum?.rejected ?? 0,
-          unverified: sum?.unverified ?? 0,
-        }),
-      );
+      await VerifyIssueTickets(novelId, refs);
+      // 入口即时返回：把涉及的 run 标记为在飞复验，提示后台执行中。
+      const runs = new Set(refs.map((r) => r.run_id));
+      setVerifyingRuns((prev) => {
+        const next = new Set(prev);
+        runs.forEach((r) => next.add(r));
+        return next;
+      });
+      toastInfo(t("pipeline.tickets.verifyStarted", { count: refs.length }));
       setSelected(new Set());
       load();
     } catch (error) {
@@ -244,6 +333,17 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       setBusy("");
     }
   }, [selectedRefs, novelId, t, load]);
+
+  // 取消在飞复验（审计 P0）：best-effort——取消成功或在队列未起执行体均静默；
+  // 后端成功取消会发 pipeline:verify_cancelled 事件最终清态（此处乐观清态，幂等安全）。
+  const onCancelAllVerify = useCallback(() => {
+    if (!novelId || verifyingRuns.size === 0) return;
+    Array.from(verifyingRuns).forEach((runID) =>
+      CancelIssueVerify(novelId, runID).catch(() => {}),
+    );
+    setVerifyingRuns(new Set());
+    setVerifyProgress({});
+  }, [novelId, verifyingRuns]);
 
   return (
     <div className="flex flex-col gap-3 rounded border bg-card p-4">
@@ -388,6 +488,25 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                   {t("pipeline.tickets.dismissCancel")}
                 </button>
               </div>
+            </div>
+          ) : null}
+
+          {verifyingRuns.size > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 rounded border bg-primary/5 p-2">
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              <span className="text-xs text-primary">
+                {t("pipeline.tickets.verifying")}
+                {Object.values(verifyProgress)
+                  .map((p) => ` ${p.done}/${p.total}`)
+                  .join(" · ")}
+              </span>
+              <button
+                type="button"
+                onClick={() => onCancelAllVerify()}
+                className="rounded border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-xs text-foreground/90 transition-colors hover:bg-destructive/20"
+              >
+                {t("pipeline.tickets.cancelVerify")}
+              </button>
             </div>
           ) : null}
 

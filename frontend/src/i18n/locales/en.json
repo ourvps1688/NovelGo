@@ -1932,6 +1932,9 @@
       "verifying": "Verifying…",
       "verifyHint": "Spot-checks fixes against the incremental verification contract and records a receipt per ticket; conclusions only, no auto-fix.",
       "verifyOk": "Verification done: {{confirmed}} passed, {{rejected}} failed, {{unverified}} skipped",
+      "verifyStarted": "Started verifying {{count}} item(s) in the background (progress shown below)",
+      "cancelVerify": "Cancel verification",
+      "verifyCancelled": "Verification cancelled",
       "dismiss": "Reject",
       "dismissReason": "Rejection reason (required, kept on record)",
       "dismissPlaceholder": "e.g. false positive / already covered by other changes…",
@@ -1964,7 +1967,8 @@
         "dismissed": "Rejected",
         "skipped": "Skipped",
         "rewrite": "Rewrite backlog",
-        "retcon": "To retcon"
+        "retcon": "To retcon",
+        "verifying": "Verifying"
       }
     },
     "patrol": {
