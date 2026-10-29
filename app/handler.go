@@ -19,6 +19,7 @@ import (
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/content"
 	"github.com/novelgo/novelgo/internal/deletion"
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/llm"
@@ -91,6 +92,7 @@ type App struct {
 	setting        *setting.Store
 	chapter        *chapter.Store
 	chapterService *chapter.Service
+	contentService *content.Service
 	character      *character.Store
 	session        *session.Store
 	skill          *skill.Store
@@ -427,6 +429,15 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	if err := a.reconcileOrphanChapterFiles(); err != nil {
 		a.logger.Warn("启动期孤儿章节文件清理失败", "err", err)
 	}
+	// 内容派生编排服务：把 SaveContent 中 RAG/搜索缓存/字数统计/写作记录的跨介质
+	// 协调从 app 绑定层下沉到领域层（分层合规，A1）。
+	a.contentService = content.NewService(a.logger, a.chapter, a.writing,
+		func() content.SearchUpdater {
+			if svc := a.searchService.Load(); svc != nil {
+				return svc
+			}
+			return nil
+		})
 	s, err := skill.NewStore(a.logger, config.UserSkillsDir())
 	if err != nil {
 		a.logger.Error("初始化 skill store 失败", "err", err)

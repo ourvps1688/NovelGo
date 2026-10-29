@@ -7,12 +7,9 @@ import (
 	"path"
 	"strings"
 
-	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/personasetting"
-	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/skill"
-	"github.com/novelgo/novelgo/internal/text"
 )
 
 // SaveContentInput 是保存文件内容的入参。
@@ -55,6 +52,9 @@ func (a *App) GetContent(novelID int64, path string) (string, error) {
 }
 
 // SaveContent 保存小说仓库中指定路径的文件内容。
+//
+// 约定：app 绑定层只做 DTO 校验与文件落盘，跨介质派生编排（RAG 刷新 / 搜索缓存 /
+// 字数统计 / 写作记录）下沉到 content.Service.DeriveAfterSave，app 不承载领域编排。
 func (a *App) SaveContent(input SaveContentInput) error {
 	if err := a.validateChapterContentPath(input.NovelID, input.Path); err != nil {
 		return err
@@ -81,33 +81,15 @@ func (a *App) SaveContent(input SaveContentInput) error {
 		return err
 	}
 
-	// T-AGG-5：保存的是 skill 文件（新增/编辑源 mental skill）→ 自动重建受影响的跨书聚合档案；
-	// 同时若是创作心智（kind=mental），自动让其对本书生效（勾选常驻 + 设为写作人格）。
+	// skill 文件落盘后的跨书聚合与心智自动激活（App 层职责，保持在此）。
 	if isSkillPath(input.Path) {
 		a.reconcileAggregated()
 		a.autoActivateMentalSkill(input.NovelID, input.Content)
 	}
 
+	// 章节正文落盘后，刷新全部派生介质（编排下沉至 content.Service）。
 	if ref, ok := git.ParseChapterLikePath(input.Path); ok && !ref.IsOutline && !ref.IsNew && ref.VolumeID == 0 {
-		chapterID := ref.ID
-		rag.SubmitRefresh(input.NovelID, chapterID, input.Content)
-		if svc := a.searchService.Load(); svc != nil {
-			svc.UpdateCachedChapter(input.NovelID, chapterID, input.Content)
-		}
-		stats := text.ComputeStats(input.Content)
-
-		// 记录字数变化
-		if a.writing != nil && input.ExpectedContent != nil {
-			changes := text.ComputeWordChanges(*input.ExpectedContent, input.Content)
-			a.writing.LogChanges(a.ctx, input.NovelID, chapterID, changes.Added, changes.Deleted)
-		}
-
-		if err := a.chapter.DB.WithContext(a.ctx).
-			Model(&chapter.Chapter{}).
-			Where("novel_id = ? AND id = ?", input.NovelID, chapterID).
-			Update("word_count", stats.WordCount).Error; err != nil {
-			a.logger.Warn("更新字数失败", "novel_id", input.NovelID, "chapter_id", chapterID, "err", err)
-		}
+		a.contentService.DeriveAfterSave(a.ctx, input.NovelID, ref.ID, input.Content, input.ExpectedContent)
 	}
 
 	return nil

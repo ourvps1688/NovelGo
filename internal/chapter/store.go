@@ -470,3 +470,14 @@ func (s *Store) UpdateTitle(ctx context.Context, tx *gorm.DB, novelID, chapterID
 	}
 	return nil
 }
+
+// UpdateWordCount 更新章节字数统计（派生数据，best-effort 可重放）。
+func (s *Store) UpdateWordCount(ctx context.Context, novelID, chapterID int64, wordCount int) error {
+	if err := s.DB.WithContext(ctx).
+		Model(&Chapter{}).
+		Where("novel_id = ? AND id = ?", novelID, chapterID).
+		Update("word_count", wordCount).Error; err != nil {
+		return fmt.Errorf("chapter store: update word_count: %w", err)
+	}
+	return nil
+}
