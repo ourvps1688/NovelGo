@@ -505,6 +505,10 @@ func (s *Service) runVerifyTickets(runID string, novelID int64) {
 //   - verified=false && rejected=false → 未确认：LLM 调用失败 / 回执未解析 / 回执未提及本工单
 //     （→pending 留待下轮，绝不静默判通过）
 func (s *Service) verifyOneTicket(ctx context.Context, novelID int64, runID string, row PipelineIssue, ledgerNotes []string, propBlock string) (verified, rejected bool, note string) {
+	// P1：机械类工单先走 L0 确定性快路径，命中则免 LLM 调用（P0+P2 语义不变）。
+	if decided, lv, lnote := s.tryL0Verify(ctx, novelID, runID, row, s.l0Reader); decided {
+		return lv, !lv, lnote
+	}
 	out, derr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
 		NovelID:   novelID,
 		Prompt:    verifyPrompt(novelID, []verifyTarget{{ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc, Chapters: issueChapterIDs(AuditIssue{Area: row.Area, Desc: row.Desc, ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON)}), FixNote: row.Note}}, ledgerNotes, propBlock, contextasm.ContextBlocks{}),

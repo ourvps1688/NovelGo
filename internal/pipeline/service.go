@@ -64,6 +64,8 @@ type Service struct {
 	// chapterStore 用于「回流 S3 重写回路」把 issue 里的章节阅读序号映射回真实 chapter_id。
 	// 默认从 s.store.db 构造；测试可注入或用 nil（nil 时重写回路降级为手动交回）。
 	chapterStore *chapter.Store
+	// l0Reader 读章节正文供 P1 复验 L0 确定性快路径使用；默认走 git 文件，测试可注入 stub。
+	l0Reader l0ChapterReader
 	// chapterLister 返回本书全部章节 ID（用于 S0 批量 statesync）。默认走 raw gorm 查询。
 	chapterLister func(ctx context.Context, novelID int64) ([]int64, error)
 	// volumeAssigner 为存量书建默认卷并把所有未分卷章节归入该卷（修复 G3b 卷边界判定）。默认走 raw gorm。
@@ -150,6 +152,7 @@ func NewService(db *gorm.DB, ag *agent.Agent, skillStore *skill.Store, llmClient
 		defaultModel: defaultModel,
 		appCtx:       appCtx,
 		logger:       logger,
+		l0Reader:     defaultL0ChapterReader,
 	}
 	if logger == nil {
 		s.logger = slog.Default()
