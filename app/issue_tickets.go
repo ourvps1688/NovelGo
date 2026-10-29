@@ -49,3 +49,12 @@ func (a *App) DismissIssueTickets(novelID int64, refs []pipeline.IssueTicketRef,
 	}
 	return a.pipeline.DismissIssueTickets(a.ctx, novelID, refs, reason)
 }
+
+// CancelIssueVerify 取消一个 run 的后台复验（审计 P0）：用户在工单面板点「取消复验」后调用。
+// 返回 cancelled 标识是否确有在飞复验被取消（未知 run 合法空操作）。
+func (a *App) CancelIssueVerify(novelID int64, runID string) (bool, error) {
+	if a.pipeline == nil {
+		return false, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.CancelIssueVerify(novelID, runID)
+}

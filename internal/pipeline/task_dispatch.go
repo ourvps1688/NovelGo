@@ -24,15 +24,16 @@ import (
 
 // 执行体种类（task.kind，Handler 注册键）。
 const (
-	taskKindAudit      = "audit"       // 签约体检（S4/S4b/蓝图体检，含 enterAudit/enterBlueprintAudit）
-	taskKindFix        = "fix"         // S5 检测结果路由+工单沉淀（R5-2 自动修复摘除后）
-	taskKindIssueFix   = "issue_fix"   // 发现项工单「去修复」执行体（#240 R5-2 工单接执行）
-	taskKindFinalAudit = "final_audit" // S6 完本终检
-	taskKindBlueprint  = "blueprint"   // S2 蓝图生成
-	taskKindS0Align    = "s0_align"    // S0 导入对齐（建卷+statesync）
-	taskKindFullAlign  = "full_align"  // 全量对齐（建卷+statesync+全本体检）
-	taskKindPatrol     = "patrol"      // 一致性巡检（张力报告，只读）
-	taskKindDetect     = "detect"      // 检测任务（卷体检/书体检，R5-3 T1.2 检测-only 皮；巡检·结构复用 taskKindPatrol）
+	taskKindAudit       = "audit"        // 签约体检（S4/S4b/蓝图体检，含 enterAudit/enterBlueprintAudit）
+	taskKindFix         = "fix"          // S5 检测结果路由+工单沉淀（R5-2 自动修复摘除后）
+	taskKindIssueFix    = "issue_fix"    // 发现项工单「去修复」执行体（#240 R5-2 工单接执行）
+	taskKindIssueVerify = "issue_verify" // 发现项工单「复验」执行体（审计 P0）：按 run 后台逐工单异步复验
+	taskKindFinalAudit  = "final_audit"  // S6 完本终检
+	taskKindBlueprint   = "blueprint"    // S2 蓝图生成
+	taskKindS0Align     = "s0_align"     // S0 导入对齐（建卷+statesync）
+	taskKindFullAlign   = "full_align"   // 全量对齐（建卷+statesync+全本体检）
+	taskKindPatrol      = "patrol"       // 一致性巡检（张力报告，只读）
+	taskKindDetect      = "detect"       // 检测任务（卷体检/书体检，R5-3 T1.2 检测-only 皮；巡检·结构复用 taskKindPatrol）
 )
 
 // taskPayload 是执行参数（task.payload JSON；RunID/NovelID 同步冗余到 task 行供查询）。
@@ -127,6 +128,9 @@ func (s *Service) registerTaskHandlers() {
 	}))
 	s.taskRunner.Register(taskKindIssueFix, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.runIssueFixTickets(runID, novelID)
+	}))
+	s.taskRunner.Register(taskKindIssueVerify, s.runIDNovelIDHandler(func(runID string, novelID int64) {
+		s.runVerifyTickets(runID, novelID)
 	}))
 	s.taskRunner.Register(taskKindFinalAudit, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.executeFinalAudit(runID, novelID)

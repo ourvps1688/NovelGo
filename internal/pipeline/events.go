@@ -131,3 +131,29 @@ const EvDetectCancelled = "pipeline:detect_cancelled"
 func EmitDetectCancelled(ctx context.Context, p map[string]any) {
 	eventBus.Emit(ctx, EvDetectCancelled, p)
 }
+
+// ── 工单复验进度事件（审计 P0：复验改为后台异步、逐工单、可取消）────────────
+// 复验执行体按 run 后台逐工单复验，前端经以下事件呈现进度/收口/取消，避免整段阻塞。
+const (
+	// EvVerifyProgress 复验进度：{novel_id, run_id, total, done, status, last_key?, last_ok?, last_note?}
+	EvVerifyProgress = "pipeline:verify_progress"
+	// EvVerifyDone 复验完成：{novel_id, run_id, confirmed, rejected, unverified, detail}
+	EvVerifyDone = "pipeline:verify_done"
+	// EvVerifyCancelled 复验被取消：{novel_id, run_id}
+	EvVerifyCancelled = "pipeline:verify_cancelled"
+)
+
+// EmitVerifyProgress 广播复验进度（逐工单推进时）。
+func EmitVerifyProgress(ctx context.Context, p map[string]any) {
+	eventBus.Emit(ctx, EvVerifyProgress, p)
+}
+
+// EmitVerifyDone 广播复验完成（本轮 run 收口）。
+func EmitVerifyDone(ctx context.Context, p map[string]any) {
+	eventBus.Emit(ctx, EvVerifyDone, p)
+}
+
+// EmitVerifyCancelled 广播复验被用户取消。
+func EmitVerifyCancelled(ctx context.Context, p map[string]any) {
+	eventBus.Emit(ctx, EvVerifyCancelled, p)
+}

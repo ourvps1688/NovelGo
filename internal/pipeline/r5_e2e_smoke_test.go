@@ -216,12 +216,12 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 	require.Equal(t, 1, fixedCtxt.FixRounds, "工单修复收口令修复轮数 +1")
 	require.Contains(t, fixedCtxt.DriftReport, "蓝图巡检", "修复收口后蓝图巡检结论落 DriftReport")
 
-	// ── 阶段 4：显式复验（signability-verify 回执逐条落表）。
+	// ── 阶段 4：显式复验（signability-verify 回执逐条落表，审计 P0 异步派发）。
 	sum, err := svc.VerifyIssueTickets(ctx, novelID, refs)
 	require.NoError(t, err)
-	require.Equal(t, 1, sum.Confirmed, "I1 复验通过")
-	require.Equal(t, 1, sum.Rejected, "I2 未通过退回待修")
-	require.Equal(t, 0, sum.Unverified)
+	require.Equal(t, 2, sum.Queued, "I1/I2 进入后台复验队列（异步入口只回派发数）")
+	require.Equal(t, 0, sum.Confirmed, "异步入口不回逐项结论")
+	require.Equal(t, 0, sum.Rejected)
 	volRows, lerr = svc.store.ListIssues(ctx, novelID, volRes.RunID)
 	require.NoError(t, lerr)
 	byKey := map[string]PipelineIssue{}

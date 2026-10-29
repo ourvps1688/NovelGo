@@ -192,6 +192,16 @@ const detectContainerStage = "detect"
 // 以 var 暴露便于测试收缩与后续按 kind 细分。
 var detectTaskTimeout = 60 * time.Minute
 
+// verifyCallTimeout 是「单轮复验执行体」的硬超时上限（对应审计 P0）：复验已改为按 run
+// 后台逐工单复验，整体墙钟随工单数线性增长，此处给一个较宽的安全兜底，防止慢供应商/
+// 卡死导致复验无限期挂起。以 var 暴露便于测试收缩。逐工单循环每步先查 ctx.Err，
+// 超时/取消后安全退出（未复验工单复位 pending，可重跑）。
+var verifyCallTimeout = 15 * time.Minute
+
+// verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，比完整
+// 体检轻得多，6 轮足够（原整批复验用 12 轮，是慢的主因之一）。
+const verifyMaxTurns = 6
+
 // detectKindOfMode 由容器 mode 反推检测 kind（卷体检 / 书体检；默认书体检），
 // 供执行体创建带取消的派生 ctx 时定位 detectKey（与 beginDetect 登记键一致）。
 func detectKindOfMode(mode string, volumeID *int64) string {

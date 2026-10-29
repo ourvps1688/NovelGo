@@ -25,10 +25,13 @@ type IssueTicketRef struct {
 }
 
 // IssueVerifySummary 是一次工单复验的收口计数（面板 toast/汇总展示）。
+// 复验改为后台异步（审计 P0）后，VerifyIssueTickets 立即返回 Queued=已派发工单数，
+// 实际逐项结果经 pipeline:verify_progress / pipeline:verify_done 事件流推送。
 type IssueVerifySummary struct {
 	Confirmed  int    `json:"confirmed"`  // 复验通过（→verified）
 	Rejected   int    `json:"rejected"`   // 复验未通过（退回待修）
-	Unverified int    `json:"unverified"` // 未列入回执（留待下轮）
+	Unverified int    `json:"unverified"` // 终态跳过 / 回执未解析未改动 / 未提及留待下轮
+	Queued     int    `json:"queued"`     // 已派发后台复验的工单数（异步入口即时回执）
 	Detail     string `json:"detail"`     // 一行小结
 }
 
@@ -333,10 +336,17 @@ func (s *Service) transitionIssueTickets(ctx context.Context, novelID int64, ref
 	return errors.Join(errs...)
 }
 
-// VerifyIssueTickets 是工单面板「复验」按钮的执行入口（§10.3 显式复验）：对选中工单按
-// 增量复验逻辑（signability-verify + verifyPrompt）定点核验，复验回执逐条落工单
-// （verify_receipt/verify_at），通过→verified、未通过→退回待修（pending）。
-// 只记结论不改 verdict、不触发自动修复回流（检测核心）；终态工单跳过不验。
+// VerifyIssueTickets 是工单面板「复验」按钮的执行入口（§10.3 显式复验）。审计 P0 起改为
+// **后台异步、逐工单、作用域化、可取消、有界超时**的复验：
+//   - 入口只做校验 + 选票分组 + 置 verifying 态 + 按 run 派发后台执行体，立即返回
+//     Queued=已派工单数（不再同步阻塞整段 LLM 调用）；
+//   - 实际复验由 runVerifyTickets 逐工单执行：每个工单独立一次 signability-verify 调用，
+//     **不注入整书审计上下文**（传空 ContextBlocks，复验本就「定点核对修过的作用域」，
+//     上下文由 agent 经工具按需读取），scope 收窄到该工单 chapters + 本轮修复日志；
+//   - 逐工单故障隔离：单工单 LLM 失败/回执未解析 → 标未复验（复位 pending）继续，
+//     绝不整批失败；回执未解析**不再静默全过**（审计 P2）；
+//   - 全程有界 ctx（verifyCallTimeout）+ 可取消（CancelIssueVerify），超时/取消后安全退出；
+//   - 进度经 pipeline:verify_progress / pipeline:verify_done 事件流推送前端。
 func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) (*IssueVerifySummary, error) {
 	if s.store == nil {
 		return nil, errors.New("issue 工单表未初始化")
@@ -345,16 +355,10 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 		return nil, errors.New("未选择工单")
 	}
 
-	// 载入工单行：终态（verified/dismissed）不接受复验，跳过不计。
-	type targetRow struct {
-		row PipelineIssue
-	}
-	targets := make([]verifyTarget, 0, len(refs))
-	rows := make([]targetRow, 0, len(refs))
+	// 载入工单行：终态（verified/dismissed）不接受复验，跳过不计；其余置 verifying 态后按 run 派发。
 	seen := map[string]bool{}
-	fixLog := []FixLogEntry{}
-	fixNote := map[string]string{}
 	summary := &IssueVerifySummary{}
+	runIDs := map[string]bool{}
 	for _, ref := range refs {
 		key := ref.RunID + "\x00" + ref.IssueKey
 		if seen[key] {
@@ -372,103 +376,207 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 			summary.Unverified++ // 终态跳过
 			continue
 		}
-		rows = append(rows, targetRow{row: *row})
-		targets = append(targets, verifyTarget{
-			ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc,
-			Chapters: issueChapterIDs(AuditIssue{
-				Area: row.Area, Desc: row.Desc,
-				ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON),
-			}),
-		})
-		// 修复日志摘要（fix_note）随 run 上下文取：指引复验定点核对改动点。
-		if run, rerr := s.store.GetByRunID(ctx, ref.RunID); rerr == nil && run.ContextJSON != "" {
-			var bc GateContext
-			if json.Unmarshal([]byte(run.ContextJSON), &bc) == nil {
-				for _, e := range bc.FixLog {
-					fixNote[e.ID] = e.Note
-					fixLog = append(fixLog, e)
-				}
-			}
-		}
+		// 置 verifying 瞬态（执行体按 run 聚合 verifying 态工单；进程崩溃残留由启动期清扫复位）。
+		s.syncIssueRow(ctx, novelID, ref.RunID, ref.IssueKey, IssueStatusVerifying, "")
+		runIDs[ref.RunID] = true
+		summary.Queued++
 	}
-	if len(targets) == 0 {
+	if summary.Queued == 0 {
 		return summary, nil
 	}
-	for i := range targets {
-		targets[i].FixNote = fixNote[targets[i].ID]
+	for runID := range runIDs {
+		runID := runID
+		s.dispatchExecutor(taskKindIssueVerify, runID, novelID, func() {
+			s.runVerifyTickets(runID, novelID)
+		})
+	}
+	summary.Detail = fmt.Sprintf("已启动复验 %d 项（后台执行，进度见面板）", summary.Queued)
+	return summary, nil
+}
+
+// runVerifyTickets 是复验执行体（审计 P0）：处理本 run 全部 verifying 态工单，逐工单定点复验。
+// 每个工单一次独立 signability-verify 调用（作用域化、MaxTurns=verifyMaxTurns），故障隔离；
+// verified→verified（终态）/ 未通过→pending（退回待修）/ 未确认（LLM 失败或回执未解析）→
+// pending（留待下轮），绝不静默全过。整轮受 verifyCallTimeout 有界 ctx 约束，可被 CancelIssueVerify 取消。
+func (s *Service) runVerifyTickets(runID string, novelID int64) {
+	ctx := s.beginVerifyCtx(runID)
+	defer s.endVerifyCtx(runID)
+
+	rows, err := s.store.ListVerifyingTickets(ctx, novelID, runID)
+	if err != nil {
+		s.logger.Error("复验：加载 verifying 工单失败", "run_id", runID, "err", err)
+		return
+	}
+	if len(rows) == 0 {
+		s.logger.Info("复验：本 run 无 verifying 态工单，跳过", "run_id", runID)
+		return
 	}
 
-	// 复验沿用 §4.3-4 增量复验逻辑（提示词/技能/回执契约单源）：台账变更核对与
-	// 修复传播检查同套输入（聚合自选中工单所属 run 的修复日志）。
-	ledgerNotes := ledgerChangeNotes(fixLog)
+	// 修复日志（fix_note）随 run 上下文取：指引复验定点核对改动点（与整批复验同口径）。
+	var fixLog []FixLogEntry
+	fixNote := map[string]string{}
+	if run, rerr := s.store.GetByRunID(ctx, runID); rerr == nil && run.ContextJSON != "" {
+		var bc GateContext
+		if json.Unmarshal([]byte(run.ContextJSON), &bc) == nil {
+			for _, e := range bc.FixLog {
+				fixNote[e.ID] = e.Note
+				fixLog = append(fixLog, e)
+			}
+		}
+	}
+	// 传播检查（依赖闭包定向复验块）按本 run 全部工单作用域算一次（5 表全扫已是最简，逐工单重扫浪费）。
+	targets := make([]verifyTarget, 0, len(rows))
+	for _, r := range rows {
+		targets = append(targets, verifyTarget{
+			ID: r.IssueKey, Level: r.Level, Area: r.Area, Desc: r.Desc,
+			Chapters: issueChapterIDs(AuditIssue{
+				Area: r.Area, Desc: r.Desc, ChapterIDs: decodeIssueChapterIDs(r.ChapterIDsJSON),
+			}),
+			FixNote: fixNote[r.IssueKey],
+		})
+	}
 	prop := s.propagationCheck(ctx, novelID, targets, fixLog)
-	// R0 观测归属：选中工单同属一个 run 时记账到该 run；跨 run 选择留空（合法空值）。
-	obsRun := ""
-	if len(rows) > 0 {
-		obsRun = rows[0].row.RunID
-		for _, tr := range rows[1:] {
-			if tr.row.RunID != obsRun {
-				obsRun = ""
-				break
-			}
-		}
-	}
-	out, verr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
-		NovelID:   novelID,
-		Prompt:    verifyPrompt(novelID, targets, ledgerNotes, prop.block(), s.buildBlocks(ctx, novelID, contextasm.PurposeAudit)),
-		MaxTurns:  12,
-		SessionID: "pipeline:issue-tickets:verify:" + uuid.NewString(),
-		RunID:     obsRun,
-	})
-	if verr != nil {
-		return nil, fmt.Errorf("复验执行失败：%w", verr)
-	}
-	results, verifySum, found := parseVerifyReceipt(out.Text)
+	ledgerNotes := ledgerChangeNotes(fixLog)
 
-	var errs []error
-	for _, tr := range rows {
-		if !found {
-			// 兼容回退（与显式复验 VerifyIssueTickets 同口径）：无回执按已修复确认处理，不卡死闭环。
-			if err := s.store.RecordIssueVerify(ctx, novelID, tr.row.RunID, tr.row.IssueKey, true, ""); err != nil {
-				errs = append(errs, err)
-			} else {
-				summary.Confirmed++
-			}
-			continue
+	summary := &IssueVerifySummary{}
+	total := len(rows)
+	emitVerifyProgress(ctx, map[string]any{
+		"novel_id": novelID, "run_id": runID, "total": total, "done": 0, "status": "start",
+	})
+	for i, r := range rows {
+		if ctx.Err() != nil {
+			break // 超时或被取消：剩余工单保持 verifying，收口时复位 pending。
 		}
-		res, ok := results[tr.row.IssueKey]
+		verified, rejected, note := s.verifyOneTicket(ctx, novelID, runID, r, ledgerNotes, prop.block())
 		switch {
-		case !ok:
-			summary.Unverified++ // 未提及：留待下轮
-		case res.OK:
-			if err := s.store.RecordIssueVerify(ctx, novelID, tr.row.RunID, tr.row.IssueKey, true, res.Note); err != nil {
-				errs = append(errs, err)
+		case verified:
+			if err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, true, note); err != nil {
+				s.logger.Warn("复验：落库 verified 失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
+				s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验通过落库失败，已复位待复验")
+				summary.Unverified++
 			} else {
 				summary.Confirmed++
 			}
-		default:
-			if err := s.store.RecordIssueVerify(ctx, novelID, tr.row.RunID, tr.row.IssueKey, false, res.Note); err != nil {
-				errs = append(errs, err)
+		case rejected:
+			if err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, false, note); err != nil {
+				s.logger.Warn("复验：落库未通过失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
+				s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验未通过落库失败，已复位待复验")
+				summary.Unverified++
 			} else {
 				summary.Rejected++
 			}
+		default:
+			// 未确认（LLM 失败 / 回执未解析 / 回执未提及）：复位 pending 留待下轮，绝不静默判通过（审计 P2）。
+			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, noteOrDefault(note, "复验未确认，已复位待复验"))
+			summary.Unverified++
 		}
+		emitVerifyProgress(ctx, map[string]any{
+			"novel_id": novelID, "run_id": runID, "total": total, "done": i + 1,
+			"last_key": r.IssueKey, "last_ok": verified, "last_rejected": rejected,
+			"last_note": note, "status": "progress",
+		})
+	}
+	// 收口：任何残留 verifying 态（超时/取消中断）→ 复位 pending，避免永久卡死。
+	if v, lerr := s.store.ResetStuckVerifying(ctx, novelID); lerr == nil && v > 0 {
+		s.logger.Warn("复验：收口复位残留 verifying 工单", "run_id", runID, "count", v)
 	}
 
-	summary.Detail = fmt.Sprintf("复验：确认修复 %d 项", summary.Confirmed)
+	summary.Detail = fmt.Sprintf("复验完成：确认 %d 项", summary.Confirmed)
 	if summary.Rejected > 0 {
-		summary.Detail += fmt.Sprintf("，%d 项未通过已退回待修", summary.Rejected)
+		summary.Detail += fmt.Sprintf("，%d 项未通过退回待修", summary.Rejected)
 	}
 	if summary.Unverified > 0 {
-		summary.Detail += fmt.Sprintf("，%d 项未复验留待下轮", summary.Unverified)
-	}
-	if verifySum != "" {
-		summary.Detail += "；复验小结：" + verifySum
+		summary.Detail += fmt.Sprintf("，%d 项未确认留待下轮", summary.Unverified)
 	}
 	if seg := prop.summary(); seg != "" {
 		summary.Detail += "；" + seg
 	}
-	return summary, errors.Join(errs...)
+	emitVerifyDone(ctx, map[string]any{
+		"novel_id": novelID, "run_id": runID,
+		"confirmed": summary.Confirmed, "rejected": summary.Rejected,
+		"unverified": summary.Unverified, "detail": summary.Detail,
+	})
+}
+
+// verifyOneTicket 对单个工单做一次作用域化复验：只注入该工单 chapters + 本轮修复日志
+// （不含整书审计上下文），经 signability-verify 定点核验。返回 (verified, rejected, note)：
+//   - verified=true  → 复验通过（→verified）
+//   - verified=false && rejected=true  → 复验明确未通过（→pending 退回待修）
+//   - verified=false && rejected=false → 未确认：LLM 调用失败 / 回执未解析 / 回执未提及本工单
+//     （→pending 留待下轮，绝不静默判通过）
+func (s *Service) verifyOneTicket(ctx context.Context, novelID int64, runID string, row PipelineIssue, ledgerNotes []string, propBlock string) (verified, rejected bool, note string) {
+	out, derr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
+		NovelID:   novelID,
+		Prompt:    verifyPrompt(novelID, []verifyTarget{{ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc, Chapters: issueChapterIDs(AuditIssue{Area: row.Area, Desc: row.Desc, ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON)}), FixNote: row.Note}}, ledgerNotes, propBlock, contextasm.ContextBlocks{}),
+		MaxTurns:  verifyMaxTurns,
+		SessionID: "pipeline:issue-tickets:verify:" + uuid.NewString(),
+		RunID:     runID,
+	})
+	if derr != nil {
+		// 供应商熔断/超时/网络失败：整工单未确认，留待下轮（不报错中断整批）。
+		s.logger.Warn("复验：单工单执行失败，标未确认留待下轮", "run_id", runID, "issue", row.IssueKey, "err", derr)
+		return false, false, "复验执行失败（" + derr.Error() + "），已复位待复验"
+	}
+	results, _, found := parseVerifyReceipt(out.Text)
+	if !found {
+		// 审计 P2：回执未解析 → 不再静默全过，标未确认留待下轮。
+		s.logger.Warn("复验：回执未解析，工单状态未改动（复位 pending 留待下轮）", "run_id", runID, "issue", row.IssueKey)
+		return false, false, "复验回执未解析，状态未改动"
+	}
+	res, ok := results[row.IssueKey]
+	if !ok {
+		return false, false, "复验回执未包含本工单，留待下轮"
+	}
+	if res.OK {
+		return true, false, res.Note
+	}
+	return false, true, res.Note
+}
+
+// noteOrDefault 返回非空 note，否则回退默认文案（避免空备注）。
+func noteOrDefault(note, def string) string {
+	if strings.TrimSpace(note) == "" {
+		return def
+	}
+	return note
+}
+
+// beginVerifyCtx 从 appCtx 派生「带超时+取消」的复验 ctx 并登记 cancel（审计 P0 可取消）。
+func (s *Service) beginVerifyCtx(runID string) context.Context {
+	ctx, cancel := context.WithTimeout(s.appCtx, verifyCallTimeout)
+	s.verifyCancelFns.Store(verifyKey(runID), cancel)
+	return ctx
+}
+
+// endVerifyCtx 复验收口：撤销超时/取消派生 ctx + 注销 cancel 登记。
+func (s *Service) endVerifyCtx(runID string) {
+	v, ok := s.verifyCancelFns.LoadAndDelete(verifyKey(runID))
+	if !ok {
+		return
+	}
+	if cancel, ok := v.(context.CancelFunc); ok {
+		cancel()
+	}
+}
+
+func verifyKey(runID string) string { return "verify:" + runID }
+
+// CancelIssueVerify 取消一个 run 的后台复验（审计 P0）：取出 cancel 使本轮复验 ctx 立即
+// Done，逐工单循环感知后安全退出（未复验工单复位 pending）；返回 cancelled 标识是否确有
+// 在飞复验被取消。未知/无在飞 run 返回 false（合法空操作）。
+func (s *Service) CancelIssueVerify(novelID int64, runID string) (bool, error) {
+	if s.store == nil {
+		return false, errors.New("issue 工单表未初始化")
+	}
+	v, ok := s.verifyCancelFns.Load(verifyKey(runID))
+	if !ok {
+		return false, nil
+	}
+	if cancel, ok := v.(context.CancelFunc); ok {
+		cancel()
+	}
+	EmitVerifyCancelled(s.appCtx, map[string]any{"novel_id": novelID, "run_id": runID})
+	return true, nil
 }
 
 // decodeIssueChapterIDs 解析工单行的章节作用域列（JSON 数组）；解析失败返回空。

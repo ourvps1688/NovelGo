@@ -3,6 +3,8 @@ package pipeline
 import (
 	"context"
 	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -212,10 +214,27 @@ func TestServiceVerifyIssueTickets(t *testing.T) {
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 
-	var verifyPromptText string
+	// 审计 P0：复验进度/结束事件应经发射槽发出（验收 swap 接缝，与 emitFixStart 同范式）。
+	var vProgress, vDone int
+	var vEvMu sync.Mutex
+	t.Cleanup(swapEmitVerifyProgress(func(_ context.Context, _ map[string]any) {
+		vEvMu.Lock()
+		vProgress++
+		vEvMu.Unlock()
+	}))
+	t.Cleanup(swapEmitVerifyDone(func(_ context.Context, _ map[string]any) {
+		vEvMu.Lock()
+		vDone++
+		vEvMu.Unlock()
+	}))
+
+	var verifyPrompts []string
+	var promptMu sync.Mutex
 	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
 		if name == "signability-verify" {
-			verifyPromptText = input.Prompt
+			promptMu.Lock()
+			verifyPrompts = append(verifyPrompts, input.Prompt)
+			promptMu.Unlock()
 			return SkillOutput{Text: "```json\n" +
 				`{"verified":[{"id":"I1","ok":true,"note":"人设已立"},{"id":"I2","ok":false,"note":"只改了一半"}],"summary":"1 项确认"}` +
 				"\n```"}, nil
@@ -238,13 +257,18 @@ func TestServiceVerifyIssueTickets(t *testing.T) {
 		{RunID: "run-a", IssueKey: "I3"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, sum.Confirmed)
-	require.Equal(t, 1, sum.Rejected)
+	// 审计 P0：入口只派发后台复验，立即返回已派工单数；I3 终态跳过不派发。
+	require.Equal(t, 2, sum.Queued, "I1/I2 进入后台复验队列")
 	require.Equal(t, 1, sum.Unverified, "终态工单跳过不验")
-	require.Contains(t, sum.Detail, "确认修复 1 项")
-	require.Contains(t, verifyPromptText, `"id":"I1"`, "选中工单进复验清单")
-	require.Contains(t, verifyPromptText, `"chapters":[1,2,3]`, "作用域章节进复验清单")
-	require.NotContains(t, verifyPromptText, `"id":"I3"`, "终态工单不进复验清单")
+	require.Equal(t, 0, sum.Confirmed, "异步入口只回派发数，不回逐项结论")
+	require.Contains(t, sum.Detail, "已启动复验")
+	// 逐工单定点复验：I1（第1-3章）作用域进复验清单，I3 终态不进；合并所有派发提示词断言。
+	promptMu.Lock()
+	allPrompts := strings.Join(verifyPrompts, "\n")
+	promptMu.Unlock()
+	require.Contains(t, allPrompts, `"id":"I1"`, "选中工单进复验清单")
+	require.Contains(t, allPrompts, `"chapters":[1,2,3]`, "作用域章节进复验清单")
+	require.NotContains(t, allPrompts, `"id":"I3"`, "终态工单不进复验清单")
 
 	rows, lerr := svc.store.ListIssues(ctx, 7, "run-a")
 	require.NoError(t, lerr)
@@ -263,10 +287,18 @@ func TestServiceVerifyIssueTickets(t *testing.T) {
 	// 空选择显式报错。
 	_, err = svc.VerifyIssueTickets(ctx, 7, nil)
 	require.Error(t, err)
+
+	// 复验进度/结束事件经发射槽发出：每工单一次进度（含 start）+ 一次 done。
+	vEvMu.Lock()
+	pn, dn := vProgress, vDone
+	vEvMu.Unlock()
+	require.GreaterOrEqual(t, pn, 1, "复验应发出进度事件")
+	require.Equal(t, 1, dn, "复验结束应发出一次 done 事件")
 }
 
-// TestServiceVerifyIssueTicketsSkillError 验收复验执行失败：显式报错、工单状态不动
-// （检测核心：不伪造复验结论）。
+// TestServiceVerifyIssueTicketsSkillError 验收复验执行失败（审计 P0 异步语义）：
+// 派发入口成功即返回，LLM 失败发生在后台逐工单复验内——单工单未确认 → 复位
+// pending 留待下轮，不伪造结论、不整批失败（检测核心：不静默判通过）。
 func TestServiceVerifyIssueTicketsSkillError(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
@@ -277,10 +309,12 @@ func TestServiceVerifyIssueTicketsSkillError(t *testing.T) {
 	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
 		{ID: "I1", Level: "P0", Area: "开篇", Desc: "x", FixType: FixTypeLedger},
 	}))
+	require.NoError(t, svc.store.TransitionIssueTicket(ctx, 7, "run-a", "I1", IssueStatusFixing, ""))
 
+	// 审计 P0：入口只派发后台复验，不因后台 LLM 失败报错。
 	_, err := svc.VerifyIssueTickets(ctx, 7, []IssueTicketRef{{RunID: "run-a", IssueKey: "I1"}})
-	require.ErrorIs(t, err, assert.AnError)
+	require.NoError(t, err, "派发入口不应因后台 LLM 失败报错")
 	rows, lerr := svc.store.ListIssues(ctx, 7, "run-a")
 	require.NoError(t, lerr)
-	require.Equal(t, IssueStatusPending, rows[0].Status, "复验失败不改工单状态")
+	require.Equal(t, IssueStatusPending, rows[0].Status, "复验失败不改工单状态（未确认留待下轮）")
 }

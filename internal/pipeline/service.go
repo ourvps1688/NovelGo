@@ -130,6 +130,10 @@ type Service struct {
 	// 立即 Done（agent loop / dispatchSkill 感知后安全退出）。注册/注销与 detectRunning
 	// 同生命周期（执行体收口 defer 调用 endDetectCtx 注销）。
 	detectCancelFns sync.Map
+	// verifyCancelFns 复验取消登记表（key=verify:<runID>，value=context.CancelFunc）。
+	// CancelIssueVerify 按 key 取出并调用 cancel，使本轮复验 ctx 立即 Done；逐工单
+	// 复验循环感知后安全退出（未复验工单复位 pending）。与 detectCancelFns 同口径。
+	verifyCancelFns sync.Map
 }
 
 // NewService 构造流水线服务。
@@ -2812,6 +2816,8 @@ var (
 	emitFixDoneSlot           = newEmitterSlot(EmitFixDone)
 	emitRewriteBacklogSlot    = newEmitterSlot(EmitRewriteBacklog)
 	emitDetectDoneSlot        = newEmitterSlot(EmitDetectDone)
+	emitVerifyProgressSlot    = newEmitterSlot(EmitVerifyProgress)
+	emitVerifyDoneSlot        = newEmitterSlot(EmitVerifyDone)
 )
 
 // 稳定 wrapper：调用点签名与用法零改动。
@@ -2826,6 +2832,8 @@ func emitFixStart(ctx context.Context, p map[string]any)       { emitFixStartSlo
 func emitFixDone(ctx context.Context, p map[string]any)        { emitFixDoneSlot.emit(ctx, p) }
 func emitRewriteBacklog(ctx context.Context, p map[string]any) { emitRewriteBacklogSlot.emit(ctx, p) }
 func emitDetectDone(ctx context.Context, p map[string]any)     { emitDetectDoneSlot.emit(ctx, p) }
+func emitVerifyProgress(ctx context.Context, p map[string]any) { emitVerifyProgressSlot.emit(ctx, p) }
+func emitVerifyDone(ctx context.Context, p map[string]any)     { emitVerifyDoneSlot.emit(ctx, p) }
 
 // swapEmitX 供测试原子注入实现并返回还原函数：
 // defer swapEmitX(f)() 或 t.Cleanup(swapEmitX(f))。
@@ -2855,6 +2863,12 @@ func swapEmitRewriteBacklog(f func(context.Context, map[string]any)) func() {
 }
 func swapEmitDetectDone(f func(context.Context, map[string]any)) func() {
 	return emitDetectDoneSlot.swap(f)
+}
+func swapEmitVerifyProgress(f func(context.Context, map[string]any)) func() {
+	return emitVerifyProgressSlot.swap(f)
+}
+func swapEmitVerifyDone(f func(context.Context, map[string]any)) func() {
+	return emitVerifyDoneSlot.swap(f)
 }
 
 // TimeNow 暴露 time.Now，便于测试时统一；服务内部不依赖外部时钟。

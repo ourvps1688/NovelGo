@@ -31,6 +31,9 @@ const (
 	IssueStatusSkipped   = "skipped"
 	IssueStatusRewrite   = "rewrite"
 	IssueStatusRetcon    = "retcon"
+	// IssueStatusVerifying 是「复验进行中」的瞬态：复验异步执行期间工单停留此态，
+	// 复验收口（通过/退回/未确认）后离开。进程崩溃残留的 verifying 由启动期清扫复位（见 RecoverInterruptedRuns）。
+	IssueStatusVerifying = "verifying"
 )
 
 // 工单流转的显式错误面（面板按钮路径：宁缺勿错——非法迁移显式报错，不静默改写）。
@@ -177,6 +180,29 @@ func (s *Store) ListFixingTickets(ctx context.Context, novelID int64, runID stri
 		return nil, err
 	}
 	return rows, nil
+}
+
+// ListVerifyingTickets 列出该 run 处于 verifying 态的发现项工单（复验执行体的聚合入口，
+// 与 ListFixingTickets 同构：复验按 run 处理全部 verifying 态工单，不传 refs）。
+func (s *Store) ListVerifyingTickets(ctx context.Context, novelID int64, runID string) ([]PipelineIssue, error) {
+	var rows []PipelineIssue
+	err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND run_id = ? AND status = ?", novelID, runID, IssueStatusVerifying).
+		Order("id").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// ResetStuckVerifying 将残留的 verifying 态工单复位为 pending（进程崩溃/中断残留清扫，
+// 与 RecoverInterruptedRuns 同口径：执行体随进程退出而消亡，DB 状态需人工/启动期复位）。
+func (s *Store) ResetStuckVerifying(ctx context.Context, novelID int64) (int64, error) {
+	res := s.db.WithContext(ctx).
+		Model(&PipelineIssue{}).
+		Where("novel_id = ? AND status = ?", novelID, IssueStatusVerifying).
+		Updates(map[string]any{"status": IssueStatusPending, "note": "复验执行中断，已复位待复验"})
+	return res.RowsAffected, res.Error
 }
 
 // ── 发现项工单（R5-1，提案 §10.2/§10.7）──────────────────────────────────────

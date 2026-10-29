@@ -115,8 +115,8 @@ func TestServiceIssueFixAllSkipsToManualBacklog(t *testing.T) {
 	require.Equal(t, "工程级问题超出单批预算", finalCtxt.ManualBacklog[0].Reason, "人工工单应带原因")
 }
 
-// TestServiceVerifyIssueTicketsNoReceiptCompat 验收兼容回退：复验输出缺回执时按已修复确认处理
-// （与修复回执缺省口径一致，不卡死闭环）。
+// TestServiceVerifyIssueTicketsNoReceiptCompat 验收 P2 修正：复验输出缺回执时**不再静默全过**，
+// 工单状态复位 pending 留待下轮（审计 P2：静默全过是最大隐患，必须显式暴露未确认）。
 func TestServiceVerifyIssueTicketsNoReceiptCompat(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
@@ -145,7 +145,7 @@ func TestServiceVerifyIssueTicketsNoReceiptCompat(t *testing.T) {
 
 	rows, lerr := svc.store.ListIssues(ctx, 409, run.RunID)
 	require.NoError(t, lerr)
-	require.Equal(t, IssueStatusVerified, rows[0].Status, "无回执兼容回退按已修复确认处理")
+	require.Equal(t, IssueStatusPending, rows[0].Status, "P2：回执未解析不再静默全过，工单复位 pending 留待下轮")
 }
 
 // TestManualBacklogSummary 验证人工工单摘要渲染（列表截断 + 原因）。
