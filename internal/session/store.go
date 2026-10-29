@@ -261,7 +261,7 @@ func (s *Store) GetMessagesForAPI(ctx context.Context, sessionID string, version
 	var msgs []Message
 	if err := s.DB.WithContext(ctx).
 		Where("session_id = ? AND to_api = ? AND version = ?", sessionID, true, version).
-		Order("created_at ASC").
+		Order("created_at ASC, id ASC").
 		Find(&msgs).Error; err != nil {
 		return nil, fmt.Errorf("session store: get api messages: %w", err)
 	}
@@ -273,7 +273,7 @@ func (s *Store) GetMessagesForFrontend(ctx context.Context, sessionID string) ([
 	var msgs []Message
 	if err := s.DB.WithContext(ctx).
 		Where("session_id = ? AND to_frontend = ?", sessionID, true).
-		Order("created_at ASC").
+		Order("created_at ASC, id ASC").
 		Find(&msgs).Error; err != nil {
 		return nil, fmt.Errorf("session store: get frontend messages: %w", err)
 	}
@@ -285,7 +285,7 @@ func (s *Store) GetAllMessages(ctx context.Context, sessionID string) ([]Message
 	var msgs []Message
 	if err := s.DB.WithContext(ctx).
 		Where("session_id = ?", sessionID).
-		Order("created_at ASC").
+		Order("created_at ASC, id ASC").
 		Find(&msgs).Error; err != nil {
 		return nil, fmt.Errorf("session store: get all messages: %w", err)
 	}
