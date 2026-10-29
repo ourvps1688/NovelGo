@@ -18,6 +18,7 @@ import {
 import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
+import { useNavigationStore } from "@/stores/useNavigationStore";
 import { useSettingsOpenStore } from "@/stores/useSettingsOpenStore";
 import { IssueScopeTags } from "./IssueTags";
 
@@ -426,11 +427,29 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     {chapters.length > 0 ? (
-                      <span className="text-muted-foreground text-xs">
-                        {t("pipeline.tickets.chapters", {
-                          list: chapters.join("、"),
-                        })}
-                      </span>
+                      <>
+                        <span className="text-muted-foreground text-xs">
+                          {t("pipeline.tickets.chapters", {
+                            list: chapters.join("、"),
+                          })}
+                          ：
+                        </span>
+                        {chapters.map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            title={t("pipeline.tickets.jumpToChapter", { n })}
+                            onClick={() =>
+                              useNavigationStore
+                                .getState()
+                                .openChapterByReadingNumber?.(novelId, n)
+                            }
+                            className="rounded border px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10"
+                          >
+                            {t("pipeline.tickets.chapterN", { n })}
+                          </button>
+                        ))}
+                      </>
                     ) : null}
                     <IssueScopeTags issue={row} />
                   </div>

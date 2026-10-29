@@ -61,8 +61,10 @@ import { usePanelStore } from "@/stores/usePanelStore";
 import { useSettingsOpenStore } from "@/stores/useSettingsOpenStore";
 import { useFocusStore } from "@/stores/useFocusStore";
 import { useEditorStore } from "@/stores/useEditorStore";
+import { useNavigationStore } from "@/stores/useNavigationStore";
 import { useGitStore } from "@/components/git/useGitStore";
 import { useNovels } from "@/components/novel/useNovels";
+import { useChapters } from "@/components/chapter/useChapters";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import { useCreateNovel } from "@/components/novel/useCreateNovel";
 import { useSaveCover } from "@/components/novel/useSaveCover";
@@ -137,6 +139,9 @@ export default function WorkspaceView({
   const isReference =
     novels.find((n) => n.id === activeNovelId)?.kind === "reference";
   useEditorTabTitles(activeNovelId);
+  // 全局「跳转章节原文」能力的数据源：按阅读序号反查章节对象。react-query 按
+  // queryKey 去重，其余面板（ChapterList 等）已调用时此处直接复用缓存。
+  const { data: navChapters = [] } = useChapters(activeNovelId);
   const setActiveNovelId = useNovelStore((s) => s.setActiveNovelId);
   const setExportNovelId = useNovelStore((s) => s.setExportNovelId);
   // 3.7: switchNovel action（set activeNovelId + SetActiveNovel 后端）。
@@ -270,6 +275,30 @@ export default function WorkspaceView({
     setActivePanel,
     setActiveSkillName,
   });
+
+  // ── 全局「按阅读序号跳转章节原文」通道（B2 闭环最后一跳）──────────────
+  // IssueTicketsPanel 等深层面板经 useNavigationStore.openChapterByReadingNumber
+  // 触发；此处用 navChapters 反查真实 chapter 对象并委托 handleSelectChapter 打开。
+  // 用 ref 持有最新数据/回调，使注册函数稳定、不因章节刷新而反复重注册。
+  const navChaptersRef = useRef(navChapters);
+  const handleSelectChapterRef = useRef(handleSelectChapter);
+  useEffect(() => {
+    navChaptersRef.current = navChapters;
+    handleSelectChapterRef.current = handleSelectChapter;
+  }, [navChapters, handleSelectChapter]);
+  useEffect(() => {
+    useNavigationStore.getState().register((novelId, readingNumber) => {
+      const ch = navChaptersRef.current.find(
+        (c) => c.novel_id === novelId && c.reading_number === readingNumber,
+      );
+      if (!ch) {
+        toastError(t("pipeline.tickets.chapterNotFound", { n: readingNumber }));
+        return;
+      }
+      handleSelectChapterRef.current(ch);
+    });
+    return () => useNavigationStore.getState().unregister();
+  }, [t]);
 
   // ── Approval ────────────────────────────────────────────
 
