@@ -33,6 +33,64 @@ func (s *Store) GetSession(ctx context.Context, sessionID string) (*Session, err
 	return &sess, nil
 }
 
+// CreateSession 持久化新 session（聊天入口在 DB 中落地会话记录）。
+func (s *Store) CreateSession(ctx context.Context, sess *Session) error {
+	if err := s.DB.WithContext(ctx).Create(sess).Error; err != nil {
+		return fmt.Errorf("session store: create session: %w", err)
+	}
+	return nil
+}
+
+// AppendMessage 追加一条消息（append-only：错误结局事件、手动注入等）。
+func (s *Store) AppendMessage(ctx context.Context, msg *Message) error {
+	if err := s.DB.WithContext(ctx).Create(msg).Error; err != nil {
+		return fmt.Errorf("session store: append message: %w", err)
+	}
+	return nil
+}
+
+// PersistTurnMessages 在单事务内持久化一轮的消息：sysContents（新会话预构建 system 段，按序写入）
+// + slash inject + auto inject + 用户消息。userMsg 为 nil 时仅写入前三者。
+// 系统消息与 inject 均标记为 ToAPI=true/ToFrontend=false（仅用户消息可同时前端可见）。
+func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnID, version int, sysContents []string, slashInject, autoInject string, userMsg *Message) error {
+	sysMsg := func(content string) *Message {
+		return &Message{
+			SessionID: sessionID, TurnID: turnID, Role: "system", Content: content,
+			Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
+		}
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, c := range sysContents {
+			if c == "" {
+				continue
+			}
+			if err := tx.Create(sysMsg(c)).Error; err != nil {
+				return err
+			}
+		}
+		if slashInject != "" {
+			if err := tx.Create(&Message{
+				SessionID: sessionID, TurnID: turnID, Role: "user", Content: slashInject,
+				Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if autoInject != "" {
+			if err := tx.Create(&Message{
+				SessionID: sessionID, TurnID: turnID, Role: "user", Content: autoInject,
+				Version: version, ToAPI: true, ToFrontend: false, AgentType: "main",
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if userMsg != nil {
+			return tx.Create(userMsg).Error
+		}
+		return nil
+	})
+}
+
 // ListSessionsOptions 是 ListSessions 的可选参数。
 type ListSessionsOptions struct {
 	PageParams storage.PageParams

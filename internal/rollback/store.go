@@ -33,6 +33,14 @@ func (s *Store) ListForRollback(ctx context.Context, sessionID string, targetTur
 	return commits, nil
 }
 
+// CreateTurnCommit 记录一次 turn 的 git 提交（user/ai 各一条，按唯一索引分区）。
+func (s *Store) CreateTurnCommit(ctx context.Context, tc *TurnCommit) error {
+	if err := s.DB.WithContext(ctx).Create(tc).Error; err != nil {
+		return fmt.Errorf("rollback store: create turn commit: %w", err)
+	}
+	return nil
+}
+
 // cleanupTurnCommits 在 RollbackTurn 事务内删除指定区间的 turn_commits 记录。
 func cleanupTurnCommits(tx *gorm.DB, sessionID string, targetTurn, lastTurn int) error {
 	return tx.Where("session_id = ? AND turn_id >= ? AND turn_id <= ?",

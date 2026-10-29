@@ -18,6 +18,7 @@ import (
 	"github.com/novelgo/novelgo/internal/approval"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/commit"
 	"github.com/novelgo/novelgo/internal/config"
 	"github.com/novelgo/novelgo/internal/content"
 	"github.com/novelgo/novelgo/internal/deletion"
@@ -93,6 +94,7 @@ type App struct {
 	chapter        *chapter.Store
 	chapterService *chapter.Service
 	contentService *content.Service
+	commitService  *commit.Service
 	character      *character.Store
 	session        *session.Store
 	skill          *skill.Store
@@ -369,6 +371,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	a.location = location.NewStore(db, a.logger)
 	a.reader = reader.NewStore(db, a.logger)
 	a.turnCommit = rollback.NewStore(db, a.logger)
+	a.commitService = commit.NewService(a.turnCommit, a.logger)
 	a.writing = writing.NewStore(db, a.logger)
 	a.volume = volume.NewStore(db, a.logger)
 

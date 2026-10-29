@@ -16,6 +16,7 @@ import (
 	"github.com/novelgo/novelgo/internal/approval"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
+	"github.com/novelgo/novelgo/internal/commit"
 	"github.com/novelgo/novelgo/internal/config"
 	"github.com/novelgo/novelgo/internal/content"
 	"github.com/novelgo/novelgo/internal/deletion"
@@ -187,6 +188,8 @@ func setupTestApp(t *testing.T) *App {
 	app.chapterService = chapter.NewService(chapterStore, volumeStore, chapterDeletionGuard, logger, nil, nil)
 	// 保存正文后的跨介质派生编排服务（搜索缓存懒加载器测试环境传 nil）。
 	app.contentService = content.NewService(logger, chapterStore, writingStore, nil)
+	// git 自动提交编排服务（与 handler.go 装配同形，复用 turnCommit store）
+	app.commitService = commit.NewService(turnCommitStore, logger)
 
 	return app
 }

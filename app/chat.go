@@ -9,15 +9,11 @@ import (
 
 	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"gorm.io/gorm"
-
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/agent"
 	"github.com/novelgo/novelgo/internal/agentcfg"
 	"github.com/novelgo/novelgo/internal/config"
-	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/llm"
-	"github.com/novelgo/novelgo/internal/rollback"
 	"github.com/novelgo/novelgo/internal/session"
 	"github.com/novelgo/novelgo/internal/skill"
 )
@@ -84,15 +80,10 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		return nil, fmt.Errorf("获取 turn ID 失败: %w", err)
 	}
 
-	// 5. 打开 git 仓库，提交用户在对话间隙的手动编辑
+	// 5. 提交用户在对话间隙的手动编辑（git 收尾已下沉到 commit.Service，best-effort 不阻塞对话）
 	s := a.settingsSnapshot()
-	repo, repoErr := git.New(input.NovelID, s.GitName, s.GitEmail, a.logger)
-	if repoErr != nil {
-		a.logger.Warn("auto-commit: 打开 git 仓库失败，跳过本轮自动提交", "err", repoErr)
-	} else {
-		a.commitUserChanges(repo, turnID, sess.SessionID)
-		defer a.commitAIChanges(repo, turnID, sess.SessionID, model.Name)
-	}
+	a.commitService.RecordUserChanges(ctx, input.NovelID, s.GitName, s.GitEmail, sess.SessionID, turnID)
+	defer a.commitService.RecordAIChanges(ctx, input.NovelID, s.GitName, s.GitEmail, sess.SessionID, turnID, model.Name)
 
 	// 6. 解析 / 命令（skill 或 quick command），构建注入内容
 	var slashInject string
@@ -115,7 +106,8 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		autoInject = a.buildAutoSkillInject(ctx, input.NovelID, input.Message, input.ProviderName, input.ModelID)
 	}
 
-	// 7. 持久化本轮消息（事务：System 消息 + slash inject + 用户消息原子写入）
+	// 7. 持久化本轮消息（事务化交由 session.Store.PersistTurnMessages：
+	// System 消息 + slash inject + auto inject + 用户消息在单事务内原子写入）
 	// system 消息在事务外构建（compress 模式），避免事务内读 DB 导致 SQLite 单连接死锁
 	var sysMsgs *agentcfg.SystemMessages
 	if isNew {
@@ -135,43 +127,11 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		ToFrontend: true,
 		AgentType:  "main",
 	}
-	if err := a.session.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if isNew && sysMsgs != nil {
-			if err := writeSystemMessages(tx, sess.SessionID, turnID, sysMsgs); err != nil {
-				return err
-			}
-		}
-		if slashInject != "" {
-			if err := tx.Create(&session.Message{
-				SessionID:  sess.SessionID,
-				TurnID:     turnID,
-				Role:       "user",
-				Content:    slashInject,
-				Version:    sess.ActiveVersion,
-				ToAPI:      true,
-				ToFrontend: false,
-				AgentType:  "main",
-			}).Error; err != nil {
-				return err
-			}
-		}
-
-		if autoInject != "" {
-			if err := tx.Create(&session.Message{
-				SessionID:  sess.SessionID,
-				TurnID:     turnID,
-				Role:       "user",
-				Content:    autoInject,
-				Version:    sess.ActiveVersion,
-				ToAPI:      true,
-				ToFrontend: false,
-				AgentType:  "main",
-			}).Error; err != nil {
-				return err
-			}
-		}
-		return tx.Create(userMsg).Error
-	}); err != nil {
+	var sysContents []string
+	if isNew && sysMsgs != nil {
+		sysContents = []string{sysMsgs.Identity, sysMsgs.Always, sysMsgs.Catalog, sysMsgs.Profile, sysMsgs.State, sysMsgs.Persona}
+	}
+	if err := a.session.PersistTurnMessages(ctx, sess.SessionID, turnID, sess.ActiveVersion, sysContents, slashInject, autoInject, userMsg); err != nil {
 		return nil, fmt.Errorf("持久化消息失败: %w", err)
 	}
 	if a.activity != nil {
@@ -227,7 +187,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 				eventType = session.EventError
 			}
 		}
-		a.session.DB.Create(&session.Message{
+		if err := a.session.AppendMessage(ctx, &session.Message{
 			SessionID:  sess.SessionID,
 			TurnID:     turnID,
 			Role:       "system",
@@ -236,7 +196,9 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 			ToFrontend: true,
 			ToAPI:      false,
 			AgentType:  "main",
-		})
+		}); err != nil {
+			a.logger.Warn("持久化结局事件消息失败", "err", err)
+		}
 		// 统一 emit 结局事件：session.EventType 既是 DB 标记又是实时载荷，前端按同一套映射设 status
 		wails.EventsEmit(ctx, "chat:turn_outcome", map[string]any{
 			"turn_id":    turnID,
@@ -260,13 +222,10 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 // loadOrCreateSession 加载已有 session 或创建新 session。
 func (a *App) loadOrCreateSession(ctx context.Context, input ChatInput) (*session.Session, bool, error) {
 	if input.SessionID != "" {
-		var sess session.Session
-		err := a.session.DB.WithContext(ctx).
-			Where("session_id = ?", input.SessionID).
-			First(&sess).Error
-		if err == nil {
-			return &sess, false, nil
+		if sess, err := a.session.GetSession(ctx, input.SessionID); err == nil {
+			return sess, false, nil
 		}
+		// 会话不存在或读取失败 → 视为需新建（下方统一创建流程）
 	}
 
 	// 创建新 session
@@ -276,32 +235,12 @@ func (a *App) loadOrCreateSession(ctx context.Context, input ChatInput) (*sessio
 		Model:           input.ModelID,
 		ReasoningEffort: input.ReasoningEffort,
 	}
-	if err := a.session.DB.WithContext(ctx).Create(sess).Error; err != nil {
+	if err := a.session.CreateSession(ctx, sess); err != nil {
 		return nil, false, err
 	}
 
 	wails.EventsEmit(ctx, "chat:session_created", sess)
 	return sess, true, nil
-}
-
-// writeSystemMessages 在新 session 的事务内写入预构建的 system 消息到 messages 表。
-// sysMsgs 应在事务外通过 BuildSystemMessages 构建完成（compress 模式，避免死锁）。
-func writeSystemMessages(tx *gorm.DB, sessionID string, turnID int, msgs *agentcfg.SystemMessages) error {
-	sysMsg := func(content string) *session.Message {
-		return &session.Message{
-			SessionID: sessionID, TurnID: turnID, Role: "system", Content: content,
-			Version: 1, ToAPI: true, ToFrontend: false, AgentType: "main",
-		}
-	}
-
-	for _, c := range []string{msgs.Identity, msgs.Always, msgs.Catalog, msgs.Profile, msgs.State, msgs.Persona} {
-		if c != "" {
-			if err := tx.Create(sysMsg(c)).Error; err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // messagesContainPersona 检测已加载的 API 消息中是否已存在 persona 常驻块
@@ -320,7 +259,7 @@ func messagesContainPersona(messages []map[string]any) bool {
 
 // injectPersonaMessages 在每轮消息前追加 persona 系统消息（若引用有效且尚未常驻）。
 // 返回的消息切片保持 system 在前；已存在常驻块（PersonaMarker）时原样返回，避免重复。
-// 新会话的首轮不依赖此函数（persona 已由 writeSystemMessages 持久化为常驻块）。
+// 新会话的首轮不依赖此函数（persona 已由 PersistTurnMessages 持久化为常驻块）。
 func injectPersonaMessages(messages []map[string]any, runningTokens map[string]int, persona *agentcfg.PersonaRef, skillStore *skill.Store, novelID int64) []map[string]any {
 	if persona == nil || messagesContainPersona(messages) {
 		return messages
@@ -488,8 +427,8 @@ func (a *App) CompressContext(input CompressInput) (*CompressResult, error) {
 	}
 
 	// 1. 加载 Session
-	var sess session.Session
-	if err := a.session.DB.Where("session_id = ?", input.SessionID).First(&sess).Error; err != nil {
+	sess, err := a.session.GetSession(context.Background(), input.SessionID)
+	if err != nil {
 		return nil, fmt.Errorf("session 不存在: %w", err)
 	}
 
@@ -536,63 +475,4 @@ func (a *App) CompressContext(input CompressInput) (*CompressResult, error) {
 		return nil, err
 	}
 	return &CompressResult{TurnID: turnID}, nil
-}
-
-// commitUserChanges 在 turn 开始时提交用户在对话间隙对章节文件的手动修改。
-// git 操作失败只记日志，不阻塞对话流程。
-func (a *App) commitUserChanges(repo *git.Repo, turnID int, sessionID string) {
-	has, err := repo.HasUncommitted()
-	if err != nil {
-		a.logger.Warn("auto-commit: 检查未提交变更失败", "err", err)
-		return
-	}
-	if !has {
-		return
-	}
-
-	msg := fmt.Sprintf("turn %d: user manual changes\n\nSession: %s", turnID, sessionID)
-	a.doCommit(repo, turnID, sessionID, "user", msg)
-}
-
-// commitAIChanges 在 turn 结束时提交 AI 对章节文件的所有修改。
-// 通过 defer 调用，确保正常结束、用户打断、异常退出时都会执行。
-func (a *App) commitAIChanges(repo *git.Repo, turnID int, sessionID string, modelName string) {
-	has, err := repo.HasUncommitted()
-	if err != nil {
-		a.logger.Warn("auto-commit: 检查未提交变更失败", "err", err)
-		return
-	}
-	if !has {
-		return
-	}
-
-	msg := fmt.Sprintf("turn %d: AI changes\n\nSession: %s\n\nCo-authored-by: NovelGo (%s)", turnID, sessionID, modelName)
-	a.doCommit(repo, turnID, sessionID, "ai", msg)
-}
-
-// doCommit 执行 git add + commit，并将 hash 写入 turn_commits 表。
-func (a *App) doCommit(repo *git.Repo, turnID int, sessionID, commitType, msg string) {
-	if err := repo.StageAll(); err != nil {
-		a.logger.Warn("auto-commit: git add 失败", "err", err)
-		return
-	}
-
-	hash, err := repo.Commit(msg)
-	if err != nil {
-		a.logger.Warn("auto-commit: git commit 失败", "err", err)
-		return
-	}
-
-	tc := &rollback.TurnCommit{
-		SessionID:  sessionID,
-		TurnID:     turnID,
-		CommitType: commitType,
-		CommitHash: hash,
-	}
-	if err := a.db.Create(tc).Error; err != nil {
-		a.logger.Warn("auto-commit: 写入 turn_commits 失败", "err", err)
-		return
-	}
-
-	a.logger.Info("auto-commit: 提交成功", "turn", turnID, "type", commitType, "hash", hash[:7])
 }
