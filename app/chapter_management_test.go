@@ -149,18 +149,26 @@ func TestDeleteChapterReturnsReferencesAndCleansFiles(t *testing.T) {
 	assert.True(t, errors.Is(err, os.ErrNotExist), "err = %v, want os.ErrNotExist", err)
 }
 
-func TestDeleteChapterRollsBackRecordWhenFileCleanupFails(t *testing.T) {
+// E1 后契约：DB 为真相源，文件清理是提交后 best-effort（有限重试 + 启动期
+// ReconcileOrphanFiles 回收）。文件清理失败不再回滚已提交的记录——记录一定被删，
+// 残留文件等待启动期孤儿回收。
+func TestDeleteChapterDeletesRecordDespiteFileCleanupFailure(t *testing.T) {
 	app := setupTestApp(t)
 	novel := createTestNovel(t, app)
 	ch := createTestChapter(t, app, novel.ID)
 
 	outlinePath, err := git.ResolvePath(git.OutlinePath(ch.ID), novel.ID)
 	require.NoError(t, err)
+	// 把大纲「文件」位置变成无法被 git.RemoveFile 删除的目录，强制文件清理失败。
 	require.NoError(t, os.MkdirAll(outlinePath, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(outlinePath, "blocked"), []byte("blocked"), 0o644))
 
 	_, err = app.DeleteChapter(novel.ID, ch.ID)
-	require.Error(t, err)
-	_, err = app.chapter.GetByID(app.ctx, nil, novel.ID, ch.ID)
 	require.NoError(t, err)
+	// 记录已提交删除（DB 为真相源），不应再被查到。
+	_, err = app.chapter.GetByID(app.ctx, nil, novel.ID, ch.ID)
+	require.Error(t, err)
+	// 残留的孤立大纲目录仍留在磁盘，等待启动期 ReconcileOrphanFiles 回收。
+	_, statErr := os.Stat(filepath.Join(outlinePath, "blocked"))
+	require.NoError(t, statErr)
 }

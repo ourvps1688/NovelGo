@@ -14,12 +14,12 @@ import (
 	"time"
 	"unicode"
 
-	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/event"
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/review"
@@ -29,6 +29,20 @@ import (
 	"github.com/novelgo/novelgo/internal/writing"
 	"github.com/novelgo/novelgo/internal/writingconfig"
 )
+
+// eventBus 是 MCP 工具事件总线的注入实现，默认丢弃（NopEmitter），
+// 由 app 在启动时经 SetEmitter 注入基于 wails runtime 的真实实现。
+// 此前 file:changed 依赖 ctx.Value("events") 哨兵闸（全局从未设置，导致该事件在生产
+// 环境从不真正发射）；现改为统一经 eventBus 路由，注入真实实现后即可正常发射，
+// 测试环境退化为 NopEmitter 不副作用。
+var eventBus event.Emitter = event.NopEmitter{}
+
+// SetEmitter 注入 MCP 工具事件总线实现（app 启动时调用一次）。传入 nil 视为不改动。
+func SetEmitter(e event.Emitter) {
+	if e != nil {
+		eventBus = e
+	}
+}
 
 // ── edit ──────────────────────────────────────────────────
 
@@ -175,23 +189,23 @@ func writeApproved(ctx context.Context, tc ToolContext, path, current, proposed 
 	return nil, nil
 }
 
-// emitFileChanged 推送 file:changed 事件。wails runtime 在上下文缺失时
-// 会 log.Fatalf 终止进程，因此无 wails 运行时上下文（如测试环境）时静默跳过。
+// emitFileChanged 推送 file:changed 事件。经注入的 eventBus 路由（默认 NopEmitter，
+// 测试环境无副作用；app 注入 wails 实现后生产环境正常发射）。
 func emitFileChanged(ctx context.Context, novelID int64, path string) {
-	if ctx == nil || ctx.Value("events") == nil {
+	if ctx == nil {
 		return
 	}
-	wails.EventsEmit(ctx, "file:changed", map[string]any{
+	eventBus.Emit(ctx, "file:changed", map[string]any{
 		"novel_id": novelID,
 		"path":     path,
 	})
 }
 
 func emitFileMetadataChanged(ctx context.Context, novelID int64, path string) {
-	if ctx == nil || ctx.Value("events") == nil {
+	if ctx == nil {
 		return
 	}
-	wails.EventsEmit(ctx, "file:changed", map[string]any{
+	eventBus.Emit(ctx, "file:changed", map[string]any{
 		"novel_id":      novelID,
 		"path":          path,
 		"metadata_only": true,
@@ -972,7 +986,7 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 // runSub 为实际派发子 Agent 的函数（调用方决定用 ToolContext.RunSubAgent 还是 agent.RunSubAgent）；
 // logger 用于失败日志；toolID 标识调用来源（用于 statesync 进度事件）。返回派发错误（非阻断调用方可忽略）。
 func RunStateSyncForChapter(ctx context.Context, runSub func(ctx context.Context, req SubAgentRequest) (string, error), logger *slog.Logger, toolID string, novelID, chapterID int64) error {
-	wails.EventsEmit(ctx, "statesync:progress", map[string]any{
+	eventBus.Emit(ctx, "statesync:progress", map[string]any{
 		"novel_id":   novelID,
 		"chapter_id": chapterID,
 		"status":     "started",
@@ -994,7 +1008,7 @@ func RunStateSyncForChapter(ctx context.Context, runSub func(ctx context.Context
 		if logger != nil {
 			logger.Warn("state-sync 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
 		}
-		wails.EventsEmit(ctx, "statesync:progress", map[string]any{
+		eventBus.Emit(ctx, "statesync:progress", map[string]any{
 			"novel_id":   novelID,
 			"chapter_id": chapterID,
 			"status":     "done",
@@ -1002,7 +1016,7 @@ func RunStateSyncForChapter(ctx context.Context, runSub func(ctx context.Context
 		})
 		return err
 	}
-	wails.EventsEmit(ctx, "statesync:progress", map[string]any{
+	eventBus.Emit(ctx, "statesync:progress", map[string]any{
 		"novel_id":   novelID,
 		"chapter_id": chapterID,
 		"status":     "done",

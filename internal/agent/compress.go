@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	wails "github.com/wailsapp/wails/v2/pkg/runtime"
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/agentcfg"
@@ -311,7 +310,7 @@ func apiMsgToMessage(m map[string]any, sessionID string, turnID, version int) *s
 
 // emitCompression 推送压缩事件到前端。
 func (a *Agent) emitCompression(ctx context.Context, turnID int, phase, summary, subTaskID string) {
-	wails.EventsEmit(ctx, "agent:"+strconv.Itoa(turnID), AgentEvent{
+	a.emitter.Emit(ctx, "agent:"+strconv.Itoa(turnID), AgentEvent{
 		TurnID:           turnID,
 		Type:             EventCompression,
 		CompressionPhase: phase,

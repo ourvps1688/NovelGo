@@ -58,6 +58,7 @@ NovelGo 是一个使用 Wails（Go + React）的桌面 AI 网文写作助手。�
 - `Store` 只负责所属介质的读写、查询和事务内的数据一致性；例如章节的 `volume_id` / `sort_order` 调整属于 Store。
 - 涉及多个持久化介质、多个领域或有补偿流程的用例必须采用 `App → internal/<domain>.Service → Store/依赖`。Service 负责业务语义与编排，例如 DB 记录、Git 文件、交叉引用、向量索引和缓存的协调。
 - Service 不得反向依赖 `app/` 或 Wails；遇到可选基础设施（如向量库、搜索缓存）使用小接口或 provider 注入，避免领域包循环依赖。
+- 事件发布（向前端推流）同样遵循上述约束：领域包（`internal/agent`、`internal/pipeline`、`internal/mcp_tools`）**不得直接 `import wails`**，统一经 `internal/event.Emitter` 接口发布事件，由 `app` 在启动时注入基于 `wails runtime` 的实现（默认 `event.NopEmitter`，测试安全）。
 
 ## 修改安全边界
 

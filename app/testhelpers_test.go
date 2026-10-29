@@ -17,7 +17,9 @@ import (
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/config"
+	"github.com/novelgo/novelgo/internal/content"
 	"github.com/novelgo/novelgo/internal/deletion"
+	"github.com/novelgo/novelgo/internal/event"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/location"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
@@ -115,7 +117,7 @@ func setupTestApp(t *testing.T) *App {
 	cancelMgr := agent.NewCancelManager()
 
 	// Agent.
-	ag := agent.New(llmClient, registry, sessionStore, chapterStore, db, approvals, logger, skillStore, cancelMgr)
+	ag := agent.New(llmClient, registry, sessionStore, chapterStore, db, approvals, logger, skillStore, cancelMgr, event.NopEmitter{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -183,6 +185,8 @@ func setupTestApp(t *testing.T) *App {
 		deletion.For(deletion.EntityChapter, characterStore.ChapterDeletionBlockers),
 	)
 	app.chapterService = chapter.NewService(chapterStore, volumeStore, chapterDeletionGuard, logger, nil, nil)
+	// 保存正文后的跨介质派生编排服务（搜索缓存懒加载器测试环境传 nil）。
+	app.contentService = content.NewService(logger, chapterStore, writingStore, nil)
 
 	return app
 }

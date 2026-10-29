@@ -12,13 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	wails "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/agentcfg"
 	"github.com/novelgo/novelgo/internal/approval"
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/event"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
 	"github.com/novelgo/novelgo/internal/search"
@@ -39,6 +38,7 @@ type Agent struct {
 	chapterStore  *chapter.Store
 	searchService atomic.Pointer[search.Service]
 	cancelMgr     *CancelManager
+	emitter       event.Emitter
 }
 
 // RunOptions 是单次 Run() 的参数。
@@ -63,8 +63,12 @@ type RunOptions struct {
 	RunningTokens map[string]int
 }
 
-// New 创建 Agent 实例。
-func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.Store, chapterStore *chapter.Store, db *gorm.DB, approver approval.Approver, logger *slog.Logger, skillStore *skill.Store, cancelMgr *CancelManager) *Agent {
+// New 创建 Agent 实例。emitter 用于向前端推送对话流事件（agent:<turnID>），
+// 由 app 注入基于 wails runtime 的实现；传 nil 时退化为 event.NopEmitter（测试安全）。
+func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.Store, chapterStore *chapter.Store, db *gorm.DB, approver approval.Approver, logger *slog.Logger, skillStore *skill.Store, cancelMgr *CancelManager, emitter event.Emitter) *Agent {
+	if emitter == nil {
+		emitter = event.NopEmitter{}
+	}
 	return &Agent{
 		llm:          llmClient,
 		registry:     registry,
@@ -75,6 +79,7 @@ func New(llmClient *llm.Client, registry *mcp_tools.Registry, session *session.S
 		logger:       logger,
 		skillStore:   skillStore,
 		cancelMgr:    cancelMgr,
+		emitter:      emitter,
 	}
 }
 
@@ -207,7 +212,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			event.Timestamp = time.Now()
 		}
 		event.SubTaskID = opts.SubTaskID
-		wails.EventsEmit(ctx, agentEventName, event)
+		a.emitter.Emit(ctx, agentEventName, event)
 	}
 
 	canceled := false    // 用户手动取消（ctx.Done）

@@ -4,7 +4,7 @@
 
 Agent Loop 是对话系统的编排核心——接收消息列表，调用 LLM 流式接口，解析 tool_calls 并执行工具，将结果追加回消息列表，循环直到 LLM 不再调用工具或达到上限。
 
-与 Python `core/agent_loop.py` 逻辑等价。Go 版无需 Python 的 5 个回调——async SQLAlchemy session 管理、消息打标、display 生成等 Python 必须的外部依赖，在 Go 中或不需要或由 loop 内置。唯一差异是事件推送直接 import Wails runtime，不注入。
+与 Python `core/agent_loop.py` 逻辑等价。Go 版无需 Python 的 5 个回调——async SQLAlchemy session 管理、消息打标、display 生成等 Python 必须的外部依赖，在 Go 中或不需要或由 loop 内置。事件推送经 `event.Emitter` 接口注入（由 app 提供 wails 实现），领域包不直接 import Wails（见 AGENTS.md 分层约束）。
 
 ## 整体流程
 
@@ -64,11 +64,11 @@ Python 的 5 个回调在 Go 中消解为直接调用：
 | `display_handler` | `a.buildDisplay(name, args, phase)` | 主和子逻辑完全相同，内置为 Agent 方法 |
 | `on_message` | `a.db.Create(&msg)` + 内存追加 | 持久化就一行，不需要注入不同实现 |
 | `on_usage` | 调用方从 `EventUsage` 自行 `UpdateSessionUsage` | 与循环逻辑无关，事后处理 |
-| `ws_manager.send_personal_message` | 直接 `wails.EventsEmit("agent:"+turnID, event)` | internal/ 可以 import Wails，无需回调 |
+| `ws_manager.send_personal_message` | 经注入的 `event.Emitter.Emit("agent:"+turnID, event)` | 领域包不得 import Wails，事件走 `internal/event` 接口注入（由 app 提供 wails 实现） |
 
 ### 事件推送
 
-Agent 直接调用 `wails.EventsEmit("agent:"+strconv.Itoa(turnID), event)`，无回调。子 agent 时事件名用 `parentTurnID`，前端在对应的主 turn 分组下渲染子 agent 行为。
+Agent 经注入的 `event.Emitter.Emit("agent:"+strconv.Itoa(turnID), event)` 发布事件，无回调（事件发射器由 `agent.New` 注入，默认 `event.NopEmitter`）。子 agent 时事件名用 `parentTurnID`，前端在对应的主 turn 分组下渲染子 agent 行为。
 
 ### turn_id 替代 task_id
 
@@ -83,7 +83,7 @@ Python 用 `task_id`（随机 UUID）关联事件到前端。Go 中所有消息�
 | `AgentType` | `"main"` | `"review"` / `"memory"` / `"statesync"` 等 |
 | `ParentTurnID` | `nil` | `&parentTurnID` |
 | `AllowedTools` | mainAgentAllowlist | reviewAllowlist / memoryAllowlist |
-| 事件推送 | `wails.EventsEmit("agent:"+turnID, ...)` | `wails.EventsEmit("agent:"+parentTurnID, ...)` |
+| 事件推送 | `event.Emitter.Emit("agent:"+turnID, ...)` | `event.Emitter.Emit("agent:"+parentTurnID, ...)` |
 | Messages | session 历史 | 独立的 `[system, user]` |
 
 ## ToolContext 和 ToolResult
@@ -207,24 +207,24 @@ func (a *Agent) Run(ctx, opts RunOptions) (AgentLoopResult, error):
             case EventThinking:
                 isThinking = true
                 thinkingBuffer += event.Data
-                wails.EventsEmit("agent:"+turnID, AgentEvent{Type: EventThinking, Data: event.Data})
+                a.emitter.Emit("agent:"+turnID, AgentEvent{Type: EventThinking, Data: event.Data})
 
             case EventContent:
-                if isThinking { wails.EventsEmit(...EventThinkingDone); isThinking = false }
+                if isThinking { a.emitter.Emit(...EventThinkingDone); isThinking = false }
                 responseBuffer += event.Data
                 fullResponse += event.Data
-                wails.EventsEmit("agent:"+turnID, AgentEvent{Type: EventContent, Data: event.Data})
+                a.emitter.Emit("agent:"+turnID, AgentEvent{Type: EventContent, Data: event.Data})
 
             case EventToolCallStart:
-                if isThinking { wails.EventsEmit(...EventThinkingDone); isThinking = false }
+                if isThinking { a.emitter.Emit(...EventThinkingDone); isThinking = false }
                 display := a.buildDisplay(name, nil, PhaseSelected)
-                wails.EventsEmit("agent:"+turnID, AgentEvent{
+                a.emitter.Emit("agent:"+turnID, AgentEvent{
                     Type: EventToolCall, ToolName: name, ToolID: id,
                     Phase: "selected", Display: display})
 
             case EventToolCallEnd:
                 display := a.buildDisplay(name, args, PhaseExecuting)
-                wails.EventsEmit("agent:"+turnID, AgentEvent{
+                a.emitter.Emit("agent:"+turnID, AgentEvent{
                     Type: EventToolCall, ToolName: name, ToolID: id,
                     Phase: "executing", Display: display})
 
@@ -234,7 +234,7 @@ func (a *Agent) Run(ctx, opts RunOptions) (AgentLoopResult, error):
                 phase := "completed"
                 if !result.Success { phase = "failed" }
                 display = a.buildDisplay(name, args, phase)
-                wails.EventsEmit("agent:"+turnID, AgentEvent{
+                a.emitter.Emit("agent:"+turnID, AgentEvent{
                     Type: EventToolCall, ToolName: name, ToolID: id,
                     Phase: phase, Result: result, Display: display})
 
@@ -256,7 +256,7 @@ func (a *Agent) Run(ctx, opts RunOptions) (AgentLoopResult, error):
 
         // ---- 流结束 ----
         if len(toolOutputs) == 0:
-            if isThinking { wails.EventsEmit(...EventThinkingDone) }
+            if isThinking { a.emitter.Emit(...EventThinkingDone) }
             break
 
         // 1. assistant + tool_calls
@@ -276,7 +276,7 @@ func (a *Agent) Run(ctx, opts RunOptions) (AgentLoopResult, error):
         // 4. 死循环检测
         if isStuckLoop(recentPatterns, toolOutputs, loopCount):
             a.appendMsg("system", "检测到重复调用模式，请基于已有信息直接输出", nil, opts)
-            wails.EventsEmit("agent:"+turnID,
+            a.emitter.Emit("agent:"+turnID,
                 AgentEvent{Type: EventToolCall, Phase: "loop_detected"})
 
         // 5. token 预算 → 超限时触发压缩（暂占位）
@@ -357,7 +357,7 @@ func (a *Agent) appendMsg(role, content string, extra map[string]any, opts RunOp
 | 工具执行 | `tool_call_handler` 闭包（注入 session、allowed 等） | `a.registry.Execute()`，Agent 持有 registry + allowedTools |
 | 消息持久化 | `on_message` 闭包 → session_manager | `a.db.Create(&msg)`，Agent 持有 db |
 | 展示文本 | `display_handler` 闭包 | `a.buildDisplay()` 内置方法 |
-| 事件推送 | `ws_manager.send_personal_message` import 后直接调 | `wails.EventsEmit` import 后直接调 |
+| 事件推送 | `ws_manager.send_personal_message` import 后直接调 | `event.Emitter.Emit` 注入（`internal/event` 接口，由 app 提供 wails 实现） |
 | 消息打标 | `on_message` 包装函数给 dict 塞 `source`/`agent_type` | `Message.AgentType` / `ParentTurnID` 构造时直接赋值 |
 | 事件关联 | 随机 `task_id` UUID | 自增 `turn_id` |
 | 取消 | `asyncio.Event` | `context.Context` |

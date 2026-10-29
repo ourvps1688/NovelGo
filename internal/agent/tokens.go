@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	wails "github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/session"
@@ -105,7 +103,7 @@ func (a *Agent) updateUsage(ctx context.Context, apiUsage map[string]any, runnin
 		}
 	}
 
-	wails.EventsEmit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
+	a.emitter.Emit(ctx, "agent:"+strconv.Itoa(opts.TurnID), AgentEvent{
 		TurnID:    opts.TurnID,
 		Type:      EventUsage,
 		Usage:     usage,

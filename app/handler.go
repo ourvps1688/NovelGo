@@ -123,6 +123,16 @@ func New(logger *slog.Logger) *App {
 	}
 }
 
+// wailsEmitter 是 event.Emitter 的 wails runtime 实现：把领域事件经
+// runtime.EventsEmit 推到前端。领域包（agent/pipeline/mcp_tools）只依赖
+// event.Emitter 接口，由 app 在启动时注入本实现，避免它们直接 import wails。
+type wailsEmitter struct{}
+
+// Emit 实现 event.Emitter。
+func (wailsEmitter) Emit(ctx context.Context, name string, data ...any) {
+	runtime.EventsEmit(ctx, name, data...)
+}
+
 // ── 生命周期 ──────────────────────────────────────────────
 
 // OnStartup 在 Wails 窗口创建后调用，完成基础设施初始化。
@@ -449,6 +459,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 
 	// 7. 初始化 MCP 工具注册表
 	a.registry = mcp_tools.NewRegistry(a.logger)
+	mcp_tools.SetEmitter(wailsEmitter{})
 	mcp_tools.RegisterAllTools(a.registry)
 	a.mcpServer = mcpserver.New(a.registry, db, a.currentNovel, a.logger, []string{"get_chapter_list", "list_volumes"})
 
@@ -468,7 +479,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 
 	// 10. 创建 Agent 实例（全局复用）
 	a.cancelMgr = agent.NewCancelManager()
-	a.agent = agent.New(a.llmClient, a.registry, a.session, a.chapter, db, a.approvals, a.logger, a.skill, a.cancelMgr)
+	a.agent = agent.New(a.llmClient, a.registry, a.session, a.chapter, db, a.approvals, a.logger, a.skill, a.cancelMgr, wailsEmitter{})
 
 	// 10.5 初始化 style store（全局风格素材）
 	a.style = style.NewStore(db, a.logger)
@@ -477,6 +488,8 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 解析默认模型（"provider/model"），供 S2 蓝图阶段多轮 agent 使用。
 	defaultProv, defaultModel := a.parseModelKey(a.settings.SelectedModelKey)
 	a.pipeline = pipeline.NewService(db, a.agent, a.skill, a.llmClient, defaultProv, defaultModel, a.ctx, a.logger)
+	// 注入流水线事件总线实现（领域包经 event.Emitter 接口发布，避免直接依赖 wails）。
+	pipeline.SetEventBus(wailsEmitter{})
 	// 注入 S0 对齐所需的 statesync 子 Agent 执行器：经由 agent.RunSubAgent 派发（mcp_tools 提供指令构造）。
 	a.pipeline.SetStateSyncRunner(func(ctx context.Context, novelID, chapterID int64) error {
 		return mcp_tools.RunStateSyncForChapter(ctx, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {

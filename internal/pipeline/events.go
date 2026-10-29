@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 
-	wails "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/novelgo/novelgo/internal/event"
 )
 
 // 流水线全局事件名（前端经 EventsOn 订阅）。
@@ -21,6 +21,18 @@ const (
 	// 纯增量通道：既有事件协议零改动；巡检·结构沿用 EvConsistencyPatrol 既有通道。
 	EvDetectDone = "pipeline:detect_done"
 )
+
+// eventBus 是流水线事件总线的注入实现，默认丢弃（NopEmitter），
+// 由 app 在启动时经 SetEventBus 注入基于 wails runtime 的真实实现。
+// 测试经 swapEmitX 直接替换槽实现，不依赖此变量。
+var eventBus event.Emitter = event.NopEmitter{}
+
+// SetEventBus 注入流水线事件总线实现（app 启动时调用一次）。传入 nil 视为不改动。
+func SetEventBus(e event.Emitter) {
+	if e != nil {
+		eventBus = e
+	}
+}
 
 // StagePayload 阶段变更事件载荷。
 type StagePayload struct {
@@ -50,28 +62,28 @@ type ControlAckPayload struct {
 
 // EmitStage 广播阶段变更。
 func EmitStage(ctx context.Context, p StagePayload) {
-	wails.EventsEmit(ctx, EvStage, p)
+	eventBus.Emit(ctx, EvStage, p)
 }
 
 // EmitGate 广播闸门待确认。
 func EmitGate(ctx context.Context, p GatePayload) {
-	wails.EventsEmit(ctx, EvGate, p)
+	eventBus.Emit(ctx, EvGate, p)
 }
 
 // EmitControlAck 广播控制指令回执。
 func EmitControlAck(ctx context.Context, p ControlAckPayload) {
-	wails.EventsEmit(ctx, EvControlAck, p)
+	eventBus.Emit(ctx, EvControlAck, p)
 }
 
 // EmitStockAudit 广播「全量对齐」体检完成，通知前端刷新并展示结果。
 func EmitStockAudit(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvStockAudit, p)
+	eventBus.Emit(ctx, EvStockAudit, p)
 }
 
 // EmitConsistencyPatrol 广播全书一致性巡检（张力报告，WBS 3.3）完成，
 // 通知前端刷新并只读展示巡检报告（张力清单）。
 func EmitConsistencyPatrol(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvConsistencyPatrol, p)
+	eventBus.Emit(ctx, EvConsistencyPatrol, p)
 }
 
 // FixIssuePayload 是 S5 修复开始事件里的一条修复项（来自体检 issue 清单）。
@@ -92,21 +104,21 @@ type FixIssuePayload struct {
 // EmitFixStart 广播 S5 修复开始，携带本轮要修复的 issue 清单，
 // 让用户看到「在修复什么问题、涉及哪些元素（角色/地点/弧线/读者视角…）」。
 func EmitFixStart(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvFixStart, p)
+	eventBus.Emit(ctx, EvFixStart, p)
 }
 
 // EmitFixDone 广播 S5 修复结束（ok=false 时带 error），前端展示修复结果。
 func EmitFixDone(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvFixDone, p)
+	eventBus.Emit(ctx, EvFixDone, p)
 }
 
 // EmitRewriteBacklog 广播「正文级问题回流 S3 重写回路」，通知前端刷新并展示重写清单。
 func EmitRewriteBacklog(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvRewriteBacklog, p)
+	eventBus.Emit(ctx, EvRewriteBacklog, p)
 }
 
 // EmitDetectDone 广播检测任务（卷体检/书体检）完成，通知前端跳结果
 // （发现项工单面板）并刷新检测状态（R5-3 T1.2/T2.2）。
 func EmitDetectDone(ctx context.Context, p map[string]any) {
-	wails.EventsEmit(ctx, EvDetectDone, p)
+	eventBus.Emit(ctx, EvDetectDone, p)
 }
