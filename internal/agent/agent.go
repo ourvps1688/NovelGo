@@ -187,6 +187,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	var responseBuffer strings.Builder
 	var thinkingBuffer strings.Builder
 	isThinking := false
+	// toolExecuted 标记本 turn 是否执行过任意工具（含子 Agent 工具调用），
+	// 供 chat 层 turn 级自动重放判断是否安全（已执行工具则重放会双写）。
+	toolExecuted := false
 	recentPatterns := make([]string, 0, 6)
 	tracker := newInterruptTracker() // 工具连续失败计数（system 5/args 5/全局 10 中断）
 	runningTokens := opts.RunningTokens
@@ -365,6 +368,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						ModelID:       opts.Model.ID,
 					}
 					result := a.registry.Execute(ctx, name, rawArgs, tc, opts.AllowedTools)
+					toolExecuted = true // 任意工具执行（含子 Agent 工具调用）即置位，供 turn 级重放安全判断
 					a.logger.Info("tool executed", "tool", name, "success", result.Success, "phase", map[bool]string{true: "completed", false: "failed"}[result.Success])
 
 					phase := "completed"
@@ -470,7 +474,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 							select {
 							case <-ctx.Done():
 								timer.Stop()
-								return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, ctx.Err()
+								return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, ctx.Err()
 							case <-timer.C:
 							}
 							goto RETRY_STREAM
@@ -484,7 +488,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 								ErrMsg: FriendlyError(event.Error), Timestamp: time.Now(),
 							})
 						}
-						return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, event.Error
+						return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, event.Error
 					}
 
 					// P2: 可恢复错误重试（不重试 ctx.Canceled / 不可恢复错误 / 非 *APIError）
@@ -525,7 +529,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 							// 用户在退避期间取消 → 走 user_stopped 路径
 							// 不 emit EventError（前端已设 status='stopped'）
 							timer.Stop()
-							return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, ctx.Err()
+							return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, ctx.Err()
 						case <-timer.C:
 						}
 						goto RETRY_STREAM
@@ -545,7 +549,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						a.appendMsg("assistant", finalText, thinkingContent,
 							nil, &opts, runningTokens)
 					}
-					return AgentLoopResult{FinalText: finalText, ThinkingContent: thinkingContent, TurnCount: loopCount}, event.Error
+					return AgentLoopResult{FinalText: finalText, ThinkingContent: thinkingContent, TurnCount: loopCount, ToolExecuted: toolExecuted}, event.Error
 				}
 			}
 		}
@@ -615,16 +619,16 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 	}
 
 	if canceled {
-		return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, ctx.Err()
+		return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, ctx.Err()
 	}
 	if interrupted {
-		return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, interruptErr
+		return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, interruptErr
 	}
 	if !normalEnd {
 		// MaxTurns 耗尽：循环条件退出，非正常 break，走 system_interrupted
-		return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, &MaxTurnsInterrupt{Reason: "已达最大轮数，对话结束"}
+		return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, &MaxTurnsInterrupt{Reason: "已达最大轮数，对话结束"}
 	}
-	return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount}, nil
+	return AgentLoopResult{FinalText: responseBuffer.String(), ThinkingContent: thinkingBuffer.String(), TurnCount: loopCount, ToolExecuted: toolExecuted}, nil
 }
 
 // appendMsg 统一处理消息的内存追加 + 持久化 + token 计数。

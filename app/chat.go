@@ -154,13 +154,13 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	// 此处用 PersonaMarker 去重避免重复；已有会话（无此常驻块）则每轮注入，实现实时切换。
 	messages = injectPersonaMessages(messages, runningTokens, input.Persona, a.skill, input.NovelID)
 
-	// 9. 运行 Agent 循环
+	// 9. 运行 Agent 循环（含 turn 级自动重放，见 chat_retry.go）
 	wails.EventsEmit(ctx, "chat:started", map[string]any{
 		"session_id": sess.SessionID,
 		"turn_id":    turnID,
 	})
 
-	result, runErr := a.agent.Run(ctx, agent.RunOptions{
+	result, runErr := a.runTurnWithRetry(ctx, agent.RunOptions{
 		TurnID:          turnID,
 		RunningTokens:   runningTokens,
 		SessionID:       sess.SessionID,
@@ -173,7 +173,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		AgentType:       "main",
 		MaxTurns:        100,
 		ReasoningEffort: input.ReasoningEffort,
-	})
+	}, input.ProviderName, runningTokens)
 
 	// 10. 最终回复已由 agent.Run() 内部 appendMsg 持久化，此处不重复存储
 	if runErr != nil {

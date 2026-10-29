@@ -48,4 +48,7 @@ type AgentLoopResult struct {
 	FinalText       string
 	ThinkingContent string
 	TurnCount       int
+	// ToolExecuted 标记本次 Run 是否在主循环里执行过任意工具（含子 Agent 工具调用）。
+	// chat 层据此决定是否做 turn 级自动重放：已执行工具的重放会造成双写，必须交回手动重发。
+	ToolExecuted bool
 }
