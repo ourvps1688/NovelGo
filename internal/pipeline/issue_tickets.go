@@ -356,9 +356,12 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 	}
 
 	// 载入工单行：终态（verified/dismissed）不接受复验，跳过不计；其余置 verifying 态后按 run 派发。
+	// 同时收集每个 run 本次要复验的工单键（runKeys），显式透传给执行体，避免执行体回扫
+	// verifying 态的读己写竞态（该竞态曾导致执行体读到 0 行而提前返回，工单永久卡在 verifying）。
 	seen := map[string]bool{}
 	summary := &IssueVerifySummary{}
 	runIDs := map[string]bool{}
+	runKeys := map[string][]string{}
 	for _, ref := range refs {
 		key := ref.RunID + "\x00" + ref.IssueKey
 		if seen[key] {
@@ -379,6 +382,7 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 		// 置 verifying 瞬态（执行体按 run 聚合 verifying 态工单；进程崩溃残留由启动期清扫复位）。
 		s.syncIssueRow(ctx, novelID, ref.RunID, ref.IssueKey, IssueStatusVerifying, "")
 		runIDs[ref.RunID] = true
+		runKeys[ref.RunID] = append(runKeys[ref.RunID], ref.IssueKey)
 		summary.Queued++
 	}
 	if summary.Queued == 0 {
@@ -386,29 +390,60 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 	}
 	for runID := range runIDs {
 		runID := runID
+		keys := runKeys[runID]
 		s.dispatchExecutor(taskKindIssueVerify, runID, novelID, func() {
-			s.runVerifyTickets(runID, novelID)
-		})
+			s.runVerifyTickets(runID, novelID, keys)
+		}, keys...)
 	}
 	summary.Detail = fmt.Sprintf("已启动复验 %d 项（后台执行，进度见面板）", summary.Queued)
 	return summary, nil
 }
 
-// runVerifyTickets 是复验执行体（审计 P0）：处理本 run 全部 verifying 态工单，逐工单定点复验。
+// runVerifyTickets 是复验执行体（审计 P0）：处理本 run 的复验工单，逐工单定点复验。
 // 每个工单一次独立 signability-verify 调用（作用域化、MaxTurns=verifyMaxTurns），故障隔离；
 // verified→verified（终态）/ 未通过→pending（退回待修）/ 未确认（LLM 失败或回执未解析）→
 // pending（留待下轮），绝不静默全过。整轮受 verifyCallTimeout 有界 ctx 约束，可被 CancelIssueVerify 取消。
-func (s *Service) runVerifyTickets(runID string, novelID int64) {
+//
+// keys 为显式工单键（由 VerifyIssueTickets 透传）：优先按 key 精确加载，彻底消除「执行体回扫
+// verifying 态」的读己写竞态（竞态曾让执行体读到 0 行而提前返回，工单永久卡在 verifying）。
+// keys 为空（历史任务/降级路径）时回落按 run 扫描 verifying 态工单的旧口径，保持向后兼容。
+func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 	ctx := s.beginVerifyCtx(runID)
 	defer s.endVerifyCtx(runID)
 
-	rows, err := s.store.ListVerifyingTickets(ctx, novelID, runID)
-	if err != nil {
-		s.logger.Error("复验：加载 verifying 工单失败", "run_id", runID, "err", err)
-		return
+	var rows []PipelineIssue
+	if len(keys) > 0 {
+		// 确定性复验：仅处理显式传入的工单键，不再依赖 verifying 态扫描。
+		for _, issueKey := range keys {
+			row, rerr := s.store.getIssueRow(ctx, novelID, runID, issueKey)
+			if rerr != nil {
+				if errors.Is(rerr, ErrIssueNotFound) {
+					s.logger.Warn("复验：工单键不存在，跳过", "run_id", runID, "issue", issueKey)
+					continue
+				}
+				s.logger.Error("复验：加载工单失败", "run_id", runID, "issue", issueKey, "err", rerr)
+				continue
+			}
+			// 终态（verified/dismissed）已被其他路径收口，跳过不复验。
+			if row.Status == IssueStatusVerified || row.Status == IssueStatusDismissed {
+				continue
+			}
+			rows = append(rows, *row)
+		}
+	} else {
+		var err error
+		rows, err = s.store.ListVerifyingTickets(ctx, novelID, runID)
+		if err != nil {
+			s.logger.Error("复验：加载 verifying 工单失败", "run_id", runID, "err", err)
+			return
+		}
+		if len(rows) == 0 {
+			s.logger.Info("复验：本 run 无 verifying 态工单，跳过", "run_id", runID)
+			return
+		}
 	}
 	if len(rows) == 0 {
-		s.logger.Info("复验：本 run 无 verifying 态工单，跳过", "run_id", runID)
+		s.logger.Info("复验：无待复验工单（显式键均终态/不存在），跳过", "run_id", runID)
 		return
 	}
 

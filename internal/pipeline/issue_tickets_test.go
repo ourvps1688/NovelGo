@@ -5,10 +5,14 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/novelgo/novelgo/internal/task"
 )
 
 // ── 发现项工单状态机（R5-1，§10.2）───────────────────────────────────────────
@@ -157,6 +161,60 @@ func TestServiceRewriteBacklogOfProjection(t *testing.T) {
 	fallback := []RewriteItem{{ID: "IX", Level: "P1"}}
 	got = svc.rewriteBacklogOf(ctx, 7, "run-a", fallback)
 	require.Equal(t, fallback, got, "取数失败回退内存清单")
+}
+
+// TestVerifyIssueTicketsCarriesKeysViaQueue 复验读己写竞态回归（验收点）：
+// VerifyIssueTickets 必须把本次要复验的工单键显式透传到执行体（经 task payload 的 IssueKeys），
+// 而非依赖执行体回扫 verifying 态——旧口径存在读己写竞态，执行体读到 0 行而提前返回，
+// 工单永久卡在 verifying（用户侧表现为「复验无法走下去」）。本测试锁定键被携带、
+// 执行体按键精确复验（不依赖 verifying 扫描）。
+//
+// 覆盖 issue_verify handler 为探针（不真跑 LLM），仅捕获 payload 中的 IssueKeys。
+func TestVerifyIssueTicketsCarriesKeysViaQueue(t *testing.T) {
+	db := newQueueTestDB(t)
+	svc := newQueueService(t, db)
+	ctx := context.Background()
+
+	novelID := int64(9)
+	runID := "run-verify-keys"
+	require.NoError(t, svc.store.ReplaceIssues(ctx, novelID, runID, 0, []AuditIssue{
+		{ID: "I1", Level: "P1", Area: "节奏", Desc: "拖沓"},
+		{ID: "I2", Level: "P1", Area: "人设", Desc: "弱"},
+		{ID: "I3", Level: "P1", Area: "逻辑", Desc: "矛盾"}, // 已 verified 终态，应被跳过
+	}))
+	require.NoError(t, svc.store.RecordIssueVerify(ctx, novelID, runID, "I3", true, "已通过"))
+
+	var mu sync.Mutex
+	var captured []string
+	var hits atomic.Int32
+	svc.taskRunner.Register(taskKindIssueVerify, func(_ context.Context, tk *task.Task) error {
+		p, err := decodeTaskPayload(tk.Payload)
+		require.NoError(t, err)
+		mu.Lock()
+		captured = append(captured, p.IssueKeys...)
+		mu.Unlock()
+		hits.Add(1)
+		return nil
+	})
+
+	svc.StartTaskQueue()
+	defer svc.StopTaskQueue()
+
+	summary, err := svc.VerifyIssueTickets(ctx, novelID, []IssueTicketRef{
+		{RunID: runID, IssueKey: "I1"},
+		{RunID: runID, IssueKey: "I2"},
+		{RunID: runID, IssueKey: "I3"}, // 终态，不应计入 Queued
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, summary.Queued, "非终态 I1/I2 计入待复验")
+	require.Equal(t, 1, summary.Unverified, "终态 I3 计入 Unverified 跳过不计")
+
+	require.Eventually(t, func() bool { return hits.Load() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"复验执行体未派发")
+	mu.Lock()
+	got := append([]string(nil), captured...)
+	mu.Unlock()
+	require.ElementsMatch(t, []string{"I1", "I2"}, got, "执行体必须拿到显式工单键（竞态修复核心：不再依赖 verifying 扫描）")
 }
 
 // ── 工单面板服务入口（确认/去修复/驳回/列表）──────────────────────────────────

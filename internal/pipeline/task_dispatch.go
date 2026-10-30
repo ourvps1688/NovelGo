@@ -37,9 +37,12 @@ const (
 )
 
 // taskPayload 是执行参数（task.payload JSON；RunID/NovelID 同步冗余到 task 行供查询）。
+// IssueKeys 仅复验执行体使用：显式携带本次要复验的工单键，消除「执行体扫描 verifying 态
+// 工单」的读己写竞态（该竞态会让执行体读到 0 行而提前返回，工单永久卡在 verifying）。
 type taskPayload struct {
-	RunID   string `json:"run_id"`
-	NovelID int64  `json:"novel_id"`
+	RunID     string   `json:"run_id"`
+	NovelID   int64    `json:"novel_id"`
+	IssueKeys []string `json:"issue_keys,omitempty"`
 }
 
 // StartTaskQueue 清理残留活跃任务并启动队列消费。应用启动时调用（幂等，
@@ -85,12 +88,14 @@ func (s *Service) hasActiveTask(ctx context.Context, runID string) bool {
 
 // dispatchExecutor 把执行体派发进持久任务队列（dedup=kind:run_id 活跃去重）。
 // 队列不可用时降级调 legacy（迁移前的裸 goroutine 行为，逐字保留）。
-func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy func()) {
+// issueKeys 仅复验执行体使用：显式携带待复验工单键，经 task payload 透传给消费侧，
+// 避免消费侧回扫 verifying 态（读己写竞态根因）。其余执行体不传（空）。
+func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy func(), issueKeys ...string) {
 	if s.taskStore == nil || s.taskRunner == nil || !s.taskRunner.Started() {
 		legacy()
 		return
 	}
-	payload, merr := json.Marshal(taskPayload{RunID: runID, NovelID: novelID})
+	payload, merr := json.Marshal(taskPayload{RunID: runID, NovelID: novelID, IssueKeys: issueKeys})
 	if merr != nil {
 		legacy()
 		return
@@ -129,9 +134,15 @@ func (s *Service) registerTaskHandlers() {
 	s.taskRunner.Register(taskKindIssueFix, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.runIssueFixTickets(runID, novelID)
 	}))
-	s.taskRunner.Register(taskKindIssueVerify, s.runIDNovelIDHandler(func(runID string, novelID int64) {
-		s.runVerifyTickets(runID, novelID)
-	}))
+	s.taskRunner.Register(taskKindIssueVerify, func(_ context.Context, t *task.Task) error {
+		p, err := decodeTaskPayload(t.Payload)
+		if err != nil {
+			return err
+		}
+		// 透传显式工单键：消除执行体回扫 verifying 态的读己写竞态（验收点）。
+		s.runVerifyTickets(p.RunID, p.NovelID, p.IssueKeys)
+		return nil
+	})
 	s.taskRunner.Register(taskKindFinalAudit, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.executeFinalAudit(runID, novelID)
 	}))
