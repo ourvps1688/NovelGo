@@ -28,6 +28,7 @@ import { toErrorMessage } from "@/utils/error";
 import type { pipeline, chapter, volume } from "@/lib/wailsjs/go/models";
 import type { AuditData } from "@/types/pipeline";
 import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
+import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
 
 type DetectKind = "chapter" | "volume" | "structure";
 
@@ -42,18 +43,9 @@ const VERDICT_KEYS: Record<string, string> = {
   error: "journey.quality.detect.verdict.error",
 };
 
-// 工单状态徽章配色（与 IssueTicketsPanel 同口径）：内联结果只读展示用。
-const STATUS_CLS: Record<string, string> = {
-  pending: "bg-warning/10 text-warning-foreground",
-  confirmed: "bg-primary/10 text-primary",
-  fixing: "bg-primary/10 text-primary",
-  fixed: "bg-primary/10 text-primary",
-  verified: "bg-success/10 text-success-foreground",
-  dismissed: "bg-muted text-muted-foreground",
-  skipped: "bg-muted text-muted-foreground",
-  rewrite: "bg-warning/10 text-warning-foreground",
-  retcon: "bg-warning/10 text-warning-foreground",
-};
+// 工单状态徽章配色（与 IssueTicketsPanel 同口径）：内联结果只读展示用——
+// 已迁入 SignabilityAssessmentCard 复用，本文件仅保留章节质量档案跳转所需的
+// VERDICT_KEYS / fmtTime（卷体检走共用评估卡，不再在此渲染工单预览）。
 
 const SELECT_CLS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -91,6 +83,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   const volumeOpts: volume.Volume[] = volumes ?? [];
   const effChapterId = scopeId ?? chapterOpts[0]?.id ?? null;
   const effVolumeId = scopeId ?? volumeOpts[0]?.id ?? null;
+  const volumeName =
+    volumeOpts.find((v) => v.id === effVolumeId)?.name ?? undefined;
 
   const { data: statuses } = useQuery({
     queryKey: detectionKeys.list(novelId),
@@ -276,69 +270,46 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
             }}
           />
         ) : st?.last_run_at ? (
-          <div className="mt-4 rounded-lg border bg-muted/30 p-3 max-w-3xl">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">
-                {t("journey.quality.detect.resultTitle")}
-              </span>
-              {st.last_verdict ? (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-                  {VERDICT_KEYS[st.last_verdict]
-                    ? t(VERDICT_KEYS[st.last_verdict])
-                    : st.last_verdict}
+          kind === "volume" ? (
+            // 卷体检与书体检跑同一 signability-audit 技能、产物形态一致：复用八维评估卡
+            // （标注卷 scope 铭牌），修复此前卷体检不渲染评分/八维、只给通用工单预览的缺口。
+            <SignabilityAssessmentCard
+              status={st}
+              inlineIssues={inlineIssues}
+              scopeLabel={volumeName}
+            />
+          ) : (
+            // 章节检测产物是质量档案（非评分报告/工单），形态本就不同：仅给跳转入口。
+            <div className="mt-4 rounded-lg border bg-muted/30 p-3 max-w-3xl">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-foreground">
+                  {t("journey.quality.detect.resultTitle")}
                 </span>
-              ) : null}
+                {st.last_verdict ? (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    {VERDICT_KEYS[st.last_verdict]
+                      ? t(VERDICT_KEYS[st.last_verdict])
+                      : st.last_verdict}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("journey.quality.detect.lastRun", {
+                  at: fmtTime(st.last_run_at),
+                  count: st.last_issue_count ?? 0,
+                })}
+              </p>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setActivePanel("chapters")}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
+                >
+                  {t("journey.quality.detect.viewQuality")}
+                </button>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("journey.quality.detect.lastRun", {
-                at: fmtTime(st.last_run_at),
-                count: st.last_issue_count ?? 0,
-              })}
-            </p>
-
-            {inlineIssues.length > 0 ? (
-              <ul className="mt-2 flex flex-col gap-1.5">
-                {inlineIssues.slice(0, 12).map((r) => (
-                  <li
-                    key={r.id}
-                    className="rounded border bg-card px-2 py-1.5 text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-[11px] ${
-                          STATUS_CLS[r.status] ??
-                          "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {t(`pipeline.tickets.status.${r.status}`)}
-                      </span>
-                      <span className="shrink-0 font-medium">
-                        {r.issue_key}
-                      </span>
-                      <span className="truncate font-medium">{r.area}</span>
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
-                      {r.desc}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() =>
-                  setActivePanel(kind === "chapter" ? "chapters" : "pipeline")
-                }
-                className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
-              >
-                {kind === "chapter"
-                  ? t("journey.quality.detect.viewQuality")
-                  : t("journey.quality.detect.viewTickets")}
-              </button>
-            </div>
-          </div>
+          )
         ) : null}
       </div>
 
