@@ -6,6 +6,7 @@ import { GetPatrolReport, RunDetectionTask } from "@/lib/wailsjs/go/app/App";
 import type { AuditData } from "@/types/pipeline";
 import { patrolKeys } from "@/lib/queryKeys";
 import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
+import { usePanelStore } from "@/stores/usePanelStore";
 import PatrolReportPanel from "./PatrolReportPanel";
 import IssueTicketsPanel from "./IssueTicketsPanel";
 import RetconPanel from "./RetconPanel";
@@ -30,6 +31,10 @@ export default function DetectionCorePanel({ novelId }: Props) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [tick, setTick] = useState(0);
+  // 进入来源上下文：从签约潜力工作流点「查看工单」跳来时记 "signability"，
+  // 据此做澄清 + 排序，避免把顶部的「一致性巡检」误认为签约发现项。
+  const panelContext = usePanelStore((s) => s.panelContext);
+  const fromSignability = panelContext === "signability";
 
   // 全书一致性巡查报告（张力报告）：经 GetPatrolReport 双源合并取数
   // （活跃 run + structure 检测容器，按落库时间戳最新者胜）。取数失败静默
@@ -85,18 +90,40 @@ export default function DetectionCorePanel({ novelId }: Props) {
 
         {/* 检测核心结果消费面：汇总视图 + 人工修复入口（与流水线阶段解耦）。 */}
         <div className="flex flex-col gap-3">
-          <PatrolReportPanel
-            data={patrolData}
-            tick={tick}
-            onRun={() => {
-              // 巡检动作埋点（P4 T2.2）：失败静默零提示。
-              trackFeature(ACTION_FEATURE_KEYS.patrol);
-              // 无活跃流水线：走检测任务独立入口（R5-3 T1.2，巡检·结构），
-              // 完成沿用 consistency_patrol 事件刷新本面板。
-              RunDetectionTask(novelId, "structure", null).catch(() => {});
-            }}
-          />
-          <IssueTicketsPanel novelId={novelId} />
+          {fromSignability ? (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs leading-relaxed text-foreground/90">
+              {t("pipeline.fromSignabilityHint")}
+            </div>
+          ) : null}
+
+          {fromSignability ? (
+            <>
+              {/* 来自签约流：优先呈现「发现项工单」（按钮承诺的内容），
+                  一致性巡检降到其后并标注为独立模块，避免误判同源。 */}
+              <IssueTicketsPanel novelId={novelId} />
+              <PatrolReportPanel
+                data={patrolData}
+                tick={tick}
+                independentNote={t("pipeline.patrol.independentNote")}
+                onRun={() => {
+                  trackFeature(ACTION_FEATURE_KEYS.patrol);
+                  RunDetectionTask(novelId, "structure", null).catch(() => {});
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <PatrolReportPanel
+                data={patrolData}
+                tick={tick}
+                onRun={() => {
+                  trackFeature(ACTION_FEATURE_KEYS.patrol);
+                  RunDetectionTask(novelId, "structure", null).catch(() => {});
+                }}
+              />
+              <IssueTicketsPanel novelId={novelId} />
+            </>
+          )}
           <RetconPanel novelId={novelId} />
           <VolumeManagePanel novelId={novelId} />
         </div>

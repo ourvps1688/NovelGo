@@ -159,7 +159,7 @@ export default function SignabilityAssessmentCard({
       <div className="mt-3">
         <button
           type="button"
-          onClick={() => setActivePanel("pipeline")}
+          onClick={() => setActivePanel("pipeline", "signability")}
           className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
         >
           {t("journey.quality.detect.viewTickets")}

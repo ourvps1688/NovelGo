@@ -1897,6 +1897,7 @@
   "pipeline": {
     "title": "Detection Core",
     "detectCoreHint": "Detection tasks can be launched anytime, independent of the writing pipeline. Findings are collected as tickets; fixing is always manual.",
+    "fromSignabilityHint": "You entered Detection Core from the Signability workflow. Detection Core is a hub summarizing every detection: the Issues tickets below collect findings from all detections across the book (including the signability book detection you just ran) — confirm, fix, and re-verify them here. The Consistency Patrol (Tension Report) is a separate structure detection module that only reports forward-adaptation drift tensions; it is unrelated to the signability assessment.",
     "autoRun": "Auto Run",
     "alignFull": "Full Align",
     "alignFullHint": "Run full alignment on the imported book: build volume, backfill ledger, and run a whole-book signability audit",
@@ -1987,6 +1988,7 @@
     "patrol": {
       "title": "Consistency Patrol (Tension Report)",
       "hint": "Cross-checks the established facts of frozen volumes against the current ledger and manuscript, reporting cumulative drift tensions (setting distortion / unfulfilled promises / quietly rewritten reader knowledge / timeline drift / retcon seams). Report-only: it never enters the auto-fix loop; you decide what to change.",
+      "independentNote": "Separate module: Consistency Patrol is a structure detection and unrelated to the signability assessment — its content is not from the signability flow.",
       "run": "Run Patrol",
       "running": "Patrol is running in the background (read-only, no rewriting). This panel refreshes automatically when it finishes; if nothing arrives after a long while it failed — just run it again.",
       "issues": "Tension List",

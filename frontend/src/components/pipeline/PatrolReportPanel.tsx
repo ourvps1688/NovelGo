@@ -13,12 +13,16 @@ export default function PatrolReportPanel({
   data,
   tick,
   onRun,
+  independentNote,
 }: {
   // 最近一次张力报告（run.ContextJSON.patrol_report 解析结果，可空）。
   data: AuditData | null;
   // 一致性巡检完成计数（由 DetectionCorePanel 的 pipeline:consistency_patrol 事件驱动）：变化即清除「运行中」提示。
   tick: number;
   onRun: () => void;
+  // 可选：当本面板从其它检测（如签约潜力）入口到达时，标注其为独立模块，
+  // 避免误判为同源发现项。默认不渲染。
+  independentNote?: string;
 }) {
   const { t } = useTranslation();
   const [pending, setPending] = useState(false);
@@ -78,6 +82,12 @@ export default function PatrolReportPanel({
       <p className="text-xs text-muted-foreground">
         {t("pipeline.patrol.hint")}
       </p>
+
+      {independentNote ? (
+        <p className="rounded border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+          {independentNote}
+        </p>
+      ) : null}
 
       {pending ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
