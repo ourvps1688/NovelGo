@@ -21,6 +21,7 @@
 - LF 归一化只对本次改动文件做（全树 find+sed 误伤 50+ 文件）；读文件做逐字/正则断言的测试须 CRLF 归一化或钉 eol=lf。
 - 重启 wails dev 要点：①`/c/Users/Administrator/go/bin/wails.exe dev`（带全套 Go/CGO export）；②重启前 `rm -rf frontend/dist/assets`（否则 vite emptyDir 触发 SAFE_DELETE_BULK_CONFIRM_REQUIRED 失败）；③结束旧进程用 PowerShell `Stop-Process -Id <pid> -Force`。wails watcher 会卡死不重建，修完须核验运行中构建（grep 二进制文案实证新代码进进程）。
 - 队列测试「入队后断言不被执行」须先停/延后消费循环。MCP read 工具 start_line 越界=窗口平移收敛+note；破坏性参数才 required。grep 零回退口径：P0–P2 工件、theme token、desktop-first、PanelId 零删除。
+- **vitest 在沙箱内偶发失败，但与版本无关**：vite 8.0.14 + vitest 4.1.10 本就兼容（vitest 4.1.10 的 peer 依赖明确含 `vite ^8.0.0`），**无需对齐版本**。沙箱内失败根因=资源受限：① forks 池 fork 子进程偶发 "Timeout waiting for worker to respond"；② jsdom/React Testing Library 组件测试在全量 CPU/内存压力下偶发渲染空 `<div />`（找不到元素）。实证：同样用例隔离跑 9/9 过；**脱离沙箱（dangerouslyDisableSandbox）全量 46 文件/385 测试 EXIT=0 全绿**。结论：项目本身没问题，门禁在资源充足机器上稳定绿；沙箱内无法靠版本/配置改动确定性变绿。pre-commit 钩子只校验 Go 文件，故前端改动提交不被卡。前端改动可用 format:check/i18n:check/lint(0 error)/build 兜底验证，vitest 门禁建议在资源充足环境（本地机/脱沙箱）跑。
 
 ## 章节寻址约定（聊天 LLM 防找错章，勿回退）
 - **chapter_id 是稳定主键（DB 自增），阅读序号是实时计算（volumes.sort_order+chapters.sort_order），二者不等价；换卷/重排后对应关系会变。** 前端严格用后端 reading_number，编号本身没错。
