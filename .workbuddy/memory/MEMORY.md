@@ -58,6 +58,10 @@
   - `signability-audit.md` 是契约源（8 维评分口径），勿回退。
 - 四道闸：后端 gofmt/gobuild/vet/golangci-lint(webkit2_41 0 issues)/go test 全绿；前端 format:check/i18n:check/lint(0 error)/build/vitest(385 通过) 全绿。
 
+## 检测工作流结构分支渲染张力报告（已落地，commit f301946d）
+- 用户要求把 DetectionWorkflowView 的巡检/structure 分支也改为渲染 PatrolReport 专属张力报告面板，而非复用通用工单列表（与上方书体检修复同一个「界面长得一样」表层问题）。
+- 落地：structure 分支经 `GetPatrolReport` 双源合并取数（活跃 run + structure 检测容器，落库时间戳最新者胜），解析 `patrol_report` JSON→`AuditData` 喂 `PatrolReportPanel`（结论徽章+摘要+张力条+作用域标签）；监听 `pipeline:consistency_patrol` 完成事件失效重拉 + tick 驱动收起「运行中」提示（与 `DetectionCorePanel` 同一套契约，事件由 `patrol.go` 广播）。结构巡检只报告张力、零发现项工单→移除「查看工单」入口；章节/卷仍走通用工单列表。复用既有 `PatrolReportPanel`（pipeline.patrol.* i18n 已齐备），未新增文案键、未改该组件。前端四道闸全绿，后端无需改动。
+
 ## 供应商熔断重设计（P0 已落地，commit 74800a1b）
 - **根因修复**：原 `provider_trip.go` 用「近 10min 空闲超时 ≥10 次」当硬信号误熔断（thinking 模型长静默/代理缓冲被误杀）。P0 把「空闲超时」从熔断触发信号**剥离**，熔断只认**硬失败**。
 - **三态自愈熔断器** `internal/llm/breaker.go`：`providerBreakerManager` 全局单例 `ProviderBreaker`，按 provider 隔离；三态 Closed/Open/Half-Open；阈值初值 `hardFailureTrip=5`、`hardFailureWindow=2min`、`breakerCooldown=30s`、`breakerProbeSuccess=1`；Open 冷却到期→自动 Half-Open 探针，探针成功→Closed、失败→回 Open（自愈）。
