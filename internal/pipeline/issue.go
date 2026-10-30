@@ -205,6 +205,18 @@ func (s *Store) ResetStuckVerifying(ctx context.Context, novelID int64) (int64, 
 	return res.RowsAffected, res.Error
 }
 
+// ResetAllStuckVerifying 启动期（RecoverInterruptedRuns）全局清扫：把所有 novel 残留的
+// verifying 态工单一次性复位为 pending。复验执行体随进程退出而消亡，若崩溃/重启发生在
+// 复验中途，执行体收口逻辑不再运行，这些工单会永久停在 verifying；此处兜底复位，避免
+// 永久卡死（issue.go:35 注释承诺的「启动期清扫复位」此前未真正实现，本次补齐）。
+func (s *Store) ResetAllStuckVerifying(ctx context.Context) (int64, error) {
+	res := s.db.WithContext(ctx).
+		Model(&PipelineIssue{}).
+		Where("status = ?", IssueStatusVerifying).
+		Updates(map[string]any{"status": IssueStatusPending, "note": "应用重启导致复验中断，已复位待复验"})
+	return res.RowsAffected, res.Error
+}
+
 // ── 发现项工单（R5-1，提案 §10.2/§10.7）──────────────────────────────────────
 // issue 台账升格为工单：状态机（发现→确认→（人工）修复中→复验通过/驳回）+ 复验回执。
 // 工单面板按钮经 Service 走本组方法；流水线内部同步（UpdateIssueStatus）不走状态机

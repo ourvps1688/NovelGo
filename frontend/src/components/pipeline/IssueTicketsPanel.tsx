@@ -525,14 +525,29 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                       onChange={() => toggle(row.id)}
                       aria-label={row.issue_key}
                     />
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-xs ${
-                        STATUS_CLS[row.status] ??
-                        "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {t(`pipeline.tickets.status.${row.status}`)}
-                    </span>
+                    {row.status === "verifying" ? (
+                      verifyingRuns.has(row.run_id) ? (
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                          {t("pipeline.tickets.status.verifying")}
+                          {verifyProgress[row.run_id]
+                            ? ` · ${verifyProgress[row.run_id].done}/${verifyProgress[row.run_id].total}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning-foreground">
+                          {t("pipeline.tickets.verifyStale")}
+                        </span>
+                      )
+                    ) : (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-xs ${
+                          STATUS_CLS[row.status] ??
+                          "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {t(`pipeline.tickets.status.${row.status}`)}
+                      </span>
+                    )}
                     <span className="shrink-0 font-medium text-xs">
                       {row.issue_key}
                     </span>
@@ -581,6 +596,12 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                   {row.note ? (
                     <p className="text-muted-foreground text-xs">
                       {t("pipeline.tickets.note")}：{row.note}
+                    </p>
+                  ) : null}
+                  {row.status === "verifying" &&
+                  !verifyingRuns.has(row.run_id) ? (
+                    <p className="text-warning-foreground text-xs">
+                      {t("pipeline.tickets.verifyStaleHint")}
                     </p>
                   ) : null}
                 </li>

@@ -509,7 +509,12 @@ func (s *Service) verifyOneTicket(ctx context.Context, novelID int64, runID stri
 	if decided, lv, lnote := s.tryL0Verify(ctx, novelID, runID, row, s.l0Reader); decided {
 		return lv, !lv, lnote
 	}
-	out, derr := s.dispatchSkill(ctx, "signability-verify", SkillInput{
+	// 单工单独立墙钟预算：避免某工单的 LLM 调用卡住（供应商静默/空闲超时）拖住整批复验。
+	// 超时即该工单复位 pending 留待下轮，后续工单继续；早于 thinking 模型 9 分钟空闲看门狗。
+	// L0 快路径（已在上文）不在此预算内，只有真正 LLM 调用受约束。
+	tctx, tcancel := context.WithTimeout(ctx, verifyTicketTimeout)
+	defer tcancel()
+	out, derr := s.dispatchSkill(tctx, "signability-verify", SkillInput{
 		NovelID:   novelID,
 		Prompt:    verifyPrompt(novelID, []verifyTarget{{ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc, Chapters: issueChapterIDs(AuditIssue{Area: row.Area, Desc: row.Desc, ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON)}), FixNote: row.Note}}, ledgerNotes, propBlock, contextasm.ContextBlocks{}),
 		MaxTurns:  verifyMaxTurns,

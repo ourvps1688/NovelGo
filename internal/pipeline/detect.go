@@ -198,6 +198,12 @@ var detectTaskTimeout = 60 * time.Minute
 // 超时/取消后安全退出（未复验工单复位 pending，可重跑）。
 var verifyCallTimeout = 15 * time.Minute
 
+// verifyTicketTimeout 是单工单复验 LLM 调用的墙钟上限（逐工单预算，独立于 verifyCallTimeout）：
+// 复验逐工单顺序执行，若某工单的 LLM 调用卡住（供应商静默/空闲超时），不兜底会拖住整批。
+// 此处给每张工单单独的预算，超时的工单单独复位 pending 并让后续工单继续，避免「一张卡死、
+// 整批无进展」——也早于 thinking 模型 9 分钟空闲看门狗，使其干净超时而非硬等。
+var verifyTicketTimeout = 5 * time.Minute
+
 // verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，比完整
 // 体检轻得多，6 轮足够（原整批复验用 12 轮，是慢的主因之一）。
 const verifyMaxTurns = 6

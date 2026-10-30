@@ -2772,6 +2772,14 @@ func (s *Service) RecoverInterruptedRuns() {
 			s.logger.Info("启动恢复：waiting book-run 的卷级子 run 已收口，已唤醒回写作", "run_id", run.RunID)
 		}
 	}
+	// 启动清扫：复验执行体随进程退出而消亡，崩溃/重启发生在复验中途时，执行体收口逻辑
+	// 不再运行，残留的 verifying 工单会永久卡死。此处全局复位为 pending（issue.go:35 注释
+	// 承诺的「启动期清扫复位」此前未真正实现，本次补齐），用户重新点击复验即可重跑。
+	if v, rerr := s.store.ResetAllStuckVerifying(ctx); rerr != nil {
+		s.logger.Error("启动恢复：清扫残留 verifying 工单失败", "err", rerr)
+	} else if v > 0 {
+		s.logger.Warn("启动恢复：已复位崩溃残留的 verifying 工单", "count", v)
+	}
 }
 
 // redispatchIfNeeded 在恢复（resume）后按需重新派发执行体。执行体存活以任务队列的

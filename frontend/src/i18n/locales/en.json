@@ -1962,6 +1962,8 @@
       "chapterNotFound": "Chapter {{n}} no longer exists; cannot jump to source",
       "verifyReceipt": "Verify receipt",
       "note": "Note",
+      "verifyStale": "Verify interrupted",
+      "verifyStaleHint": "This ticket is stuck in 'verifying' but no verification is running (page reloaded or process restarted). It will auto-reset to pending on app restart, or re-select and click Verify to re-run.",
       "empty": "No tickets yet. Detected findings become tickets here for manual confirmation, fixing and verification.",
       "fixSent": "Sent {{count}} issue(s) to the chat window — collaborate with the AI in the dialog below to fix them",
       "fixPromptTitle": "Please help fix the following detected findings (already marked as fixing):",
