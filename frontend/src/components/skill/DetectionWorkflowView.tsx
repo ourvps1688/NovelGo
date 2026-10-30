@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FileText,
@@ -10,12 +10,14 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  GetPatrolReport,
   ListDetectionTaskStatuses,
   ListIssueTickets,
   RunDetectionTask,
 } from "@/lib/wailsjs/go/app/App";
-import { detectionKeys } from "@/lib/queryKeys";
+import { detectionKeys, patrolKeys } from "@/lib/queryKeys";
 import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
+import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { useChapters } from "@/components/chapter/useChapters";
 import { useVolumes } from "@/components/volume/useVolumes";
 import { useModels } from "@/components/settings/useModels";
@@ -24,6 +26,8 @@ import { usePanelStore } from "@/stores/usePanelStore";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import type { pipeline, chapter, volume } from "@/lib/wailsjs/go/models";
+import type { AuditData } from "@/types/pipeline";
+import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
 
 type DetectKind = "chapter" | "volume" | "structure";
 
@@ -112,6 +116,43 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     const runId = st.last_run_id;
     return (allIssues ?? []).filter((r) => r.run_id === runId);
   }, [allIssues, kind, st?.last_run_id]);
+
+  // 巡检·结构结果消费面：经 GetPatrolReport 双源合并取数（活跃 run + structure 检测容器，
+  // 按落库时间戳最新者胜），解析张力报告 AuditData 喂 PatrolReportPanel——
+  // 取代旧「通用工单列表」呈现，使结构巡检与书体检/章节严格区分（结构只报告张力、零工单）。
+  const { data: patrolView } = useQuery({
+    queryKey: patrolKeys.report(novelId),
+    queryFn: async () => (await GetPatrolReport(novelId)) ?? null,
+    enabled: !!novelId && kind === "structure",
+  });
+  const patrolData: AuditData | null = useMemo(() => {
+    const raw = patrolView?.report;
+    if (!raw) return null;
+    try {
+      return typeof raw === "string" ? (JSON.parse(raw) as AuditData) : raw;
+    } catch {
+      return null;
+    }
+  }, [patrolView?.report]);
+
+  // 结构巡检完成事件到达即失效重拉；tick 驱动 PatrolReportPanel 收起「运行中」提示。
+  const [patrolTick, setPatrolTick] = useState(0);
+  useEffect(() => {
+    if (!novelId || kind !== "structure") return;
+    const off = EventsOn(
+      "pipeline:consistency_patrol",
+      (p: { novel_id?: number }) => {
+        if (p.novel_id !== novelId) return;
+        queryClient.invalidateQueries({
+          queryKey: patrolKeys.report(novelId),
+        });
+        setPatrolTick((prev) => prev + 1);
+      },
+    );
+    return () => {
+      off?.();
+    };
+  }, [novelId, kind, queryClient]);
 
   const scopeReady =
     kind === "chapter"
@@ -225,7 +266,16 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
           )
         ) : null}
 
-        {st?.last_run_at ? (
+        {kind === "structure" ? (
+          <PatrolReportPanel
+            data={patrolData}
+            tick={patrolTick}
+            onRun={() => {
+              trackFeature(ACTION_FEATURE_KEYS.patrol);
+              handleStart();
+            }}
+          />
+        ) : st?.last_run_at ? (
           <div className="mt-4 rounded-lg border bg-muted/30 p-3 max-w-3xl">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-foreground">
