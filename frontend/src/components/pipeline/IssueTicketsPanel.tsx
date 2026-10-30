@@ -380,7 +380,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
 
       {visible.length > 0 ? (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-border/60 bg-card py-2">
             <button
               type="button"
               className="rounded border px-2 py-1 text-xs hover:bg-muted"

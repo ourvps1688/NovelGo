@@ -1263,6 +1263,11 @@ export default function ChatPanel({
               ...t,
               status: "interrupted" as const,
               errorMessage: String(err),
+              segments: t.segments.map((seg) =>
+                seg.type === "subagent" && seg.status === "streaming"
+                  ? { ...seg, status: "done" as const }
+                  : seg,
+              ),
             };
           }),
         );
@@ -1288,7 +1293,11 @@ export default function ChatPanel({
                   ...t,
                   status: "done" as const,
                   segments: t.segments.map((seg) =>
-                    seg.type === "text" ? { ...seg, isStreaming: false } : seg,
+                    seg.type === "text"
+                      ? { ...seg, isStreaming: false }
+                      : seg.type === "subagent" && seg.status === "streaming"
+                        ? { ...seg, status: "done" as const }
+                        : seg,
                   ),
                 }
               : t,
