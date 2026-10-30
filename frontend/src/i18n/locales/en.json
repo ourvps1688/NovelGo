@@ -1805,7 +1805,20 @@
     "configureModelFirst": "Configure a model in Settings first",
     "launchFailed": "Failed to start the signability check. Please retry.",
     "evaluation": "Signability Assessment",
-    "evaluationHint": "Findings overview from this whole-book audit. Confirm each item, then Start Fix, or send it to chat to collaborate with the AI on edits."
+    "evaluationHint": "Findings overview from this whole-book audit. Confirm each item, then Start Fix, or send it to chat to collaborate with the AI on edits.",
+    "scoreLabel": "Score",
+    "summaryLabel": "Verdict summary",
+    "dimensionTitle": "Evaluation dimensions (8)",
+    "dimensions": {
+      "opening": "Opening signability (first 3 chapters)",
+      "fit": "Genre fit & differentiation",
+      "character": "Character selling points",
+      "pacing": "Pacing & payoff density",
+      "world": "World/setting coherence & hooks",
+      "longArc": "Long-arc traction (read-chasing hooks)",
+      "compliance": "Platform tone compliance",
+      "reader": "Reader perspective"
+    }
   },
   "bookpitch": {
     "title": "New Book Pitch Workflow",

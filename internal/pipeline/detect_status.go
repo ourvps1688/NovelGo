@@ -43,6 +43,11 @@ type DetectionTaskStatus struct {
 	// LastVerdict 是最近一次结果结论：volume/book=体检 verdict（pass|needs_fix）、
 	// structure=张力报告 verdict、chapter=质量档案 L1Status（checked|pending|skipped）。
 	LastVerdict string `json:"last_verdict,omitempty"`
+	// LastScore 是最近一次体检总分（/40，8 维 ×5）；book/volume 体检有值，
+	// structure/chapter 为空（张力报告/质量档案不产总分）。
+	LastScore int `json:"last_score,omitempty"`
+	// LastSummary 是最近一次体检一句话结论；book/volume 体检有值，structure/chapter 为空。
+	LastSummary string `json:"last_summary,omitempty"`
 	// LastIssueCount 是最近一次结果的发现数（chapter=L0+L1 档案发现；其余=issue 数）。
 	LastIssueCount int `json:"last_issue_count"`
 	// LastRunAt 是最近一次结果落库时间；从未检测过为空。
@@ -293,6 +298,8 @@ func (s *Service) scopedDetectStatus(ctx context.Context, novelID int64, kind st
 	if audit := parseStoredAudit(ctxt.Audit); audit != nil {
 		st.LastVerdict = audit.Verdict
 		st.LastIssueCount = len(audit.Issues)
+		st.LastScore = audit.Score
+		st.LastSummary = audit.Summary
 	}
 	at := run.UpdatedAt
 	st.LastRunAt = &at

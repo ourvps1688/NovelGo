@@ -46,6 +46,19 @@ function fmtTime(v?: unknown): string {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 }
 
+// 签约潜力评估八维口径（与 signability-audit 技能 v2 评分维度逐字一致）：
+// 开篇过签力/题材契合/人设卖点/节奏爽点/设定自洽/长线牵引/平台合规/读者视角。
+const SIGN_DIMENSIONS = [
+  "opening",
+  "fit",
+  "character",
+  "pacing",
+  "world",
+  "longArc",
+  "compliance",
+  "reader",
+] as const;
+
 // 签约体检入口（R5 检测核心收口，#260）：不再走旧流水线状态机，直接以检测任务
 // 独立启动「全书签约体检」（RunDetectionTask(novelId, "book", null)）。完成后**就地
 // 内联展示签约潜力评估与发现概览**（不再强制跳到共享「检测核心」页），修复由人工
@@ -151,7 +164,44 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+
+            {/* 签约潜力评估核心区：评分 + 结论 + 八维口径（与巡检张力报告明确区分） */}
+            {typeof bookSt.last_score === "number" ? (
+              <div className="mt-2 flex items-baseline gap-1.5">
+                <span className="text-xs text-muted-foreground">
+                  {t("signability.scoreLabel")}
+                </span>
+                <span className="text-lg font-semibold leading-none text-foreground">
+                  {bookSt.last_score}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    /40
+                  </span>
+                </span>
+              </div>
+            ) : null}
+            {bookSt.last_summary ? (
+              <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+                {bookSt.last_summary}
+              </p>
+            ) : null}
+            <div className="mt-3">
+              <p className="text-xs font-medium text-foreground">
+                {t("signability.dimensionTitle")}
+              </p>
+              <ul className="mt-1 grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
+                {SIGN_DIMENSIONS.map((d) => (
+                  <li
+                    key={d}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    <span className="h-1 w-1 shrink-0 rounded-full bg-primary/60" />
+                    {t(`signability.dimensions.${d}`)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <p className="mt-3 text-xs text-muted-foreground">
               {t("signability.evaluationHint")}
             </p>
             <p className="mt-1 text-xs text-muted-foreground/70">

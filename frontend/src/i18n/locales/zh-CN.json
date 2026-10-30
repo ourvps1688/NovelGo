@@ -1765,7 +1765,20 @@
     "configureModelFirst": "请先在设置中配置模型",
     "launchFailed": "启动签约体检失败，请稍后重试",
     "evaluation": "签约潜力评估",
-    "evaluationHint": "以下为本次全书签约体检的发现概览；逐项确认后可「去修复」，或发送到聊天与 AI 协作修改。"
+    "evaluationHint": "以下为本次全书签约体检的发现概览；逐项确认后可「去修复」，或发送到聊天与 AI 协作修改。",
+    "scoreLabel": "评分",
+    "summaryLabel": "结论",
+    "dimensionTitle": "评估维度（八维）",
+    "dimensions": {
+      "opening": "开篇过签力（黄金三章）",
+      "fit": "题材契合与差异化",
+      "character": "人设卖点",
+      "pacing": "节奏与爽点密度",
+      "world": "世界/设定自洽与卖点",
+      "longArc": "长线牵引（追读钩子）",
+      "compliance": "平台调性合规",
+      "reader": "读者视角"
+    }
   },
   "bookpitch": {
     "title": "新书孵化工作流",

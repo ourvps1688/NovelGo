@@ -2485,6 +2485,9 @@ type auditInput struct {
 	structBlock string
 	// keyChapter 是「关键章定向深读」块（§8.5 第三层）；空=不注入（零提示）。
 	keyChapter string
+	// genre 是本书题材卡约束块（签约体检全程引用，设计约束：开场抓手/冲突发动机/
+	// 章尾钩子/禁止漂移/爽点密度/情绪曲线/字数门槛 由题材卡参数化驱动）；空=不注入。
+	genre string
 	// focused 是三层输入模式（milestone 中途复检=降频后的常规 L2）：发现层=档案+结构
 	// 告警，验证层=关键章定向深读（抽样只验证不发现），不逐章通读全书。
 	// false=编辑部通读（卷收口/完本/黄金三章首检/用户主动：全书逐章通读，逐字同旧文）。
@@ -2520,7 +2523,50 @@ func signabilityPrompt(novelID int64, in auditInput, blocks contextasm.ContextBl
 	if in.keyChapter != "" {
 		p += "\n\n" + in.keyChapter
 	}
+	if in.genre != "" {
+		p += "\n\n" + in.genre
+	}
 	return p + blocks.Render(contextasm.PurposeAudit)
+}
+
+// genreCardBlock 构造本书题材卡约束块（签约体检全程引用，设计约束：开场抓手/冲突发动机/
+// 章尾钩子/禁止漂移/爽点密度/情绪曲线/字数门槛 由题材卡参数化驱动）。从 CheckerConfig
+// 取机器可检参数（爽点密度下限/章尾钩子/禁忌/窗口N）+ 题材名；未配置/读取失败回落
+// 通用网文标准引导，不报错中断（与设计口径一致：零配置≠报错）。题材卡仅作体检约束参照，
+// 不替代 signability-audit 八维评分方法论。
+func (s *Service) genreCardBlock(ctx context.Context, novelID int64) string {
+	cfg, err := quality.NewStore(s.store.db, s.logger).GetCheckerConfig(ctx, novelID)
+	if err != nil || cfg == nil {
+		cfg = quality.DefaultCheckerConfig(novelID)
+	}
+	genre := strings.TrimSpace(s.novelGenre(ctx, novelID))
+	var b strings.Builder
+	fmt.Fprintf(&b, "【本书题材卡约束】（全程引用；未配置项按通用网文标准引导，不报错中断）\n")
+	if genre != "" {
+		fmt.Fprintf(&b, "- 题材：%s\n", genre)
+	} else {
+		b.WriteString("- 题材：未配置\n")
+	}
+	if cfg.BeatDensityMin > 0 {
+		fmt.Fprintf(&b, "- 爽点密度下限：%.2f 次/章\n", cfg.BeatDensityMin)
+	} else {
+		b.WriteString("- 爽点密度下限：未配置（通用标准）\n")
+	}
+	hook := "必需"
+	if !cfg.HookRequired() {
+		hook = "非必需"
+	}
+	fmt.Fprintf(&b, "- 章尾钩子：%s\n", hook)
+	taboos := cfg.Taboos()
+	if len(taboos) > 0 {
+		fmt.Fprintf(&b, "- 禁忌清单：%s\n", strings.Join(taboos, "、"))
+	} else {
+		b.WriteString("- 禁忌清单：未配置（通用标准）\n")
+	}
+	if cfg.WindowN > 0 {
+		fmt.Fprintf(&b, "- 伏笔窗口 N：%d 章（超期宽限）\n", cfg.WindowN)
+	}
+	return b.String()
 }
 
 // blueprintAuditPrompt 构造 S2 蓝图体检阶段的任务提示词。issue JSON 契约片段由 contract.go

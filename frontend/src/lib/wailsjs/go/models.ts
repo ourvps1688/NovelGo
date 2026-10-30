@@ -2755,10 +2755,12 @@ export namespace pipeline {
 	    scope_id?: number;
 	    running: boolean;
 	    last_run_id?: string;
-	    last_verdict?: string;
-	    last_issue_count: number;
-	    // Go type: time
-	    last_run_at?: any;
+    last_verdict?: string;
+    last_score?: number;
+    last_summary?: string;
+    last_issue_count: number;
+    // Go type: time
+    last_run_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new DetectionTaskStatus(source);
@@ -2771,8 +2773,10 @@ export namespace pipeline {
 	        this.scope_id = source["scope_id"];
 	        this.running = source["running"];
 	        this.last_run_id = source["last_run_id"];
-	        this.last_verdict = source["last_verdict"];
-	        this.last_issue_count = source["last_issue_count"];
+        this.last_verdict = source["last_verdict"];
+        this.last_score = source["last_score"];
+        this.last_summary = source["last_summary"];
+        this.last_issue_count = source["last_issue_count"];
 	        this.last_run_at = this.convertValues(source["last_run_at"], null);
 	    }
 	
