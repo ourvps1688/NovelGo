@@ -100,7 +100,7 @@ func SearchSettings(ctx context.Context, db *gorm.DB, novelID int64, query strin
 	if vs := rag.GetVectorStore(); vs != nil {
 		results, err := vs.Search(ctx, novelID, query, topK, &rag.SearchFilter{ChunkTypes: []string{SettingChunkType}})
 		if err == nil {
-			// MMR 多样性重排（P0-1 reranker 经真实数据评测为负优化，已回退至 MMR）。
+			// MMR 多样性重排
 			results = rag.MMRRerank(query, results, topK, 0.7)
 			return mapSettingResults(results), nil
 		}

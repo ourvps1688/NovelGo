@@ -133,75 +133,19 @@ download_vc_runtime() {
     fi
 }
 
-# download_reranker_model 下载二阶段 Reranker 模型（bge-reranker-base, int8 量化）。
-# 该模型为【可选增强】：缺失时应用自动回落 MMR，不影响运行。故下载失败仅告警、
-# 不中断脚本、不 exit，与必选的 BGE 嵌入模型区分对待。
-#
-# 模型选择说明（P0-1 实施修正）：
-#   最初文档规划 bge-reranker-v2-m3（多语交叉编码器），但本项目 Go tokenizer
-#   （internal/rag/tokenizer.go）是专为 bge-small-zh（bert-base-chinese WordPiece，
-#   21128 词）实现的最小 WordPiece 分词器，既加载不了 v2-m3 的 SentencePiece 词表
-#   （Xenova 导出只有 tokenizer.json/vocab.json，无 vocab.txt），且 huggingface.co
-#   直连在本环境不可达、hf-mirror 亦未托管 v2-m3。
-#   bge-reranker-base 同为 bert-base-chinese WordPiece，词表与现有 vocab.txt 完全一致，
-#   可直接复用，故务实切换为本模型。词表：复用嵌入模型的 vocab.txt（复制为
-#   reranker_vocab.txt），无需单独下载。
-#
-# 注：本环境未安装 file(1)，HTML 误下校验改用 head + grep 完成。
-download_reranker_model() {
-    mkdir -p "$MODEL_DIR"
-    echo "下载 Reranker 模型 (bge-reranker-base, int8 量化, 可选增强)..."
-
-    local repo="https://huggingface.co/Xenova/bge-reranker-base/resolve/main"
-    local mirror="https://hf-mirror.com/Xenova/bge-reranker-base/resolve/main"
-
-    # 词表复用：bge-reranker-base 与 bge-small-zh 同为 bert-base-chinese WordPiece。
-    # 优先用已下载的 vocab.txt；若不存在则尝试单独拉取（再缺失则告警跳过）。
-    if [ -f "$MODEL_DIR/vocab.txt" ]; then
-        cp -f "$MODEL_DIR/vocab.txt" "$MODEL_DIR/reranker_vocab.txt"
-        echo "  reranker 词表复用 vocab.txt → reranker_vocab.txt ($(stat -c%s "$MODEL_DIR/reranker_vocab.txt") bytes)"
-    elif ! curl -fsSL --retry 2 --retry-delay 10 --connect-timeout 30 -o "$MODEL_DIR/reranker_vocab.txt" "$mirror/vocab.txt"; then
-        if ! curl -fsSL --retry 2 --retry-delay 5 --connect-timeout 30 -o "$MODEL_DIR/reranker_vocab.txt" "$repo/vocab.txt"; then
-            echo "警告: Reranker 词表不可用，跳过（应用将回落 MMR，不影响运行）"
-            return 0
-        fi
-    fi
-
-    # onnx/model_quantized.onnx -> reranker.onnx
-    if ! curl -fsSL --retry 3 --retry-delay 10 --connect-timeout 30 -o "$MODEL_DIR/reranker.onnx" "$mirror/onnx/model_quantized.onnx"; then
-        if ! curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 30 -o "$MODEL_DIR/reranker.onnx" "$repo/onnx/model_quantized.onnx"; then
-            echo "警告: Reranker 模型下载失败，跳过（应用将回落 MMR，不影响运行）"
-            rm -f "$MODEL_DIR/reranker_vocab.txt"
-            return 0
-        fi
-    fi
-
-    # 校验下载内容不是 HTML 错误页（本环境无 file(1)，改用 head 检查首字节）
-    if head -c 512 "$MODEL_DIR/reranker.onnx" | grep -qiE "<!doctype|<html|404 not found|error"; then
-        echo "警告: 下载的 Reranker 模型文件疑似 HTML 错误页，已跳过"
-        rm -f "$MODEL_DIR/reranker.onnx" "$MODEL_DIR/reranker_vocab.txt"
-        return 0
-    fi
-
-    echo "Reranker 模型 → $MODEL_DIR/"
-}
-
 case "${OS}" in
     MINGW*|MSYS*|CYGWIN*)
         download_onnx "win-x64" "onnxruntime-win-x64-${ONNX_VERSION}.zip"
         download_vc_runtime
         download_bge_model
-        download_reranker_model
         ;;
     Linux)
         download_onnx "linux-x64" "onnxruntime-linux-x64-${ONNX_VERSION}.tgz"
         download_bge_model
-        download_reranker_model
         ;;
     Darwin)
         download_onnx "osx-arm64" "onnxruntime-osx-arm64-${ONNX_VERSION}.tgz"
         download_bge_model
-        download_reranker_model
         ;;
     *)
         echo "不支持的操作系统: $OS"

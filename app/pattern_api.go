@@ -159,7 +159,7 @@ func (r *ragEvidenceRetriever) RetrieveEvidence(ctx context.Context, novelID int
 	}
 	var out []string
 	for i, q := range queries {
-		// MMR 多样性重排（P0-1 reranker 经真实数据评测为负优化，已回退至 MMR）。
+		// MMR 多样性重排
 		reranked := rag.MMRRerank(q, perQuery[i], k, 0.7)
 		for _, it := range reranked {
 			c := strings.TrimSpace(it.Content)

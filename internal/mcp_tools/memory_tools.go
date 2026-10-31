@@ -86,7 +86,7 @@ func (t *SearchStoryMemoryTool) Execute(ctx context.Context, args any, tc ToolCo
 		}, nil
 	}
 
-	// 3. MMR 多样性重排（P0-1 reranker 经真实数据评测为负优化，已回退至 MMR）
+	// 3. MMR 多样性重排
 	reranked := rag.MMRRerank(a.Query, filtered, a.TopK, 0.7)
 
 	// 4. 查询章节元数据
