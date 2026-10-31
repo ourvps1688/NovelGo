@@ -119,7 +119,7 @@ flowchart LR
 ### P0-1 二阶段 Reranker（**强烈推荐，性价比最高**）
 
 - **目标**：召回 top-40（粗排 cosine）→ 本地 reranker 重排 top-5（精排）。
-- **模型候选**：`bge-reranker-v2-m3`（int8，跨语言、中英文兼顾），约几十 MB。
+- **模型（已落地，实施修正）**：`bge-reranker-base`（int8 量化，约 279MB）。最初候选为 `bge-reranker-v2-m3`（跨语言、中英文兼顾、约几十 MB），但实施时受两大约束被迫切换：① 本项目 Go tokenizer（`internal/rag/tokenizer.go`）是专为 `bge-small-zh`（bert-base-chinese WordPiece，21128 词）实现的最小 WordPiece 分词器，加载不了 v2-m3 的 SentencePiece 词表（Xenova 导出只有 `tokenizer.json`/`vocab.json`，无 `vocab.txt`）；② v2-m3 在 `huggingface.co` 直连本环境不可达、`hf-mirror` 亦未托管。而 `bge-reranker-base` 同为 bert-base-chinese WordPiece，词表与现有 `vocab.txt` **完全一致可直接复用**，故务实切换，reranker 无需单独词表（`reranker_vocab.txt` 由 `vocab.txt` 复制）。若未来引入通用 SentencePiece/BPE 分词器，可再评估升级 v2-m3。
 - **新增资产**：`internal/rag/reranker_onnx.go`（第二个 `OnnxEmbedder`-style 单例，复用 `mu` 串行 Run 与 arena 治理范式），`download-onnx.sh` 增加该模型下载。
 - **接口**：`Rerank(ctx, query string, candidates []ScoredChunk) ([]ScoredChunk, error)`，在 `Search` 之后、`SearchSettings`/`ragEvidenceRetriever`/记忆召回之后接一道。
 - **降级**：reranker 缺失时回落纯 cosine+MMR（保持现有行为）。
@@ -181,7 +181,7 @@ flowchart LR
 
 ## 8. 实施路线图与里程碑
 
-1. **阶段 0（基线评估，1~2 天）**：评估目标机器内存基线；用真实小说语料对 `bge-reranker-v2-m3` 做离线 top-K 命中率评测，确认 P0-1 收益成立。
+1. **阶段 0（基线评估，1~2 天）**：评估目标机器内存基线；用真实小说语料对 `bge-reranker-base`（已落地）做离线 top-K 命中率评测，确认 P0-1 收益成立。
 2. **阶段 1（P0-1 Reranker）**：新增 `reranker_onnx.go` + 更新 `download-onnx.sh` + 在 4 个消费方接二阶段重排 + 降级分支 + 单测。
 3. **阶段 2（P0-2 批处理/缓存）**：`ragEvidenceRetriever` 合并 `EmbedBatch` + `(novelID, query)` 短 TTL 缓存。
 4. **阶段 3（评估 P1/P2）**：视阶段 1/2 实测收益，决定是否推进长文聚合、分类器/NER；若推进，先做离线评测再立项。

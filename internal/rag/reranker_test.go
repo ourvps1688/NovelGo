@@ -31,38 +31,28 @@ func newStubReranker(t *testing.T) *OnnxReranker {
 
 func TestEncodePair_Structure(t *testing.T) {
 	r := newStubReranker(t)
-	ids, tids := r.encodePair("你好", "世界")
+	ids := r.encodePair("你好", "世界")
 
 	// [CLS] 你 好 [SEP] 世 界 [SEP]
 	require.Equal(t, []int{0, 3, 4, 1, 5, 6, 1}, ids)
-	// token_type_ids：query 段（CLS+你+好+首个SEP）为 0，passage 段（世界+末SEP）为 1
-	require.Equal(t, []int{0, 0, 0, 0, 1, 1, 1}, tids)
-	require.Len(t, ids, len(tids))
 }
 
 func TestEncodePair_TruncationKeepsQuery(t *testing.T) {
 	r := newStubReranker(t)
 	// passage 远长于上限：会按 bertMaxLen 截断 passage，query 完整保留。
 	longPassage := strings.Repeat("世", 600)
-	ids, tids := r.encodePair("你", longPassage)
+	ids := r.encodePair("你", longPassage)
 
 	require.LessOrEqual(t, len(ids), bertMaxLen, "拼接后不得超过模型最大长度")
-	require.Equal(t, len(ids), len(tids))
 	// query 段保持完整：CLS + 你 + SEP
 	require.Equal(t, []int{0, 3, 1}, ids[:3])
-	// query 段 type 全 0，passage 段 type 全 1
-	require.Equal(t, 0, tids[0])
-	require.Equal(t, 0, tids[1])
-	require.Equal(t, 0, tids[2])
-	require.Equal(t, 1, tids[3])
 }
 
 func TestEncodePair_EmptyPassage(t *testing.T) {
 	r := newStubReranker(t)
-	ids, tids := r.encodePair("你好", "")
+	ids := r.encodePair("你好", "")
 	// [CLS] 你 好 [SEP] [SEP]（passage 为空，仍补末位 SEP）
 	require.Equal(t, []int{0, 3, 4, 1, 1}, ids)
-	require.Equal(t, []int{0, 0, 0, 0, 1}, tids)
 }
 
 // TestRerank_NoRerankerFallsBackUnchanged 锁定优雅降级不变量：

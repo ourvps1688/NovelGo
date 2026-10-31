@@ -22,7 +22,7 @@ import (
 const (
 	rerankerModelFile  = "reranker.onnx" // 由 scripts/download-onnx.sh 下载
 	rerankerVocabFile  = "reranker_vocab.txt"
-	rerankerOutputName = "logits" // Xenova/bge-reranker-v2-m3 的 ONNX 输出名
+	rerankerOutputName = "logits" // Xenova/bge-reranker-base 的 ONNX 输出名（单对相关度 logit）
 	rerankerOutDim     = 1        // 单对相关度 logit；若换用 num_labels=2 的导出，需改为 2
 )
 
@@ -33,7 +33,7 @@ var (
 	rerankerInitErr  error
 )
 
-// OnnxReranker 是 bge-reranker-v2-m3（或兼容交叉编码器）的 ONNX 封装。
+// OnnxReranker 是 bge-reranker-base（或兼容交叉编码器）的 ONNX 封装。
 type OnnxReranker struct {
 	session   *ort.DynamicAdvancedSession
 	tokenizer *Tokenizer
@@ -122,7 +122,7 @@ func newOnnxReranker(modelsDir string, t *Tokenizer, log *slog.Logger) (*OnnxRer
 	}
 
 	session, err := ort.NewDynamicAdvancedSession(modelPath,
-		[]string{"input_ids", "attention_mask", "token_type_ids"},
+		[]string{"input_ids", "attention_mask"},
 		[]string{rerankerOutputName}, options)
 	if err != nil {
 		return nil, fmt.Errorf("rag: load reranker model: %w", err)
@@ -140,11 +140,13 @@ func newOnnxReranker(modelsDir string, t *Tokenizer, log *slog.Logger) (*OnnxRer
 
 // encodePair 构造交叉编码器输入：
 //
-//	input_ids     = [CLS] query [SEP] passage [SEP]
-//	token_type_ids = 0...0 (query 段)  1...1 (passage 段，含末尾 [SEP])
+//	input_ids = [CLS] query [SEP] passage [SEP]
 //
 // 总长受限 bertMaxLen：优先保留 query，passage 超出则截断（检索场景 passage 信息量更大但更长）。
-func (r *OnnxReranker) encodePair(query, passage string) ([]int, []int) {
+//
+// 注意：bge-reranker-base（及 bge-reranker-v2-m3）仅需 input_ids + attention_mask，
+// 不接收 token_type_ids，query/passage 的分隔依赖 [SEP]，故此处不构造 segment id。
+func (r *OnnxReranker) encodePair(query, passage string) []int {
 	q := r.tokenizer.Tokenize(query)
 	p := r.tokenizer.Tokenize(passage)
 
@@ -164,13 +166,7 @@ func (r *OnnxReranker) encodePair(query, passage string) ([]int, []int) {
 	ids = append(ids, r.sepID)
 	ids = append(ids, p...)
 	ids = append(ids, r.sepID)
-
-	typeIDs := make([]int, len(ids))
-	qLen := len(q) + 2 // [CLS] + query + 首个 [SEP]
-	for i := qLen; i < len(ids); i++ {
-		typeIDs[i] = 1
-	}
-	return ids, typeIDs
+	return ids
 }
 
 // Score 对 (query, passage) 批量打分，返回每个 passage 的相关度 logit（降序无关，按输入顺序）。
@@ -205,12 +201,10 @@ func (r *OnnxReranker) scoreBatch(ctx context.Context, query string, passages []
 	}
 
 	inputIDsList := make([][]int, len(passages))
-	typeIDsList := make([][]int, len(passages))
 	maxLen := 0
 	for i, p := range passages {
-		ids, tids := r.encodePair(query, p)
+		ids := r.encodePair(query, p)
 		inputIDsList[i] = ids
-		typeIDsList[i] = tids
 		if len(ids) > maxLen {
 			maxLen = len(ids)
 		}
@@ -224,17 +218,12 @@ func (r *OnnxReranker) scoreBatch(ctx context.Context, query string, passages []
 
 	inputIDs := make([]int64, batchSize*seqLen)
 	attentionMask := make([]int64, batchSize*seqLen)
-	tokenTypeIDs := make([]int64, batchSize*seqLen)
 	for i := int64(0); i < batchSize; i++ {
 		ids := inputIDsList[i]
-		tids := typeIDsList[i]
 		base := i * seqLen
 		for j, id := range ids {
 			inputIDs[base+int64(j)] = int64(id)
 			attentionMask[base+int64(j)] = 1
-		}
-		for j, tid := range tids {
-			tokenTypeIDs[base+int64(j)] = int64(tid)
 		}
 	}
 
@@ -250,12 +239,6 @@ func (r *OnnxReranker) scoreBatch(ctx context.Context, query string, passages []
 	}
 	defer maskTensor.Destroy()
 
-	typeIDsTensor, err := ort.NewTensor(ort.NewShape(batchSize, seqLen), tokenTypeIDs)
-	if err != nil {
-		return nil, fmt.Errorf("rag: create reranker type_ids tensor: %w", err)
-	}
-	defer typeIDsTensor.Destroy()
-
 	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(batchSize, rerankerOutDim))
 	if err != nil {
 		return nil, fmt.Errorf("rag: create reranker output tensor: %w", err)
@@ -265,7 +248,7 @@ func (r *OnnxReranker) scoreBatch(ctx context.Context, query string, passages []
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.session.Run(
-		[]ort.Value{inputTensor, maskTensor, typeIDsTensor},
+		[]ort.Value{inputTensor, maskTensor},
 		[]ort.Value{outputTensor},
 	); err != nil {
 		return nil, fmt.Errorf("rag: reranker onnx run: %w", err)
