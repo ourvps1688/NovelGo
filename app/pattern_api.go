@@ -151,14 +151,16 @@ func (r *ragEvidenceRetriever) RetrieveEvidence(ctx context.Context, novelID int
 	if k <= 0 {
 		k = 4
 	}
+	// P0-2：多个证据 query 合并一次 EmbedBatchQuery（带 BGE 指令前缀），消除逐条串行 Embed。
+	// 检索结果仍逐条返回，供下面分别二阶段重排（行为不变）。
+	perQuery, err := r.store.SearchBatch(ctx, novelID, queries, k, nil)
+	if err != nil {
+		return nil, err
+	}
 	var out []string
-	for _, q := range queries {
-		res, err := r.store.Search(ctx, novelID, q, k, nil)
-		if err != nil {
-			return nil, err
-		}
+	for i, q := range queries {
 		// 二阶段精排：reranker 已加载时按相关度重排（否则回落 MMR，行为不变）。
-		reranked := rag.Rerank(ctx, q, res, k)
+		reranked := rag.Rerank(ctx, q, perQuery[i], k)
 		for _, it := range reranked {
 			c := strings.TrimSpace(it.Content)
 			if c != "" {

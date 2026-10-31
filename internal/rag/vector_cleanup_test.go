@@ -31,6 +31,14 @@ func (stubEmbedder) EmbedBatch(_ context.Context, texts []string) ([][]float32, 
 	return out, nil
 }
 
+func (stubEmbedder) EmbedBatchQuery(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i := range out {
+		out[i] = stubVector()
+	}
+	return out, nil
+}
+
 func (stubEmbedder) Compact(context.Context) error { return nil }
 func (stubEmbedder) Dim() int                      { return 512 }
 func (stubEmbedder) Close() error                  { return nil }

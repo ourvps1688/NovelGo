@@ -48,6 +48,7 @@ type OnnxEmbedder struct {
 	sepID     int
 	mu        sync.Mutex
 	log       *slog.Logger
+	cache     *embedCache // 查询向量短 TTL 缓存（P0-2）
 }
 
 // InitEmbedder 加载 tokenizer（同步）后异步加载 ONNX 模型，不阻塞调用方。
@@ -170,6 +171,7 @@ func newOnnxEmbedder(modelsDir string, t *Tokenizer, log *slog.Logger) (*OnnxEmb
 		clsID:     clsID,
 		sepID:     sepID,
 		log:       log,
+		cache:     newEmbedCache(),
 	}, nil
 }
 
@@ -193,69 +195,26 @@ func (e *OnnxEmbedder) prepare(text string) []int {
 // ── Embedding ────────────────────────────────────────────
 
 func (e *OnnxEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	// 查询加 BGE 指令前缀
-	ids := e.prepare(queryInstruction + text)
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	// 查询向量走缓存：命中即跳过 ONNX（P0-2 核心收益）。
+	if v, ok := e.cache.get(text); ok {
+		return v, nil
 	}
-
-	seqLen := int64(len(ids))
-	inputIDs := make([]int64, seqLen)
-	attentionMask := make([]int64, seqLen)
-	tokenTypeIDs := make([]int64, seqLen)
-	for i, id := range ids {
-		inputIDs[i] = int64(id)
-		attentionMask[i] = 1
-	}
-
-	inputTensor, err := ort.NewTensor(ort.NewShape(1, seqLen), inputIDs)
+	vecs, err := e.embedBatch(ctx, []string{text}, nil, true)
 	if err != nil {
-		return nil, fmt.Errorf("rag: create input tensor: %w", err)
+		return nil, err
 	}
-	defer inputTensor.Destroy()
-
-	maskTensor, err := ort.NewTensor(ort.NewShape(1, seqLen), attentionMask)
-	if err != nil {
-		return nil, fmt.Errorf("rag: create mask tensor: %w", err)
-	}
-	defer maskTensor.Destroy()
-
-	typeIDsTensor, err := ort.NewTensor(ort.NewShape(1, seqLen), tokenTypeIDs)
-	if err != nil {
-		return nil, fmt.Errorf("rag: create type_ids tensor: %w", err)
-	}
-	defer typeIDsTensor.Destroy()
-
-	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(1, seqLen, 512))
-	if err != nil {
-		return nil, fmt.Errorf("rag: create output tensor: %w", err)
-	}
-	defer outputTensor.Destroy()
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	err = e.session.Run(
-		[]ort.Value{inputTensor, maskTensor, typeIDsTensor},
-		[]ort.Value{outputTensor},
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("rag: onnx run: %w", err)
-	}
-
-	hidden := outputTensor.GetData()
-	return clsPool(hidden, 512), nil
+	e.cache.add(text, vecs[0])
+	return vecs[0], nil
 }
 
+// EmbedBatch 批量嵌入文档（不加 BGE 指令前缀），单次 ONNX Run 完成一批。
+// 用于 IndexChunks / UpsertChunks 等文档索引——这些内容唯一且一次性，故绕过查询缓存。
 func (e *OnnxEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
 	if len(texts) <= maxBatchSize {
-		return e.embedBatch(ctx, texts, nil)
+		return e.embedBatch(ctx, texts, nil, false)
 	}
 
 	results := make([][]float32, 0, len(texts))
@@ -264,7 +223,7 @@ func (e *OnnxEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]floa
 		if end > len(texts) {
 			end = len(texts)
 		}
-		batch, err := e.embedBatch(ctx, texts[i:end], nil)
+		batch, err := e.embedBatch(ctx, texts[i:end], nil, false)
 		if err != nil {
 			return nil, fmt.Errorf("rag: batch [%d:%d]: %w", i, end, err)
 		}
@@ -273,8 +232,36 @@ func (e *OnnxEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]floa
 	return results, nil
 }
 
+// EmbedBatchQuery 批量嵌入查询语句（带 BGE 指令前缀），单次 ONNX Run 完成一批。
+// 供多查询检索（如 V2-D 证据前置 ragEvidenceRetriever）合并推理，消除逐条 Embed 的串行开销。
+// 每条查询命中 embedCache 时跳过推理；结果写入缓存供同会话后续重复查询复用。
+func (e *OnnxEmbedder) EmbedBatchQuery(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	results := make([][]float32, 0, len(texts))
+	for i := 0; i < len(texts); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		batch := texts[i:end]
+		vecs, err := e.embedBatch(ctx, batch, nil, true)
+		if err != nil {
+			return nil, fmt.Errorf("rag: batch query [%d:%d]: %w", i, end, err)
+		}
+		for j, t := range batch {
+			e.cache.add(t, vecs[j])
+		}
+		results = append(results, vecs...)
+	}
+	return results, nil
+}
+
 // embedBatch 执行单次 batch ONNX 推理，调用方保证 len(texts) ≤ maxBatchSize。
-func (e *OnnxEmbedder) embedBatch(ctx context.Context, texts []string, runOptions *ort.RunOptions) ([][]float32, error) {
+// withQuery=true 时给每条文本加 BGE 查询指令前缀（Embed / EmbedBatchQuery 路径），
+// false 时不加（EmbedBatch 文档路径、Compact 探针）。
+func (e *OnnxEmbedder) embedBatch(ctx context.Context, texts []string, runOptions *ort.RunOptions, withQuery bool) ([][]float32, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -285,7 +272,11 @@ func (e *OnnxEmbedder) embedBatch(ctx context.Context, texts []string, runOption
 	tokenized := make([][]int, len(texts))
 	maxLen := 0
 	for i, text := range texts {
-		tokenized[i] = e.prepare(text)
+		if withQuery {
+			tokenized[i] = e.prepare(queryInstruction + text)
+		} else {
+			tokenized[i] = e.prepare(text)
+		}
 		if len(tokenized[i]) > maxLen {
 			maxLen = len(tokenized[i])
 		}
@@ -374,7 +365,7 @@ func (e *OnnxEmbedder) Compact(ctx context.Context) error {
 	if err := options.AddRunConfigEntry(memoryArenaShrinkKey, memoryArenaShrinkValue); err != nil {
 		return fmt.Errorf("rag: configure memory arena shrink: %w", err)
 	}
-	if _, err := e.embedBatch(ctx, []string{compactProbeText}, options); err != nil {
+	if _, err := e.embedBatch(ctx, []string{compactProbeText}, options, false); err != nil {
 		return fmt.Errorf("rag: compact memory arena: %w", err)
 	}
 	e.log.Info("ONNX CPU 内存池已整理")

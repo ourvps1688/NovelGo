@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,11 +21,31 @@ type VectorStore struct {
 	embedder    Embedder
 	log         *slog.Logger
 	ensuredOnce sync.Map // map[int64]bool，避免重复 CREATE TABLE IF NOT EXISTS
+
+	// 检索结果缓存（P0-2）：key = novelID + query + topK + filter，短 TTL + 索引 epoch 失效。
+	// 命中可跳过 ONNX 嵌入与 sqlite-vec 查询；索引发生任何写变后整体失效，避免返回陈旧 chunk。
+	searchCacheMu sync.RWMutex
+	searchCache   map[string]searchCacheEntry
+	indexEpoch    uint64
 }
+
+// searchCacheEntry 是单条检索结果缓存项；epoch 记录写入时的索引版本。
+type searchCacheEntry struct {
+	results []SearchResult
+	epoch   uint64
+	exp     time.Time
+}
+
+const searchCacheTTL = 5 * time.Minute
 
 // NewVectorStore 创建向量存储。db 应为已启用 sqlite-vec 扩展的 SQLite 连接。
 func NewVectorStore(db *sql.DB, embedder Embedder, log *slog.Logger) *VectorStore {
-	return &VectorStore{db: db, embedder: embedder, log: log}
+	return &VectorStore{
+		db:          db,
+		embedder:    embedder,
+		log:         log,
+		searchCache: make(map[string]searchCacheEntry),
+	}
 }
 
 func (s *VectorStore) tableName(novelID int64) string {
@@ -134,6 +155,7 @@ func (s *VectorStore) IndexChunks(ctx context.Context, novelID int64, chunks []C
 		return fmt.Errorf("rag: commit tx: %w", err)
 	}
 
+	s.bumpIndexEpoch() // 索引写入后使检索缓存失效
 	s.log.Info("向量索引完成", "novel_id", novelID, "chunks", len(chunks))
 	return nil
 }
@@ -184,6 +206,7 @@ func (s *VectorStore) UpsertChunks(ctx context.Context, novelID int64, chunks []
 		return fmt.Errorf("rag: commit tx: %w", err)
 	}
 
+	s.bumpIndexEpoch() // 索引写入后使检索缓存失效
 	s.log.Info("向量幂等写入完成", "novel_id", novelID, "chunks", len(chunks))
 	return nil
 }
@@ -203,6 +226,7 @@ func (s *VectorStore) DeleteChunk(ctx context.Context, novelID int64, chunkID st
 		fmt.Sprintf(`DELETE FROM %s WHERE chunk_id = ?`, tableName), chunkID); err != nil {
 		return fmt.Errorf("rag: delete chunk %s: %w", chunkID, err)
 	}
+	s.bumpIndexEpoch() // 索引删除后使检索缓存失效
 	s.log.Info("已删除向量块", "novel_id", novelID, "chunk_id", chunkID)
 	return nil
 }
@@ -214,9 +238,15 @@ func (s *VectorStore) CompactEmbeddingMemory(ctx context.Context) error {
 }
 
 // Search 在指定小说的向量索引中执行语义检索。
+// 命中检索结果缓存（相同 novelID+query+topK+filter 且在索引 epoch / TTL 内）时直接返回，跳过嵌入与查询。
 func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, topK int, filter *SearchFilter) ([]SearchResult, error) {
 	if err := s.ensureTable(ctx, novelID); err != nil {
 		return nil, err
+	}
+
+	key := s.searchCacheKey(novelID, query, topK, filter)
+	if res, ok := s.getSearchCache(key); ok {
+		return res, nil
 	}
 
 	queryEmb, err := s.embedder.Embed(ctx, query)
@@ -224,6 +254,50 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 		return nil, fmt.Errorf("rag: embed query: %w", err)
 	}
 
+	res, err := s.searchWithEmbedding(ctx, novelID, queryEmb, topK, filter)
+	if err != nil {
+		return nil, err
+	}
+	s.putSearchCache(key, res)
+	return res, nil
+}
+
+// SearchBatch 批量语义检索：一次性批量嵌入所有查询（带 BGE 指令前缀，见 EmbedBatchQuery），
+// 再各自检索。相比逐条 Search（每条一次串行 Embed），ONNX 推理从 N 次降为 ⌈N/maxBatchSize⌉ 次。
+// 每条查询仍独立返回结果，供调用方（如 V2-D 证据前置）分别做二阶段重排。
+func (s *VectorStore) SearchBatch(ctx context.Context, novelID int64, queries []string, topK int, filter *SearchFilter) ([][]SearchResult, error) {
+	if len(queries) == 0 {
+		return nil, nil
+	}
+	if err := s.ensureTable(ctx, novelID); err != nil {
+		return nil, err
+	}
+
+	qvecs, err := s.embedder.EmbedBatchQuery(ctx, queries)
+	if err != nil {
+		return nil, fmt.Errorf("rag: batch embed queries: %w", err)
+	}
+
+	out := make([][]SearchResult, len(queries))
+	for i, q := range queries {
+		key := s.searchCacheKey(novelID, q, topK, filter)
+		if res, ok := s.getSearchCache(key); ok {
+			out[i] = res
+			continue
+		}
+		res, err := s.searchWithEmbedding(ctx, novelID, qvecs[i], topK, filter)
+		if err != nil {
+			return nil, err
+		}
+		s.putSearchCache(key, res)
+		out[i] = res
+	}
+	return out, nil
+}
+
+// searchWithEmbedding 用预计算的查询向量执行 sqlite-vec 余弦检索与结果装配。
+// 嵌入与缓存由调用方（Search / SearchBatch）负责，本方法只做 SQL 检索。
+func (s *VectorStore) searchWithEmbedding(ctx context.Context, novelID int64, queryEmb []float32, topK int, filter *SearchFilter) ([]SearchResult, error) {
 	q, err := sqlite_vec.SerializeFloat32(queryEmb)
 	if err != nil {
 		return nil, fmt.Errorf("rag: serialize query: %w", err)
@@ -301,8 +375,81 @@ func (s *VectorStore) Search(ctx context.Context, novelID int64, query string, t
 		return nil, fmt.Errorf("rag: iterate results: %w", err)
 	}
 
-	s.log.Info("向量检索完成", "novel_id", novelID, "query_len", len([]rune(query)), "results", len(results))
+	s.log.Info("向量检索完成", "novel_id", novelID, "results", len(results))
 	return results, nil
+}
+
+// ── 检索结果缓存 ──────────────────────────────────────────
+
+// bumpIndexEpoch 在向量索引发生任何写变后调用：递增 epoch 并清空检索缓存，
+// 使基于旧索引的缓存项整体失效，避免返回已被增删改的陈旧 chunk。
+func (s *VectorStore) bumpIndexEpoch() {
+	s.searchCacheMu.Lock()
+	defer s.searchCacheMu.Unlock()
+	s.indexEpoch++
+	s.searchCache = make(map[string]searchCacheEntry)
+}
+
+// searchCacheKey 生成检索缓存键：novelID + query + topK + filter 稳定串。
+func (s *VectorStore) searchCacheKey(novelID int64, query string, topK int, filter *SearchFilter) string {
+	fk := ""
+	if filter != nil {
+		var b strings.Builder
+		for _, id := range filter.ChapterIDs {
+			fmt.Fprintf(&b, "c%d,", id)
+		}
+		for _, t := range filter.ChunkTypes {
+			b.WriteString(t)
+			b.WriteByte(',')
+		}
+		fk = b.String()
+	}
+	return fmt.Sprintf("%d\x00%s\x00%d\x00%s", novelID, query, topK, fk)
+}
+
+// getSearchCache 命中（未过期且 epoch 匹配）时返回结果副本，否则 (nil, false)。
+func (s *VectorStore) getSearchCache(key string) ([]SearchResult, bool) {
+	s.searchCacheMu.RLock()
+	defer s.searchCacheMu.RUnlock()
+	e, ok := s.searchCache[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(e.exp) || e.epoch != s.indexEpoch {
+		return nil, false
+	}
+	out := make([]SearchResult, len(e.results))
+	for i := range e.results {
+		r := e.results[i]
+		if r.Embedding != nil {
+			cp := make([]float32, len(r.Embedding))
+			copy(cp, r.Embedding)
+			r.Embedding = cp
+		}
+		out[i] = r
+	}
+	return out, true
+}
+
+// putSearchCache 写入检索缓存（深拷 Embedding，避免后续查询误改缓存切片）。
+func (s *VectorStore) putSearchCache(key string, results []SearchResult) {
+	s.searchCacheMu.Lock()
+	defer s.searchCacheMu.Unlock()
+	cp := make([]SearchResult, len(results))
+	for i := range results {
+		r := results[i]
+		if r.Embedding != nil {
+			v := make([]float32, len(r.Embedding))
+			copy(v, r.Embedding)
+			r.Embedding = v
+		}
+		cp[i] = r
+	}
+	s.searchCache[key] = searchCacheEntry{
+		results: cp,
+		epoch:   s.indexEpoch,
+		exp:     time.Now().Add(searchCacheTTL),
+	}
 }
 
 // DeleteChapterChunks 删除指定章节的所有向量块。
@@ -316,6 +463,7 @@ func (s *VectorStore) DeleteChapterChunks(ctx context.Context, novelID int64, ch
 	if err != nil {
 		return fmt.Errorf("rag: delete chapter %d chunks: %w", chapterID, err)
 	}
+	s.bumpIndexEpoch() // 索引删除后使检索缓存失效
 	s.log.Info("已删除章节向量", "novel_id", novelID, "chapter_id", chapterID)
 	return nil
 }
@@ -405,6 +553,7 @@ func (s *VectorStore) DeleteNovel(ctx context.Context, novelID int64) error {
 		return fmt.Errorf("rag: drop table for novel %d: %w", novelID, err)
 	}
 	s.ensuredOnce.Delete(novelID)
+	s.bumpIndexEpoch() // 整表删除后使检索缓存失效
 	s.log.Info("已删除小说向量表", "novel_id", novelID)
 	return nil
 }
