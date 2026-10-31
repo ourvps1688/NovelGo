@@ -42,6 +42,7 @@
 - 浏览器访问 localhost:5173 白屏=正常（Wails 桥 `window.go`/`window.runtime` 仅注入桌面 webview，浏览器无桥→React 初始化抛错白屏）；必须用 wails dev 桌面窗口。
 - LF 归一化只对本次改动文件做（全树 sed 误伤 50+）；读文件做断言的测试须 CRLF 归一化或钉 eol=lf。
 - **vitest 沙箱内偶发失败但版本无关**（vite 8 + vitest 4 兼容）：根因资源受限（forks 池/ jsdom 渲染空 div）；脱离沙箱全量 385 测试 EXIT=0。pre-commit 只校验 Go 文件；前端用 format/i18n/lint(0 error)/build 兜底，vitest 建议脱沙箱跑。
+- **v172 去重迁移的子表守卫（2026-11-01 修复，commit 6a0aca2f）**：PreSchemaSteps 在 AutoMigrate 建表**之前**运行（见 `internal/migrate/engine/registry.go` 注释），故去重函数里任何对引用子表的 UPDATE/DELETE（如 `repointFKs` 的 `group_members`/`character_fact_knowledge`/`pov_roster`/`story_arcs`、`repointLocationRelations` 的 `location_relations`）**必须先 `HasTable` 守卫**——表不存在即跳过（无外键可重指）。曾因缺守卫，dev 库 `characters` 等老表存在但较新子表未建，迁移步骤 `1-dedup-characters` 报 `no such table: group_members` 致启动失败。新增 `dedup_test.go:TestDedupCharacters_MissingChildTables` 锁死。新增/改动迁移的 PreSchemaSteps 时，凡直接碰子表 SQL 一律先 HasTable。
 
 ## 章节寻址约定
 - chapter_id 是稳定主键（DB 自增），阅读序号是实时计算（volumes.sort_order+chapters.sort_order），二者不等价；换卷/重排后对应关系会变。前端严格用后端 reading_number。
