@@ -100,8 +100,8 @@ func SearchSettings(ctx context.Context, db *gorm.DB, novelID int64, query strin
 	if vs := rag.GetVectorStore(); vs != nil {
 		results, err := vs.Search(ctx, novelID, query, topK, &rag.SearchFilter{ChunkTypes: []string{SettingChunkType}})
 		if err == nil {
-			// 二阶段精排：reranker 已加载时用本地交叉编码器重排，否则回落 MMR（行为不变）。
-			results = rag.Rerank(ctx, query, results, topK)
+			// MMR 多样性重排（P0-1 reranker 经真实数据评测为负优化，已回退至 MMR）。
+			results = rag.MMRRerank(query, results, topK, 0.7)
 			return mapSettingResults(results), nil
 		}
 		// 语义检索失败不致命，退化为关键词检索。

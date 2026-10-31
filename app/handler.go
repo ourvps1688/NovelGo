@@ -317,8 +317,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 
 	// 1. 异步加载 ONNX 模型（不阻塞 GUI，尽早调用）
 	rag.InitEmbedder(config.ModelsDir(), a.logger)
-	// 1b. 异步加载二阶段 Reranker（可选增强：模型缺失时自动回落 MMR，不影响启动）
-	rag.InitReranker(config.ModelsDir(), a.logger)
+	// 注：P0-1 的二阶段 Reranker 经真实数据离线评测为负优化
+	//（整体 MRR 下降，且用户最关心的跨块边界召回从 0.926 暴跌至 0.299，单 query 精排额外增加 ~2.7s 延迟），
+	// 已回退至纯余弦 + MMR 多样性重排。Rerank / InitReranker 函数保留但不再接线，未来若需启用可一键恢复。
 
 	// 2. 打开全局数据库
 	db, err := storage.Open(config.GlobalDBPath(), a.logger)

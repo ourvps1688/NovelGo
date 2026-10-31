@@ -86,8 +86,8 @@ func (t *SearchStoryMemoryTool) Execute(ctx context.Context, args any, tc ToolCo
 		}, nil
 	}
 
-	// 3. 二阶段精排（reranker 已加载时用本地交叉编码器，否则回落 MMR）
-	reranked := rag.Rerank(ctx, a.Query, filtered, a.TopK)
+	// 3. MMR 多样性重排（P0-1 reranker 经真实数据评测为负优化，已回退至 MMR）
+	reranked := rag.MMRRerank(a.Query, filtered, a.TopK, 0.7)
 
 	// 4. 查询章节元数据
 	chapters, err := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).ListAllByNovel(ctx, nil, tc.NovelID)
