@@ -46,3 +46,4 @@
 ## 章节寻址约定
 - chapter_id 是稳定主键（DB 自增），阅读序号是实时计算（volumes.sort_order+chapters.sort_order），二者不等价；换卷/重排后对应关系会变。前端严格用后端 reading_number。
 - 按阅读序号确定性寻址 `chapters/no_{N}.md`：`git.ChapterPathRef.ByReadingNumber`/`ParseChapterLikePath` 增 `no_(\d+)`；read/edit 经 `resolveChapterRowRef`→`GetChapterIDByReadingNumber` 反查落盘。工具铁律：让 LLM 精修「第N章」必须用 `no_{N}`，严禁拿 get_chapter_list 的「第N章」当 id 推算。
+- **工单 chapter_ids 与台账引用契约（2026-11-01 修复，commit 4c87ef37）**：体检 issue 的 `chapter_ids` 是章节**全局阅读序号**（与 get_chapter_list 一致）；台账实体引用约定写 `<type>#<id>`（如 `timeline#42`/`reader_perspective#1643`，id=台账表自增主键，常上千）。`parseChapterRefs` 兜底正则只认「第N章」与「章#N」，**裸 `#\d+` 一律视为台账引用、绝不当时章节**（曾误判致工单「涉及章节」出现第1643章等脏数据，且台账 ID 会经 `issueChapterIDs` 漏入 S3 重写回流）。修复后正则=`(?:章节|章)\s*#\s*(\d+)`。
