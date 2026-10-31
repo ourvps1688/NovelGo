@@ -22,6 +22,12 @@ const (
 	maxEmbedThreads = 4 // 推理线程数上限：核多的机器不占满 CPU
 )
 
+// embeddingDim 是当前 embedding 模型的输出维度。
+// 升级模型（如 bge-large-zh-v1.5 = 1024 维）时只改此常量，并重建向量库：
+// vec0 虚拟表的 float[N] 维度写死在 schema 中，维度变更属于不兼容变更，必须重建。
+// 此处集中定义，避免维度散落在 embedder 与 vector_store 的多个魔法数字里相互漂移。
+const embeddingDim = 512 // bge-small-zh-v1.5 (int8)
+
 // BGE 模型查询时需要加指令前缀，文档不加。
 const queryInstruction = "为这个句子生成表示以用于检索相关文章："
 
@@ -105,7 +111,7 @@ func GetTokenizer() *Tokenizer {
 	return tokenizer
 }
 
-func (e *OnnxEmbedder) Dim() int { return 512 }
+func (e *OnnxEmbedder) Dim() int { return embeddingDim }
 
 // embedThreads 返回批量推理使用的 ONNX 线程数：按 CPU 核数动态收缩，
 // 避免核多的机器被推理占满，也避免核少的机器线程数过低而不可用。
@@ -192,6 +198,28 @@ func (e *OnnxEmbedder) prepare(text string) []int {
 	return ids
 }
 
+// splitTokenWindows 将 token 序列按窗口大小非重叠切分，每窗 ≤ winSize。
+// 用于长文分段聚合（P1）：每窗后续加 [CLS]/[SEP] 独立编码。纯函数，无 ONNX 依赖。
+func splitTokenWindows(tokens []int, winSize int) [][]int {
+	if winSize <= 0 {
+		winSize = bertMaxLen - 2
+	}
+	if len(tokens) == 0 {
+		return nil
+	}
+	var windows [][]int
+	for off := 0; off < len(tokens); off += winSize {
+		end := off + winSize
+		if end > len(tokens) {
+			end = len(tokens)
+		}
+		w := make([]int, end-off)
+		copy(w, tokens[off:end])
+		windows = append(windows, w)
+	}
+	return windows
+}
+
 // ── Embedding ────────────────────────────────────────────
 
 func (e *OnnxEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -199,7 +227,7 @@ func (e *OnnxEmbedder) Embed(ctx context.Context, text string) ([]float32, error
 	if v, ok := e.cache.get(text); ok {
 		return v, nil
 	}
-	vecs, err := e.embedBatch(ctx, []string{text}, nil, true)
+	vecs, err := e.embedLongTexts(ctx, []string{text}, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -209,21 +237,18 @@ func (e *OnnxEmbedder) Embed(ctx context.Context, text string) ([]float32, error
 
 // EmbedBatch 批量嵌入文档（不加 BGE 指令前缀），单次 ONNX Run 完成一批。
 // 用于 IndexChunks / UpsertChunks 等文档索引——这些内容唯一且一次性，故绕过查询缓存。
+// 长文自动分段聚合（P1）：维度恒定 embeddingDim，与既有向量库兼容。
 func (e *OnnxEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	if len(texts) <= maxBatchSize {
-		return e.embedBatch(ctx, texts, nil, false)
-	}
-
 	results := make([][]float32, 0, len(texts))
 	for i := 0; i < len(texts); i += maxBatchSize {
 		end := i + maxBatchSize
 		if end > len(texts) {
 			end = len(texts)
 		}
-		batch, err := e.embedBatch(ctx, texts[i:end], nil, false)
+		batch, err := e.embedLongTexts(ctx, texts[i:end], nil, false)
 		if err != nil {
 			return nil, fmt.Errorf("rag: batch [%d:%d]: %w", i, end, err)
 		}
@@ -235,6 +260,7 @@ func (e *OnnxEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]floa
 // EmbedBatchQuery 批量嵌入查询语句（带 BGE 指令前缀），单次 ONNX Run 完成一批。
 // 供多查询检索（如 V2-D 证据前置 ragEvidenceRetriever）合并推理，消除逐条 Embed 的串行开销。
 // 每条查询命中 embedCache 时跳过推理；结果写入缓存供同会话后续重复查询复用。
+// 长文自动分段聚合（P1）。
 func (e *OnnxEmbedder) EmbedBatchQuery(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -246,7 +272,7 @@ func (e *OnnxEmbedder) EmbedBatchQuery(ctx context.Context, texts []string) ([][
 			end = len(texts)
 		}
 		batch := texts[i:end]
-		vecs, err := e.embedBatch(ctx, batch, nil, true)
+		vecs, err := e.embedLongTexts(ctx, batch, nil, true)
 		if err != nil {
 			return nil, fmt.Errorf("rag: batch query [%d:%d]: %w", i, end, err)
 		}
@@ -258,47 +284,129 @@ func (e *OnnxEmbedder) EmbedBatchQuery(ctx context.Context, texts []string) ([][
 	return results, nil
 }
 
-// embedBatch 执行单次 batch ONNX 推理，调用方保证 len(texts) ≤ maxBatchSize。
-// withQuery=true 时给每条文本加 BGE 查询指令前缀（Embed / EmbedBatchQuery 路径），
-// false 时不加（EmbedBatch 文档路径、Compact 探针）。
-func (e *OnnxEmbedder) embedBatch(ctx context.Context, texts []string, runOptions *ort.RunOptions, withQuery bool) ([][]float32, error) {
+// embedLongTexts 长文分段聚合（P1 核心）。
+// 每条文本按 ≤(bertMaxLen-2) token 切窗，每窗加 [CLS]/[SEP] 独立编码为 embeddingDim 维向量，
+// 再跨窗均值池化 + L2 归一，得到单条 embeddingDim 维向量。
+// 短文本（单窗）与旧 prepare 截断路径逐字节等价；维度恒定，故无需重建向量库、不影响既有检索。
+func (e *OnnxEmbedder) embedLongTexts(ctx context.Context, texts []string, runOptions *ort.RunOptions, withQuery bool) ([][]float32, error) {
+	// 1. 构造每条文本的窗口序列（已含 [CLS]/[SEP]）。
+	allSeqs := make([][]int, 0, len(texts))
+	starts := make([]int, len(texts))
+	counts := make([]int, len(texts))
+	for i, text := range texts {
+		raw := text
+		if withQuery {
+			raw = queryInstruction + text
+		}
+		tokens := e.tokenizer.Tokenize(raw)
+		var seqs [][]int
+		if len(tokens) == 0 {
+			// 空文本：退化为 [CLS, SEP]，与旧 prepare("") 行为一致，避免产生零向量改变语义。
+			seqs = [][]int{e.prepare(text)}
+		} else {
+			for _, w := range splitTokenWindows(tokens, bertMaxLen-2) {
+				seq := make([]int, len(w)+2)
+				seq[0] = e.clsID
+				copy(seq[1:], w)
+				seq[len(seq)-1] = e.sepID
+				seqs = append(seqs, seq)
+			}
+		}
+		starts[i] = len(allSeqs)
+		counts[i] = len(seqs)
+		allSeqs = append(allSeqs, seqs...)
+	}
+
+	// 2. 全部窗口批量编码（内部按 maxBatchSize 分批）。
+	windowVecs, err := e.runSequences(ctx, allSeqs, runOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. 跨窗均值池化 + L2 归一。
+	results := make([][]float32, len(texts))
+	for i := range texts {
+		if counts[i] == 0 {
+			results[i] = make([]float32, embeddingDim)
+			continue
+		}
+		acc := make([]float32, embeddingDim)
+		base := starts[i]
+		for k := 0; k < counts[i]; k++ {
+			v := windowVecs[base+k]
+			for d := 0; d < embeddingDim; d++ {
+				acc[d] += v[d]
+			}
+		}
+		inv := float32(1) / float32(counts[i])
+		var norm float64
+		for d := range acc {
+			acc[d] *= inv
+			norm += float64(acc[d]) * float64(acc[d])
+		}
+		norm = math.Sqrt(norm)
+		if norm > 0 {
+			for d := range acc {
+				acc[d] /= float32(norm)
+			}
+		}
+		results[i] = acc
+	}
+	return results, nil
+}
+
+// runSequences 对一批已带 [CLS]/[SEP] 的 token 序列（长度可不等，均 ≤ bertMaxLen）执行 ONNX 推理，
+// 逐条 CLS 池化 + L2 归一，返回 embeddingDim 维向量。替代旧 embedBatch 内循环，供长文聚合复用。
+// 样本数超过 maxBatchSize 时自动分批。
+func (e *OnnxEmbedder) runSequences(ctx context.Context, seqs [][]int, runOptions *ort.RunOptions) ([][]float32, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
 	}
 
-	// 1. Tokenize all texts, find max length.
-	tokenized := make([][]int, len(texts))
-	maxLen := 0
-	for i, text := range texts {
-		if withQuery {
-			tokenized[i] = e.prepare(queryInstruction + text)
-		} else {
-			tokenized[i] = e.prepare(text)
+	if len(seqs) == 0 {
+		return nil, nil
+	}
+	if len(seqs) > maxBatchSize {
+		out := make([][]float32, 0, len(seqs))
+		for i := 0; i < len(seqs); i += maxBatchSize {
+			end := i + maxBatchSize
+			if end > len(seqs) {
+				end = len(seqs)
+			}
+			part, err := e.runSequences(ctx, seqs[i:end], runOptions)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, part...)
 		}
-		if len(tokenized[i]) > maxLen {
-			maxLen = len(tokenized[i])
+		return out, nil
+	}
+
+	maxLen := 0
+	for _, s := range seqs {
+		if len(s) > maxLen {
+			maxLen = len(s)
 		}
 	}
 	if maxLen == 0 {
-		results := make([][]float32, len(texts))
+		results := make([][]float32, len(seqs))
 		for i := range results {
-			results[i] = make([]float32, 512)
+			results[i] = make([]float32, embeddingDim)
 		}
 		return results, nil
 	}
 
-	batchSize := int64(len(texts))
+	batchSize := int64(len(seqs))
 	seqLen := int64(maxLen)
 
-	// 2. Build padded tensors [N, maxLen].
 	inputIDs := make([]int64, batchSize*seqLen)
 	attentionMask := make([]int64, batchSize*seqLen)
 	tokenTypeIDs := make([]int64, batchSize*seqLen)
 
 	for i := int64(0); i < batchSize; i++ {
-		ids := tokenized[i]
+		ids := seqs[i]
 		base := i * seqLen
 		for j, id := range ids {
 			inputIDs[base+int64(j)] = int64(id)
@@ -324,13 +432,12 @@ func (e *OnnxEmbedder) embedBatch(ctx context.Context, texts []string, runOption
 	}
 	defer typeIDsTensor.Destroy()
 
-	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(batchSize, seqLen, 512))
+	outputTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(batchSize, seqLen, embeddingDim))
 	if err != nil {
 		return nil, fmt.Errorf("rag: create batch output tensor: %w", err)
 	}
 	defer outputTensor.Destroy()
 
-	// 3. Single ONNX Run.
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	err = e.session.RunWithOptions(
@@ -342,16 +449,28 @@ func (e *OnnxEmbedder) embedBatch(ctx context.Context, texts []string, runOption
 		return nil, fmt.Errorf("rag: batch onnx run: %w", err)
 	}
 
-	// 4. CLS pool each sample.
 	hidden := outputTensor.GetData()
 	results := make([][]float32, batchSize)
-	sampleSize := int(seqLen) * 512
+	sampleSize := int(seqLen) * embeddingDim
 	for i := int64(0); i < batchSize; i++ {
 		start := int(i) * sampleSize
-		results[i] = clsPool(hidden[start:start+sampleSize], 512)
+		results[i] = clsPool(hidden[start:start+sampleSize], embeddingDim)
 	}
 
 	return results, nil
+}
+
+// embedTruncated 短路径：沿用旧 prepare 截断语义（≤ bertMaxLen-2 token），供 Compact 探针等无需分段聚合的场景。
+func (e *OnnxEmbedder) embedTruncated(ctx context.Context, texts []string, runOptions *ort.RunOptions, withQuery bool) ([][]float32, error) {
+	seqs := make([][]int, len(texts))
+	for i, t := range texts {
+		if withQuery {
+			seqs[i] = e.prepare(queryInstruction + t)
+		} else {
+			seqs[i] = e.prepare(t)
+		}
+	}
+	return e.runSequences(ctx, seqs, runOptions)
 }
 
 // Compact 在一次极小推理结束时触发 ONNX Runtime CPU arena shrink。
@@ -365,7 +484,7 @@ func (e *OnnxEmbedder) Compact(ctx context.Context) error {
 	if err := options.AddRunConfigEntry(memoryArenaShrinkKey, memoryArenaShrinkValue); err != nil {
 		return fmt.Errorf("rag: configure memory arena shrink: %w", err)
 	}
-	if _, err := e.embedBatch(ctx, []string{compactProbeText}, options, false); err != nil {
+	if _, err := e.embedTruncated(ctx, []string{compactProbeText}, options, false); err != nil {
 		return fmt.Errorf("rag: compact memory arena: %w", err)
 	}
 	e.log.Info("ONNX CPU 内存池已整理")

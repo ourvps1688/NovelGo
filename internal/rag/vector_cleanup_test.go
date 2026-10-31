@@ -40,12 +40,12 @@ func (stubEmbedder) EmbedBatchQuery(_ context.Context, texts []string) ([][]floa
 }
 
 func (stubEmbedder) Compact(context.Context) error { return nil }
-func (stubEmbedder) Dim() int                      { return 512 }
+func (stubEmbedder) Dim() int                      { return embeddingDim }
 func (stubEmbedder) Close() error                  { return nil }
 
 // stubVector 全零向量在余弦距离下没有意义，给首维一个非零值。
 func stubVector() []float32 {
-	v := make([]float32, 512)
+	v := make([]float32, embeddingDim)
 	v[0] = 0.5
 	return v
 }

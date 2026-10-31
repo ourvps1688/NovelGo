@@ -35,12 +35,12 @@ func (contentStubEmbedder) EmbedBatchQuery(_ context.Context, texts []string) ([
 	return out, nil
 }
 func (contentStubEmbedder) Compact(context.Context) error { return nil }
-func (contentStubEmbedder) Dim() int                      { return 512 }
+func (contentStubEmbedder) Dim() int                      { return embeddingDim }
 func (contentStubEmbedder) Close() error                  { return nil }
 
 // contentVec 由文本 FNV-1a 哈希派生一个确定性向量，相同文本 → 相同向量（距离 0）。
 func contentVec(text string) []float32 {
-	v := make([]float32, 512)
+	v := make([]float32, embeddingDim)
 	var h uint32 = 2166136261
 	for i := 0; i < len(text); i++ {
 		h ^= uint32(text[i])

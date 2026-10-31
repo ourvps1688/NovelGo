@@ -79,14 +79,14 @@ func (s *VectorStore) ensureTable(ctx context.Context, novelID int64) error {
 		}
 	}
 	sql := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS %s USING vec0(
-		embedding float[512] distance_metric=cosine,
+		embedding float[%d] distance_metric=cosine,
 		chunk_id text,
 		content text,
 		chunk_type text,
 		chapter_id integer,
 		chunk_index integer,
 		start_position integer
-	)`, tableName)
+	)`, tableName, embeddingDim)
 
 	_, err := s.db.ExecContext(ctx, sql)
 	if err != nil {
