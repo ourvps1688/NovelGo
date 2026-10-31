@@ -17,6 +17,7 @@
 
 ## 复验工作流（关键 gotcha，勿回退）
 - **L0 快路径（P1 已落地，commit a16b1305）**：机械类工单（字数/章尾钩子/AI味/称呼混用/死人出镜/战力数值序/文风漂移）走 `quality.RunL0Checks` 确定性判定，修复即自动确认（免 LLM）；仅语义矛盾与依赖台账缺失者退回 LLM。
+- **复验三档预算（2026-10-31 放宽，commit 87670600）**：`internal/pipeline/detect.go` 三档——`verifyCallTimeout` 15min→**120min**（整轮随工单数线性兜底，21 张仍余量；原 15min 把整轮腰斩，在跑工单拿整轮 ctx 到期 deadline，剩全复位 pending）；`verifyTicketTimeout` 5min→**8min**（仍早于 thinking 9min 空闲看门狗，容慢模型单轮 1-2min + ~10万 token 章节上下文）；`verifyMaxTurns` 6→**12**（多章节工单需多次 read 才出回执）。根因实证：`mimo`/`mimo-v2.6-pro`（purpose=signability）一直正常响应（llm_usage_daily 有记录、无熔断），慢在主模型+大上下文，非断网；修前 5min/6 轮往往在出回执前被斩断。
 - **复验派发铁律（读己写竞态修复，2026-10-31）**：`VerifyIssueTickets` 必须**显式把待复验工单键经 task payload 的 `IssueKeys` 透传**给 `runVerifyTickets`；**严禁依赖执行体回扫 verifying 态**——旧口径曾因读己写竞态让执行体读到 0 行而提前返回，工单永久卡 `verifying`（用户侧「复验无法走下去」）。`runVerifyTickets(runID,novelID,keys)`：keys 非空按 key 精确 `getIssueRow` 加载（跳过终态），空则回落 `ListVerifyingTickets` 旧口径。`dispatchExecutor` 末位变参 `issueKeys ...string` 仅复验用；Handler 解码 `p.IssueKeys` 透传。启动期 `ResetAllStuckVerifying` 仍兜底复位残留 verifying→pending。
 
 ## 供应商熔断（P0 已落地）
