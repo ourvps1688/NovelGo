@@ -152,6 +152,11 @@ func (s *Store) UpdateIssueStatus(ctx context.Context, novelID int64, runID, iss
 	if skipReason != "" {
 		updates["skip_reason"] = skipReason
 	}
+	if status == IssueStatusVerifying {
+		// 重新进入复验态：清除此前「启动清扫/中断」残留备注，避免与「复验中」状态并排显示造成
+		// 「卡在复验中」的误导错觉（UI 仅 VerifyIssueTickets 会把状态置为 verifying，此处收窄安全）。
+		updates["note"] = ""
+	}
 	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
 		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
 		Updates(updates).Error
