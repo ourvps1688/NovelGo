@@ -166,6 +166,37 @@ func TestRunConsistencyPatrolRejectionStoredAsError(t *testing.T) {
 	require.Equal(t, run.NovelID, p["novel_id"])
 }
 
+// TestRunConsistencyPatrolRejectionEchoesRawRefusal 回归：原实现「原始返回已忽略」把唯一可
+// 定位的拒绝语丢弃，导致用户无法知道哪段内容被判高风险。修复后失败态 Summary 必须回显模型/
+// 网关的原始拒绝语（截断后），让用户能据其点名的章节/内容做局部脱敏后重跑。
+func TestRunConsistencyPatrolRejectionEchoesRawRefusal(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	run, err := svc.StartPipeline(ctx, 707, "new", nil, false)
+	require.NoError(t, err)
+
+	capturePatrolEmit(t)
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		require.Equal(t, "consistency-patrol", name)
+		// 模型软拒绝语点名具体章节：这是用户最需要的「哪段被判高风险」线索。
+		return SkillOutput{Text: "I'm sorry, but I cannot continue: the graphic depiction of violence in chapter 12 of this manuscript violates our content policy."}, nil
+	}
+	svc.runConsistencyPatrol(ctx, run.RunID, run.NovelID)
+
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.NotEmpty(t, ctxt.PatrolReport)
+
+	var report AuditData
+	require.NoError(t, json.Unmarshal([]byte(ctxt.PatrolReport), &report))
+	require.Equal(t, "error", report.Verdict)
+	require.Contains(t, report.Summary, "chapter 12", "失败态必须回显原始拒绝语中的具体章节线索")
+	require.NotContains(t, report.Summary, "原始返回已忽略", "不应再丢弃原始拒绝语")
+}
+
 // TestControlPipelinePatrolDispatch 验证手动触发：控制指令 "patrol" 后台跑张力报告，
 // 不改变当前阶段（WBS 3.3 触发=卷末+手动）。
 func TestControlPipelinePatrolDispatch(t *testing.T) {

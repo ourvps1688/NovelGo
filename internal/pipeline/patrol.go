@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/novelgo/novelgo/internal/contextasm"
@@ -73,13 +74,25 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	if refused, reason := isLLMRefusal(out.Text); refused {
 		s.logger.Warn("一致性巡检：模型拒绝/安全审核拦截（落地失败态，非阻断）",
 			"run_id", runID, "reason", reason, "snippet", firstN(out.Text, 120))
+		// 回显模型/网关的原始拒绝语：这是系统能拿到的、最接近「哪段内容被判高风险」的信号——
+		// 网关硬拦截往往只回通用拒绝，但模型软拒绝语常会点名具体章节/内容。原实现「原始返回已忽略」
+		// 把唯一可定位线索丢弃，导致用户无法继续。此处保留截断后的原文摘要（out.Text 是模型/
+		// 网关的回应，非用户小说正文，按用户诉求保留原话，仅限长 + 折叠空白）。
+		detail := refusalExcerpt(out.Text, 800)
+		summary := "一致性巡检未能完成：模型拒绝了本次请求（" + reason + "）。\n" +
+			"触发来源：发送给模型的章节/台账内容触发了上游模型或网关的安全审核。" +
+			"由于全书巡检一次性把整本书拼入请求，系统无法自动定位是哪一章命中，需由你/模型自行定位。\n"
+		if detail != "" {
+			summary += "\n原始拒绝语（模型/网关原话，已脱敏截断）：\n" + detail +
+				"\n若其中点名了具体章节或内容（如「第 N 章的某描写」），请对该处做局部脱敏/改写后重跑；" +
+				"若只是通用拦截（未点名），可换内容审核更宽松的模型/供应商，或分卷巡检以隔离命中章节。\n"
+		}
+		summary += "建议：①更换内容审核更宽松的模型或供应商；②确认当前模型支持长上下文（全书巡检会拼入大量章节）；" +
+			"③如确为内容命中，可先对该卷做局部脱敏后再巡检。本次未写入张力清单。"
 		if serr := s.storePatrolReport(bg, runID, AuditData{
 			Verdict: "error",
-			Summary: "一致性巡检未能完成：模型拒绝了本次请求（" + reason + "）。" +
-				"这通常是因为发送给模型的章节/台账内容触发了上游模型的安全审核。" +
-				"建议：①更换内容审核更宽松的模型或供应商；②确认当前模型支持长上下文（全书巡检会拼入大量章节）；" +
-				"③如确为内容命中，可先对该卷做局部脱敏后再巡检。本次原始返回已忽略，未写入张力清单。",
-			Issues: []AuditIssue{},
+			Summary: summary,
+			Issues:  []AuditIssue{},
 		}); serr != nil {
 			s.logger.Warn("一致性巡检：写回失败态失败", "err", serr)
 		}
@@ -117,4 +130,19 @@ func (s *Service) storePatrolReport(ctx context.Context, runID string, data Audi
 		return merr
 	}
 	return s.store.SetStageStatus(ctx, cur.RunID, cur.CurrentStage, cur.Status, string(updated))
+}
+
+// refusalExcerpt 取拒绝语的用户可读摘要：限长 + 折叠多余空白（含换行）。
+// out.Text 是模型/网关对本次请求的回应（不是用户小说正文），按用户诉求保留原话要点，
+// 仅防止超长灌入张力报告 DB 字段；返回空串表示无可摘录内容。
+func refusalExcerpt(text string, maxRunes int) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	collapsed := strings.Join(strings.Fields(text), " ")
+	runes := []rune(collapsed)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return collapsed
+	}
+	return string(runes[:maxRunes]) + "…"
 }
