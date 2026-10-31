@@ -75,10 +75,25 @@ func defaultL0ChapterReader(novelID, chapterID int64) (string, bool) {
 	return content, true
 }
 
+// coarseHeuristicChecks 是「精确性不足、命中可能源于与原工单无关的原因」的 L0 检查项：
+//   - name_drift：同章出现角色正名+别名即命中，而角色在章节内自报别名（如自介「我姓苏/苏阿水/
+//     外头人叫我水鬼苏」）天然让正名+别名共存 → 必然命中，与原工单常描述的「报名前就叫全名」
+//     等叙事时序问题无关；
+//   - tail_hook：仅判章末 120 字有无悬念信号词，与原工单常描述的「跨章钩子连贯/去向断裂」等
+//     语义问题无关。
+//
+// 这两类命中不应直接判未修复退回（否则修了具体语义问题却因粗粒度类别命中而永远通不过），
+// 应保守回落 LLM 复核原工单具体指向。其余检查项为精确类，命中必为真实未修复，可安全驳回。
+var coarseHeuristicChecks = map[string]bool{
+	quality.CheckNameDrift: true,
+	quality.CheckTailHook:  true,
+}
+
 // l0Verdict 由 L0 发现清单与有效候选检查项判定复验结论（纯函数、可单测）。
-// decided=true 时：verified=false 表示候选机械问题仍有 Finding 命中（明确未修复，退回 pending，安全）；
+// decided=true 时：verified=false 表示候选精确机械问题仍有 Finding 命中（明确未修复，退回 pending，安全）；
 // 仅当 allVerifiable=true（全部候选检查项都具备依赖可判定）且零命中时，verified=true 自动确认通过（免 LLM）。
 // 若有候选检查项因依赖缺失被剔除（!allVerifiable），即使已验证项全消除也不自行确认，保守退回 LLM 复核未验证方面，避免漏判。
+// 若仅粗粒度启发式检查（coarseHeuristicChecks）命中，不臆测未修复，decided=false 回落 LLM 复核原具体指向。
 func l0Verdict(findings []quality.Finding, effective map[string]bool, allVerifiable bool) (decided, verified bool, hitChecks []string) {
 	hits := map[string]bool{}
 	for c := range effective {
@@ -89,18 +104,27 @@ func l0Verdict(findings []quality.Finding, effective map[string]bool, allVerifia
 			}
 		}
 	}
-	if len(hits) > 0 {
-		names := make([]string, 0, len(hits))
-		for c := range hits {
-			names = append(names, c)
+	if len(hits) == 0 {
+		if !allVerifiable {
+			// 候选检查项存在依赖缺失无法判定者：保守退回 LLM，不臆测修复状态。
+			return false, false, nil
 		}
-		return true, false, names
+		return true, true, nil
 	}
-	if !allVerifiable {
-		// 候选检查项存在依赖缺失无法判定者：保守退回 LLM，不臆测修复状态。
-		return false, false, nil
+	// 区分精确命中与粗粒度启发式命中：
+	// - 存在精确项命中 → 确定性判未修复退回待修（安全，精确项命中必为真实未修复）。
+	// - 仅粗粒度启发式项命中（name_drift/tail_hook，见 coarseHeuristicChecks 注释）→ 不臆测未修复，
+	//   回落 LLM 复核原工单具体指向，避免修了具体语义问题却因粗粒度类别命中永远通不过。
+	preciseHits := make([]string, 0)
+	for c := range hits {
+		if !coarseHeuristicChecks[c] {
+			preciseHits = append(preciseHits, c)
+		}
 	}
-	return true, true, nil
+	if len(preciseHits) > 0 {
+		return true, false, preciseHits
+	}
+	return false, false, nil
 }
 
 // tryL0Verify 尝试用确定性 L0 快路径复验单工单。

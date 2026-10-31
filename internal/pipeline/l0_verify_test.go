@@ -85,6 +85,30 @@ func TestL0Verdict(t *testing.T) {
 	require.Empty(t, hit)
 }
 
+// TestL0VerdictCoarseHitFallsBackToLLM 验证粗粒度启发式检查（name_drift/tail_hook）命中不臆测未修复，
+// 回落 LLM 复核原具体指向；仅精确检查命中才确定性判未修复。
+func TestL0VerdictCoarseHitFallsBackToLLM(t *testing.T) {
+	// name_drift 命中且为唯一有效项 → 不驳回，回落 LLM（decided=false）。
+	eff := map[string]bool{quality.CheckNameDrift: true}
+	decided, verified, _ := l0Verdict([]quality.Finding{{Check: quality.CheckNameDrift}}, eff, true)
+	require.False(t, decided, "name_drift 命中应回落 LLM，不应判未修复")
+	require.False(t, verified)
+
+	// tail_hook 命中且为唯一有效项 → 同上回落 LLM。
+	eff = map[string]bool{quality.CheckTailHook: true}
+	decided, verified, _ = l0Verdict([]quality.Finding{{Check: quality.CheckTailHook}}, eff, true)
+	require.False(t, decided, "tail_hook 命中应回落 LLM，不应判未修复")
+	require.False(t, verified)
+
+	// 同时命中精确项与粗粒度项 → 精确项主导，确定性判未修复（安全）。
+	eff = map[string]bool{quality.CheckWordCount: true, quality.CheckNameDrift: true}
+	decided, verified, hit := l0Verdict(
+		[]quality.Finding{{Check: quality.CheckWordCount}, {Check: quality.CheckNameDrift}}, eff, true)
+	require.True(t, decided)
+	require.False(t, verified)
+	require.Equal(t, []string{quality.CheckWordCount}, hit, "仅精确命中应入回执，粗粒度项不计")
+}
+
 // TestTryL0VerifyRouting 验证各类「走原 LLM 复验路径」的守卫分支（decided=false）。
 func TestTryL0VerifyRouting(t *testing.T) {
 	svc := l0TestService(t)
