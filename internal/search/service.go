@@ -551,7 +551,7 @@ func (s *Service) searchRAG(ctx context.Context, novelID int64, query string, al
 		return nil
 	}
 
-	reranked := rag.MMRRerank(query, filtered, RagTopK, 0.7)
+	reranked := rag.Rerank(ctx, query, filtered, RagTopK)
 
 	chapMeta := make(map[int64]chapter.Chapter, len(allChapters))
 	for _, ch := range allChapters {

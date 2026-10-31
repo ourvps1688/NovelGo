@@ -133,19 +133,59 @@ download_vc_runtime() {
     fi
 }
 
+# download_reranker_model 下载二阶段 Reranker 模型（bge-reranker-v2-m3, int8）。
+# 该模型为【可选增强】：缺失时应用自动回落 MMR，不影响运行。故下载失败仅告警、
+# 不中断脚本、不 exit，与必选的 BGE 嵌入模型区分对待。
+download_reranker_model() {
+    mkdir -p "$MODEL_DIR"
+    echo "下载 Reranker 模型 (bge-reranker-v2-m3, int8, 可选增强)..."
+
+    local repo="https://huggingface.co/Xenova/bge-reranker-v2-m3/resolve/main"
+    local mirror="https://hf-mirror.com/Xenova/bge-reranker-v2-m3/resolve/main"
+
+    # vocab.txt -> reranker_vocab.txt
+    if ! curl -fsSL --retry 2 --retry-delay 10 --connect-timeout 30 -o "$MODEL_DIR/reranker_vocab.txt" "$repo/vocab.txt"; then
+        if ! curl -fsSL --retry 2 --retry-delay 5 --connect-timeout 30 -o "$MODEL_DIR/reranker_vocab.txt" "$mirror/vocab.txt"; then
+            echo "警告: Reranker 词表下载失败，跳过（应用将回落 MMR，不影响运行）"
+            return 0
+        fi
+    fi
+
+    # onnx/model_quantized.onnx -> reranker.onnx
+    if ! curl -fsSL --retry 2 --retry-delay 10 --connect-timeout 30 -o "$MODEL_DIR/reranker.onnx" "$repo/onnx/model_quantized.onnx"; then
+        if ! curl -fsSL --retry 2 --retry-delay 5 --connect-timeout 30 -o "$MODEL_DIR/reranker.onnx" "$mirror/onnx/model_quantized.onnx"; then
+            echo "警告: Reranker 模型下载失败，跳过（应用将回落 MMR，不影响运行）"
+            rm -f "$MODEL_DIR/reranker_vocab.txt"
+            return 0
+        fi
+    fi
+
+    # 校验下载内容不是 HTML 错误页
+    if file "$MODEL_DIR/reranker.onnx" | grep -qi "html"; then
+        echo "警告: 下载的 Reranker 模型文件是 HTML 页面，已跳过"
+        rm -f "$MODEL_DIR/reranker.onnx" "$MODEL_DIR/reranker_vocab.txt"
+        return 0
+    fi
+
+    echo "Reranker 模型 → $MODEL_DIR/"
+}
+
 case "${OS}" in
     MINGW*|MSYS*|CYGWIN*)
         download_onnx "win-x64" "onnxruntime-win-x64-${ONNX_VERSION}.zip"
         download_vc_runtime
         download_bge_model
+        download_reranker_model
         ;;
     Linux)
         download_onnx "linux-x64" "onnxruntime-linux-x64-${ONNX_VERSION}.tgz"
         download_bge_model
+        download_reranker_model
         ;;
     Darwin)
         download_onnx "osx-arm64" "onnxruntime-osx-arm64-${ONNX_VERSION}.tgz"
         download_bge_model
+        download_reranker_model
         ;;
     *)
         echo "不支持的操作系统: $OS"

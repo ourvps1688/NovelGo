@@ -317,6 +317,8 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 
 	// 1. 异步加载 ONNX 模型（不阻塞 GUI，尽早调用）
 	rag.InitEmbedder(config.ModelsDir(), a.logger)
+	// 1b. 异步加载二阶段 Reranker（可选增强：模型缺失时自动回落 MMR，不影响启动）
+	rag.InitReranker(config.ModelsDir(), a.logger)
 
 	// 2. 打开全局数据库
 	db, err := storage.Open(config.GlobalDBPath(), a.logger)

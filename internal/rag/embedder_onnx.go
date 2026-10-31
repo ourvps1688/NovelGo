@@ -129,7 +129,7 @@ func newOnnxEmbedder(modelsDir string, t *Tokenizer, log *slog.Logger) (*OnnxEmb
 		return nil, fmt.Errorf("rag: vocab missing [CLS] or [SEP]")
 	}
 
-	if err := ort.InitializeEnvironment(); err != nil {
+	if err := ensureOrtEnv(); err != nil {
 		return nil, fmt.Errorf("rag: init onnx environment: %w", err)
 	}
 
