@@ -37,10 +37,16 @@ type CreateCharacterInput struct {
 	Abilities   string `json:"abilities,omitempty"`   // JSON 数组，如 ["剑术","隐身"]
 }
 
-// CreateCharacter 创建一个角色。
+// CreateCharacter 创建一个角色。按 (novel_id, name) 幂等：同名已存在则复用已有记录、
+// 不覆盖其字段（避免世界观抽取/巡检重跑产生重复台账）。
 func (a *App) CreateCharacter(novelID int64, input CreateCharacterInput) (*character.Character, error) {
 	if input.Name == "" {
 		return nil, fmt.Errorf("角色名称不能为空")
+	}
+	if existing, err := a.character.GetByName(a.ctx, novelID, input.Name); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
 	}
 	char := character.Character{
 		NovelID:     novelID,

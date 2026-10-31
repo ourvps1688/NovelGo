@@ -21,8 +21,8 @@ const (
 // 及 series bible 通用归属 volume_id 与 temporal 变革定位（changed_at/changed_in_*）。
 type Character struct {
 	ID          int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	NovelID     int64     `gorm:"column:novel_id;not null;index"    json:"novel_id"`
-	Name        string    `gorm:"column:name;not null;index"        json:"name"`
+	NovelID     int64     `gorm:"column:novel_id;not null;uniqueIndex:uk_novel_character_name,priority:1" json:"novel_id"`
+	Name        string    `gorm:"column:name;not null;uniqueIndex:uk_novel_character_name,priority:2" json:"name"`
 	Description string    `gorm:"column:description"                json:"description"` // 自然语言描述，LLM 填写
 	Personality string    `gorm:"column:personality"                json:"personality"` // JSON 自由格式，LLM 填写。如 {"traits":["勇敢","冲动"],"brief":"一个热血青年"}
 	Abilities   string    `gorm:"column:abilities"                  json:"abilities"`   // JSON 数组，如 ["剑术","隐身"]（= capability.known_skills）

@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -35,8 +36,8 @@ func TestRdListByNovel_FilterType(t *testing.T) {
 	s := NewStore(db, testRdLogger())
 	ctx := context.Background()
 
-	db.Create(&ReaderPerspective{NovelID: 1, Type: "known", PlantedChapterID: readerChapterID(1)})
-	db.Create(&ReaderPerspective{NovelID: 1, Type: "suspense", PlantedChapterID: readerChapterID(2)})
+	db.Create(&ReaderPerspective{NovelID: 1, Type: "known", Content: "已知信息", ContentHash: ContentHash("已知信息"), PlantedChapterID: readerChapterID(1)})
+	db.Create(&ReaderPerspective{NovelID: 1, Type: "suspense", Content: "悬念信息", ContentHash: ContentHash("悬念信息"), PlantedChapterID: readerChapterID(2)})
 
 	result, _ := s.ListByNovel(ctx, 1, ListByNovelOptions{Type: "suspense"})
 	if result.Total != 1 {
@@ -50,9 +51,9 @@ func TestRdListActive(t *testing.T) {
 	ctx := context.Background()
 
 	revealedID := int64(5)
-	db.Create(&ReaderPerspective{NovelID: 1, Type: "known", PlantedChapterID: readerChapterID(1)})
-	db.Create(&ReaderPerspective{NovelID: 1, Type: "suspense", PlantedChapterID: readerChapterID(2), RevealedChapterID: &revealedID}) // 已揭示
-	db.Create(&ReaderPerspective{NovelID: 1, Type: "misconception", PlantedChapterID: readerChapterID(3)})
+	db.Create(&ReaderPerspective{NovelID: 1, Type: "known", Content: "已知信息", ContentHash: ContentHash("已知信息"), PlantedChapterID: readerChapterID(1)})
+	db.Create(&ReaderPerspective{NovelID: 1, Type: "suspense", Content: "悬念信息", ContentHash: ContentHash("悬念信息"), PlantedChapterID: readerChapterID(2), RevealedChapterID: &revealedID}) // 已揭示
+	db.Create(&ReaderPerspective{NovelID: 1, Type: "misconception", Content: "误知信息", ContentHash: ContentHash("误知信息"), PlantedChapterID: readerChapterID(3)})
 
 	active, _ := s.ListActive(ctx, 1)
 	if len(active) != 2 {
@@ -66,7 +67,8 @@ func TestRdListByNovel_Pagination(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 1; i <= 4; i++ {
-		db.Create(&ReaderPerspective{NovelID: 1, Type: "known", PlantedChapterID: readerChapterID(int64(i))})
+		c := fmt.Sprintf("读者认知%d", i)
+		db.Create(&ReaderPerspective{NovelID: 1, Type: "known", Content: c, ContentHash: ContentHash(c), PlantedChapterID: readerChapterID(int64(i))})
 	}
 
 	result, _ := s.ListByNovel(ctx, 1, ListByNovelOptions{
@@ -87,7 +89,7 @@ func TestRdCreate(t *testing.T) {
 	ctx := context.Background()
 
 	item := ReaderPerspective{
-		NovelID: 1, Type: "known", Content: "主角身世未知",
+		NovelID: 1, Type: "known", Content: "主角身世未知", ContentHash: ContentHash("主角身世未知"),
 		PlantedChapterID: readerChapterID(1), RelatedTruth: "主角是皇帝私生子",
 	}
 	if err := db.WithContext(ctx).Create(&item).Error; err != nil {
@@ -110,7 +112,7 @@ func TestRdCreate(t *testing.T) {
 func TestRdCreate_AllowsMissingHistoricalPlantedChapter(t *testing.T) {
 	db := openRdDB(t)
 
-	item := ReaderPerspective{NovelID: 1, Type: "known", Content: "历史条目"}
+	item := ReaderPerspective{NovelID: 1, Type: "known", Content: "历史条目", ContentHash: ContentHash("历史条目")}
 	if err := db.Create(&item).Error; err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -123,7 +125,7 @@ func TestRdUpdate(t *testing.T) {
 	db := openRdDB(t)
 	ctx := context.Background()
 
-	item := ReaderPerspective{NovelID: 1, Type: "suspense", Content: "旧悬念", PlantedChapterID: readerChapterID(2)}
+	item := ReaderPerspective{NovelID: 1, Type: "suspense", Content: "旧悬念", ContentHash: ContentHash("旧悬念"), PlantedChapterID: readerChapterID(2)}
 	db.WithContext(ctx).Create(&item)
 
 	type UpdateInput struct {
@@ -151,7 +153,7 @@ func TestRdDelete(t *testing.T) {
 	db := openRdDB(t)
 	ctx := context.Background()
 
-	item := ReaderPerspective{NovelID: 1, Type: "known", Content: "待删", PlantedChapterID: readerChapterID(1)}
+	item := ReaderPerspective{NovelID: 1, Type: "known", Content: "待删", ContentHash: ContentHash("待删"), PlantedChapterID: readerChapterID(1)}
 	db.WithContext(ctx).Create(&item)
 
 	if err := db.WithContext(ctx).Where("id = ?", item.ID).Delete(&ReaderPerspective{}).Error; err != nil {

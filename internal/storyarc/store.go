@@ -2,6 +2,7 @@ package storyarc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -39,6 +40,20 @@ type ListByNovelOptions struct {
 	Status     string // 空字符串=不过滤，"active"/"paused"/"completed"/"abandoned"
 	Search     string // 空字符串=不过滤，按 name LIKE OR description LIKE 模糊匹配
 	Order      string // 空字符串=默认 importance DESC, created_at ASC；调用方显式传（App 传原排序，MCP 传 updated_at DESC）
+}
+
+// GetByName 按 (novel_id, name) 精确查找叙事弧线。未找到返回 (nil, nil)。
+// 创建入口用它做 find-or-create 幂等，避免同名重复台账。
+func (s *Store) GetByName(ctx context.Context, novelID int64, name string) (*StoryArc, error) {
+	var a StoryArc
+	err := s.DB.WithContext(ctx).Where("novel_id = ? AND name = ?", novelID, name).First(&a).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("storyarc store: get by name: %w", err)
+	}
+	return &a, nil
 }
 
 // ListByNovel 分页列出某小说的叙事弧线，支持类型/状态过滤和名称搜索。前端管理页、MCP full 模式、全局搜索复用。

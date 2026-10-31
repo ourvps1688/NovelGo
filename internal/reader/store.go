@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -20,6 +21,20 @@ type Store struct {
 // NewStore 创建 reader 存储。
 func NewStore(db *gorm.DB, logger *slog.Logger) *Store {
 	return &Store{DB: db, logger: logger}
+}
+
+// GetByTypeContentHash 按 (novel_id, type, content_hash) 精确查找读者认知条目。未找到返回 (nil, nil)。
+// content_hash 由 reader.ContentHash(content) 计算得到；创建入口用它做 find-or-create 幂等。
+func (s *Store) GetByTypeContentHash(ctx context.Context, novelID int64, typ, contentHash string) (*ReaderPerspective, error) {
+	var rp ReaderPerspective
+	err := s.DB.WithContext(ctx).Where("novel_id = ? AND type = ? AND content_hash = ?", novelID, typ, contentHash).First(&rp).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reader store: get by type+hash: %w", err)
+	}
+	return &rp, nil
 }
 
 // ListByNovelOptions 是 ListByNovel 的可选参数。

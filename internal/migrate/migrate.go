@@ -19,6 +19,7 @@ import (
 	_ "github.com/novelgo/novelgo/internal/migrate/v162" // blank：注册 novels.kind 列与历史回填迁移
 	_ "github.com/novelgo/novelgo/internal/migrate/v170" // blank：注册 series bible 存量迁移（temporal 回填 + 结构化尽力填充）
 	_ "github.com/novelgo/novelgo/internal/migrate/v171" // blank：注册 retcon_cases.kind 列与历史回填迁移
+	_ "github.com/novelgo/novelgo/internal/migrate/v172" // blank：注册四类台账按自然键去重 + 唯一索引迁移
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/pipeline"

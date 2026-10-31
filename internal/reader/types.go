@@ -1,6 +1,11 @@
 package reader
 
-import "time"
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"strings"
+	"time"
+)
 
 // PerspectiveType 定义读者认知条目的类型。
 const (
@@ -21,9 +26,12 @@ const (
 // related_truth 是作者全知视角——不仅 misconception，所有类型都可记录真相。
 // "谁杀了村长"是悬念，答案作者心里应该有数。
 type ReaderPerspective struct {
-	ID                int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
-	NovelID           int64     `gorm:"column:novel_id;not null;index"      json:"novel_id"`
-	Type              string    `gorm:"column:type;not null;index"          json:"type"`                    // "known" | "suspense" | "misconception"
+	ID      int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	NovelID int64  `gorm:"column:novel_id;not null;uniqueIndex:uk_novel_rp_type_hash,priority:1" json:"novel_id"`
+	Type    string `gorm:"column:type;not null;uniqueIndex:uk_novel_rp_type_hash,priority:2" json:"type"` // "known" | "suspense" | "misconception"
+	// ContentHash 是 content 归一化后的 SHA1 十六进制摘要，与自然键 (novel_id, type) 组成唯一约束，
+	// 从 DB 层杜绝「同一类型+相同内容」的重复读者认知条目（见 v172 迁移与创建幂等逻辑）。
+	ContentHash       string    `gorm:"column:content_hash;uniqueIndex:uk_novel_rp_type_hash,priority:3" json:"content_hash,omitempty"`
 	Content           string    `gorm:"column:content;not null"             json:"content"`                 // 条目内容：读者知道/想知道/误以为的事情
 	RelatedTruth      string    `gorm:"column:related_truth"                json:"related_truth"`           // 作者视角：真实情况。所有类型可选，不只是 misconception
 	PlantedChapterID  *int64    `gorm:"column:planted_chapter_id;index"        json:"planted_chapter_id"`   // 起点事件（埋设/形成/揭示，lifecycle raised_at/formed_at/revealed_at）；nil 表示历史记录无法关联章节
@@ -36,6 +44,18 @@ type ReaderPerspective struct {
 
 // TableName 指定 GORM 表名。
 func (ReaderPerspective) TableName() string { return "reader_perspectives" }
+
+// NormalizeContent 把内容归一化：首尾去空白、内部连续空白折叠为单个空格。
+// 用于读者认知条目的重复判定——「相同内容仅空格/换行差异」视为同一记录。
+func NormalizeContent(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// ContentHash 返回内容归一化后的 SHA1 十六进制摘要，作为去重与唯一约束的键。
+func ContentHash(s string) string {
+	sum := sha1.Sum([]byte(NormalizeContent(s)))
+	return hex.EncodeToString(sum[:])
+}
 
 // POVMode 是 POV 叙事模式的封闭枚举（WBS §0.4 冻结）：limited|omniscient。
 const (

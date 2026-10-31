@@ -182,6 +182,7 @@ func (t *CreateStoryArcTool) Execute(ctx context.Context, args any, tc ToolConte
 	a := args.(*CreateStoryArcArgs)
 
 	var ids []int64
+	var reusedIDs []int64
 	var failedName string
 	var failedErr error
 	err := tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -189,6 +190,13 @@ func (t *CreateStoryArcTool) Execute(ctx context.Context, args any, tc ToolConte
 			importance := item.Importance
 			if importance == 0 {
 				importance = 1
+			}
+			var existing storyarc.StoryArc
+			res := tx.Where("novel_id = ? AND name = ?", tc.NovelID, item.Name).Limit(1).Find(&existing)
+			if res.Error == nil && res.RowsAffected > 0 {
+				ids = append(ids, existing.ID)
+				reusedIDs = append(reusedIDs, existing.ID)
+				continue
 			}
 			arc := storyarc.StoryArc{
 				NovelID:     tc.NovelID,
@@ -216,7 +224,7 @@ func (t *CreateStoryArcTool) Execute(ctx context.Context, args any, tc ToolConte
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"ids": ids, "count": len(ids)},
+		Data:    map[string]any{"ids": ids, "count": len(ids), "reused_ids": reusedIDs},
 	}, nil
 }
 

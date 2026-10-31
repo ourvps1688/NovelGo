@@ -2,6 +2,7 @@ package character
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -84,6 +85,20 @@ func (s *Store) GetByIDs(ctx context.Context, ids []int64) ([]Character, error) 
 		return nil, fmt.Errorf("character store: get by ids: %w", err)
 	}
 	return chars, nil
+}
+
+// GetByName 按 (novel_id, name) 精确查找角色。未找到返回 (nil, nil)。
+// 创建入口用它做 find-or-create 幂等，避免同名重复台账。
+func (s *Store) GetByName(ctx context.Context, novelID int64, name string) (*Character, error) {
+	var c Character
+	err := s.DB.WithContext(ctx).Where("novel_id = ? AND name = ?", novelID, name).First(&c).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("character store: get by name: %w", err)
+	}
+	return &c, nil
 }
 
 // ── CharacterRelation ─────────────────────────────────

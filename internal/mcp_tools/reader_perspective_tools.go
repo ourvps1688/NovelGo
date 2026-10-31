@@ -234,6 +234,7 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 		rp := reader.ReaderPerspective{
 			NovelID:           tc.NovelID,
 			Type:              item.Type,
+			ContentHash:       reader.ContentHash(item.Content),
 			Content:           item.Content,
 			PlantedChapterID:  &chapterID,
 			RelatedTruth:      item.RelatedTruth,
@@ -246,11 +247,20 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 	}
 
 	var ids []int64
+	var reusedIDs []int64
 	var failedName string
 	var failedErr error
 	err = tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for i := range rps {
-			if err := tx.Create(&rps[i]).Error; err != nil {
+			rp := rps[i]
+			var existing reader.ReaderPerspective
+			res := tx.Where("novel_id = ? AND type = ? AND content_hash = ?", tc.NovelID, rp.Type, rp.ContentHash).Limit(1).Find(&existing)
+			if res.Error == nil && res.RowsAffected > 0 {
+				ids = append(ids, existing.ID)
+				reusedIDs = append(reusedIDs, existing.ID)
+				continue
+			}
+			if err := tx.Create(&rp).Error; err != nil {
 				failedName = a.Entries[i].Content
 				if len(failedName) > 20 {
 					failedName = failedName[:20]
@@ -258,7 +268,7 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 				failedErr = err
 				return err
 			}
-			ids = append(ids, rps[i].ID)
+			ids = append(ids, rp.ID)
 		}
 		return nil
 	})
@@ -271,7 +281,7 @@ func (t *CreateReaderPerspectiveEntryTool) Execute(ctx context.Context, args any
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"ids": ids, "count": len(ids)},
+		Data:    map[string]any{"ids": ids, "count": len(ids), "reused_ids": reusedIDs},
 	}, nil
 }
 

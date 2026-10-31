@@ -52,9 +52,15 @@ func (a *App) readerLifecycleOrderOf(novelID int64) (func(int64) int, error) {
 
 // CreateReaderPerspective 创建一条读者认知条目。
 // 经 reader.ValidateLifecycle 落库（lifecycle 时间戳采集：作者确认通道，WBS 2.7）。
+// 按 (novel_id, type, content) 幂等：相同内容已存在则复用、不覆盖（避免重复台账）。
 func (a *App) CreateReaderPerspective(novelID int64, input CreateReaderPerspectiveInput) (*reader.ReaderPerspective, error) {
 	if input.Type == "" || input.Content == "" || input.PlantedChapterID == 0 {
 		return nil, fmt.Errorf("类型、内容和种下章节不能为空")
+	}
+	if existing, err := a.reader.GetByTypeContentHash(a.ctx, novelID, input.Type, reader.ContentHash(input.Content)); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
 	}
 	chapterIDs := []int64{input.PlantedChapterID}
 	if input.RevealedChapterID != nil {
@@ -67,6 +73,7 @@ func (a *App) CreateReaderPerspective(novelID int64, input CreateReaderPerspecti
 	item := reader.ReaderPerspective{
 		NovelID:           novelID,
 		Type:              input.Type,
+		ContentHash:       reader.ContentHash(input.Content),
 		Content:           input.Content,
 		PlantedChapterID:  &plantedChapterID,
 		RelatedTruth:      input.RelatedTruth,

@@ -235,10 +235,18 @@ func (t *CreateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 	a := args.(*CreateCharacterArgs)
 
 	var ids []int64
+	var reusedIDs []int64
 	var failedName string
 	var failedErr error
 	err := tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for _, item := range a.Characters {
+			var existing character.Character
+			res := tx.Where("novel_id = ? AND name = ?", tc.NovelID, item.Name).Limit(1).Find(&existing)
+			if res.Error == nil && res.RowsAffected > 0 {
+				ids = append(ids, existing.ID)
+				reusedIDs = append(reusedIDs, existing.ID)
+				continue
+			}
 			ch := character.Character{
 				NovelID:     tc.NovelID,
 				Name:        item.Name,
@@ -266,7 +274,7 @@ func (t *CreateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"ids": ids, "count": len(ids)},
+		Data:    map[string]any{"ids": ids, "count": len(ids), "reused_ids": reusedIDs},
 	}, nil
 }
 

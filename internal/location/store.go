@@ -2,6 +2,7 @@ package location
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -86,6 +87,20 @@ func (s *Store) GetByIDs(ctx context.Context, ids []int64) ([]Location, error) {
 		return nil, fmt.Errorf("location store: get by ids: %w", err)
 	}
 	return locs, nil
+}
+
+// GetByName 按 (novel_id, name) 精确查找地点。未找到返回 (nil, nil)。
+// 创建入口用它做 find-or-create 幂等，避免同名重复台账。
+func (s *Store) GetByName(ctx context.Context, novelID int64, name string) (*Location, error) {
+	var l Location
+	err := s.DB.WithContext(ctx).Where("novel_id = ? AND name = ?", novelID, name).First(&l).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("location store: get by name: %w", err)
+	}
+	return &l, nil
 }
 
 // ── LocationRelation ──────────────────────────────────

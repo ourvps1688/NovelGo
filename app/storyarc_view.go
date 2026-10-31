@@ -52,10 +52,16 @@ type CreateStoryArcInput struct {
 	Importance  int    `json:"importance,omitempty"`  // 重要度 1-5
 }
 
-// CreateStoryArc 创建一条叙事弧线。
+// CreateStoryArc 创建一条叙事弧线。按 (novel_id, name) 幂等：同名已存在则复用已有记录、
+// 不覆盖其字段（避免重复台账）。
 func (a *App) CreateStoryArc(novelID int64, input CreateStoryArcInput) (*storyarc.StoryArc, error) {
 	if input.Name == "" || input.ArcType == "" {
 		return nil, fmt.Errorf("弧线名称和类型不能为空")
+	}
+	if existing, err := a.storyarc.GetByName(a.ctx, novelID, input.Name); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
 	}
 	arc := storyarc.StoryArc{
 		NovelID:     novelID,

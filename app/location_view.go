@@ -41,10 +41,16 @@ type CreateLocationInput struct {
 	Tags             string `json:"tags,omitempty"`               // JSON 数组标签
 }
 
-// CreateLocation 创建一个地点。
+// CreateLocation 创建一个地点。按 (novel_id, name) 幂等：同名已存在则复用已有记录、
+// 不覆盖其字段（避免重复台账）。
 func (a *App) CreateLocation(novelID int64, input CreateLocationInput) (*location.Location, error) {
 	if input.Name == "" {
 		return nil, fmt.Errorf("地点名称不能为空")
+	}
+	if existing, err := a.location.GetByName(a.ctx, novelID, input.Name); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
 	}
 	loc := location.Location{
 		NovelID:          novelID,
