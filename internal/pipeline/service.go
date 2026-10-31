@@ -2375,10 +2375,15 @@ func upsertManualItem(list []ManualItem, item ManualItem) []ManualItem {
 }
 
 // parseChapterRefs 尽力从 area/desc 文本解析涉及的章节号，供 S3 写作回路定位待重写章节。
-// 识别「第 N 章」「第 N-M 章」区间与「#N」两种写法；解析失败或越界（≤0）忽略。
+// 识别「第 N 章」「第 N-M 章」区间与「章#N」两种写法；解析失败或越界（≤0）忽略。
+//
+// 重要：台账实体引用约定的写法是 `<type>#<id>`（如 `timeline#42`、
+// `reader_perspective#1643`、`character#5`），其中 id 是台账表自增主键（常达上千量级），
+// 绝不可当作章节号。因此「#N」正则必须收窄为「章#N」（漂移/文风类 issue 的 area 形如
+// 「章节#12」），裸 `#\d+` 会把这些台账 ID 误当成章节，污染「涉及章节」（见 #bug）。
 var (
 	chapterRangeRe = regexp.MustCompile(`第\s*(\d+)\s*(?:[-~到至]\s*(\d+))?\s*章`)
-	chapterHashRe  = regexp.MustCompile(`#\s*(\d+)`)
+	chapterHashRe  = regexp.MustCompile(`(?:章节|章)\s*#\s*(\d+)`)
 )
 
 func parseChapterRefs(area, desc string) []int64 {
