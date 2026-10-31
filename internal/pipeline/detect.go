@@ -193,20 +193,24 @@ const detectContainerStage = "detect"
 var detectTaskTimeout = 60 * time.Minute
 
 // verifyCallTimeout 是「单轮复验执行体」的硬超时上限（对应审计 P0）：复验已改为按 run
-// 后台逐工单复验，整体墙钟随工单数线性增长，此处给一个较宽的安全兜底，防止慢供应商/
-// 卡死导致复验无限期挂起。以 var 暴露便于测试收缩。逐工单循环每步先查 ctx.Err，
-// 超时/取消后安全退出（未复验工单复位 pending，可重跑）。
-var verifyCallTimeout = 15 * time.Minute
+// 后台逐工单顺序复验，整体墙钟随工单数线性增长——本应给较宽的安全兜底，防止慢供应商/
+// 卡死导致复验无限期挂起。此前取 15min 对 20+ 工单远远不够：整轮会被腰斩（在跑工单拿到
+// 整轮 ctx 到期的 deadline，剩余工单被收口复位），复验永远跑不完。现按「工单数 × 单张预算」
+// 上界放宽到 120min（21 张 × ~5min 实测均值仍有余量），并以 var 暴露便于测试收缩。
+// 逐工单循环每步先查 ctx.Err，超时/取消后安全退出（未复验工单复位 pending，可重跑）。
+var verifyCallTimeout = 120 * time.Minute
 
 // verifyTicketTimeout 是单工单复验 LLM 调用的墙钟上限（逐工单预算，独立于 verifyCallTimeout）：
 // 复验逐工单顺序执行，若某工单的 LLM 调用卡住（供应商静默/空闲超时），不兜底会拖住整批。
 // 此处给每张工单单独的预算，超时的工单单独复位 pending 并让后续工单继续，避免「一张卡死、
-// 整批无进展」——也早于 thinking 模型 9 分钟空闲看门狗，使其干净超时而非硬等。
-var verifyTicketTimeout = 5 * time.Minute
+// 整批无进展」。实测 mimo-v2.6-pro 在 ~10万 token 章节上下文下单轮就要 1-2min，5min 往往在
+// 出回执前就被斩断；放宽到 8min 仍早于 thinking 模型 9 分钟空闲看门狗，使其干净超时而非硬等。
+var verifyTicketTimeout = 8 * time.Minute
 
-// verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，比完整
-// 体检轻得多，6 轮足够（原整批复验用 12 轮，是慢的主因之一）。
-const verifyMaxTurns = 6
+// verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，需逐章节
+// read 后再出回执，多章节工单 6 轮不够（未出回执即被截断 → 整批复验失败）。放宽到 12 轮，
+// 仍轻于整批复验的 18 轮。
+const verifyMaxTurns = 12
 
 // detectKindOfMode 由容器 mode 反推检测 kind（卷体检 / 书体检；默认书体检），
 // 供执行体创建带取消的派生 ctx 时定位 detectKey（与 beginDetect 登记键一致）。

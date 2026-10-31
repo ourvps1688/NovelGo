@@ -308,20 +308,27 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       toastInfo(t("pipeline.tickets.selectHint"));
       return;
     }
+    // 入口即时标记在飞复验：必须在派发前把 run 登记进 verifyingRuns，否则后端已置
+    // verifying、前端尚未收到首条进度事件前会短暂误报「复验中断」（与真卡死外观一致，误导）。
+    const runs = new Set(refs.map((r) => r.run_id));
+    setVerifyingRuns((prev) => {
+      const next = new Set(prev);
+      runs.forEach((r) => next.add(r));
+      return next;
+    });
     setBusy("verify");
     try {
       await VerifyIssueTickets(novelId, refs);
-      // 入口即时返回：把涉及的 run 标记为在飞复验，提示后台执行中。
-      const runs = new Set(refs.map((r) => r.run_id));
-      setVerifyingRuns((prev) => {
-        const next = new Set(prev);
-        runs.forEach((r) => next.add(r));
-        return next;
-      });
       toastInfo(t("pipeline.tickets.verifyStarted", { count: refs.length }));
       setSelected(new Set());
       load();
     } catch (error) {
+      // 派发失败：回滚 verifyingRuns，避免误显示「复验中」。
+      setVerifyingRuns((prev) => {
+        const next = new Set(prev);
+        runs.forEach((r) => next.delete(r));
+        return next;
+      });
       const msg = toErrorMessage(error);
       if (isProviderTrip(msg)) {
         setTripError(msg);
