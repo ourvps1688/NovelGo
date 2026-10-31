@@ -271,9 +271,16 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
           const chText = ch.length
             ? `  ${t("pipeline.tickets.chapters", { list: ch.join(", ") })}`
             : "";
+          // 复验未过再次「去修复」时，把最新复验回执作为上下文追加，闭合反馈环
+          // （仅给人/模型当背景看，不自动改稿，仍属人工在环，不违反「复验不自动回流修复」）。
+          const receipt = r.verify_receipt
+            ? `\n    ${t("pipeline.tickets.fixPromptReceipt", {
+                at: fmtTime(r.verify_at),
+              })} ${r.verify_receipt}`
+            : "";
           return `${i + 1}. [${r.issue_key}] ${r.area}\n    ${t(
             "pipeline.tickets.fixPromptDesc",
-          )} ${r.desc}${chText}`;
+          )} ${r.desc}${chText}${receipt}`;
         })
         .join("\n\n");
       const content =
