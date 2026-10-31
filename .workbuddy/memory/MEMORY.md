@@ -16,6 +16,12 @@
 - 分层铁律：app 绑定层只做 DTO+委托；领域编排在 `internal/<domain>.Service`；`internal` 领域包不得直接 import wails，事件经 `internal/event.Emitter`；跨介质一致性以 DB 为真相源，文件/向量清理移出事务+启动期孤儿回收。
 - **台账唯一约束（2026-10-31 落地，commit 147b667c）**：角色/地点/弧线/读者视角四类台账按自然键去重，禁止无条件 INSERT 产生重复记录。代码层 find-or-create——app 层 4 个创建入口（`CreateCharacter`/`CreateLocation`/`CreateStoryArc`/`CreateReaderPerspective`）+ MCP 工具事务内循环，经 `Store.GetByName` / `Store.GetByTypeContentHash` 命中即复用、不覆盖其字段；DB 层 `internal/migrate/v172` 迁移（`Destructive` 触发自动备份）在 AutoMigrate 前按 (novel_id,name) / (novel_id,type,content_hash) 合并存量重复行（保留内容最丰、id 最大者）、重指并折叠外键、补齐回填 reader content_hash，再加 GORM 唯一索引。读者哈希单源 `reader.ContentHash`/`NormalizeContent`（SHA1 over 归一化内容）。location_relations 重指对 `uk_location_pair` 碰撞安全（先删撞对冗余边再 UPDATE）。**新增这四类实体一律走幂等路径**。
 
+## ONNX 模型使用现状（调研 2026-10-31，暂未实施增强）
+- **范围**：ONNX Runtime 在本项目**只做文本向量化**——单一模型 `bge-small-zh-v1.5`（int8，512维），经 `internal/rag/embedder_onnx.go` 的 `OnnxEmbedder` 单例（异步加载、`e.mu` 串行 Run、CLS+L2、批量≤8、arena 治理）产出 embedding，写入 `vec0`/`sqlite-vec` 向量库。
+- **4 个消费方**（全部 `if vs==nil` 优雅降级）：①章节语义检索 `IndexChunks`/`Search`；②设定语义检索 `setting/index_search.go:SearchSettings`（无 ONNX 退化为 LIKE）；③模式抽取证据前置 V2-D `app/pattern_api.go` 的 `ragEvidenceRetriever`；④故事记忆语义召回 MCP `mcp_tools/memory_tools.go`（已用 `rag.MMRRerank` 纯 Go 多样性重排，非模型）。
+- **缺口**：无 rerank 模型（top-K 仅 cosine+MMR 粗排）、端侧算力仅用向量化、512 截断+CLS pooling 长文漏召、V2-D 多查询串行未批处理/未缓存、机械类判定与实体抽取仍靠规则/LLM。
+- **增益候选（按性价比）**：P0=加二阶段 reranker（bge-reranker-v2-m3 int8）+检索批处理/短 TTL 缓存；P1=长文分段聚合/评估升级 embedding 模型；P2=本地分类器/NER 替代部分 LLM 判定（离线零隐私外传，契合隐私红线）；P3=端侧生成式续写（ORT 对 decoder-only 支持弱，短期不推荐）。**动手前须评估低端机内存与更新 `download-onnx.sh`**。
+
 ## 复验工作流（关键 gotcha，勿回退）
 - **L0 快路径（P1 已落地，commit a16b1305；粗粒度回落 LLM 修复 2026-10-31，commit 1c9b2766）**：机械类工单走 `quality.RunL0Checks` 确定性判定。精确检查项（字数/AI味/禁忌/死人出镜/战力/文风漂移）命中仍**确定性判未修复退回**（安全）；**粗粒度启发式项 `name_drift`/`tail_hook` 命中不再臆测驳回**——其类别口径比原工单（常含机械关键词的 LLM 语义细粒度问题）更宽，会以无关理由命中导致永久通不过，故 `decided=false` **回落 LLM 复核原具体指向**。`l0_verify.go` 常量 `coarseHeuristicChecks` 维护该豁免清单。L0 仍作「放行加速器」：候选项零命中且依赖齐备→自动确认通过（免 LLM）。
 - **复验三档预算（2026-10-31 放宽，commit 87670600）**：`internal/pipeline/detect.go` 三档——`verifyCallTimeout` 15min→**120min**（整轮随工单数线性兜底，21 张仍余量；原 15min 把整轮腰斩，在跑工单拿整轮 ctx 到期 deadline，剩全复位 pending）；`verifyTicketTimeout` 5min→**8min**（仍早于 thinking 9min 空闲看门狗，容慢模型单轮 1-2min + ~10万 token 章节上下文）；`verifyMaxTurns` 6→**12**（多章节工单需多次 read 才出回执）。根因实证：`mimo`/`mimo-v2.6-pro`（purpose=signability）一直正常响应（llm_usage_daily 有记录、无熔断），慢在主模型+大上下文，非断网；修前 5min/6 轮往往在出回执前被斩断。
