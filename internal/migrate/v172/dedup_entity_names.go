@@ -121,8 +121,13 @@ func scoreArc(r arcRow) int {
 }
 
 // repointFKs 把子表中外键 dupID 全部重指到 keepID（按 novel_id 限定范围）。
+// 子表可能尚未被 AutoMigrate 创建（本步在 PreSchemaSteps 阶段、建表之前运行），
+// 故先 HasTable 守卫：表不存在即无外键可重指，安全跳过。
 func repointFKs(db *gorm.DB, novelID, dupID, keepID int64, refs [][2]string) error {
 	for _, r := range refs {
+		if !db.Migrator().HasTable(r[0]) {
+			continue
+		}
 		if err := db.Exec(
 			fmt.Sprintf("UPDATE %s SET %s = ? WHERE %s = ? AND novel_id = ?", r[0], r[1], r[1]),
 			keepID, dupID, novelID,
@@ -138,6 +143,10 @@ func repointFKs(db *gorm.DB, novelID, dupID, keepID int64, refs [][2]string) err
 // 普通 UPDATE 在「重指后会与已有 (a,b) 对撞」时会被唯一索引拒绝。因此这里先删除会撞对的
 // 冗余边，再把剩余边重指——保证迁移不会因唯一索引冲突而失败。
 func repointLocationRelations(db *gorm.DB, novelID, dupID, keepID int64) error {
+	// 本步在 PreSchemaSteps 阶段、AutoMigrate 建表之前运行，location_relations 可能尚不存在。
+	if !db.Migrator().HasTable("location_relations") {
+		return nil
+	}
 	for _, col := range []string{"location_a", "location_b"} {
 		other := "location_b"
 		if col == "location_b" {

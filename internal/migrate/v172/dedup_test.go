@@ -164,6 +164,47 @@ func TestDedupReaders(t *testing.T) {
 	require.NoError(t, db.Exec("CREATE UNIQUE INDEX uk_t_rp ON reader_perspectives(novel_id, type, content_hash)").Error)
 }
 
+// TestDedupCharacters_MissingChildTables 锁死回归：当被引用的子表（如 group_members /
+// character_fact_knowledge / pov_roster / story_arcs）尚未被 AutoMigrate 创建时，
+// dedupCharacters 不应因 "no such table" 崩溃，而应跳过缺失子表的重指、正常完成去重。
+// 对应真实启动故障：dev 库 characters 表存在但 group_members 不存在，迁移步骤
+// 1-dedup-characters 报 "no such table: group_members"。
+func TestDedupCharacters_MissingChildTables(t *testing.T) {
+	// 仅建 characters 与 character_relations，模拟"子表尚未创建"的 schema 片段。
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "v172-partial.db")), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	stmts := []string{
+		`CREATE TABLE characters (id INTEGER PRIMARY KEY AUTOINCREMENT, novel_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT, personality TEXT, abilities TEXT, aliases TEXT, gender TEXT, birth_year TEXT, appearance_anchors TEXT, location_ref TEXT, faction TEXT, role TEXT, capability_ceiling TEXT, voice_traits TEXT, updated_at DATETIME)`,
+		`CREATE TABLE character_relations (id INTEGER PRIMARY KEY AUTOINCREMENT, novel_id INTEGER NOT NULL, source_character_id INTEGER NOT NULL, target_character_id INTEGER NOT NULL, relation_describe TEXT, relation_kind TEXT, description TEXT, is_current INTEGER NOT NULL DEFAULT 1)`,
+	}
+	for _, s := range stmts {
+		require.NoError(t, db.Exec(s).Error, s)
+	}
+	log := slog.Default()
+
+	mustExec(t, db, `INSERT INTO characters (id, novel_id, name, description) VALUES
+		(1, 1, '林雷', '主角'),
+		(2, 1, '林雷', '')`)
+	mustExec(t, db, `INSERT INTO character_relations (id, novel_id, source_character_id, target_character_id, relation_describe, relation_kind, is_current) VALUES
+		(1, 1, 2, 1, '宿敌', '', 1)`)
+
+	// 关键断言：缺失子表时不得返回 "no such table" 错误
+	require.NoError(t, dedupCharacters(db, log))
+
+	// 去重仍正确：保留内容更丰的 id=1，删除 id=2
+	require.Equal(t, int64(1), countWhere(t, db, `SELECT COUNT(*) FROM characters WHERE novel_id=1 AND name='林雷'`))
+	require.Equal(t, int64(0), countWhere(t, db, `SELECT COUNT(*) FROM characters WHERE id=2`))
+	// character_relations 重指仍生效（该表存在）
+	require.Equal(t, int64(1), countWhere(t, db, `SELECT COUNT(*) FROM character_relations WHERE id=1 AND source_character_id=1`))
+
+	// 幂等：再跑一次无副作用、无错误
+	require.NoError(t, dedupCharacters(db, log))
+	require.Equal(t, int64(1), countWhere(t, db, `SELECT COUNT(*) FROM characters WHERE novel_id=1 AND name='林雷'`))
+}
+
 // TestNeedsDedup 锁死检测函数：有重复时返回 true，去重后返回 false。
 func TestNeedsDedup(t *testing.T) {
 	db := openTestDB(t)
