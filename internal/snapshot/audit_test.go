@@ -92,24 +92,25 @@ func TestAuditLedger_DetectsStructuralGarbage(t *testing.T) {
 	// lifecycle：known 带回收章（无埋设章走显式分支）
 	db.Create(&reader.ReaderPerspective{
 		NovelID: 1, Type: reader.TypeKnown, Content: "主角是穿越者",
+		ContentHash:       reader.ContentHash("主角是穿越者"),
 		RevealedChapterID: int64Ptr(1),
 	})
 	// lifecycle：先埋后收（有埋设章走 lifecycle.go 单源校验）：第 2 章埋、第 1 章收
 	ch2 := chapterForOrder(t, db, 1, 2)
 	db.Create(&reader.ReaderPerspective{
 		NovelID: 1, Type: reader.TypeSuspense, Content: "密信是谁写的",
+		ContentHash:      reader.ContentHash("密信是谁写的"),
 		PlantedChapterID: int64Ptr(ch2), RevealedChapterID: int64Ptr(1),
 	})
 	// 存量无从定位：无埋设章的悬念（warning）
 	db.Create(&reader.ReaderPerspective{
 		NovelID: 1, Type: reader.TypeSuspense, Content: "老账房的旧事",
+		ContentHash: reader.ContentHash("老账房的旧事"),
 	})
 	// 伏笔 resolved 无回收章（warning）
 	db.Create(&timeline.TimelineEntry{
 		NovelID: 1, Category: "foreshadowing", Status: "resolved", Title: "断刀",
 	})
-	// 同名角色（warning）
-	db.Create(&character.Character{NovelID: 1, Name: "主角"})
 
 	report, err := svc.AuditLedger(ctx, 1)
 	if err != nil {
@@ -117,6 +118,8 @@ func TestAuditLedger_DetectsStructuralGarbage(t *testing.T) {
 	}
 	codes := issueCodes(report)
 
+	// 注：同名条目（characters.duplicate_name）检测已不再经插入触发——v172 去重迁移在
+	// (novel_id, name) 上强制唯一索引，DB 层杜绝重复，审计的同名检测退化为历史数据防御。
 	want := map[string]int{
 		"error:ref.dangling":                        1,
 		"error:enum.invalid":                        1,
@@ -125,15 +128,14 @@ func TestAuditLedger_DetectsStructuralGarbage(t *testing.T) {
 		"error:lifecycle.invalid":                   1, // 先埋后收
 		"warning:lifecycle.unlocated":               1,
 		"warning:timeline.resolved_without_chapter": 1,
-		"warning:characters.duplicate_name":         1,
 	}
 	for code, n := range want {
 		if codes[code] != n {
 			t.Errorf("问题码 %s: want %d, got %d（全部：%v）", code, n, codes[code], codes)
 		}
 	}
-	if report.ErrorCount != 6 || report.WarningCount != 3 {
-		t.Errorf("计数: want 6 error / 3 warning, got %d / %d", report.ErrorCount, report.WarningCount)
+	if report.ErrorCount != 6 || report.WarningCount != 2 {
+		t.Errorf("计数: want 6 error / 2 warning, got %d / %d", report.ErrorCount, report.WarningCount)
 	}
 }
 
@@ -191,8 +193,13 @@ func TestFreeze_WarningsDoNotBlock(t *testing.T) {
 	volID := seedFixture(t, db)
 	svc := newAuditService(db)
 
-	// 仅 warning 级：同名角色
-	db.Create(&character.Character{NovelID: 1, Name: "主角"})
+	// 仅 warning 级：无埋设章的悬念（lifecycle.unlocated）。注意 content_hash 必须显式
+	// 设置，否则与 seedFixture 的 suspense 在唯一索引 (novel_id,type,content_hash) 上空哈希
+	// 相撞被拒；同名角色场景已不可达（v172 在 (novel_id,name) 强制唯一索引）。
+	db.Create(&reader.ReaderPerspective{
+		NovelID: 1, Type: reader.TypeSuspense, Content: "无人认领的密信",
+		ContentHash: reader.ContentHash("无人认领的密信"),
+	})
 
 	report, err := svc.AuditLedger(ctx, 1)
 	if err != nil {

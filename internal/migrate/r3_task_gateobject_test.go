@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/novelgo/novelgo/internal/migrate"
+	"github.com/novelgo/novelgo/internal/migrate/engine"
 	"github.com/novelgo/novelgo/internal/pipeline"
 	"github.com/novelgo/novelgo/internal/task"
 )
@@ -78,13 +79,17 @@ func TestRunUpgradesPreR3PipelineDatabaseForTaskQueueAndGateObjects(t *testing.T
 			t.Fatalf("R3 新表缺失: %s", table)
 		}
 	}
-	// ② R3 不加版本化迁移：done 总数仍是 12。
+	// ② R3 不加版本化迁移：done 总数 = 注册表总步数（R3 只 AutoMigrate 加表，不注册步骤）。
+	var totalSteps int
+	for _, m := range engine.Registry {
+		totalSteps += len(m.AllSteps())
+	}
 	var done int64
 	if err := db.Table("migrate_state").Where("status = ?", "done").Count(&done).Error; err != nil {
 		t.Fatal(err)
 	}
-	if done != 12 {
-		t.Fatalf("版本化迁移 done 步数 = %d, want 12（R3 只 AutoMigrate 加表）", done)
+	if int(done) != totalSteps {
+		t.Fatalf("版本化迁移 done 步数 = %d, want %d（R3 只 AutoMigrate 加表，不注册版本化迁移步骤）", done, totalSteps)
 	}
 
 	ctx := context.Background()
