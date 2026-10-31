@@ -24,8 +24,11 @@ func TestIssueChapterIDsPrefersStructured(t *testing.T) {
 	fallback := AuditIssue{ID: "I3", Area: "节奏爽点", Desc: "第6-10章爽点断档"}
 	require.Equal(t, []int64{6, 7, 8, 9, 10}, issueChapterIDs(fallback), "无结构化字段应回退正则兜底")
 
-	none := AuditIssue{ID: "I4", Area: "长线牵引", Desc: "timeline#42 伏笔未回收"}
-	require.Equal(t, []int64{42}, issueChapterIDs(none), "正则兜底应识别 #N 写法")
+	// 台账引用 <type>#<id>（如 timeline#42）是台账实体ID，不是章节号——
+	// id 为台账表自增主键，常达上千量级，回归见 fix 4c87ef37。解析结果应为空，
+	// ledger ref 仅保留在 desc 文本里，绝不污染 chapter_ids。
+	ledger := AuditIssue{ID: "I4", Area: "长线牵引", Desc: "timeline#42 伏笔未回收"}
+	require.Empty(t, issueChapterIDs(ledger), "台账引用 <type>#<id> 不应被误判为章节")
 
 	empty := AuditIssue{ID: "I5", Area: "总体", Desc: "没有具体章节"}
 	require.Empty(t, issueChapterIDs(empty), "无章节线索应为空")
@@ -56,7 +59,7 @@ func TestStoreReplaceIssuesAndStatus(t *testing.T) {
 	require.Equal(t, "I1", rows[0].IssueKey)
 	require.Equal(t, IssueStatusPending, rows[0].Status)
 	require.JSONEq(t, "[1,2,3]", rows[0].ChapterIDsJSON, "结构化章节作用域应落列")
-	require.JSONEq(t, "[42]", rows[1].ChapterIDsJSON, "无结构化字段时正则兜底值应落列")
+	require.Empty(t, decodeIssueChapterIDs(rows[1].ChapterIDsJSON), "台账型 issue 不应将 <type>#<id> 误判为章节落列")
 	require.Equal(t, 1, rows[0].Round)
 
 	// 状态流转：skipped 连原因留痕。
@@ -105,7 +108,8 @@ func TestStoreReplaceIssuesIsolatedByRun(t *testing.T) {
 // ── executeAudit 落表接线（R1）─────────────────────────────────────────────
 
 // TestServiceExecuteAuditLandsIssueRows 验证体检 issue 清单整批落 pipeline_issues：
-// 结构化作用域落列、正则兜底值落列；新一轮体检整批替换（旧工单不残留）。
+// 结构化作用域落列；台账型 issue 的 <type>#<id> 引用不污染章节列（落空）；
+// 新一轮体检整批替换（旧工单不残留）。
 func TestServiceExecuteAuditLandsIssueRows(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
@@ -133,7 +137,7 @@ func TestServiceExecuteAuditLandsIssueRows(t *testing.T) {
 	require.JSONEq(t, "[1,2,3]", rows[0].ChapterIDsJSON, "结构化 chapter_ids 应落列")
 	require.Equal(t, "body", rows[0].FixType)
 	require.Equal(t, "I2", rows[1].IssueKey)
-	require.JSONEq(t, "[42]", rows[1].ChapterIDsJSON, "chapter_ids 为空时正则兜底值应落列")
+	require.Empty(t, decodeIssueChapterIDs(rows[1].ChapterIDsJSON), "台账型 issue 不应将 <type>#<id> 误判为章节落列")
 
 	// 新一轮体检（复评）整批替换：同号 I1 是新问题，旧工单不残留。
 	auditOut2 := `{"verdict":"needs_fix","score":22,"summary":"复评新发现","issues":[` +
