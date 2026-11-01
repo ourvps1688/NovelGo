@@ -377,11 +377,10 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   );
 }
 
-// 严重级徽章配色：P0=阻断（红），P1=警告（琥珀），其余=中性。
+// 严重级徽章配色：P0=阻断（红，语义 destructive），P1=警告（琥珀，语义 tag-amber），其余=中性。
 function levelBadgeClass(level: string): string {
   if (level === "P0") return "bg-destructive/10 text-destructive";
-  if (level === "P1")
-    return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+  if (level === "P1") return "bg-tag-amber text-tag-amber-foreground";
   return "bg-muted text-muted-foreground";
 }
 
