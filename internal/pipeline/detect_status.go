@@ -270,6 +270,45 @@ func fillChapterDetectStatus(st *DetectionTaskStatus, row *quality.ChapterQualit
 	st.LastRunAt = &at
 }
 
+// ChapterQualityArchive 是单章质量档案的详情视图（供前端在章节检测面板就地展开，
+// 取代原先「跳转到章节列表」的占位入口）。数据来自 chapter_quality 表的一行，
+// L0 指标/L0/L1 发现经反序列化后直接暴露给前端渲染，不含任何写操作。
+type ChapterQualityArchive struct {
+	ChapterID     int64             `json:"chapter_id"`
+	ReadingNumber int               `json:"reading_number"`
+	L0Metrics     quality.L0Metrics `json:"l0_metrics"`
+	L0Findings    []quality.Finding `json:"l0_findings"`
+	L1Findings    []quality.Finding `json:"l1_findings"`
+	L1Status      string            `json:"l1_status"`
+	CheckedAt     *time.Time        `json:"checked_at,omitempty"`
+	Exists        bool              `json:"exists"`
+}
+
+// GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单）。
+// 无档案（未检测/章节不存在/qualityStore 未注入）返回 Exists=false 的空视图，不报错。
+func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapterID int64) (*ChapterQualityArchive, error) {
+	out := &ChapterQualityArchive{Exists: false}
+	if s.qualityStore == nil {
+		return out, nil
+	}
+	row, err := s.qualityStore.GetByChapter(ctx, novelID, chapterID)
+	if err != nil || row == nil {
+		return out, nil
+	}
+	at := row.CheckedAt
+	out = &ChapterQualityArchive{
+		ChapterID:     row.ChapterID,
+		ReadingNumber: row.ReadingNumber,
+		L0Metrics:     quality.ParseL0Metrics(row.L0Metrics),
+		L0Findings:    quality.ParseFindings(row.L0Findings),
+		L1Findings:    quality.ParseFindings(row.L1Findings),
+		L1Status:      row.L1Status,
+		CheckedAt:     &at,
+		Exists:        true,
+	}
+	return out, nil
+}
+
 // scopedDetectStatus 卷/书检测状态：结果=检测容器上下文 Audit（scopeID→同 scope
 // 容器；概览→最近一次容器）。LastVerdict=体检 verdict，发现数=issue 数。
 func (s *Service) scopedDetectStatus(ctx context.Context, novelID int64, kind string, scopeID *int64, st *DetectionTaskStatus) {

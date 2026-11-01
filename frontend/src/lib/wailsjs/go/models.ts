@@ -2729,6 +2729,51 @@ export namespace personasetting {
 
 export namespace pipeline {
 	
+	export class ChapterQualityArchive {
+	    chapter_id: number;
+	    reading_number: number;
+	    l0_metrics: quality.L0Metrics;
+	    l0_findings: quality.Finding[];
+	    l1_findings: quality.Finding[];
+	    l1_status: string;
+	    // Go type: time
+	    checked_at?: any;
+	    exists: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChapterQualityArchive(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chapter_id = source["chapter_id"];
+	        this.reading_number = source["reading_number"];
+	        this.l0_metrics = this.convertValues(source["l0_metrics"], quality.L0Metrics);
+	        this.l0_findings = this.convertValues(source["l0_findings"], quality.Finding);
+	        this.l1_findings = this.convertValues(source["l1_findings"], quality.Finding);
+	        this.l1_status = source["l1_status"];
+	        this.checked_at = this.convertValues(source["checked_at"], null);
+	        this.exists = source["exists"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DetectionTaskResult {
 	    kind: string;
 	    novel_id: number;
@@ -2755,12 +2800,12 @@ export namespace pipeline {
 	    scope_id?: number;
 	    running: boolean;
 	    last_run_id?: string;
-    last_verdict?: string;
-    last_score?: number;
-    last_summary?: string;
-    last_issue_count: number;
-    // Go type: time
-    last_run_at?: any;
+	    last_verdict?: string;
+	    last_score?: number;
+	    last_summary?: string;
+	    last_issue_count: number;
+	    // Go type: time
+	    last_run_at?: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new DetectionTaskStatus(source);
@@ -2773,10 +2818,10 @@ export namespace pipeline {
 	        this.scope_id = source["scope_id"];
 	        this.running = source["running"];
 	        this.last_run_id = source["last_run_id"];
-        this.last_verdict = source["last_verdict"];
-        this.last_score = source["last_score"];
-        this.last_summary = source["last_summary"];
-        this.last_issue_count = source["last_issue_count"];
+	        this.last_verdict = source["last_verdict"];
+	        this.last_score = source["last_score"];
+	        this.last_summary = source["last_summary"];
+	        this.last_issue_count = source["last_issue_count"];
 	        this.last_run_at = this.convertValues(source["last_run_at"], null);
 	    }
 	
@@ -2812,26 +2857,28 @@ export namespace pipeline {
 	        this.issue_key = source["issue_key"];
 	    }
 	}
-export class IssueVerifySummary {
-    confirmed: number;
-    rejected: number;
-    unverified: number;
-    queued: number;
-    detail: string;
-
-    static createFrom(source: any = {}) {
-        return new IssueVerifySummary(source);
-    }
-
-    constructor(source: any = {}) {
-        if ('string' === typeof source) source = JSON.parse(source);
-        this.confirmed = source["confirmed"];
-        this.rejected = source["rejected"];
-        this.unverified = source["unverified"];
-        this.queued = source["queued"];
-        this.detail = source["detail"];
-    }
-}
+	export class IssueVerifySummary {
+	    confirmed: number;
+	    rejected: number;
+	    unverified: number;
+	    queued: number;
+	    escalated: number;
+	    detail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IssueVerifySummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.confirmed = source["confirmed"];
+	        this.rejected = source["rejected"];
+	        this.unverified = source["unverified"];
+	        this.queued = source["queued"];
+	        this.escalated = source["escalated"];
+	        this.detail = source["detail"];
+	    }
+	}
 	export class PatrolReportView {
 	    report: string;
 	    run_id: string;
@@ -2887,6 +2934,7 @@ export class IssueVerifySummary {
 	    verify_receipt?: string;
 	    // Go type: time
 	    verify_at?: any;
+	    verify_attempts: number;
 	    note?: string;
 	    round: number;
 	    // Go type: time
@@ -2916,6 +2964,7 @@ export class IssueVerifySummary {
 	        this.skip_reason = source["skip_reason"];
 	        this.verify_receipt = source["verify_receipt"];
 	        this.verify_at = this.convertValues(source["verify_at"], null);
+	        this.verify_attempts = source["verify_attempts"];
 	        this.note = source["note"];
 	        this.round = source["round"];
 	        this.created_at = this.convertValues(source["created_at"], null);
@@ -3048,12 +3097,58 @@ export namespace preference {
 
 }
 
+export namespace quality {
+	
+	export class Finding {
+	    id: string;
+	    check: string;
+	    level: string;
+	    desc: string;
+	    chapter_ids?: number[];
+	    ledger_refs?: string[];
+	    status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Finding(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.check = source["check"];
+	        this.level = source["level"];
+	        this.desc = source["desc"];
+	        this.chapter_ids = source["chapter_ids"];
+	        this.ledger_refs = source["ledger_refs"];
+	        this.status = source["status"];
+	    }
+	}
+	export class L0Metrics {
+	    word_count: number;
+	    has_tail_hook: boolean;
+	    style_metrics?: Record<string, number>;
+	
+	    static createFrom(source: any = {}) {
+	        return new L0Metrics(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.word_count = source["word_count"];
+	        this.has_tail_hook = source["has_tail_hook"];
+	        this.style_metrics = source["style_metrics"];
+	    }
+	}
+
+}
+
 export namespace reader {
 	
 	export class ReaderPerspective {
 	    id: number;
 	    novel_id: number;
 	    type: string;
+	    content_hash?: string;
 	    content: string;
 	    related_truth: string;
 	    planted_chapter_id?: number;
@@ -3073,6 +3168,7 @@ export namespace reader {
 	        this.id = source["id"];
 	        this.novel_id = source["novel_id"];
 	        this.type = source["type"];
+	        this.content_hash = source["content_hash"];
 	        this.content = source["content"];
 	        this.related_truth = source["related_truth"];
 	        this.planted_chapter_id = source["planted_chapter_id"];

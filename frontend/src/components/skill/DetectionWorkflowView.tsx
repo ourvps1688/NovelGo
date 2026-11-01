@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  GetChapterQualityArchive,
   GetPatrolReport,
   ListDetectionTaskStatuses,
   ListIssueTickets,
@@ -22,10 +23,14 @@ import { useChapters } from "@/components/chapter/useChapters";
 import { useVolumes } from "@/components/volume/useVolumes";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
-import { usePanelStore } from "@/stores/usePanelStore";
 import { toastError } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-import type { pipeline, chapter, volume } from "@/lib/wailsjs/go/models";
+import type {
+  pipeline,
+  chapter,
+  volume,
+  quality,
+} from "@/lib/wailsjs/go/models";
 import type { AuditData } from "@/types/pipeline";
 import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
@@ -71,7 +76,6 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   const [scopeId, setScopeId] = useState<number | null>(null);
   const modelsQuery = useModels();
   const settingsQuery = useSettings();
-  const setActivePanel = usePanelStore((s) => s.setActivePanel);
   const queryClient = useQueryClient();
 
   const selectedKey = settingsQuery.data?.selected_model_key || "";
@@ -110,6 +114,22 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     const runId = st.last_run_id;
     return (allIssues ?? []).filter((r) => r.run_id === runId);
   }, [allIssues, kind, st?.last_run_id]);
+
+  // 章节质量档案：就地展开（按选中章取，修掉「显示最近章而非选中章」的小坑）。
+  const [archiveOpen, setArchiveOpen] = useState(true);
+  const { data: archive, isLoading: archiveLoading } = useQuery({
+    queryKey: ["chapter-quality-archive", novelId, effChapterId],
+    queryFn: async () => {
+      if (!effChapterId) return null;
+      try {
+        return await GetChapterQualityArchive(novelId, effChapterId);
+      } catch {
+        return null;
+      }
+    },
+    enabled:
+      kind === "chapter" && !!st?.last_run_at && !!effChapterId && archiveOpen,
+  });
 
   // 巡检·结构结果消费面：经 GetPatrolReport 双源合并取数（活跃 run + structure 检测容器，
   // 按落库时间戳最新者胜），解析张力报告 AuditData 喂 PatrolReportPanel——
@@ -299,14 +319,22 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                   count: st.last_issue_count ?? 0,
                 })}
               </p>
-              <div className="mt-3">
+              <div className="mt-3 flex flex-col gap-3">
                 <button
                   type="button"
-                  onClick={() => setActivePanel("chapters")}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
+                  onClick={() => setArchiveOpen((v) => !v)}
+                  className="self-start rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:bg-muted/50"
                 >
-                  {t("journey.quality.detect.viewQuality")}
+                  {archiveOpen
+                    ? t("journey.quality.detect.collapseQuality")
+                    : t("journey.quality.detect.viewQuality")}
                 </button>
+                {archiveOpen ? (
+                  <ChapterQualityArchiveCard
+                    archive={archive ?? null}
+                    loading={archiveLoading}
+                  />
+                ) : null}
               </div>
             </div>
           )
@@ -344,6 +372,159 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               : t("journey.quality.detect.start")}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 严重级徽章配色：P0=阻断（红），P1=警告（琥珀），其余=中性。
+function levelBadgeClass(level: string): string {
+  if (level === "P0") return "bg-destructive/10 text-destructive";
+  if (level === "P1")
+    return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+  return "bg-muted text-muted-foreground";
+}
+
+function FindingRow({ f }: { f: quality.Finding }) {
+  const { t } = useTranslation();
+  const statusText = f.status
+    ? t(`journey.quality.detect.findingStatus.${f.status}`, f.status)
+    : "";
+  return (
+    <li className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs">
+      <span
+        className={`rounded px-1.5 py-0.5 font-medium ${levelBadgeClass(f.level)}`}
+      >
+        {f.level || "—"}
+      </span>
+      <span className="font-mono text-[11px] text-muted-foreground">
+        {f.check}
+      </span>
+      <span className="flex-1 text-foreground">{f.desc}</span>
+      {statusText ? (
+        <span className="text-muted-foreground">{statusText}</span>
+      ) : null}
+      {f.ledger_refs && f.ledger_refs.length > 0 ? (
+        <span className="text-[11px] text-muted-foreground">
+          {f.ledger_refs.join(" · ")}
+        </span>
+      ) : null}
+    </li>
+  );
+}
+
+// 章节质量档案就地卡片：L0 指标 + L0/L1 发现清单（L1 状态徽章复用 VERDICT_KEYS）。
+function ChapterQualityArchiveCard({
+  archive,
+  loading,
+}: {
+  archive: pipeline.ChapterQualityArchive | null;
+  loading: boolean;
+}) {
+  const { t } = useTranslation();
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        {t("journey.quality.detect.loading")}
+      </div>
+    );
+  }
+  if (!archive || !archive.exists) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {t("journey.quality.detect.emptyArchive")}
+      </p>
+    );
+  }
+  const m = archive.l0_metrics;
+  return (
+    <div className="rounded-lg border bg-muted/30 p-3 max-w-3xl">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-foreground">
+          {t("journey.quality.detect.qualityArchive")}
+          {archive.reading_number ? (
+            <span className="ml-1 text-xs text-muted-foreground">
+              {t("sidebar.chapterN", { n: archive.reading_number })}
+            </span>
+          ) : null}
+        </span>
+        {archive.checked_at ? (
+          <span className="text-[11px] text-muted-foreground">
+            {t("journey.quality.detect.archiveCheckedAt", {
+              at: fmtTime(archive.checked_at),
+            })}
+          </span>
+        ) : null}
+      </div>
+
+      {/* L0 指标 */}
+      <div className="mt-3">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t("journey.quality.detect.l0Metrics")}
+        </div>
+        <div className="mt-1 flex flex-wrap gap-2 text-xs">
+          <span className="rounded-md border border-border bg-background px-2 py-1">
+            {t("journey.quality.detect.wordCount")}：{m?.word_count ?? 0}
+          </span>
+          <span className="rounded-md border border-border bg-background px-2 py-1">
+            {t("journey.quality.detect.tailHook")}：
+            {m?.has_tail_hook
+              ? t("journey.quality.detect.yes")
+              : t("journey.quality.detect.no")}
+          </span>
+          {m?.style_metrics
+            ? Object.entries(m.style_metrics).map(([k, v]) => (
+                <span
+                  key={k}
+                  className="rounded-md border border-border bg-background px-2 py-1 font-mono"
+                >
+                  {k}：{v}
+                </span>
+              ))
+            : null}
+        </div>
+      </div>
+
+      {/* L0 发现 */}
+      <div className="mt-3">
+        <div className="text-xs font-medium text-muted-foreground">
+          {t("journey.quality.detect.l0Findings")}
+        </div>
+        {archive.l0_findings && archive.l0_findings.length > 0 ? (
+          <ul className="mt-1 flex flex-col gap-1.5">
+            {archive.l0_findings.map((f) => (
+              <FindingRow key={f.id} f={f} />
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("journey.quality.detect.noFindings")}
+          </p>
+        )}
+      </div>
+
+      {/* L1 发现 + L1 状态徽章 */}
+      <div className="mt-3">
+        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <span>{t("journey.quality.detect.l1Findings")}</span>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
+            {VERDICT_KEYS[archive.l1_status]
+              ? t(VERDICT_KEYS[archive.l1_status])
+              : archive.l1_status || t("journey.quality.detect.l1Status")}
+          </span>
+        </div>
+        {archive.l1_findings && archive.l1_findings.length > 0 ? (
+          <ul className="mt-1 flex flex-col gap-1.5">
+            {archive.l1_findings.map((f) => (
+              <FindingRow key={f.id} f={f} />
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("journey.quality.detect.noFindings")}
+          </p>
+        )}
       </div>
     </div>
   );

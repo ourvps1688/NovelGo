@@ -254,6 +254,10 @@ export function GetChapterPlans(arg1) {
   return window['go']['app']['App']['GetChapterPlans'](arg1);
 }
 
+export function GetChapterQualityArchive(arg1, arg2) {
+  return window['go']['app']['App']['GetChapterQualityArchive'](arg1, arg2);
+}
+
 export function GetChapters(arg1) {
   return window['go']['app']['App']['GetChapters'](arg1);
 }

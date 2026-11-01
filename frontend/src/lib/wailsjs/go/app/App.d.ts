@@ -158,6 +158,8 @@ export function GetChapterContents(arg1:app.GetChapterContentsInput):Promise<app
 
 export function GetChapterPlans(arg1:number):Promise<Array<timeline.ChapterPlan>>;
 
+export function GetChapterQualityArchive(arg1:number,arg2:number):Promise<pipeline.ChapterQualityArchive>;
+
 export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;
 
 export function GetCharacterGroupMembers(arg1:app.GetCharacterGroupMembersInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_character_GroupMember_>;

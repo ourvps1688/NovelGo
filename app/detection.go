@@ -56,3 +56,12 @@ func (a *App) GetPatrolReport(novelID int64) (*pipeline.PatrolReportView, error)
 	}
 	return a.pipeline.GetPatrolReport(a.ctx, novelID)
 }
+
+// GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单），
+// 供章节检测面板就地展开展示，取代原先跳转到章节列表的占位入口。
+func (a *App) GetChapterQualityArchive(novelID int64, chapterID int64) (*pipeline.ChapterQualityArchive, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetChapterQualityArchive(a.ctx, novelID, chapterID)
+}
