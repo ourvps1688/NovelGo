@@ -67,9 +67,9 @@ useWhen:
 - `get_reader_perspective`：**lifecycle 四事件缺口检测**（读者认知「埋设/回收/揭示/纠正」时间戳采集的检测侧，与作者前端「标记回收」确认构成双通道）——对照正文逐项核查：
   - ① 埋设未回收（死线）：活跃悬念（suspense）种下已久、正文早已给出解答机会却仍无回收（payoff）记录；
   - ② 误解未纠正：活跃误知（misconception）形成已久、正文已暗示或揭示真相却仍无纠正（correction）记录；
-  - ③ 该揭示未揭示：正文已向读者揭示的关键信息或已完成的回收/反转，台账无对应条目、或条目仍挂「未回收」；
+  - ③ 该揭示未揭示：正文已向读者揭示的关键信息或已完成的回收/反转，但台账仍挂「未回收」或**看似无对应条目**——两者修复动词不同，**必须先区分再开方**：用 `get_reader_perspective` 确认该事实是否**已作为 suspense/misconception 条目存在**（只是 `revealed_chapter_id` 没设）；若已存在 → 修复用 `update_reader_perspective_entry` 设 `revealed_chapter_id` 把它**提升/回收为已知**（**严禁 `create` 重复建**——否则同一事实会既在悬念池又在已知，制造双重认知记录、复验必判未通过）；仅当该信息在台账中**完全不存在**时，才用 `create_reader_perspective_entry` 补建。desc 必须写清用的是 update 还是 create，并附 `reader_perspective#ID`（已存在时）。
   - ④ 先埋后收：条目的埋设/形成章与正文实际揭示顺序是否一致（回收/纠正不得早于埋设/形成）。
-  - 每条缺口产 issue 一律 `fix_type:"ledger"` + `dimension:"reader_pov"`，desc 指向具体 `reader_perspective#ID`；修复即补写 lifecycle 时间戳（S5 用 `update_reader_perspective_entry` 设 `revealed_chapter_id`（suspense=回收、misconception=纠正），或 `create_reader_perspective_entry` 补埋设/揭示条目），如 `{"id":"I11","level":"P1","area":"读者视角","desc":"reader_perspective#15 误解线无回收","fix_type":"ledger","target_scope":"active_volume","dimension":"reader_pov","direction":"forward_fix"}`。
+  - 每条缺口产 issue 一律 `fix_type:"ledger"` + `dimension:"reader_pov"`，desc 指向具体 `reader_perspective#ID`；修复即补写 lifecycle 时间戳——**已存在的条目**用 `update_reader_perspective_entry` 设 `revealed_chapter_id`（suspense=回收、misconception=纠正），**完全不存在的条目**才用 `create_reader_perspective_entry` 补埋设/揭示条目，如 `{"id":"I11","level":"P1","area":"读者视角","desc":"reader_perspective#15 误解线无回收，update_reader_perspective_entry 设 revealed_chapter_id","fix_type":"ledger","target_scope":"active_volume","dimension":"reader_pov","direction":"forward_fix"}`。
 - 低分放行章节核查：`get_chapter_list` 输出中带「质检」标注的章节（quality_score 已落库），凡评分偏低（如 <60）或质检报告显示「多次重写仍不达标后放行」的，必须核对其正文与问题并**必产一条 P1 issue**（评分门禁重试耗尽放行的章节不得静默放过）。
 - 控制成本：逐条扫描时只标记**具体不一致**，不重复读同一资源；扫描台账**不**替代逐章正文审读，二者互补。
 
