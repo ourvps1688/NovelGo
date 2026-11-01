@@ -2238,18 +2238,48 @@ func parseAudit(text string) AuditData {
 }
 
 // extractAuditJSON 从体检输出抽取结构化 JSON：优先 ```json 围栏块；围栏缺失/异常时回退到
-// 「最后一个 { 与最后一个 }（且 } 在 { 之后）之间的平衡对象」，容忍模型未闭合围栏或轻微
-// 格式抖动。抽不到返回空串（交由兜底处理，绝不返回整段原文）。
+// 「首个 { 起、按括号深度配平（跳过字符串字面量内的括号）到深度 0 的最外层 {…} 平衡对象」，
+// 容忍模型漏围栏或轻微格式抖动。抽不到返回空串（交由兜底处理，绝不返回整段原文）。
+//
+// 注意：嵌套体检 JSON（含 issues 数组）必须以深度配平取最外层对象——用 LastIndex 取最后一个
+// { 会切到内层 issue 元素的 {，配最外层 } 得到 {...}]} 非法 JSON，导致 json.Unmarshal 失败、
+// 静默落入兜底伪造单条 I1 并丢弃全部真实 issue（历史回归，已修复）。
 func extractAuditJSON(text string) string {
 	if m := auditJSONRe.FindStringSubmatch(text); len(m) > 1 {
 		if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
 			return trimmed
 		}
 	}
-	open := strings.LastIndex(text, "{")
-	close := strings.LastIndex(text, "}")
-	if open >= 0 && close > open {
-		return text[open : close+1]
+	// 围栏缺失时回退：扫描配平的最外层 {…}（跳过字符串字面量内的括号）。
+	start := strings.Index(text, "{")
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	inStr := false
+	for i := start; i < len(text); i++ {
+		c := text[i]
+		if inStr {
+			if c == '\\' && i+1 < len(text) {
+				i++ // 跳过转义字符
+				continue
+			}
+			if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return text[start : i+1]
+			}
+		}
 	}
 	return ""
 }
