@@ -18,6 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/novelgo/novelgo/internal/task"
 )
@@ -86,30 +89,63 @@ func (s *Service) hasActiveTask(ctx context.Context, runID string) bool {
 	return active
 }
 
+// legacyGuard 是降级路径（入队失败时后台派发）的同键去重：防止同一 kind:run_id 在降级
+// 路径下重复后台启动执行体（正常路径由任务队列 dedup 保证；降级是兜底，应尽量避免双跑）。
+var legacyGuard sync.Map
+
 // dispatchExecutor 把执行体派发进持久任务队列（dedup=kind:run_id 活跃去重）。
-// 队列不可用时降级调 legacy（迁移前的裸 goroutine 行为，逐字保留）。
+// 队列不可用（表缺失/Runner 未启动）→ 降级走裸 goroutine（迁移前的裸 goroutine 行为，非阻塞）。
+// 入队时数据库可能短暂锁竞争（operation_log 写与其他写入并发）：短重试吸收瞬态锁，避免误降级；
+// 重试仍失败才降级——降级**后台 goroutine** 而非同步直跑，绝不阻塞请求调用方（否则
+// 「去修复/复验」等用户操作会因执行体长耗时 LLM 调用卡死 UI，表现为按钮转圈 + 工单状态陈旧）。
 // issueKeys 仅复验执行体使用：显式携带待复验工单键，经 task payload 透传给消费侧，
 // 避免消费侧回扫 verifying 态（读己写竞态根因）。其余执行体不传（空）。
 func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy func(), issueKeys ...string) {
 	if s.taskStore == nil || s.taskRunner == nil || !s.taskRunner.Started() {
+		// 队列完全不可用（测试桩 / 降级路径）：同步直派，迁移前行为逐字保留。
+		// 生产环境队列恒启动，此分支不命中；故保持同步语义，不影响 UI 调用方。
 		legacy()
 		return
 	}
 	payload, merr := json.Marshal(taskPayload{RunID: runID, NovelID: novelID, IssueKeys: issueKeys})
 	if merr != nil {
-		legacy()
+		go legacy()
 		return
 	}
-	_, existing, err := s.taskStore.Enqueue(s.appCtx, task.Task{
+	tk := task.Task{
 		Kind:     kind,
 		DedupKey: fmt.Sprintf("%s:%s", kind, runID),
 		Payload:  string(payload),
 		RunID:    runID,
 		NovelID:  novelID,
-	})
+	}
+	var (
+		existing bool
+		err      error
+	)
+	// 短重试吸收瞬态「database is locked」（高并发写入下 operation_log 钩子偶发锁竞争）。
+	for attempt := 0; attempt < 3; attempt++ {
+		_, existing, err = s.taskStore.Enqueue(s.appCtx, tk)
+		if err == nil {
+			break
+		}
+		if strings.Contains(err.Error(), "database is locked") {
+			time.Sleep(time.Duration(attempt+1) * 40 * time.Millisecond)
+			continue
+		}
+		break
+	}
 	if err != nil {
-		s.logger.Warn("任务队列：入队失败，降级为直接派发", "kind", kind, "run_id", runID, "err", err)
-		legacy()
+		s.logger.Warn("任务队列：入队失败，降级为后台派发（非阻塞）", "kind", kind, "run_id", runID, "err", err)
+		key := fmt.Sprintf("%s:%s", kind, runID)
+		if _, loaded := legacyGuard.LoadOrStore(key, true); loaded {
+			s.logger.Info("降级后台派发：同键已在后台运行，合并跳过", "kind", kind, "run_id", runID)
+			return
+		}
+		go func() {
+			defer legacyGuard.Delete(key)
+			legacy()
+		}()
 		return
 	}
 	if existing {

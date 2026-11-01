@@ -33,22 +33,25 @@ func newQueueService(t *testing.T, db *gorm.DB) *Service {
 	return svc
 }
 
-// TestDispatchExecutorFallsBackWithoutQueue 队列不可用时降级裸 goroutine（原行为）：
-// Runner 未启动 / tasks 表缺失（Enqueue 失败）两种情况都走 legacy。
+// TestDispatchExecutorFallsBackWithoutQueue 队列不可用时降级裸 goroutine（原行为，非阻塞）：
+// Runner 未启动 / tasks 表缺失（Enqueue 失败）两种情况都走后台 legacy（异步，不阻塞调用方）。
 func TestDispatchExecutorFallsBackWithoutQueue(t *testing.T) {
 	db := newTestDB(t) // 无 tasks 表
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 
 	called := false
 	svc.dispatchExecutor(taskKindAudit, "run-1", 1, func() { called = true })
-	require.True(t, called, "Runner 未启动 → 降级直派")
+	// 降级走裸 goroutine（非阻塞）：异步置位，等待其执行。
+	require.Eventually(t, func() bool { return called }, time.Second, 10*time.Millisecond,
+		"Runner 未启动 → 降级后台派发")
 
 	svc.taskRunner = task.NewRunner(svc.taskStore, slog.Default(), task.WithPollInterval(10*time.Millisecond))
 	svc.StartTaskQueue()
 	defer svc.StopTaskQueue()
 	called = false
 	svc.dispatchExecutor(taskKindAudit, "run-2", 1, func() { called = true })
-	require.True(t, called, "Enqueue 失败（表缺失）→ 降级直派")
+	require.Eventually(t, func() bool { return called }, time.Second, 10*time.Millisecond,
+		"Enqueue 失败（表缺失）→ 降级后台派发")
 }
 
 // TestDispatchExecutorRunsViaQueue 队列路径：入队 → 消费执行 → done，legacy 不被调用。
