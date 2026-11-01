@@ -79,7 +79,14 @@ func (c *Client) GenerateText(
 	if err != nil {
 		var idleErr *idleTimeoutError
 		if errors.As(err, &idleErr) {
-			return "", &APIError{StatusCode: 0, Message: "响应空闲超时：" + idleErr.Error() + "，疑似网络中断或服务端挂起", Retryable: true}
+			// 零字节空转（供应商无响应 / 死连接）→ 不可重试，直接失败；
+			// 已收到过字节（真实慢生成 / 中途断流）→ 保留可重试，走既有退避。
+			retryable := idleRetryable(idleErr)
+			msg := "响应空闲超时：" + idleErr.Error() + "，疑似网络中断或服务端挂起"
+			if !retryable {
+				msg = "响应空闲超时（整个响应期间未收到任何字节，疑似供应商无响应 / 死连接），已中断且不再重试"
+			}
+			return "", &APIError{StatusCode: 0, Message: msg, Retryable: retryable}
 		}
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}

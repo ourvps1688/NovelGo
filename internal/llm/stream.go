@@ -76,22 +76,36 @@ const streamIdleTimeout = 3 * time.Minute
 // （建议区间 8~10min），既覆盖极长单步推理，又明显短于「永远卡死」以保留真正的挂起检测能力。
 const thinkingIdleTimeout = 9 * time.Minute
 
-// idleTimeoutError 标记由空闲 watchdog 触发的中断，供 parseSSE 生成可读错误文案。
-type idleTimeoutError struct{ timeout time.Duration }
+// idleTimeoutError 标记由空闲 watchdog 触发的中断，供上层生成可读错误文案。
+// gotBytes=false 表示闲置期间从未收到任何字节（典型「连得通但不吐数据」的死连接），
+// 上层应据此判为不可重试（直接失败），而非进入无限重试空转；
+// gotBytes=true 表示曾收到字节（真实慢生成 / 中途断流），保留可重试走既有退避。
+type idleTimeoutError struct {
+	timeout  time.Duration
+	gotBytes bool
+}
 
 func (e *idleTimeoutError) Error() string {
-	return fmt.Sprintf("流式响应空闲超时（%s 内无任何数据）", e.timeout)
+	return fmt.Sprintf("流式响应空闲超时（%s）", e.timeout)
+}
+
+// idleRetryable 由空闲超时错误的 gotBytes 判定是否可重试：
+// 零字节空转（死连接）→ 不可重试（直接失败，解除 agent 无限空转）；
+// 已收到字节（真实慢生成 / 中途断流）→ 可重试（走既有退避重试试探）。
+func idleRetryable(ie *idleTimeoutError) bool {
+	return ie != nil && ie.gotBytes
 }
 
 // idleWatchdog 监视 SSE body 读取活动：每收到字节就刷新 lastActivity，
 // 监视 goroutine 每 5s 轮询一次，发现空闲超过 streamIdleTimeout 即 cancel(ctx)。
 // 相比 time.Timer.Reset 轮询方案无竞态（CAS/双检查都不需要），代价可忽略。
 type idleWatchdog struct {
-	last    atomic.Int64 // 最近一次收到字节的 UnixNano
-	fired   atomic.Bool
-	timeout time.Duration
-	cancel  context.CancelFunc
-	logger  *slog.Logger
+	last     atomic.Int64 // 最近一次收到字节的 UnixNano
+	fired    atomic.Bool
+	gotBytes atomic.Bool // 本次请求是否曾收到过任何字节（零字节空转=死连接）
+	timeout  time.Duration
+	cancel   context.CancelFunc
+	logger   *slog.Logger
 }
 
 // idleTimeoutFor 根据 provider 中指定模型是否支持思考返回 SSE body 读取的空闲超时预算：
@@ -153,9 +167,10 @@ func (k *kickReader) Read(p []byte) (int, error) {
 	n, err := k.r.Read(p)
 	if n > 0 {
 		k.wd.last.Store(time.Now().UnixNano())
+		k.wd.gotBytes.Store(true)
 	}
 	if err != nil && k.wd.fired.Load() {
-		return n, &idleTimeoutError{timeout: k.wd.timeout}
+		return n, &idleTimeoutError{timeout: k.wd.timeout, gotBytes: k.wd.gotBytes.Load()}
 	}
 	return n, err
 }
@@ -572,17 +587,25 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerNa
 
 	if err := scanner.Err(); err != nil {
 		msg := fmt.Sprintf("SSE stream read error: %s", err)
+		retryable := true // 默认保持原行为：非空闲超时错误可重试
 		var idleErr *idleTimeoutError
 		if errors.As(err, &idleErr) {
-			msg = fmt.Sprintf("流式响应空闲超时：%s 内未收到任何数据，疑似网络中断或服务端挂起，已自动中断待重试",
-				idleErr.timeout.String())
+			// 空闲 watchdog 触发：区分「死连接」与「真实慢生成」。
+			retryable = idleRetryable(idleErr)
+			if idleErr.gotBytes {
+				msg = fmt.Sprintf("流式响应空闲超时：%s 内未再收到数据，疑似网络中断或服务端挂起，已自动中断待重试",
+					idleErr.timeout.String())
+			} else {
+				msg = fmt.Sprintf("流式响应空闲超时：%s 内未收到任何字节（疑似供应商无响应/死连接），已中断且不再重试",
+					idleErr.timeout.String())
+			}
 		}
-		c.logger.Warn("sse stream interrupted", "err", err)
+		c.logger.Warn("sse stream interrupted", "err", err, "retryable", retryable)
 		hadError = true
 		ch <- StreamEvent{Type: EventError, Error: &APIError{
 			StatusCode: 0,
 			Message:    msg,
-			Retryable:  true,
+			Retryable:  retryable,
 		}}
 		// 流异常中断：不再做 tool call 收尾，避免与 invalidToolErrors 分支叠加
 		// 产生第二个 EventError（scanner.Err 后 accumulated 数据不可信，保守丢弃）

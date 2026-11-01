@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -563,5 +564,66 @@ func TestIdleTimeoutFor(t *testing.T) {
 	// 未知模型 → 回落到 streamIdleTimeout（不误放宽）
 	if got := idleTimeoutFor(thinking, "unknown"); got != streamIdleTimeout {
 		t.Errorf("unknown model should fall back to streamIdleTimeout, got %v", got)
+	}
+}
+
+// TestIdleRetryable 验证空闲超时错误的可重试判定（方案 A）：
+// 零字节空转（死连接）→ 不可重试；已收到字节（真实慢生成 / 中途断流）→ 可重试。
+func TestIdleRetryable(t *testing.T) {
+	if idleRetryable(nil) {
+		t.Errorf("nil idleErr 应判为不可重试")
+	}
+	if idleRetryable(&idleTimeoutError{timeout: time.Minute, gotBytes: false}) {
+		t.Errorf("零字节空转=死连接应不可重试")
+	}
+	if !idleRetryable(&idleTimeoutError{timeout: time.Minute, gotBytes: true}) {
+		t.Errorf("已收字节=真实慢/中断应可重试")
+	}
+}
+
+// TestIdleTimeoutErrorGotBytes 验证 kickReader 在空闲超时时如实反映「是否收到过字节」：
+// 零字节 → gotBytes=false；曾收到字节 → gotBytes=true。这是上游把死连接判为不可重试的数据源。
+func TestIdleTimeoutErrorGotBytes(t *testing.T) {
+	noopCancel := func() {}
+
+	// case1: 整个响应零字节（死连接）
+	wd0 := &idleWatchdog{timeout: 50 * time.Millisecond, cancel: noopCancel}
+	wd0.fired.Store(true)
+	kr0 := wd0.wrapBody(strings.NewReader(""))
+	buf := make([]byte, 8)
+	_, err0 := kr0.Read(buf)
+	if err0 == nil {
+		t.Fatalf("case1: 期望收到错误")
+	}
+	var ie0 *idleTimeoutError
+	if !errors.As(err0, &ie0) {
+		t.Fatalf("case1: 零字节空闲超时错误应识别为 idleTimeoutError, got %v", err0)
+	}
+	if ie0.gotBytes {
+		t.Errorf("case1: 零字节空转应标记 gotBytes=false（死连接，不可重试）")
+	}
+
+	// case2: 先收到字节再 EOF（真实慢生成 / 中途断流）
+	wd1 := &idleWatchdog{timeout: 50 * time.Millisecond, cancel: noopCancel}
+	wd1.fired.Store(true)
+	kr1 := wd1.wrapBody(strings.NewReader("hello"))
+	b1 := make([]byte, 8)
+	n1, err1 := kr1.Read(b1)
+	if err1 != nil {
+		t.Fatalf("case2: 首读应成功, got err %v", err1)
+	}
+	if n1 != 5 {
+		t.Errorf("case2: 首读应返回 5 字节, got %d", n1)
+	}
+	_, err1b := kr1.Read(b1) // EOF
+	if err1b == nil {
+		t.Fatalf("case2: 二读应返回 EOF")
+	}
+	var ie1 *idleTimeoutError
+	if !errors.As(err1b, &ie1) {
+		t.Fatalf("case2: 已收字节后再空闲超时仍应识别为 idleTimeoutError, got %v", err1b)
+	}
+	if !ie1.gotBytes {
+		t.Errorf("case2: 已收到字节应标记 gotBytes=true（保留可重试）")
 	}
 }
