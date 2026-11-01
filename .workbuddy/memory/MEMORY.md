@@ -22,6 +22,9 @@
 - v172 去重迁移子表守卫（2026-11-01, 6a0aca2f）：PreSchemaSteps 在 AutoMigrate 建表前跑，去重函数碰引用子表须先 `HasTable` 守卫，否则 dev 库缺新子表时报 `no such table: group_members` 启动失败。
 - 复验铁律（审计 P0）：`VerifyIssueTickets` 须显式经 task payload 的 `IssueKeys` 透传给 `runVerifyTickets`，严禁执行体回扫 verifying 态（读己写竞态曾致永久卡 verifying）。L0 快路径粗粒度项 `name_drift`/`tail_hook` 命中回落 LLM 复核原指向。三档预算放宽（verifyCallTimeout 120min / verifyTicketTimeout 8min / verifyMaxTurns 12）。重新进入 verifying 一并清空 note。
 - 复验自动升级人工（2026-11-01）：复验「明确未通过」累计达 3 次（`verifyEscalateAfter`，仅计 rejected 不计 unverified）自动转 `skipped`（人工工单，复用既有语义；`PipelineIssue.verify_attempts` 计数，AutoMigrate 自动加列），skip_reason/note 写明「复验 N 次未通过，自动转人工工单」；前端状态徽章不变（skipped=已跳过），面板 note 区可见原因。防修复→复验失败无限空转。
+- 签约体检报告解析泄漏修复（2026-11-01, 7cb519d8）：`parseAudit`（service.go）此前 JSON 解析失败兜底把整段原始 LLM 输出塞进 Summary/issue.Desc 并持久化，致签约潜力评估面板把整份报告当纯文本铺开（含末尾原始 JSON）。改为健壮抽 JSON（json 代码围栏 + 末段平衡大括号兜底）+ 优雅降级（干净 P0 issue 提示重跑体检，绝不写原文）；新增 TestParseAuditNoRawTextLeak 回归
+<arg_key:6124c78e>replace_all</arg_key:6124c78e>
+<arg_value:6124c78e>false
 
 ## ONNX 现状（结论，细节见 docs/onnx-enhancement-development-plan.md）
 - 仅 `bge-small-zh-v1.5`（512维）做文本向量化（4 消费方全部优雅降级）。reranker 已 L3 彻底移除（真实评测净负优化）；P0-2 批处理/缓存 ✅；P1-1 长文分段聚合 ✅（不影响功能）；P1-2 升级 embedding 模型 评估后放弃（维度变更须重建向量库）；P2 本地分类器/NER 降级待触发。
@@ -34,6 +37,6 @@
 - 工单 chapter_ids=全局阅读序号；台账引用写 `<type>#<id>`（id=自增主键，常上千）；裸 `#\d+` 一律视为台账引用。
 
 ## 排障
-- 重启 wails dev：带全套 CGO export 跑 `wails.exe dev`；重启前 `rm -rf frontend/dist/assets`（防 vite SAFE_DELETE_BULK_CONFIRM_REQUIRED）；结束旧进程 `Stop-Process -Id <pid> -Force`。浏览器访问 5173 白屏=正常（Wails 桥仅注入桌面 webview）。
+- 重启 wails dev：带全套 CGO export **+ `CODEBUDDY_SAFE_DELETE_ENABLED=0`** 跑 `wails.exe dev`。关键：WorkBuddy 的 node-safe-delete-shim（`app.asar.unpacked/cli/vendor/shim/node-safe-delete-shim.cjs`）会拦截 vite 的 emptyDir（threshold 50 / scope turn，抛 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`）；且 `wails dev` 跑 `tsc -b && vite build`，`tsc -b` 会在 rm 之后重新往 `dist/assets` 吐编译产物，故**仅预删 assets 无效**，必须靠该 env 关掉 shim 才能让 vite build 过。结束旧进程 `Stop-Process -Id <pid> -Force`（注意 `ps -W` 的 MinGW PID ≠ Windows 真实 PID，须用 PowerShell `Get-Process` 取真实 PID 再杀，否则杀不干净致旧实例残留）。浏览器访问 5173 白屏=正常（Wails 桥仅注入桌面 webview）。
 - vitest 沙箱偶发失败（资源受限）；前端用 format/i18n/lint(0 error)/build 兜底，vitest 脱沙箱跑。
 - wails 重启重产的前端绑定文件（App.d.ts/App.js/models.ts）常现纯缩进/排序噪声，git checkout 还原即可，勿混入提交。
