@@ -155,6 +155,29 @@ func TestParseAuditDegradesOnGarbage(t *testing.T) {
 	require.Contains(t, data.Summary, "乱码")
 }
 
+// TestParseAuditNoRawTextLeak 回归：体检 LLM 输出整份 markdown 报告 + 末尾坏 JSON 时，
+// parseAudit 必须优雅降级，**绝不**把原始 markdown/JSON 塞进 Summary 或 issue.Desc
+// （否则签约潜力评估卡会把整份报告当纯文本铺开，污染界面）。
+func TestParseAuditNoRawTextLeak(t *testing.T) {
+	// summary 里故意嵌入未转义 ASCII 双引号（"过签力强"）→ 合法围栏块内却是非法 JSON。
+	longReport := "签约级体检报告 (novel_id=19, 第一卷《八号竖井的呼吸》, 第1-7章全量通读)\n" +
+		"一句话结论: 能签 (30/40) — 黄金三章过签力强，短板集中在第3-4章连续性硬伤。\n" +
+		"## 八维评分\n| 开局过签力 | 4/5 |\n| 节奏与爽点密度 | 4/5 |\n" +
+		"## 修复清单一\n13 图谐绪文层纯黑 第1-2章从未展示\n" +
+		"```json\n{\"verdict\": \"pass\", \"score\": 30, \"summary\": \"能签 \"过签力强\" 短板集中在第3-4章\", " +
+		"\"issues\": [{\"id\":\"I1\",\"level\":\"P1\",\"area\":\"x\",\"desc\":\"y\"}]}\n```"
+	data := parseAudit(longReport)
+	require.Equal(t, "needs_fix", data.Verdict)
+	require.Len(t, data.Issues, 1)
+	// 关键断言：Summary 与 issue.Desc 不得包含原始 markdown/JSON 噪声。
+	require.NotContains(t, data.Summary, "```json", "Summary 不得泄漏原始 JSON 块")
+	require.NotContains(t, data.Summary, "八维评分", "Summary 不得包含整份报告正文")
+	require.NotContains(t, data.Issues[0].Desc, "八维评分", "issue.Desc 不得包含整份报告正文")
+	require.NotContains(t, data.Issues[0].Desc, "```json", "issue.Desc 不得泄漏原始 JSON 块")
+	// 降级提示应是干净的「需重跑」语义，而非原文。
+	require.Contains(t, data.Issues[0].Desc, "重新运行签约体检")
+}
+
 // TestServiceGoldenThreeTriggersAudit 验证：写完黄金三章（chapterCount≥3）且尚未体检时，
 // S3 的「继续」会自动进入 S4 签约体检，异步体检完成后着陆 G4 闸门且 audit 写入 ContextJSON。
 func TestServiceGoldenThreeTriggersAudit(t *testing.T) {

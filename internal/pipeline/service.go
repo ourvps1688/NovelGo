@@ -2213,19 +2213,20 @@ func parseVerifyReceipt(text string) (results map[string]verifyResult, summary s
 	return nil, "", false
 }
 
+// parseAudit 把 signability-audit 的 LLM 输出解析为结构化 AuditData。
+// 安全性铁律：解析失败**绝不**把整段原始 markdown/JSON 塞进 Summary/Issues（否则体检卡
+// 会把整份报告当纯文本铺开，污染界面）。改为优雅降级：抽取不到合法 JSON 时给一条清晰的
+// 「需重跑」提示（保持 needs_fix），由用户重新运行签约体检闭环（契约：不读旧报告，靠重跑
+// audit 闭环）。
 func parseAudit(text string) AuditData {
 	data := AuditData{Verdict: "needs_fix"}
-	m := auditJSONRe.FindStringSubmatch(text)
-	raw := text
-	if len(m) > 1 {
-		raw = m[1]
+	raw := extractAuditJSON(text)
+	if raw == "" {
+		return auditParseFallback(text)
 	}
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
-		return AuditData{
-			Verdict: "needs_fix",
-			Summary: text,
-			Issues:  []AuditIssue{{ID: "I1", Level: "P0", Area: "总体", Desc: text}},
-		}
+		// 结构化解析失败（常见：summary/desc 含未转义引号或换行）：不回退为整段原文。
+		return auditParseFallback(text)
 	}
 	if data.Verdict == "" {
 		data.Verdict = "needs_fix"
@@ -2234,6 +2235,72 @@ func parseAudit(text string) AuditData {
 		data.Issues = []AuditIssue{}
 	}
 	return data
+}
+
+// extractAuditJSON 从体检输出抽取结构化 JSON：优先 ```json 围栏块；围栏缺失/异常时回退到
+// 「最后一个 { 与最后一个 }（且 } 在 { 之后）之间的平衡对象」，容忍模型未闭合围栏或轻微
+// 格式抖动。抽不到返回空串（交由兜底处理，绝不返回整段原文）。
+func extractAuditJSON(text string) string {
+	if m := auditJSONRe.FindStringSubmatch(text); len(m) > 1 {
+		if trimmed := strings.TrimSpace(m[1]); trimmed != "" {
+			return trimmed
+		}
+	}
+	open := strings.LastIndex(text, "{")
+	close := strings.LastIndex(text, "}")
+	if open >= 0 && close > open {
+		return text[open : close+1]
+	}
+	return ""
+}
+
+// auditParseFallback 体检输出无法解析为合法 JSON 时的降级：绝不把整段原始 markdown/JSON
+// 塞进 Summary/Issues 污染界面，只给一条清晰的「需重跑」提示 + 单条 P0 总体项（沿用既有
+// 「解析失败→单条兜底 issue」契约，但 Desc 是干净提示而非原文）。
+func auditParseFallback(text string) AuditData {
+	summary := firstSentenceOf(text)
+	if summary == "" {
+		summary = "体检结果解析失败：模型未产出合法结构化 JSON，请重新运行签约体检。"
+	}
+	return AuditData{
+		Verdict: "needs_fix",
+		Summary: summary,
+		Issues: []AuditIssue{{
+			ID:    "I1",
+			Level: "P0",
+			Area:  "总体",
+			Desc:  "体检结果解析失败：模型未按契约产出合法 JSON（可能输出截断或格式不符），请重新运行签约体检以生成可用结论。",
+		}},
+	}
+}
+
+// firstSentenceOf 从体检输出的人类可读部分抽首句作为简短 Summary：只取首个代码围栏之前
+// 的内容（避免把 JSON 块/表格带进来），跳过噪音头（含 novel_id / 「签约级体检报告」），
+// 去 markdown 符号并截断。抽不到返回空串。
+func firstSentenceOf(text string) string {
+	if idx := strings.Index(text, "```"); idx >= 0 {
+		text = text[:idx]
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	for _, line := range strings.Split(text, "\n") {
+		l := strings.TrimSpace(line)
+		l = strings.TrimLeft(l, "#-*=>` ")
+		l = strings.ReplaceAll(l, "**", "")
+		if len([]rune(l)) < 4 {
+			continue
+		}
+		if strings.Contains(l, "novel_id") || strings.HasPrefix(l, "签约级体检报告") {
+			continue
+		}
+		if len([]rune(l)) > 60 {
+			l = string([]rune(l)[:60]) + "…"
+		}
+		return l
+	}
+	return ""
 }
 
 // isLLMRefusal 识别 LLM 以「拒绝 / 安全审核拦截」形式返回的无效产出（而非真实分析）。
