@@ -190,3 +190,53 @@ func TestServiceExecuteAuditLandsGateKeepsAuditContext(t *testing.T) {
 	require.NotEmpty(t, gates, "应广播 G4 汇总闸门供检测汇总视图消费")
 	require.Equal(t, GateG4, gates[len(gates)-1].GateID)
 }
+
+// ── filterChapterIDs：按本书有效章节范围裁剪脏数据 ──────────────────────────
+
+// TestFilterChapterIDs 锁死「涉及章节」裁剪：剔除越界规划章号与误填的台账 ID。
+// 阅读序号连续 1..N（N=章节总数），故有效范围等价 [1, 章节总数]。
+func TestFilterChapterIDs(t *testing.T) {
+	// 7 章书：剔除规划章号（8/20）与台账 ID（217/252）
+	require.Equal(t, []int64{1, 7}, filterChapterIDs([]int64{1, 7, 8, 20, 217, 252}, 7))
+	// 30 章书：剔除台账 ID（217/498）
+	require.Equal(t, []int64{1, 12, 30}, filterChapterIDs([]int64{1, 12, 30, 217, 498}, 30))
+	// 上界 0（本书无章节 / 测试未建章节）：跳过裁剪，保留既有行为
+	require.Equal(t, []int64{1, 8, 217}, filterChapterIDs([]int64{1, 8, 217}, 0))
+	// 负数等同 0
+	require.Equal(t, []int64{5}, filterChapterIDs([]int64{5}, -1))
+	// 负数且含越界：等同 0，不裁剪
+	require.Equal(t, []int64{1, 999}, filterChapterIDs([]int64{1, 999}, -1))
+	// 0 长度输入
+	require.Empty(t, filterChapterIDs([]int64{}, 7))
+	require.Empty(t, filterChapterIDs(nil, 7))
+}
+
+// TestPipelineIssueRow_FiltersOutOfRangeChapters 验证 pipelineIssueRow 在落库投影时
+// 已按有效章节上界裁剪：结构化 chapter_ids 与兜底正则解析的越界值都被剔除。
+func TestPipelineIssueRow_FiltersOutOfRangeChapters(t *testing.T) {
+	// 结构化 chapter_ids 含越界规划章号与台账 ID（本书 7 章）
+	row := pipelineIssueRow(19, "run-x", 0, AuditIssue{
+		ID:         "I1",
+		Area:       "节奏",
+		Desc:       "第1章与第20章断档",
+		ChapterIDs: []int64{1, 20, 217},
+	}, 7)
+	require.JSONEq(t, "[1]", row.ChapterIDsJSON)
+
+	// 结构化为空时回退 desc 正则：第1章、第20章解析出 [1,20]，裁剪后仅剩 [1]
+	row2 := pipelineIssueRow(19, "run-y", 0, AuditIssue{
+		ID:   "I2",
+		Area: "节奏",
+		Desc: "第1章与第20章断档",
+	}, 7)
+	require.JSONEq(t, "[1]", row2.ChapterIDsJSON)
+
+	// 无章节上界（0）：不裁剪，保留 LLM 原值（兼容无章节测试 / 历史数据）
+	row3 := pipelineIssueRow(19, "run-z", 0, AuditIssue{
+		ID:         "I3",
+		Area:       "长线",
+		Desc:       "timeline#42 伏笔未回收",
+		ChapterIDs: []int64{},
+	}, 0)
+	require.JSONEq(t, "[]", row3.ChapterIDsJSON)
+}

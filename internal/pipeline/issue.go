@@ -107,9 +107,34 @@ func issueChapterIDs(it AuditIssue) []int64 {
 	return parseChapterRefs(it.Area, it.Desc)
 }
 
+// filterChapterIDs 按本书有效章节范围 [1, maxChapter] 裁剪涉及章节号，剔除越界值：
+//   - LLM 把台账实体 ID（如 217/252）误填进结构化 chapter_ids 的脏数据；
+//   - LLM 引用尚未写出的规划章号（本书只写了 7 章却在 chapter_ids 写 8..20）。
+//
+// maxChapter<=0 表示本书暂无章节（含测试未建章节的情形），跳过裁剪以保留既有行为、
+// 不破坏无章节测试。阅读序号由 GetReadingNumbersByNovel 顺序编号为连续 1..N，故有效
+// 范围等价于 [1, 章节总数]，无需引入 chapter store 依赖，直接按 chapters 表计数即可。
+func filterChapterIDs(chapters []int64, maxChapter int) []int64 {
+	if maxChapter <= 0 {
+		return chapters
+	}
+	out := make([]int64, 0, len(chapters))
+	for _, c := range chapters {
+		if c >= 1 && int(c) <= maxChapter {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // pipelineIssueRow 把一条契约 issue 投影为工单行（状态 pending，作用域取有效章节号）。
-func pipelineIssueRow(novelID int64, runID string, round int, it AuditIssue) PipelineIssue {
-	chapters, _ := json.Marshal(issueChapterIDs(it))
+// validChapterMax 为本节有效章节上界（0 表示不裁剪，见 filterChapterIDs）。
+func pipelineIssueRow(novelID int64, runID string, round int, it AuditIssue, validChapterMax int) PipelineIssue {
+	chapters := filterChapterIDs(issueChapterIDs(it), validChapterMax)
+	if chapters == nil {
+		chapters = []int64{}
+	}
+	chaptersJSON, _ := json.Marshal(chapters)
 	return PipelineIssue{
 		NovelID:        novelID,
 		RunID:          runID,
@@ -121,22 +146,33 @@ func pipelineIssueRow(novelID int64, runID string, round int, it AuditIssue) Pip
 		TargetScope:    it.TargetScope,
 		Dimension:      it.Dimension,
 		Direction:      it.Direction,
-		ChapterIDsJSON: string(chapters),
+		ChapterIDsJSON: string(chaptersJSON),
 		Status:         IssueStatusPending,
 		Round:          round,
 	}
 }
 
 // ReplaceIssues 以新一轮体检结果整批替换该 run 的 issue 工单（新体检=新问题清单）。
-// round 记录本轮修复轮数，供增量复验分轮与统计。
+// round 记录本轮修复轮数，供增量复验分轮与统计。落库前按本书真实章节数裁剪 chapter_ids，
+// 剔除台账 ID / 越界规划章号等脏数据（签约体检契约要求 chapter_ids 必须是有效全局阅读序号）。
 func (s *Store) ReplaceIssues(ctx context.Context, novelID int64, runID string, round int, issues []AuditIssue) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("novel_id = ? AND run_id = ?", novelID, runID).
 			Delete(&PipelineIssue{}).Error; err != nil {
 			return err
 		}
+		// 本书有效章节上界：章节总数（阅读序号连续 1..N）。无章节则 0（不裁剪）。
+		// chapters 表可能尚未迁移（测试 / 极早期库），缺失时跳过裁剪以保留既有行为。
+		validMax := 0
+		if tx.Migrator().HasTable("chapters") {
+			var chapterCount int64
+			if err := tx.Raw("SELECT COUNT(*) FROM chapters WHERE novel_id = ?", novelID).
+				Scan(&chapterCount).Error; err == nil {
+				validMax = int(chapterCount)
+			}
+		}
 		for _, it := range issues {
-			row := pipelineIssueRow(novelID, runID, round, it)
+			row := pipelineIssueRow(novelID, runID, round, it, validMax)
 			if err := tx.Create(&row).Error; err != nil {
 				return err
 			}
