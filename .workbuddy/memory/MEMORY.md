@@ -22,9 +22,8 @@
 - v172 去重迁移子表守卫（2026-11-01, 6a0aca2f）：PreSchemaSteps 在 AutoMigrate 建表前跑，去重函数碰引用子表须先 `HasTable` 守卫，否则 dev 库缺新子表时报 `no such table: group_members` 启动失败。
 - 复验铁律（审计 P0）：`VerifyIssueTickets` 须显式经 task payload 的 `IssueKeys` 透传给 `runVerifyTickets`，严禁执行体回扫 verifying 态（读己写竞态曾致永久卡 verifying）。L0 快路径粗粒度项 `name_drift`/`tail_hook` 命中回落 LLM 复核原指向。三档预算放宽（verifyCallTimeout 120min / verifyTicketTimeout 8min / verifyMaxTurns 12）。重新进入 verifying 一并清空 note。
 - 复验自动升级人工（2026-11-01）：复验「明确未通过」累计达 3 次（`verifyEscalateAfter`，仅计 rejected 不计 unverified）自动转 `skipped`（人工工单，复用既有语义；`PipelineIssue.verify_attempts` 计数，AutoMigrate 自动加列），skip_reason/note 写明「复验 N 次未通过，自动转人工工单」；前端状态徽章不变（skipped=已跳过），面板 note 区可见原因。防修复→复验失败无限空转。
-- 签约体检报告解析泄漏修复（2026-11-01, 7cb519d8）：`parseAudit`（service.go）此前 JSON 解析失败兜底把整段原始 LLM 输出塞进 Summary/issue.Desc 并持久化，致签约潜力评估面板把整份报告当纯文本铺开（含末尾原始 JSON）。改为健壮抽 JSON（json 代码围栏 + 末段平衡大括号兜底）+ 优雅降级（干净 P0 issue 提示重跑体检，绝不写原文）；新增 TestParseAuditNoRawTextLeak 回归
-<arg_key:6124c78e>replace_all</arg_key:6124c78e>
-<arg_value:6124c78e>false
+- 签约体检报告解析泄漏修复（2026-11-01, 7cb519d8）：`parseAudit`（service.go）此前 JSON 解析失败兜底把整段原始 LLM 输出塞进 Summary/issue.Desc 并持久化，致签约潜力评估面板把整份报告当纯文本铺开（含末尾原始 JSON）。改为健壮抽 JSON（json 代码围栏 + 末段平衡大括号兜底）+ 优雅降级（干净 P0 issue 提示重跑体检，绝不写原文）；新增 TestParseAuditNoRawTextLeak 回归测试。
+- 签约体检卡「一直运行中」死循环修复（2026-11-01, c4afcb37）：供应商「连得通但不吐数据」时，空闲看门狗每约9分钟超时一次，旧代码把空闲超时一律标 Retryable:true 且熔断刻意忽略空闲超时，致 agent 无限重试直到60分钟硬超时，界面表现为签约体检一直运行中卡死。修复：idleWatchdog 记录本次请求是否收到过字节；新增 idleRetryable 纯函数——零字节空转（死连接）判不可重试（直接失败并给「未收到任何字节/疑似供应商无响应」清晰错误），已收字节（真实慢生成/中途断流）仍保留可重试，不误杀思考模型长静默。非流式（generate.go）与流式（stream.go）两路径接入；新增 TestIdleRetryable/TestIdleTimeoutErrorGotBytes。熔断行为不变（仍不因子空闲超时熔断）。
 
 ## ONNX 现状（结论，细节见 docs/onnx-enhancement-development-plan.md）
 - 仅 `bge-small-zh-v1.5`（512维）做文本向量化（4 消费方全部优雅降级）。reranker 已 L3 彻底移除（真实评测净负优化）；P0-2 批处理/缓存 ✅；P1-1 长文分段聚合 ✅（不影响功能）；P1-2 升级 embedding 模型 评估后放弃（维度变更须重建向量库）；P2 本地分类器/NER 降级待触发。
