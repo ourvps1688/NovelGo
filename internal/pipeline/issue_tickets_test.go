@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -43,7 +44,8 @@ func TestStoreIssueTicketStateMachine(t *testing.T) {
 	require.ErrorIs(t, err, ErrIssueIllegalTransition)
 
 	// 复验回执落表：通过 → verified 终态 + 回执/时间留痕。
-	require.NoError(t, s.RecordIssueVerify(ctx, 7, "run-a", "I1", true, "第1-3章人设已立"))
+	_, err = s.RecordIssueVerify(ctx, 7, "run-a", "I1", true, "第1-3章人设已立")
+	require.NoError(t, err)
 	rows, err = s.ListIssues(ctx, 7, "run-a")
 	require.NoError(t, err)
 	require.Equal(t, IssueStatusVerified, rows[0].Status)
@@ -53,7 +55,7 @@ func TestStoreIssueTicketStateMachine(t *testing.T) {
 	// 终态无出边：verified 上任何流转/复验都被拒。
 	err = s.TransitionIssueTicket(ctx, 7, "run-a", "I1", IssueStatusFixing, "")
 	require.ErrorIs(t, err, ErrIssueTerminal)
-	err = s.RecordIssueVerify(ctx, 7, "run-a", "I1", true, "再验一次")
+	_, err = s.RecordIssueVerify(ctx, 7, "run-a", "I1", true, "再验一次")
 	require.ErrorIs(t, err, ErrIssueTerminal)
 
 	// 不存在的工单显式报错。
@@ -83,12 +85,59 @@ func TestStoreIssueTicketDismissAndReverifyFail(t *testing.T) {
 
 	// 复验未通过：退回待修（pending），回执照记。
 	require.NoError(t, s.TransitionIssueTicket(ctx, 7, "run-a", "I2", IssueStatusFixing, ""))
-	require.NoError(t, s.RecordIssueVerify(ctx, 7, "run-a", "I2", false, "只改了一半"))
+	_, err = s.RecordIssueVerify(ctx, 7, "run-a", "I2", false, "只改了一半")
+	require.NoError(t, err)
 	rows, err = s.ListIssues(ctx, 7, "run-a")
 	require.NoError(t, err)
 	require.Equal(t, IssueStatusPending, rows[1].Status)
 	require.Equal(t, "只改了一半", rows[1].VerifyReceipt)
 	require.NotNil(t, rows[1].VerifyAt)
+}
+
+// TestStoreIssueVerifyAutoEscalate 验收复验多次「明确未通过」自动升级为人工工单（skipped）：
+// 累计未通过达 verifyEscalateAfter 阈值，第 N 次未通过即转 skipped（而非 pending），
+// 并在 skip_reason/note 写明原因；阈值前的未通过保持 pending 且尝试次数递增。
+// 仅计明确未通过（rejected），不计未确认（unverified）。
+func TestStoreIssueVerifyAutoEscalate(t *testing.T) {
+	db := newTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	require.NoError(t, s.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇", Desc: "前三章未立人设"},
+	}))
+	require.NoError(t, s.TransitionIssueTicket(ctx, 7, "run-a", "I1", IssueStatusFixing, ""))
+
+	// 前 verifyEscalateAfter-1 次未通过：保持 pending，尝试次数递增。
+	for i := 1; i < verifyEscalateAfter; i++ {
+		escalated, err := s.RecordIssueVerify(ctx, 7, "run-a", "I1", false, fmt.Sprintf("第%d次未过", i))
+		require.NoError(t, err)
+		require.False(t, escalated, "未达阈值不应升级")
+		row, rerr := s.getIssueRow(ctx, 7, "run-a", "I1")
+		require.NoError(t, rerr)
+		require.Equal(t, IssueStatusPending, row.Status, "阈值前未通过退回待修")
+		require.Equal(t, i, row.VerifyAttempts, "尝试次数随未通过递增")
+	}
+
+	// 第 verifyEscalateAfter 次未通过：自动升级为人工工单（skipped）。
+	escalated, err := s.RecordIssueVerify(ctx, 7, "run-a", "I1", false, "第N次仍未过")
+	require.NoError(t, err)
+	require.True(t, escalated, "达阈值应触发自动升级")
+	row, rerr := s.getIssueRow(ctx, 7, "run-a", "I1")
+	require.NoError(t, rerr)
+	require.Equal(t, IssueStatusSkipped, row.Status, "达阈值自动转人工工单")
+	require.Equal(t, verifyEscalateAfter, row.VerifyAttempts)
+	require.Contains(t, row.SkipReason, "自动转人工工单")
+	require.Contains(t, row.Note, "自动转人工工单")
+
+	// 升级后（skipped 为人工工单态，非硬终态，留给人工经 skipped→fixing/dismissed 裁决）：
+	// 再次未通过复验应幂等保持 skipped（不再翻转、不报错、尝试次数继续累加）。
+	again, err := s.RecordIssueVerify(ctx, 7, "run-a", "I1", false, "越界复验")
+	require.NoError(t, err)
+	require.True(t, again, "已升级工单再未通过仍判定为升级态")
+	row, rerr = s.getIssueRow(ctx, 7, "run-a", "I1")
+	require.NoError(t, rerr)
+	require.Equal(t, IssueStatusSkipped, row.Status)
+	require.Equal(t, verifyEscalateAfter+1, row.VerifyAttempts)
 }
 
 // ── RewriteBacklog 的工单表投影（R5-1「读写改走工单」）────────────────────────
@@ -117,7 +166,8 @@ func TestStoreListRewriteTickets(t *testing.T) {
 		"body 与 V 系进投影；台账级（I2）不进")
 
 	// 已收口的工单退出清单：verified / dismissed 不进。
-	require.NoError(t, s.RecordIssueVerify(ctx, 7, "run-a", "I3", true, "已修复"))
+	_, err = s.RecordIssueVerify(ctx, 7, "run-a", "I3", true, "已修复")
+	require.NoError(t, err)
 	require.NoError(t, s.TransitionIssueTicket(ctx, 7, "run-a", "I4", IssueStatusDismissed, "误报"))
 	rows, err = s.ListRewriteTickets(ctx, 7, "run-a")
 	require.NoError(t, err)
@@ -151,7 +201,8 @@ func TestServiceRewriteBacklogOfProjection(t *testing.T) {
 	require.Equal(t, "IX", got[0].ID)
 
 	// 有行但全部收口（复验通过/驳回终态）→ 投影为空且不回退（收口即时出清单）。
-	require.NoError(t, svc.store.RecordIssueVerify(ctx, 7, "run-a", "I1", true, "复验通过"))
+	_, err := svc.store.RecordIssueVerify(ctx, 7, "run-a", "I1", true, "复验通过")
+	require.NoError(t, err)
 	require.NoError(t, svc.store.TransitionIssueTicket(ctx, 7, "run-a", "I2", IssueStatusDismissed, "误报"))
 	got = svc.rewriteBacklogOf(ctx, 7, "run-a", []RewriteItem{{ID: "I1"}})
 	require.Empty(t, got, "工单收口后投影为空，不回退内存清单")
@@ -182,7 +233,8 @@ func TestVerifyIssueTicketsCarriesKeysViaQueue(t *testing.T) {
 		{ID: "I2", Level: "P1", Area: "人设", Desc: "弱"},
 		{ID: "I3", Level: "P1", Area: "逻辑", Desc: "矛盾"}, // 已 verified 终态，应被跳过
 	}))
-	require.NoError(t, svc.store.RecordIssueVerify(ctx, novelID, runID, "I3", true, "已通过"))
+	_, err := svc.store.RecordIssueVerify(ctx, novelID, runID, "I3", true, "已通过")
+	require.NoError(t, err)
 
 	var mu sync.Mutex
 	var captured []string

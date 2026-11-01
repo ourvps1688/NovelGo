@@ -212,6 +212,12 @@ var verifyTicketTimeout = 8 * time.Minute
 // 仍轻于整批复验的 18 轮。
 const verifyMaxTurns = 12
 
+// verifyEscalateAfter 是复验「明确未通过」的自动升级阈值（防无限空转）：同一工单复验
+// 连续被判定未通过累计达此次数，自动从 pending 升级为 skipped（人工工单，契约本就规定
+// 修不了报 skipped 转人工、不再重试），并在 skip_reason/note 写明原因，交人工裁决
+// （修正修复处方 / 手动复验 / 驳回）。仅计明确未通过（rejected），不计未确认（unverified）。
+const verifyEscalateAfter = 3
+
 // detectKindOfMode 由容器 mode 反推检测 kind（卷体检 / 书体检；默认书体检），
 // 供执行体创建带取消的派生 ctx 时定位 detectKey（与 beginDetect 登记键一致）。
 func detectKindOfMode(mode string, volumeID *int64) string {

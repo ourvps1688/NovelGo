@@ -32,6 +32,7 @@ type IssueVerifySummary struct {
 	Rejected   int    `json:"rejected"`   // 复验未通过（退回待修）
 	Unverified int    `json:"unverified"` // 终态跳过 / 回执未解析未改动 / 未提及留待下轮
 	Queued     int    `json:"queued"`     // 已派发后台复验的工单数（异步入口即时回执）
+	Escalated  int    `json:"escalated"`  // 复验多次未过自动转人工工单数（skipped）
 	Detail     string `json:"detail"`     // 一行小结
 }
 
@@ -485,7 +486,7 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 		verified, rejected, note := s.verifyOneTicket(ctx, novelID, runID, r, ledgerNotes, prop.block())
 		switch {
 		case verified:
-			if err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, true, note); err != nil {
+			if _, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, true, note); err != nil {
 				s.logger.Warn("复验：落库 verified 失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
 				s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验通过落库失败，已复位待复验")
 				summary.Unverified++
@@ -493,12 +494,16 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 				summary.Confirmed++
 			}
 		case rejected:
-			if err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, false, note); err != nil {
+			escalated, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, false, note)
+			if err != nil {
 				s.logger.Warn("复验：落库未通过失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
 				s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验未通过落库失败，已复位待复验")
 				summary.Unverified++
 			} else {
 				summary.Rejected++
+				if escalated {
+					summary.Escalated++
+				}
 			}
 		default:
 			// 未确认（LLM 失败 / 回执未解析 / 回执未提及）：复位 pending 留待下轮，绝不静默判通过（审计 P2）。
@@ -523,13 +528,16 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 	if summary.Unverified > 0 {
 		summary.Detail += fmt.Sprintf("，%d 项未确认留待下轮", summary.Unverified)
 	}
+	if summary.Escalated > 0 {
+		summary.Detail += fmt.Sprintf("，%d 项复验多次未过自动转人工工单", summary.Escalated)
+	}
 	if seg := prop.summary(); seg != "" {
 		summary.Detail += "；" + seg
 	}
 	emitVerifyDone(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID,
 		"confirmed": summary.Confirmed, "rejected": summary.Rejected,
-		"unverified": summary.Unverified, "detail": summary.Detail,
+		"unverified": summary.Unverified, "escalated": summary.Escalated, "detail": summary.Detail,
 	})
 }
 

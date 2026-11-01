@@ -86,6 +86,9 @@ type PipelineIssue struct {
 	VerifyReceipt string `gorm:"column:verify_receipt;type:text" json:"verify_receipt,omitempty"`
 	// VerifyAt 是最近一次复验落表时间。
 	VerifyAt *time.Time `gorm:"column:verify_at" json:"verify_at,omitempty"`
+	// VerifyAttempts 是复验「明确未通过」的累计次数（只计 rejected，不计未确认 unverified）；
+	// 达阈值（verifyEscalateAfter）自动升级为人工工单（skipped），避免无限空转。
+	VerifyAttempts int `gorm:"column:verify_attempts;not null;default:0" json:"verify_attempts"`
 	// Note 是工单面板流转时的人工备注（驳回理由/交接说明）。
 	Note string `gorm:"column:note;type:text" json:"note,omitempty"`
 	// Round 是记录/流转时的修复轮数（GateContext.FixRounds），供轮次统计与增量复验分轮。
@@ -314,26 +317,66 @@ func (s *Store) TransitionIssueTicket(ctx context.Context, novelID int64, runID,
 }
 
 // RecordIssueVerify 落一条复验回执（§10.2「状态机 + 复验回执」）：通过→verified（终态），
-// 未通过→pending（退回待修，与显式复验 VerifyIssueTickets 同口径）；verify_receipt/verify_at
-// 逐次留痕。终态工单（verified/dismissed）不接受复验。
-func (s *Store) RecordIssueVerify(ctx context.Context, novelID int64, runID, issueKey string, ok bool, receipt string) error {
-	row, err := s.getIssueRow(ctx, novelID, runID, issueKey)
-	if err != nil {
-		return err
-	}
-	if row.Status == IssueStatusVerified || row.Status == IssueStatusDismissed {
-		return fmt.Errorf("%w: %s 是终态", ErrIssueTerminal, row.Status)
-	}
-	to := IssueStatusPending // 复验未通过：退回待修
+// 未通过→pending（退回待修）或达阈值自动升级为人工工单（skipped）；verify_receipt/verify_at
+// 逐次留痕。返回 escalated 标识本次未通过是否触发了自动升级。
+// 终态工单（verified/dismissed）不接受复验。
+//
+// 自动升级（防无限空转）：对复验「明确未通过」（rejected）累计 VerifyAttempts；达
+// verifyEscalateAfter 阈值即转 skipped（人工工单，契约本就规定修不了报 skipped 转人工、
+// 不再重试），并在 skip_reason/note 写明原因，避免工单在「修复→复验失败」间无限循环。
+// 未确认（unverified，LLM 失败/回执未解析）不计次数、不改状态，留待下轮。
+func (s *Store) RecordIssueVerify(ctx context.Context, novelID int64, runID, issueKey string, ok bool, receipt string) (bool, error) {
+	// 通过：→verified 终态，逐次留痕（尝试次数保持原值，不影响终态语义）。
 	if ok {
-		to = IssueStatusVerified
+		row, err := s.getIssueRow(ctx, novelID, runID, issueKey)
+		if err != nil {
+			return false, err
+		}
+		if row.Status == IssueStatusVerified || row.Status == IssueStatusDismissed {
+			return false, fmt.Errorf("%w: %s 是终态", ErrIssueTerminal, row.Status)
+		}
+		now := time.Now()
+		err = s.db.WithContext(ctx).Model(&PipelineIssue{}).
+			Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+			Updates(map[string]any{
+				"status": IssueStatusVerified, "verify_receipt": receipt, "verify_at": now, "updated_at": now,
+			}).Error
+		return false, err
 	}
-	now := time.Now()
-	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
-		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
-		Updates(map[string]any{
-			"status": to, "verify_receipt": receipt, "verify_at": now, "updated_at": now,
-		}).Error
+	// 未通过：事务内原子递增尝试次数，达阈值自动升级为人工工单（skipped）。
+	var escalated bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var r PipelineIssue
+		if err := tx.Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+			First(&r).Error; err != nil {
+			return err
+		}
+		if r.Status == IssueStatusVerified || r.Status == IssueStatusDismissed {
+			return fmt.Errorf("%w: %s 是终态", ErrIssueTerminal, r.Status)
+		}
+		newAttempts := r.VerifyAttempts + 1
+		now := time.Now()
+		updates := map[string]any{
+			"verify_attempts": newAttempts,
+			"verify_receipt":  receipt,
+			"verify_at":       now,
+			"updated_at":      now,
+		}
+		if newAttempts >= verifyEscalateAfter {
+			// 达阈值：自动转人工工单（契约语义 = 修不了转人工），原因写 skip_reason + note。
+			msg := fmt.Sprintf("复验 %d 次未通过，自动转人工工单（请人工裁决：修正修复处方 / 手动复验 / 驳回）", newAttempts)
+			updates["status"] = IssueStatusSkipped
+			updates["skip_reason"] = msg
+			updates["note"] = msg
+			escalated = true
+		} else {
+			updates["status"] = IssueStatusPending
+		}
+		return tx.Model(&PipelineIssue{}).
+			Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+			Updates(updates).Error
+	})
+	return escalated, err
 }
 
 // ListIssueTicketsByNovel 列出一本书的全部发现项工单（工单面板列表，跨 run，新单在前）。
