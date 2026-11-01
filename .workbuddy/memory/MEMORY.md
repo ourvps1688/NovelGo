@@ -1,51 +1,38 @@
 # NovelGo 项目长期备忘
 
 ## 项目性质
-- sigpanic/goink 合规派生 fork（Go 1.25 + Wails v2 + React 19 + SQLite/ONNX，AGPL-3.0）。README/NOTICE/About 必须保留 "Based on Goink by 响滩 (sigpanic)" 与 "This is a modified version of Goink..."。
-- 模块 `github.com/novelgo/novelgo`；数据目录 `~/NovelGo`（dev 模式 DataDir 解析为 exe 相邻 `build/bin`，DB=`build/bin/novel-agent.db`）；仓库 `ourvps1688/NovelGo`（origin），upstream=sigpanic/goink。
+- sigpanic/goink 合规派生 fork（Go 1.25 + Wails v2 + React 19 + SQLite/ONNX，AGPL-3.0）。README/NOTICE/About 须保留 "Based on Goink by 响滩 (sigpanic)" 与 "This is a modified version of Goink..."。
+- 模块 `github.com/novelgo/novelgo`；数据目录 `~/NovelGo`（dev 解析为 exe 相邻 `build/bin`，DB=`build/bin/novel-agent.db`）；仓库 `ourvps1688/NovelGo`（origin），upstream=sigpanic/goink。
 
 ## 构建/环境（勿回退）
-- CGO：`PATH` 含 `Program Files/Go/bin`+`tools/mingw64/bin`+`go/bin`；`CGO_ENABLED=1`；`CGO_CFLAGS=-IC:/tools/sqlite3-headers`；bare 调用须带 `LOCALAPPDATA`+`GOCACHE=C:\Users\Administrator\AppData\Local\go-build`+`GOLANGCI_LINT_CACHE`（同目录）。golangci-lint 在 `C:\Users\Administrator\go\bin`。
-- 前端四道闸 `npm --prefix frontend run format:check / i18n:check / lint / build`（eslint 限 0 error）；npm 一律带前缀、cwd 不跨调用。
-- 推送：`GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`；commit&&push 链式偶显 nothing to commit 但已落盘→核 `git rev-list --left-right --count origin/master...HEAD` = `0 0`。PAT 在仓库根 github_pat.txt。钩子=scripts/hooks/pre-commit。一任务一提交带全套 export；记忆账单独 `chore(memory)`。
+- CGO：`PATH` 含 `Program Files/Go/bin`+`tools/mingw64/bin`+`go/bin`；`CGO_ENABLED=1`；`CGO_CFLAGS=-IC:/tools/sqlite3-headers`；裸调用须带 `LOCALAPPDATA`+`GOCACHE=C:\Users\Administrator\AppData\Local\go-build`+`GOLANGCI_LINT_CACHE`（同目录）。golangci-lint 在 `C:\Users\Administrator\go\bin`。
+- 前端四道闸 `npm --prefix frontend run format:check / i18n:check / lint / build`（eslint 0 error 上限）。
+- 推送：`GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`；一任务一提交带全套 export；记忆账单独 `chore(memory)`；核验 `git rev-list --left-right --count origin/master...HEAD` = `0 0`。
 
 ## 架构约束（核心，勿回退）
-- **R5 检测核心已收官**：创作后质量保障唯一规范路径——检测四 kind（chapter/volume/book/structure）独立启动、发现项落工单、人工确认→修复→显式复验闭环、**零 auto-advance / 零闸门 / 零自动派发修复**。后端入口 `internal/pipeline/detect.go` RunDetectionTask。
-- 旧 Orchestrator 流水线（S0–S6/G1/G1b/G3b/G4/GEnd）后端保留作 legacy，但**前端不得走 StartPipeline / PipelineWizard / SignabilityAuditView**。前端规范入口 = DetectionTasks + IssueTicketsPanel（工单人工修复闭环）+ PatrolReportPanel + RetconPanel + VolumeManagePanel。文案纪律：检测核心「只跑检测不跑流水线」合法；零「唯一入口」宣称；pipeline 框标「编排预设」。
-- 契约单源（勿改）：signability-audit.md=体检契约源（8 维评分）；featureKeys.ts=三类 key 单源；factory.ts=PanelId 单源（零删除）；internal/structure 长程结构索引（恒 P1 只报告）；internal/quality chapter_quality 质量档案；pipeline_issues 工单状态机。度量纯本地不上传（隐私红线）。
-- **签约体检 chapter_ids 校验（2026-11-01 修复）**：契约要求 `chapter_ids` 必须是与 `get_chapter_list` 一致的**有效全局阅读序号**（阅读序号连续 1..N，N=本书章节总数），台账/全书级问题才填 `[]`。LLM 常违约：①把台账实体 ID（如 217/252，自增主键）误填进结构化 `chapter_ids`；②引用尚未写出的规划章号（本书 7 章却填 8..20）。两处都污染「涉及章节」（出现第N百/上千章或超量章号）。修复：在 `internal/pipeline/issue.go` 的 `ReplaceIssues` 落库前按 `SELECT COUNT(*) FROM chapters WHERE novel_id=?` 取有效上界，经 `filterChapterIDs` 裁剪越界值；`chapters` 表缺失（测试/早期库）用 `tx.Migrator().HasTable` 守卫跳过裁剪。`parseChapterRefs` 兜底正则只认 `章#N`/`第N章`（裸 `#数字` 视为台账引用）。存量脏行已脚本清理（DB 备份 `novel-agent.db.bak_20261101_chfilter`）。
-- 分层铁律：app 绑定层只做 DTO+委托；领域编排在 `internal/<domain>.Service`；`internal` 领域包不得直接 import wails，事件经 `internal/event.Emitter`；跨介质一致性以 DB 为真相源，文件/向量清理移出事务+启动期孤儿回收。
-- **台账唯一约束（2026-10-31 落地，commit 147b667c）**：角色/地点/弧线/读者视角四类台账按自然键去重，禁止无条件 INSERT 产生重复记录。代码层 find-or-create——app 层 4 个创建入口（`CreateCharacter`/`CreateLocation`/`CreateStoryArc`/`CreateReaderPerspective`）+ MCP 工具事务内循环，经 `Store.GetByName` / `Store.GetByTypeContentHash` 命中即复用、不覆盖其字段；DB 层 `internal/migrate/v172` 迁移（`Destructive` 触发自动备份）在 AutoMigrate 前按 (novel_id,name) / (novel_id,type,content_hash) 合并存量重复行（保留内容最丰、id 最大者）、重指并折叠外键、补齐回填 reader content_hash，再加 GORM 唯一索引。读者哈希单源 `reader.ContentHash`/`NormalizeContent`（SHA1 over 归一化内容）。location_relations 重指对 `uk_location_pair` 碰撞安全（先删撞对冗余边再 UPDATE）。**新增这四类实体一律走幂等路径**。
+- R5 检测核心已收官：质量保障唯一规范路径——检测四 kind（chapter/volume/book/structure）独立启动、发现项落工单、人工确认→修复→显式复验闭环、零 auto-advance/零闸门/零自动派发修复。后端 `internal/pipeline/detect.go` RunDetectionTask。
+- 旧 Orchestrator 流水线后端保留 legacy，前端不得走 StartPipeline/PipelineWizard/SignabilityAuditView；前端规范入口 = DetectionTasks + IssueTicketsPanel + PatrolReportPanel + RetconPanel + VolumeManagePanel。
+- 契约单源（勿改）：signability-audit.md=体检契约源（8 维评分，desc 措辞须强制前向适配——禁止「改任一处」回改前章）；featureKeys.ts=key 单源；factory.ts=PanelId 单源；pipeline_issues 工单状态机。度量纯本地不上传（隐私红线）。
+- 分层铁律：app 绑定层只做 DTO+委托；领域编排在 `internal/<domain>.Service`；`internal` 不得直接 import wails，事件经 `internal/event.Emitter`；跨介质一致性以 DB 为真相源。
+- 台账唯一约束（2026-10-31, 147b667c）：角色/地点/弧线/读者视角四类台账按自然键去重，新增一律走幂等 find-or-create；DB 层 v172 迁移合并存量重复行+加唯一索引。
 
-## ONNX 模型使用现状（调研 2026-10-31，暂未实施增强）
-- **范围**：ONNX Runtime 在本项目**只做文本向量化**——单一模型 `bge-small-zh-v1.5`（int8，512维），经 `internal/rag/embedder_onnx.go` 的 `OnnxEmbedder` 单例（异步加载、`e.mu` 串行 Run、CLS+L2、批量≤8、arena 治理）产出 embedding，写入 `vec0`/`sqlite-vec` 向量库。
-- **4 个消费方**（全部 `if vs==nil` 优雅降级）：①章节语义检索 `IndexChunks`/`Search`；②设定语义检索 `setting/index_search.go:SearchSettings`（无 ONNX 退化为 LIKE）；③模式抽取证据前置 V2-D `app/pattern_api.go` 的 `ragEvidenceRetriever`；④故事记忆语义召回 MCP `mcp_tools/memory_tools.go`（已用 `rag.MMRRerank` 纯 Go 多样性重排，非模型）。
-- **缺口（调研时 2026-10-31）**：无 rerank 模型（top-K 仅 cosine+MMR 粗排，**P0-1 已加 reranker，但离线评测显示疑似负优化，见 P0-1 评测行**）、端侧算力仅用向量化、512 截断+CLS pooling 长文漏召（**P1-1 仅补单条超长输入截断鲁棒性，跨 chunk 边界召回非其范畴**）、V2-D 多查询串行未批处理/未缓存（**已由 P0-2 闭环**）、机械类判定与实体抽取仍靠规则/LLM（留 P2）。
-- **增益候选（按性价比）**：P0=加二阶段 reranker（bge-reranker-v2-m3 int8）+检索批处理/短 TTL 缓存；P1=长文分段聚合/评估升级 embedding 模型；P2=本地分类器/NER 替代部分 LLM 判定（离线零隐私外传，契合隐私红线，**但默认非必要、降级为待触发，见 plan §10.5**）；P3=端侧生成式续写（ORT 对 decoder-only 支持弱，短期不推荐）。**动手前须评估低端机内存与更新 `download-onnx.sh`**。
-- **P0-1 Reranker 已落地（2026-10-31，commit 6dd78444）**：新增 `internal/rag/reranker_onnx.go`（`OnnxReranker` 单例 + `encodePair` 交叉编码 `[CLS]q[SEP]p[SEP]`+`token_type_ids` + `Score` 批处理）+ 统一入口 `rag.Rerank(ctx,query,cands,topK)`（reranker 缺失/失败回落 `MMRRerank`，故未部署 `reranker.onnx` 时全链路行为不变，守住优雅降级不变量）。4 处消费方接线：`internal/search/service.go`/`internal/mcp_tools/memory_tools.go`（替换既有 `MMRRerank`）、`internal/setting/index_search.go`（向量路径插入）、`app/pattern_api.go` 证据检索（每 query 精排）；`app/handler.go` 启动 `rag.InitReranker`。`scripts/download-onnx.sh` 增 `bge-reranker-base` 下载（可选，失败仅告警；**实际落地模型是 base 而非最初计划的 v2-m3**——v2-m3 的 SentencePiece 词表 Go 端 bert-base-chinese WordPiece 分词器加载不了，务实切 base）。**关键修复**：抽 `internal/rag/ort_env.go` 的 `ensureOrtEnv()`（`sync.Once`+`IsInitialized` 守卫）替换 embedder 直接 `InitializeEnvironment`——后者在已初始化时返回错误（非幂等），与 reranker 并行初始化曾导致后者静默失效。
-- **P0-2 检索批处理+缓存 已落地（2026-11-01，commit 1adc18b4）**：**无需新模型**。①`OnnxEmbedder` 新增 `EmbedBatchQuery`（带 BGE 指令前缀的批量查询嵌入）——抽 `embedBatch(ctx,texts,runOptions,withQuery)` 的 `withQuery` 开关（`Embed`/`EmbedBatchQuery`=true，`EmbedBatch`(文档)/`Compact`=false）+ 查询向量缓存 `embed_cache.go`（`embedCache`：短 TTL 5min + LRU 上限 2048，命中返回副本）。文档向量（IndexChunks/UpsertChunks）**绕过**查询缓存（一次性、不重复）。②`VectorStore` 新增 `SearchBatch`（多查询合并一次 `EmbedBatchQuery` 再逐条 `searchWithEmbedding`）+ 检索结果缓存（key=novelID+query+topK+filter，索引写变触发 `bumpIndexEpoch` 整体失效，5min TTL，副本返回）。③`ragEvidenceRetriever.RetrieveEvidence` 改用 `SearchBatch`，消除 V2-D 多查询串行 embedding。不变量：仍纯本地、无 ONNX 即降级；缓存语义安全（embedding 是文本+模型纯函数，TTL 仅封顶内存，epoch 失效防陈旧 chunk）。新增 `embed_cache_test.go`+`vector_store_cache_test.go`（content-derived stub，不依赖 ONNX 模型）。**P0 阶段（reranker+批处理/缓存）已全部收官**。
-- **P1-1 长文分段聚合 已落地（2026-11-01）**：补「512 截断+CLS pooling 长文漏召」缺口。**关键设计=不影响写作与功能**：维度恒定 `embeddingDim=512`（抽 `embedder_onnx.go` 常量 + `vector_store.go` DDL `float[%d]` 引用同一常量，集中治理、换模型只动此常量），故**无需重建向量库**、既有 512 维向量与新向量同空间。新增 `embedLongTexts`（按 ≤510 token 切窗→每窗 `[CLS]/[SEP]` 编码→跨窗均值池化+L2 归一→单条 512 维）；`Embed`/`EmbedBatch`/`EmbedBatchQuery` 统一走此路径；旧 `embedBatch` 拆为 `runSequences`（batch 推理）+ `embedTruncated`（Compact 探针）。**短文本逐字节等价**：常规 content chunk（`DefaultChunkSize=420`+50 overlap ≈≤470 token）单窗，聚合结果===旧截断路径；只在超长无标点句等 `prepare` 本就会截断的边缘情形才真正分段，反而修掉长文漏召洞。不改 chunking 配置/不改 schema/不强制重建→写作/索引/检索行为对绝大多数 chunk 完全不变。纯函数 `splitTokenWindows` + 单测；rag 缓存/检索批处理/失效单测全绿，golangci-lint 0 issues。
-- **P1-2 升级 embedding 模型 评估后放弃（2026-11-01）**：换模型属不兼容变更（vec0 `float[N]` 维度写死、旧向量全失效、必须重建向量库），故**只评估+代码准备（`embeddingDim` 常量已集中），经评估决定放弃**。理由：①reranker（升级一阶 embedding 的唯一二阶消费方）已证伪回退，提升一阶向量无二阶承接；②真实评测显示当前 512 维 baseline 已达标（整体 MRR 0.679、跨块 0.926），无瓶颈证据；③跨块漏召是 reranker 产物并非维度问题，P1-1 已补 embedding 侧唯一真缺口；④维度变更须全量重建向量库、与「不得影响写作/功能」硬约束冲突、large 向量库×2 低端机更慢。无收益证据、成本高风险，按「先评测、负优化不做」原则放弃。详见 plan §10.4。
+## 近期修复（勿回退）
+- 签约体检 chapter_ids 校验（2026-11-01）：`chapter_ids` 必须是有效全局阅读序号（1..N，N=章节总数），台账/全书级填 `[]`。LLM 常把台账 ID 或规划章号填进结构化字段→脏数据。修复：`ReplaceIssues` 落库前 `filterChapterIDs` 按 `SELECT COUNT(*) FROM chapters` 上界裁剪（缺表 HasTable 守卫）；`parseChapterRefs` 兜底只认「第N章」/「章#N」（裸 `#\d+` 视为台账引用）。
+- 工单去修复 UI 卡死修复（2026-11-01, 47125469）：点「去修复」按钮转圈+状态陈旧——根因 `dispatchExecutor` 在 `Enqueue` 遇瞬态 `database is locked` 时**同步**跑长耗时 LLM 修复，致 `StartIssueFixTickets` 永不返回。修复：Enqueue 失败改**后台 goroutine**+瞬态锁短重试（3×40ms）+`legacyGuard` 同键去重；队列不可用分支保留同步。状态 `fixing` 在 dispatch 前已落库，前端 `load()` 刷新即显示修复中。
+- v172 去重迁移子表守卫（2026-11-01, 6a0aca2f）：PreSchemaSteps 在 AutoMigrate 建表前跑，去重函数碰引用子表须先 `HasTable` 守卫，否则 dev 库缺新子表时报 `no such table: group_members` 启动失败。
+- 复验铁律（审计 P0）：`VerifyIssueTickets` 须显式经 task payload 的 `IssueKeys` 透传给 `runVerifyTickets`，严禁执行体回扫 verifying 态（读己写竞态曾致永久卡 verifying）。L0 快路径粗粒度项 `name_drift`/`tail_hook` 命中回落 LLM 复核原指向。三档预算放宽（verifyCallTimeout 120min / verifyTicketTimeout 8min / verifyMaxTurns 12）。重新进入 verifying 一并清空 note。
 
-- **P0-1 reranker 已回退（2026-11-01，评测 commit 91d8f3c5/8b769042，回退 commit 66805424）**：两阶段 reranker（bge-reranker-base）经合成 + **真实数据双重离线评测**确认为**净负优化**，已回退。①合成评测（`reranker_eval_test.go`，commit 91d8f3c5）：5章/16查询，MRR 0.938→0.835、top-1 0.875→0.750。②真实评测（路径 A，commit 8b769042，`reranker_eval_real_test.go`）：只读生产 novel-agent.db 的 vec_novel_% 表 content（mode=ro，绝不写生产数据）+ 临时库重建索引（embedding 纯函数=生产线逐条等价），真实章节 257 chunk / 90 查询——**整体 MRR 0.679→0.604（负优化）；用户最关心的跨块边界场景 MRR 0.926→0.299（灾难性，cosine 已近满分 reranker 反而推错）；仅单块片段召回自身 +0.201；单 query 精排额外 ~2.7s 延迟 + 279MB 常驻**。增益场景（同章相似块挑片段）与用户痛点（跨块）错位，净负。**回退动作**（commit 66805424）：4 处消费方（search/setting/memory_tools/pattern_api 的 V2-D 路径）落回 `rag.MMRRerank`；`app/handler.go` 不再 `InitReranker`。reranker 相关代码（`reranker_onnx.go`、`rag.Rerank`/`InitReranker`/`TryGetReranker`、eval 测试）与 279MB 模型文件、`download-onnx.sh` 下载项已于 **L3 彻底移除**（2026-11-01），仅保留 `MMRRerank` 纯 MMR 路径；优雅降级不变量（`reranker` 概念已不存在，检索恒走 MMR）仍成立。ONNX 增强结论：P0-2 批处理/缓存 ✅ 保留（真实收益：降 ONNX 推理频次）；P0-1 reranker ❌ 回退（真实数据证伪）；P1-1 长文聚合 ✅ 保留（不影响功能，仅补截断鲁棒性）；P1-2 模型升级已放弃（reranker 回退后二阶承接消失、无瓶颈证据、重建风险高，见 plan §10.4）；**P2 本地分类器/NER 默认非必要、降级为待触发**（与现有 L0 规则重叠、域适配风险高、隐私论据被高估、无实测痛点，见 plan §10.5）。
+## ONNX 现状（结论，细节见 docs/onnx-enhancement-development-plan.md）
+- 仅 `bge-small-zh-v1.5`（512维）做文本向量化（4 消费方全部优雅降级）。reranker 已 L3 彻底移除（真实评测净负优化）；P0-2 批处理/缓存 ✅；P1-1 长文分段聚合 ✅（不影响功能）；P1-2 升级 embedding 模型 评估后放弃（维度变更须重建向量库）；P2 本地分类器/NER 降级待触发。
 
-## 复验工作流（关键 gotcha，勿回退）
-- **L0 快路径（P1 已落地，commit a16b1305；粗粒度回落 LLM 修复 2026-10-31，commit 1c9b2766）**：机械类工单走 `quality.RunL0Checks` 确定性判定。精确检查项（字数/AI味/禁忌/死人出镜/战力/文风漂移）命中仍**确定性判未修复退回**（安全）；**粗粒度启发式项 `name_drift`/`tail_hook` 命中不再臆测驳回**——其类别口径比原工单（常含机械关键词的 LLM 语义细粒度问题）更宽，会以无关理由命中导致永久通不过，故 `decided=false` **回落 LLM 复核原具体指向**。`l0_verify.go` 常量 `coarseHeuristicChecks` 维护该豁免清单。L0 仍作「放行加速器」：候选项零命中且依赖齐备→自动确认通过（免 LLM）。
-- **复验三档预算（2026-10-31 放宽，commit 87670600）**：`internal/pipeline/detect.go` 三档——`verifyCallTimeout` 15min→**120min**（整轮随工单数线性兜底，21 张仍余量；原 15min 把整轮腰斩，在跑工单拿整轮 ctx 到期 deadline，剩全复位 pending）；`verifyTicketTimeout` 5min→**8min**（仍早于 thinking 9min 空闲看门狗，容慢模型单轮 1-2min + ~10万 token 章节上下文）；`verifyMaxTurns` 6→**12**（多章节工单需多次 read 才出回执）。根因实证：`mimo`/`mimo-v2.6-pro`（purpose=signability）一直正常响应（llm_usage_daily 有记录、无熔断），慢在主模型+大上下文，非断网；修前 5min/6 轮往往在出回执前被斩断。
-- **复验派发铁律（读己写竞态修复，2026-10-31）**：`VerifyIssueTickets` 必须**显式把待复验工单键经 task payload 的 `IssueKeys` 透传**给 `runVerifyTickets`；**严禁依赖执行体回扫 verifying 态**——旧口径曾因读己写竞态让执行体读到 0 行而提前返回，工单永久卡 `verifying`（用户侧「复验无法走下去」）。`runVerifyTickets(runID,novelID,keys)`：keys 非空按 key 精确 `getIssueRow` 加载（跳过终态），空则回落 `ListVerifyingTickets` 旧口径。`dispatchExecutor` 末位变参 `issueKeys ...string` 仅复验用；Handler 解码 `p.IssueKeys` 透传。启动期 `ResetAllStuckVerifying` 仍兜底复位残留 verifying→pending。
-- **复验备注残留（2026-10-31 修复，commit 4ad28e99）**：重新进入 `verifying` 态时 `UpdateIssueStatus` 一并清空 `note`，避免「复验中」与启动清扫残留「已复位待复验」并排显示误导（曾致用户误判"又卡死"）。仅 `VerifyIssueTickets` 把状态置 `verifying`，收窄安全。
+## 供应商熔断
+- 三态自愈熔断器 `internal/llm/breaker.go`，按 provider 隔离；只认硬失败（连接拒绝/DNS/首字节超时/≥5xx），空闲超时只观测不熔断。
 
-## 供应商熔断（P0 已落地）
-- 三态自愈熔断器 `internal/llm/breaker.go`（按 provider 隔离，Closed/Open/Half-Open，冷却到期自动半开探针恢复）。**熔断只认硬失败**（连接拒绝/DNS 不可达/首字节超时/≥5xx）；空闲超时（idle watchdog）**只观测绝不驱动熔断**。chat 入口与 pipeline 共用同一 `ProviderBreaker` 单例；空闲预算 thinking 模型 9min、其余 3min。
+## 章节寻址 / 工单引用契约
+- chapter_id（主键）≠ 阅读序号（实时计算）；前端严格用 reading_number；LLM 精修「第N章」须用 `no_{N}` 路径，严禁拿 get_chapter_list 的「第N章」当 id 推算。
+- 工单 chapter_ids=全局阅读序号；台账引用写 `<type>#<id>`（id=自增主键，常上千）；裸 `#\d+` 一律视为台账引用。
 
-## 排障/坑（勿回退）
-- 重启 wails dev：①带全套 Go/CGO export 跑 `/c/Users/Administrator/go/bin/wails.exe dev`；②重启前 `rm -rf frontend/dist/assets`（否则 vite emptyDir 触发 SAFE_DELETE_BULK_CONFIRM_REQUIRED）；③结束旧进程 `Stop-Process -Id <pid> -Force`。wails watcher 卡死须核验运行中构建（grep 二进制文案实证新代码进进程）。
-- 浏览器访问 localhost:5173 白屏=正常（Wails 桥 `window.go`/`window.runtime` 仅注入桌面 webview，浏览器无桥→React 初始化抛错白屏）；必须用 wails dev 桌面窗口。
-- LF 归一化只对本次改动文件做（全树 sed 误伤 50+）；读文件做断言的测试须 CRLF 归一化或钉 eol=lf。
-- **vitest 沙箱内偶发失败但版本无关**（vite 8 + vitest 4 兼容）：根因资源受限（forks 池/ jsdom 渲染空 div）；脱离沙箱全量 385 测试 EXIT=0。pre-commit 只校验 Go 文件；前端用 format/i18n/lint(0 error)/build 兜底，vitest 建议脱沙箱跑。
-- **v172 去重迁移的子表守卫（2026-11-01 修复，commit 6a0aca2f）**：PreSchemaSteps 在 AutoMigrate 建表**之前**运行（见 `internal/migrate/engine/registry.go` 注释），故去重函数里任何对引用子表的 UPDATE/DELETE（如 `repointFKs` 的 `group_members`/`character_fact_knowledge`/`pov_roster`/`story_arcs`、`repointLocationRelations` 的 `location_relations`）**必须先 `HasTable` 守卫**——表不存在即跳过（无外键可重指）。曾因缺守卫，dev 库 `characters` 等老表存在但较新子表未建，迁移步骤 `1-dedup-characters` 报 `no such table: group_members` 致启动失败。新增 `dedup_test.go:TestDedupCharacters_MissingChildTables` 锁死。新增/改动迁移的 PreSchemaSteps 时，凡直接碰子表 SQL 一律先 HasTable。
-
-## 章节寻址约定
-- chapter_id 是稳定主键（DB 自增），阅读序号是实时计算（volumes.sort_order+chapters.sort_order），二者不等价；换卷/重排后对应关系会变。前端严格用后端 reading_number。
-- 按阅读序号确定性寻址 `chapters/no_{N}.md`：`git.ChapterPathRef.ByReadingNumber`/`ParseChapterLikePath` 增 `no_(\d+)`；read/edit 经 `resolveChapterRowRef`→`GetChapterIDByReadingNumber` 反查落盘。工具铁律：让 LLM 精修「第N章」必须用 `no_{N}`，严禁拿 get_chapter_list 的「第N章」当 id 推算。
-- **工单 chapter_ids 与台账引用契约（2026-11-01 修复，commit 4c87ef37）**：体检 issue 的 `chapter_ids` 是章节**全局阅读序号**（与 get_chapter_list 一致）；台账实体引用约定写 `<type>#<id>`（如 `timeline#42`/`reader_perspective#1643`，id=台账表自增主键，常上千）。`parseChapterRefs` 兜底正则只认「第N章」与「章#N」，**裸 `#\d+` 一律视为台账引用、绝不当时章节**（曾误判致工单「涉及章节」出现第1643章等脏数据，且台账 ID 会经 `issueChapterIDs` 漏入 S3 重写回流）。修复后正则=`(?:章节|章)\s*#\s*(\d+)`。
+## 排障
+- 重启 wails dev：带全套 CGO export 跑 `wails.exe dev`；重启前 `rm -rf frontend/dist/assets`（防 vite SAFE_DELETE_BULK_CONFIRM_REQUIRED）；结束旧进程 `Stop-Process -Id <pid> -Force`。浏览器访问 5173 白屏=正常（Wails 桥仅注入桌面 webview）。
+- vitest 沙箱偶发失败（资源受限）；前端用 format/i18n/lint(0 error)/build 兜底，vitest 脱沙箱跑。
+- wails 重启重产的前端绑定文件（App.d.ts/App.js/models.ts）常现纯缩进/排序噪声，git checkout 还原即可，勿混入提交。
