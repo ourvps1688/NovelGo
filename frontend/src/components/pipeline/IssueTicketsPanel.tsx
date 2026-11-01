@@ -62,6 +62,48 @@ function refOf(row: pipeline.PipelineIssue): pipeline.IssueTicketRef {
   return { run_id: row.run_id, issue_key: row.issue_key };
 }
 
+// 按 run_id 把工单归并成「检测批次」：issue_key 是 run 内作用域（每次检测从 I1 重排），
+// 而面板合并显示本书全部 run 的工单，不区分会重号（同一个 I1 指向不同工单）。分组后每组带
+// 检测时间（批次创建时间）与短 run 标识，便于区分不同检测运行的产出。
+interface IssueBatch {
+  runID: string;
+  items: pipeline.PipelineIssue[];
+  createdAt: number; // 批次创建时间（epoch ms），用于排序
+  labelTime: string;
+}
+function shortRun(id: string): string {
+  return id.length > 8 ? id.slice(0, 8) : id;
+}
+function buildBatches(rows: pipeline.PipelineIssue[]): IssueBatch[] {
+  const byRun = new Map<string, pipeline.PipelineIssue[]>();
+  for (const r of rows) {
+    const arr = byRun.get(r.run_id);
+    if (arr) arr.push(r);
+    else byRun.set(r.run_id, [r]);
+  }
+  const out: IssueBatch[] = [];
+  for (const [runID, items] of byRun) {
+    items.sort((a, b) => a.id - b.id); // 批内按 id 升序 → I1..In 自然序
+    let minT = Infinity;
+    let sample: pipeline.PipelineIssue = items[0];
+    for (const it of items) {
+      const t = new Date(String(it.created_at)).getTime();
+      if (!Number.isNaN(t) && t < minT) {
+        minT = t;
+        sample = it;
+      }
+    }
+    out.push({
+      runID,
+      items,
+      createdAt: Number.isFinite(minT) ? minT : 0,
+      labelTime: fmtTime(sample.created_at),
+    });
+  }
+  out.sort((a, b) => b.createdAt - a.createdAt); // 最新批次置顶
+  return out;
+}
+
 // 是否「供应商疑似挂起」：后端熔断哨兵错误（errProviderTripped）文案统一含
 // 「疑似供应商挂起」并提示已跳过派发。与真错误区分——挂起可重试/切模型，真错误才纯提示。
 function isProviderTrip(msg: string): boolean {
@@ -187,6 +229,8 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
     () => (showAll ? rows : rows.filter((r) => !TERMINAL.has(r.status))),
     [rows, showAll],
   );
+  // 按 run_id 归并成检测批次，分组展示以区分不同运行重号的 I1..In。
+  const batches = useMemo(() => buildBatches(visible), [visible]);
   const selectedRefs = useMemo(
     () => visible.filter((r) => selected.has(r.id)).map((r) => refOf(r)),
     [visible, selected],
@@ -524,104 +568,122 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
             </div>
           ) : null}
 
-          <ul className="flex flex-col gap-2">
-            {visible.map((row) => {
-              const chapters = chaptersOf(row);
-              return (
-                <li
-                  key={row.id}
-                  className="flex flex-col gap-1 rounded border bg-card px-3 py-2 text-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(row.id)}
-                      onChange={() => toggle(row.id)}
-                      aria-label={row.issue_key}
-                    />
-                    {row.status === "verifying" ? (
-                      verifyingRuns.has(row.run_id) ? (
-                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-                          {t("pipeline.tickets.status.verifying")}
-                          {verifyProgress[row.run_id]
-                            ? ` · ${verifyProgress[row.run_id].done}/${verifyProgress[row.run_id].total}`
-                            : ""}
-                        </span>
-                      ) : (
-                        <span className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning-foreground">
-                          {t("pipeline.tickets.verifyStale")}
-                        </span>
-                      )
-                    ) : (
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-xs ${
-                          STATUS_CLS[row.status] ??
-                          "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {t(`pipeline.tickets.status.${row.status}`)}
-                      </span>
-                    )}
-                    <span className="shrink-0 font-medium text-xs">
-                      {row.issue_key}
-                    </span>
-                    <span className="truncate font-medium">{row.area}</span>
-                    <span className="ml-auto shrink-0 text-muted-foreground text-xs">
-                      {fmtTime(row.updated_at)}
-                    </span>
-                  </div>
-                  <p className="whitespace-pre-wrap break-words text-muted-foreground text-xs">
-                    {row.desc}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {chapters.length > 0 ? (
-                      <>
-                        <span className="text-muted-foreground text-xs">
-                          {t("pipeline.tickets.chapters", {
-                            list: chapters.join("、"),
-                          })}
-                          ：
-                        </span>
-                        {chapters.map((n) => (
-                          <button
-                            key={n}
-                            type="button"
-                            title={t("pipeline.tickets.jumpToChapter", { n })}
-                            onClick={() =>
-                              useNavigationStore
-                                .getState()
-                                .openChapterByReadingNumber?.(novelId, n)
-                            }
-                            className="rounded border px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10"
+          {batches.map((batch) => (
+            <div key={batch.runID} className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 rounded-t border border-b-0 bg-muted/40 px-3 py-1.5 text-xs">
+                <span className="font-medium">
+                  {t("pipeline.tickets.batchTitle")}
+                </span>
+                <span className="text-muted-foreground">{batch.labelTime}</span>
+                <span className="ml-auto text-muted-foreground">
+                  {t("pipeline.tickets.batchMeta", {
+                    run: shortRun(batch.runID),
+                    count: batch.items.length,
+                  })}
+                </span>
+              </div>
+              <ul className="flex flex-col gap-2">
+                {batch.items.map((row) => {
+                  const chapters = chaptersOf(row);
+                  return (
+                    <li
+                      key={row.id}
+                      className="flex flex-col gap-1 rounded border bg-card px-3 py-2 text-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(row.id)}
+                          onChange={() => toggle(row.id)}
+                          aria-label={row.issue_key}
+                        />
+                        {row.status === "verifying" ? (
+                          verifyingRuns.has(row.run_id) ? (
+                            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                              {t("pipeline.tickets.status.verifying")}
+                              {verifyProgress[row.run_id]
+                                ? ` · ${verifyProgress[row.run_id].done}/${verifyProgress[row.run_id].total}`
+                                : ""}
+                            </span>
+                          ) : (
+                            <span className="rounded bg-warning/15 px-1.5 py-0.5 text-xs text-warning-foreground">
+                              {t("pipeline.tickets.verifyStale")}
+                            </span>
+                          )
+                        ) : (
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-xs ${
+                              STATUS_CLS[row.status] ??
+                              "bg-muted text-muted-foreground"
+                            }`}
                           >
-                            {t("pipeline.tickets.chapterN", { n })}
-                          </button>
-                        ))}
-                      </>
-                    ) : null}
-                    <IssueScopeTags issue={row} />
-                  </div>
-                  {row.verify_receipt ? (
-                    <p className="text-success-foreground text-xs">
-                      {t("pipeline.tickets.verifyReceipt")}（
-                      {fmtTime(row.verify_at)}）：{row.verify_receipt}
-                    </p>
-                  ) : null}
-                  {row.note ? (
-                    <p className="text-muted-foreground text-xs">
-                      {t("pipeline.tickets.note")}：{row.note}
-                    </p>
-                  ) : null}
-                  {row.status === "verifying" &&
-                  !verifyingRuns.has(row.run_id) ? (
-                    <p className="text-warning-foreground text-xs">
-                      {t("pipeline.tickets.verifyStaleHint")}
-                    </p>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+                            {t(`pipeline.tickets.status.${row.status}`)}
+                          </span>
+                        )}
+                        <span className="shrink-0 font-medium text-xs">
+                          {row.issue_key}
+                        </span>
+                        <span className="truncate font-medium">{row.area}</span>
+                        <span className="ml-auto shrink-0 text-muted-foreground text-xs">
+                          {fmtTime(row.updated_at)}
+                        </span>
+                      </div>
+                      <p className="whitespace-pre-wrap break-words text-muted-foreground text-xs">
+                        {row.desc}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {chapters.length > 0 ? (
+                          <>
+                            <span className="text-muted-foreground text-xs">
+                              {t("pipeline.tickets.chapters", {
+                                list: chapters.join("、"),
+                              })}
+                              ：
+                            </span>
+                            {chapters.map((n) => (
+                              <button
+                                key={n}
+                                type="button"
+                                title={t("pipeline.tickets.jumpToChapter", {
+                                  n,
+                                })}
+                                onClick={() =>
+                                  useNavigationStore
+                                    .getState()
+                                    .openChapterByReadingNumber?.(novelId, n)
+                                }
+                                className="rounded border px-1.5 py-0.5 text-xs text-primary hover:bg-primary/10"
+                              >
+                                {t("pipeline.tickets.chapterN", { n })}
+                              </button>
+                            ))}
+                          </>
+                        ) : null}
+                        <IssueScopeTags issue={row} />
+                      </div>
+                      {row.verify_receipt ? (
+                        <p className="text-success-foreground text-xs">
+                          {t("pipeline.tickets.verifyReceipt")}（
+                          {fmtTime(row.verify_at)}）：{row.verify_receipt}
+                        </p>
+                      ) : null}
+                      {row.note ? (
+                        <p className="text-muted-foreground text-xs">
+                          {t("pipeline.tickets.note")}：{row.note}
+                        </p>
+                      ) : null}
+                      {row.status === "verifying" &&
+                      !verifyingRuns.has(row.run_id) ? (
+                        <p className="text-warning-foreground text-xs">
+                          {t("pipeline.tickets.verifyStaleHint")}
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </>
       ) : (
         !loading && (

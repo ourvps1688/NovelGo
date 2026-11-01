@@ -1933,6 +1933,8 @@
     "tickets": {
       "title": "Finding Tickets",
       "hint": "All detected findings become tickets; fixes are always human-triggered: confirm → start fix → (after editing) verify → pass/reject. Verify spot-checks against the incremental verification contract and records a receipt only — it never auto-fixes.",
+      "batchTitle": "Detection batch",
+      "batchMeta": "run {{run}} · {{count}} item(s)",
       "filterOpen": "Open",
       "filterAll": "All",
       "selectAll": "Select all",

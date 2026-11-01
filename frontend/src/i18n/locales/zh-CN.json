@@ -1893,6 +1893,8 @@
     "tickets": {
       "title": "发现项工单",
       "hint": "检测产出的问题统一沉淀为工单，修复永远由人工触发：确认 → 去修复 →（改完）复验 → 复验通过/驳回。复验只定点核验并落复验回执，不自动回流修复。",
+      "batchTitle": "检测批次",
+      "batchMeta": "run {{run}} · {{count}} 项",
       "filterOpen": "待处理",
       "filterAll": "全部",
       "selectAll": "全选",
