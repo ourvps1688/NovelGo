@@ -1959,6 +1959,10 @@
       "issues": "张力清单",
       "noIssues": "未发现明显张力。",
       "noReport": "暂无巡检报告：卷冻结收口后会自动跑一次，也可点「运行巡检」手动触发。",
+      "progress": {
+        "reading": "读取正文 {{done}}/{{total}}…",
+        "analyzing": "语料已就绪，LLM 分析中…"
+      },
       "verdict": {
         "pass": "无张力",
         "needs_fix": "有张力",

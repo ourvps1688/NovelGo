@@ -14,9 +14,11 @@ const (
 	EvControlAck        = "pipeline:control:ack"        // 后端→前端控制确认：{run_id, cmd, status}
 	EvStockAudit        = "pipeline:stock_audit"        // 全量对齐体检完成：{novel_id, run_id}
 	EvConsistencyPatrol = "pipeline:consistency_patrol" // 一致性巡检（张力报告）完成：{novel_id, run_id}
-	EvFixStart          = "pipeline:fix_start"          // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
-	EvFixDone           = "pipeline:fix_done"           // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
-	EvRewriteBacklog    = "pipeline:rewrite_backlog"    // 正文级问题回流 S3 重写回路：{run_id, novel_id, items}（前端展示重写清单）
+	// EvPatrolProgress 一致性巡检进度（后端批量取语料阶段）：{novel_id, run_id, phase, total, done}
+	EvPatrolProgress = "pipeline:patrol_progress"
+	EvFixStart       = "pipeline:fix_start"       // S5 修复开始：{run_id, novel_id, issues}（前端展示修复清单）
+	EvFixDone        = "pipeline:fix_done"        // S5 修复结束：{run_id, novel_id, ok, error}（前端展示结果）
+	EvRewriteBacklog = "pipeline:rewrite_backlog" // 正文级问题回流 S3 重写回路：{run_id, novel_id, items}（前端展示重写清单）
 	// EvDetectDone 检测任务（卷体检/书体检，R5-3 T1.2）完成：{novel_id, run_id, kind, verdict, issue_count}。
 	// 纯增量通道：既有事件协议零改动；巡检·结构沿用 EvConsistencyPatrol 既有通道。
 	EvDetectDone = "pipeline:detect_done"
@@ -84,6 +86,12 @@ func EmitStockAudit(ctx context.Context, p map[string]any) {
 // 通知前端刷新并只读展示巡检报告（张力清单）。
 func EmitConsistencyPatrol(ctx context.Context, p map[string]any) {
 	eventBus.Emit(ctx, EvConsistencyPatrol, p)
+}
+
+// EmitPatrolProgress 广播一致性巡检进度（后端批量取语料阶段），
+// 通知前端展示「已读取 N/M 章」而非死转圈。
+func EmitPatrolProgress(ctx context.Context, p map[string]any) {
+	eventBus.Emit(ctx, EvPatrolProgress, p)
 }
 
 // FixIssuePayload 是 S5 修复开始事件里的一条修复项（来自体检 issue 清单）。

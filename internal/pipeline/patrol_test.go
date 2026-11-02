@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/novelgo/novelgo/internal/agentcfg"
+	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,8 +107,9 @@ func TestRunConsistencyPatrolStoresReportAndEmits(t *testing.T) {
 	require.Equal(t, run.NovelID, p["novel_id"])
 }
 
-// TestRunConsistencyPatrolDegradesOnFailure 验证降级链：巡检失败只记日志
-// （不落库、不广播、不阻断），兜底巡检不给流水线添堵。
+// TestRunConsistencyPatrolDegradesOnFailure 验证降级链：巡检失败不 panic、不阻断，
+// 但须落地清晰的 verdict=error 失败态并广播事件（面板需回执，避免永久「运行中」），
+// 且不产生任何垃圾张力项（只报告不改写）。
 func TestRunConsistencyPatrolDegradesOnFailure(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
@@ -121,15 +126,17 @@ func TestRunConsistencyPatrolDegradesOnFailure(t *testing.T) {
 	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
 	require.NoError(t, gerr)
 	var ctxt GateContext
-	if got.ContextJSON != "" {
-		require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
-	}
-	require.Empty(t, ctxt.PatrolReport, "失败不应落半截报告")
-	select {
-	case <-emitted:
-		t.Fatal("失败不应广播巡检完成事件")
-	default:
-	}
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.NotEmpty(t, ctxt.PatrolReport, "失败应落地 verdict=error 失败态（面板需回执）")
+	var report AuditData
+	require.NoError(t, json.Unmarshal([]byte(ctxt.PatrolReport), &report))
+	require.Equal(t, "error", report.Verdict, "失败应标记为 error 而非丢弃")
+	require.Empty(t, report.Issues, "失败不应产生任何张力项（杜绝垃圾清单）")
+	require.Contains(t, report.Summary, "未能完成", "失败态应给出可读原因")
+
+	p := <-emitted
+	require.Equal(t, run.RunID, p["run_id"])
+	require.Equal(t, run.NovelID, p["novel_id"])
 }
 
 // TestRunConsistencyPatrolRejectionStoredAsError 验证回归：模型以「拒绝/安全审核拦截」
@@ -195,6 +202,46 @@ func TestRunConsistencyPatrolRejectionEchoesRawRefusal(t *testing.T) {
 	require.Equal(t, "error", report.Verdict)
 	require.Contains(t, report.Summary, "chapter 12", "失败态必须回显原始拒绝语中的具体章节线索")
 	require.NotContains(t, report.Summary, "原始返回已忽略", "不应再丢弃原始拒绝语")
+}
+
+// TestBuildPatrolCorpusIncludesChaptersAndLedgers 回归：后端批量取语料应把全书正文
+// （按阅读序）+ 台账快照拼入【本书语料】块，供 LLM 一次性分析，而非逼其用工具逐章读取。
+func TestBuildPatrolCorpusIncludesChaptersAndLedgers(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}, &character.Character{}))
+	chStore := chapter.NewStore(db, slog.Default())
+	ch1, err := chStore.Create(context.Background(), nil, 711, nil, "第一章")
+	require.NoError(t, err)
+	_, err = chStore.Create(context.Background(), nil, 711, nil, "第二章")
+	require.NoError(t, err)
+	require.NoError(t, db.Table("characters").Create(map[string]any{
+		"novel_id": 711, "name": "林川", "description": "主角",
+	}).Error)
+
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.SetChapterTextReader(func(_ context.Context, _ int64, chapterID int64) (string, error) {
+		return fmt.Sprintf("正文-%d", chapterID), nil
+	})
+
+	corpus := svc.buildPatrolCorpus(context.Background(), 711, "run-patrol")
+
+	require.Contains(t, corpus, "本书语料", "应注入语料块头")
+	require.Contains(t, corpus, "第1章", "应含按阅读序的首章标记")
+	require.Contains(t, corpus, "第二章", "应含后续章标题")
+	require.Contains(t, corpus, fmt.Sprintf("正文-%d", ch1.ID), "应含逐章正文")
+	require.Contains(t, corpus, "characters", "应含台账快照节")
+	require.Contains(t, corpus, "林川", "台账快照应含角色名")
+}
+
+// TestBuildPatrolCorpusNilReaderNoPanic 回归：chapterTextReader 未注入时必须整体降级（跳过章正文），
+// 不 panic、不阻断（沿用既有降级契约）。
+func TestBuildPatrolCorpusNilReaderNoPanic(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	require.NotPanics(t, func() {
+		corpus := svc.buildPatrolCorpus(context.Background(), 712, "run-patrol")
+		require.Contains(t, corpus, "本书语料")
+	})
 }
 
 // TestControlPipelinePatrolDispatch 验证手动触发：控制指令 "patrol" 后台跑张力报告，

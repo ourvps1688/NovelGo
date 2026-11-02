@@ -2971,6 +2971,7 @@ var (
 	emitControlAckSlot        = newEmitterSlot(EmitControlAck)
 	emitStockAuditSlot        = newEmitterSlot(EmitStockAudit)
 	emitConsistencyPatrolSlot = newEmitterSlot(EmitConsistencyPatrol)
+	emitPatrolProgressSlot    = newEmitterSlot(EmitPatrolProgress)
 	emitFixStartSlot          = newEmitterSlot(EmitFixStart)
 	emitFixDoneSlot           = newEmitterSlot(EmitFixDone)
 	emitRewriteBacklogSlot    = newEmitterSlot(EmitRewriteBacklog)
@@ -2986,6 +2987,9 @@ func emitControlAck(ctx context.Context, p ControlAckPayload) { emitControlAckSl
 func emitStockAudit(ctx context.Context, p map[string]any)    { emitStockAuditSlot.emit(ctx, p) }
 func emitConsistencyPatrol(ctx context.Context, p map[string]any) {
 	emitConsistencyPatrolSlot.emit(ctx, p)
+}
+func emitPatrolProgress(ctx context.Context, p map[string]any) {
+	emitPatrolProgressSlot.emit(ctx, p)
 }
 func emitFixStart(ctx context.Context, p map[string]any)       { emitFixStartSlot.emit(ctx, p) }
 func emitFixDone(ctx context.Context, p map[string]any)        { emitFixDoneSlot.emit(ctx, p) }

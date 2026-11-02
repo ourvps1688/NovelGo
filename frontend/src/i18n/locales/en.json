@@ -1999,6 +1999,10 @@
       "issues": "Tension List",
       "noIssues": "No significant tensions found.",
       "noReport": "No patrol report yet: one runs automatically after a volume freeze; you can also trigger it with Run Patrol.",
+      "progress": {
+        "reading": "Reading chapters {{done}}/{{total}}…",
+        "analyzing": "Corpus ready, LLM analyzing…"
+      },
       "verdict": {
         "pass": "No tension",
         "needs_fix": "Tensions found",

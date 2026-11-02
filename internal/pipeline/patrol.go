@@ -58,9 +58,13 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		defer s.endDetectCtx(DetectionKindStructure, novelID, nil)
 		bg = dctx
 	}
+	corpus := s.buildPatrolCorpus(bg, novelID, runID)
+	emitPatrolProgress(ctx, map[string]any{
+		"novel_id": novelID, "run_id": runID, "phase": "analyzing", "total": 0, "done": 0,
+	})
 	out, err := s.dispatchSkill(bg, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
-		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)),
+		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)) + corpus,
 		MaxTurns:  12,
 		SessionID: "pipeline:patrol:" + strconv.FormatInt(novelID, 10),
 	})

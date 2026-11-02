@@ -192,11 +192,12 @@ func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
 	require.Empty(t, svc.runBlueprintDriftPatrol(ctx, "run-x", 905),
 		"G3 巡检熔断应走原失败通道：返回空串（非阻断）")
 
-	// 一致性巡检：失败通道=记日志跳过（不落库、不广播、不阻断）。
+	// 一致性巡检：失败通道=落地 verdict=error 失败态并广播（面板需回执，避免永久「运行中」），
+	// 但绝不派发 agent（熔断护的是 LLM 调用，取语料是本地 DB 读取、不触网）。
 	patrolEmitted := false
 	t.Cleanup(swapEmitConsistencyPatrol(func(_ context.Context, _ map[string]any) { patrolEmitted = true }))
 	svc.runConsistencyPatrol(ctx, "run-x", 905)
-	require.False(t, patrolEmitted, "一致性巡检失败语义不变：不广播")
+	require.True(t, patrolEmitted, "一致性巡检失败应广播 verdict=error 失败态（面板回执）")
 
 	// 全量体检：失败通道=needs_fix + error（由 runFullAlign 广播失败 note）。
 	data, serr := svc.runStockAudit(ctx, 905)

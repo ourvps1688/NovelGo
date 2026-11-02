@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Radar, ShieldAlert, ShieldCheck } from "lucide-react";
+import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import type { AuditData } from "@/types/pipeline";
 import { IssueScopeTags } from "./IssueTags";
 
@@ -14,6 +15,7 @@ export default function PatrolReportPanel({
   tick,
   onRun,
   independentNote,
+  novelId,
 }: {
   // 最近一次张力报告（run.ContextJSON.patrol_report 解析结果，可空）。
   data: AuditData | null;
@@ -23,17 +25,48 @@ export default function PatrolReportPanel({
   // 可选：当本面板从其它检测（如签约潜力）入口到达时，标注其为独立模块，
   // 避免误判为同源发现项。默认不渲染。
   independentNote?: string;
+  // 小说 ID：用于过滤 pipeline:patrol_progress 事件（后端批量取语料进度）。
+  novelId?: number;
 }) {
   const { t } = useTranslation();
   const [pending, setPending] = useState(false);
+  const [progress, setProgress] = useState<{
+    phase: string;
+    total: number;
+    done: number;
+  } | null>(null);
 
-  // 每次巡检完成事件到达（tick 变化）都收起「运行中」提示：渲染期重置而非 effect，
+  // 订阅一致性巡检进度（后端批量取语料阶段）：读取正文 N/M、分析中，避免面板死转圈。
+  useEffect(() => {
+    if (!novelId) return;
+    const off = EventsOn(
+      "pipeline:patrol_progress",
+      (p: {
+        novel_id?: number;
+        run_id?: string;
+        phase?: string;
+        total?: number;
+        done?: number;
+      }) => {
+        if (p?.novel_id !== novelId) return;
+        setProgress({
+          phase: p.phase ?? "",
+          total: p.total ?? 0,
+          done: p.done ?? 0,
+        });
+      },
+    );
+    return off;
+  }, [novelId]);
+
+  // 每次巡检完成事件到达（tick 变化）都收起「运行中」提示并清进度：渲染期重置而非 effect，
   // 避免 set-state-in-effect 级联渲染告警。
-  // 巡检失败不广播事件，提示会停留但按钮保持可点，用户可直接重试。
+  // 巡检失败也会广播完成事件（落地 verdict=error），提示与进度同样收起，面板展示失败原因。
   const [prevTick, setPrevTick] = useState(tick);
   if (prevTick !== tick) {
     setPrevTick(tick);
     setPending(false);
+    setProgress(null);
   }
 
   const issues = data?.issues ?? [];
@@ -92,7 +125,14 @@ export default function PatrolReportPanel({
       {pending ? (
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
-          {t("pipeline.patrol.running")}
+          {progress && progress.phase === "reading"
+            ? t("pipeline.patrol.progress.reading", {
+                done: progress.done,
+                total: progress.total,
+              })
+            : progress && progress.phase === "analyzing"
+              ? t("pipeline.patrol.progress.analyzing")
+              : t("pipeline.patrol.running")}
         </p>
       ) : null}
 

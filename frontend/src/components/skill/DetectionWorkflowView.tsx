@@ -284,6 +284,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
           <PatrolReportPanel
             data={patrolData}
             tick={patrolTick}
+            novelId={novelId}
             onRun={() => {
               trackFeature(ACTION_FEATURE_KEYS.patrol);
               handleStart();
