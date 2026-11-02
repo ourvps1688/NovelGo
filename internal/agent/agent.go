@@ -440,6 +440,12 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					// 连续空闲超时计数（供应商「连得通但不吐数据」的半死连接）：
 					// 单轮内连续命中达到 idleRetryCap 即判不可重试，避免 8×9 分钟空转。
 					if apiErr != nil && apiErr.Kind == "idle_timeout" {
+						// 干净空闲超时（零字节半死连接）：计入快速放弃计数。
+						idleTimeouts++
+					} else if apiErr != nil && apiErr.Retryable && apiErr.StatusCode == 0 && responseBuffer.Len() > 0 {
+						// 流式已开始吐字后中断（连接重置/EOF/掉线，HTTP 状态码为 0 的非空闲流错误）：
+						// 与半死连接等价，同样计入快速放弃计数，避免「吐字节后掉线」被当普通可重试错误
+						// 一路重试到 60 分钟硬超时（idleRetryCap 此前只认 clean idle_timeout，漏掉此分支）。
 						idleTimeouts++
 					} else {
 						idleTimeouts = 0

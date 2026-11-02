@@ -13,6 +13,7 @@ import (
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/character"
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/volume"
 	"github.com/stretchr/testify/require"
 )
@@ -315,4 +316,35 @@ func TestPatrolTriggeredAtVolumeFreeze(t *testing.T) {
 		return SkillOutput{}, errors.New("unreachable")
 	}
 	failed.freezeVolumeWithNote(ctx, run2.NovelID, 12, run2.RunID, StageS3, StatusRunning)
+}
+
+// TestClassifyPatrolFailure 验证巡检失败归约：区分供应商无响应/流式中断与通用错误，
+// 给出清晰可操作提示（避免作者误判为巡检设计缺陷）。
+func TestClassifyPatrolFailure(t *testing.T) {
+	svc := &Service{}
+
+	// 1) 父上下文截止（patrolHardTimeout / detectTaskTimeout 触发）：清晰「供应商未返回完整结果」。
+	verdict, summary := svc.classifyPatrolFailure(fmt.Errorf("skill %q 执行失败: %w", "consistency-patrol", context.DeadlineExceeded))
+	require.Equal(t, "error", verdict)
+	require.Contains(t, summary, "供应商")
+	require.Contains(t, summary, "未返回完整结果")
+	require.NotContains(t, summary, "context deadline exceeded", "不应把原始 deadline 错误原文甩给用户")
+
+	// 2) idle_timeout（空闲看门狗触发，干净半死连接）：明确「空闲超时 / 半死连接」。
+	verdict, summary = svc.classifyPatrolFailure(fmt.Errorf("skill %q 执行失败: %w", "consistency-patrol",
+		&llm.APIError{Kind: "idle_timeout", StatusCode: 0, Retryable: true, Message: "9m0s 内未收到任何字节"}))
+	require.Equal(t, "error", verdict)
+	require.Contains(t, summary, "空闲超时")
+	require.Contains(t, summary, "半死连接")
+
+	// 3) 吐字节后掉线（HTTP 状态码 0、可重试、有内容）：同样归约为供应商中断提示。
+	verdict, summary = svc.classifyPatrolFailure(fmt.Errorf("skill %q 执行失败: %w", "consistency-patrol",
+		&llm.APIError{Kind: "", StatusCode: 0, Retryable: true, Message: "connection reset by peer"}))
+	require.Equal(t, "error", verdict)
+	require.Contains(t, summary, "供应商")
+
+	// 4) 普通错误：沿用通用文案，并回显截断后的原始错误。
+	verdict, summary = svc.classifyPatrolFailure(fmt.Errorf("skill %q 执行失败: %w", "consistency-patrol", errors.New("boom-xyz")))
+	require.Equal(t, "error", verdict)
+	require.Contains(t, summary, "boom-xyz")
 }

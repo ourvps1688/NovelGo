@@ -3,12 +3,14 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/llm"
 )
 
 // ── 全书一致性巡检（WBS 3.3「张力报告」）────────────────────────────────
@@ -21,6 +23,11 @@ import (
 // 触发（WBS 建议「卷末 + 手动」而非实时，控成本）：
 //   - 卷末自动：G_freeze 自动冻结成功（freezeVolumeWithNote）后跑一次；
 //   - 手动：控制指令 "patrol"（ControlPipeline）。
+
+// patrolHardTimeout 是单次巡检 LLM 调用的短硬超时（结构检测路径下替代其 60 分钟上限）。
+// 供应商「连得通但不吐完 / 吐字节后掉线」会一路重试到 60 分钟 detectTaskTimeout，用户干等
+// 近一小时才看到失败；此处给单次巡检更紧的 deadline，超时即落地清晰「供应商无响应」失败态。
+const patrolHardTimeout = 20 * time.Minute
 
 // patrolPrompt 构造全书一致性巡检（张力报告）的任务提示词：只读、只报告不改写。
 // blocks 尾部装配上下文块（巡检基准线，WBS 2.3；P0 §0.5 patrol=Facts+Voice）。
@@ -62,22 +69,23 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	emitPatrolProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "phase": "analyzing", "total": 0, "done": 0,
 	})
-	out, err := s.dispatchSkill(bg, "consistency-patrol", SkillInput{
+	// 单次巡检 LLM 调用的短硬超时兜底（见 patrolHardTimeout 注释）：避免供应商半死连接时
+	// 干等至 60 分钟 detectTaskTimeout。超时即落地清晰「供应商无响应」失败态。
+	patrolCtx, patrolCancel := context.WithTimeout(bg, patrolHardTimeout)
+	defer patrolCancel()
+	out, err := s.dispatchSkill(patrolCtx, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    patrolPrompt(novelID, s.buildBlocks(bg, novelID, contextasm.PurposePatrol)) + corpus,
 		MaxTurns:  12,
 		SessionID: "pipeline:patrol:" + strconv.FormatInt(novelID, 10),
 	})
 	if err != nil {
-		// 巡检失败（超时 / 供应商无响应 / 中断等）：落地清晰失败态并广播事件，
+		// 巡检失败（超时 / 供应商无响应 / 流式中断 / 中断等）：落地清晰失败态并广播事件，
 		// 否则前端「运行中」提示会永久停留、看不到任何回执（此前仅模型拒绝分支落地失败态）。
 		s.logger.Warn("一致性巡检执行失败（落地失败态，非阻断）", "run_id", runID, "err", err)
-		reason := firstN(err.Error(), 200)
-		summary := "一致性巡检未能完成：" + reason + "\n" +
-			"可能原因：LLM 供应商长时间无响应（连接已建立但未吐出数据）、请求超时，或进程被中断。\n" +
-			"建议：稍后重试；若持续失败，可更换模型/供应商，或确认该模型支持本书体量所需的长上下文。"
+		verdict, summary := s.classifyPatrolFailure(err)
 		if serr := s.storePatrolReport(s.appCtx, runID, AuditData{
-			Verdict: "error",
+			Verdict: verdict,
 			Summary: summary,
 			Issues:  []AuditIssue{},
 		}); serr != nil {
@@ -125,6 +133,30 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		"novel_id": novelID,
 		"run_id":   runID,
 	})
+}
+
+// classifyPatrolFailure 把巡检失败 error 归约为面向作者的清晰失败态（verdict + summary）。
+// 重点区分「供应商无响应 / 流式中断」与「其他错误」：前者是供应商问题（非设计缺陷），
+// 给出明确可操作的提示，避免作者误以为巡检本身有 bug；后者沿用通用文案。
+func (s *Service) classifyPatrolFailure(err error) (string, string) {
+	var apiErr *llm.APIError
+	isIdle := errors.As(err, &apiErr) && apiErr != nil && apiErr.Kind == "idle_timeout"
+	if errors.Is(err, context.DeadlineExceeded) || isIdle {
+		reason := "LLM 供应商在预期时间内未返回完整结果（疑似无响应或流式连接中断）"
+		if isIdle {
+			reason = "LLM 供应商空闲超时（连接已建立但持续未返回数据，疑似半死连接 / 吐字节后掉线）"
+		}
+		summary := "一致性巡检未能完成：" + reason + "\n" +
+			"说明：这通常是 LLM 供应商问题，不是巡检设计缺陷——单次调用未能在限定时间内跑完，" +
+			"可能因为供应商无响应、流式连接中断（吐出部分内容后掉线），或模型对该体量请求处理过慢。\n" +
+			"建议：①更换更稳定的模型或供应商；②确认当前模型支持长上下文；③稍后重试。本次未写入张力清单。"
+		return "error", summary
+	}
+	reason := firstN(err.Error(), 200)
+	summary := "一致性巡检未能完成：" + reason + "\n" +
+		"可能原因：LLM 供应商长时间无响应（连接已建立但未吐出数据）、请求超时，或进程被中断。\n" +
+		"建议：稍后重试；若持续失败，可更换模型/供应商，或确认该模型支持本书体量所需的长上下文。"
+	return "error", summary
 }
 
 // storePatrolReport 把张力报告写入 run 的 ContextJSON.PatrolReport（只读展示用，
