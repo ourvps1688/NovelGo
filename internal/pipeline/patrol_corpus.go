@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/novelgo/novelgo/internal/chapter"
 )
 
 // ── 一致性巡检语料预取（根治「让 LLM 自己逐章读取」的卡死设计）──────────────
@@ -23,7 +21,6 @@ const (
 	patrolCorpusCap  = 200000 // 全书语料（章正文 + 台账）总字符预算
 	patrolLedgerCap  = 60000  // 台账快照字符预算
 	patrolLedgerRows = 300    // 单张台账表行数上限
-	patrolWindowCap  = 30000  // 单切片（连续若干章）正文注入上限；分块调用据此截断
 )
 
 // patrolLedgerTables 是需要随语料注入的台账表（均含 novel_id 列，可直接按小说过滤）。
@@ -45,44 +42,6 @@ var patrolLedgerTables = []string{
 	"preference_items",
 	"pinned_invariants", // 书写不变量
 	"chapter_task_cards",
-}
-
-// buildWindowCorpus 只渲染连续若干章的正文（按阅读顺序、逐章附标题），拼成可注入提示词的
-// 切片语料块。刻意不含整本台账——台账对照统一交给归并步（consistency-patrol 归并提示词）处理，
-// 这样每个分块调用体量极小（仅几章正文），即使供应商生成慢也不易超时。受 patrolWindowCap 预算约束；
-// 单步失败仅记日志降级（跳过该块），绝不阻断巡检。
-func (s *Service) buildWindowCorpus(ctx context.Context, novelID int64, runID string, chapters []chapter.Chapter) string {
-	var sb strings.Builder
-	sb.WriteString("\n\n【本书语料·切片】\n")
-	truncated := false
-	for i, ch := range chapters {
-		text := ""
-		if s.chapterTextReader != nil {
-			if t, rerr := s.chapterTextReader(ctx, novelID, ch.ID); rerr == nil {
-				text = t
-			}
-		}
-		if len(text) > patrolChapterCap {
-			text = text[:patrolChapterCap] + "…（本章已按预算截断）"
-		}
-		rn := ch.ReadingNumber
-		if rn == 0 {
-			rn = i + 1
-		}
-		title := ch.Title
-		if title == "" {
-			title = fmt.Sprintf("第%d章", rn)
-		}
-		fmt.Fprintf(&sb, "\n### 第%d章《%s》\n%s\n", rn, title, text)
-		if sb.Len() > patrolWindowCap {
-			truncated = true
-			break
-		}
-	}
-	if truncated {
-		sb.WriteString("\n（切片因预算已截断；如需核查可用 read 工具补读具体章节）\n")
-	}
-	return sb.String()
 }
 
 // buildPatrolCorpus 批量取全书正文 + 台账快照，拼成可注入提示词的语料块。

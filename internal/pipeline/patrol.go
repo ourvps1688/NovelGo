@@ -19,26 +19,30 @@ import (
 // 当前台账/正文，产出**建议性张力报告**——只报告不改写、绝不进 S5 自动修复路由，
 // 改不改由作者定（retcon 候选也只走 3.1 人工审批闸门）。
 //
-// 触发（WBS 建议「卷末 + 手动」而非实时，控成本）：
+// 触发（WBS 建议「卷末 + 手动」而非实时）：
 //   - 卷末自动：G_freeze 自动冻结成功（freezeVolumeWithNote）后跑一次；
 //   - 手动：控制指令 "patrol"（ControlPipeline）。
 
-// ── 分块 Map-Reduce 巡检配置（混合方案核心：单调用体量从「整本」降到「一块/一次归并」）──
+// ── 单次归并巡检配置 ────────────────────────────────────────────────
 //
-// 旧设计把整本书（上限 20 万字符语料）一次性塞进一个 LLM 调用做全体分析，受限于单次调用延迟上限、
-// 没有任何分解/续跑/部分沉淀机制，供应商稍慢即超时整轮作废。新设计：按连续章节切片，每块一次小调用
-// （Map 步）只分析本切片并抽取跨引用锚点；最后一次性小调用（Reduce 步）汇总各分块结果做全书归并。
-// 两步复用同一只读技能 consistency-patrol，仅由提示词区分「分块分析 / 归并」角色。每块小、快、可独立重试；
-// 任一块失败不丢全局；归并失败但有分块结果时落库部分张力（verdict=needs_fix），杜绝「整轮高质量结论被丢弃」。
+// 历史教训（勿回退）：早期「整本书一次性塞进一个 LLM 调用」与「分块 Map-Reduce（每块一次小调用 +
+// 一次归并）」都跑不出来——根因不是算法而是**供应商太慢 / 半死连接**：思考模型单调用要 >12 分钟
+// 才吐完，而分块方案把 1 次调用放大成 3~N 次串行慢调用，总时长被供应商延迟复利放大成 35 分钟级，
+// 且归并步在 12 分钟预算内吐不完 → 只落残缺报告（verdict=needs_fix 但 summary 写着「建议重跑」），
+// 用户体感即「一直检测中 / 卡死」。
+//
+// 现行方案（单次归并 + 预筛证据内联）：
+//  1. 本地向量预筛（Phase 2，免费）先把「跨章、语义相近、数值/事实可能分歧」的陈述聚成候选矛盾簇；
+//  2. 仅**一次** consistency-patrol 调用，提示词内联「台账快照（既定事实+当前台账）+ 预筛候选簇」
+//     作为全部证据——不再喂整本书、也不再喂各分块全文，prompt 体量远小于旧方案；
+//  3. 提示词明确禁止调用 read/get_*/search 工具（证据已内联），杜绝 agent 多轮工具抓取把延迟放大；
+//  4. 单次调用给足超时预算；失败走 classifyPatrolFailure 落清晰失败态，绝不静默卡死。
 
 const (
-	// patrolWindowSize 分块大小：每次分块调用分析的连续章节数（buildWindowCorpus 另有 patrolWindowCap 截断保护）。
-	patrolWindowSize = 5
-	// patrolChunkTimeout 单个分块（Map 步）LLM 调用的硬超时：小体量调用应远小于此；超时即标该块失败并继续其余分块。
-	patrolChunkTimeout = 12 * time.Minute
-	// patrolReduceTimeout 归并（Reduce 步）调用的硬超时。
-	patrolReduceTimeout = 12 * time.Minute
-	// patrolOverallTimeout 单次巡检整体预算：约束所有分块 + 归并的总耗时上限，避免无限拖延（结构上替代旧 patrolHardTimeout）。
+	// patrolSynthesizeTimeout 单次归并（全书核对）调用的硬超时：证据已内联（台账+预筛簇），
+	// 体量远小于旧「整本/分块全文」方案，给思考模型留足吐完整 JSON 的余量；超时即清晰失败态。
+	patrolSynthesizeTimeout = 20 * time.Minute
+	// patrolOverallTimeout 单次巡检整体预算（含预筛本地计算 + 单次归并调用），兜底防无限拖延。
 	patrolOverallTimeout = 60 * time.Minute
 )
 
@@ -65,20 +69,11 @@ func patrolPrompt(novelID int64, blocks contextasm.ContextBlocks) string {
 //
 // 只报告不改写：结果绝不进 Audit/FixStates 等修复路由字段；失败只记日志
 // （不落库、不广播、不阻断）——兜底巡检不给流水线添堵。
-// runConsistencyPatrol 执行一次全书一致性巡检（张力报告）：分块 Map-Reduce 编排。
 //
-// 旧设计把整本书（上限 20 万字符语料）一次性塞进一个 LLM 调用做全体分析，受限于单次调用延迟上限、
-// 无分解/续跑/部分沉淀机制，供应商稍慢即超时整轮作废（verdict=error、issues=[]，高质量中间结论被丢弃）。
-//
-// 新设计（混合方案核心）：
-//  1. MAP：按 patrolWindowSize 把章节切成连续切片，每块一次小调用（复用 consistency-patrol 技能，
-//     提示词标「分块分析」）只分析本切片并抽取跨引用锚点；每块独立超时、互不牵连，失败仅记日志并继续。
-//  2. REDUCE：最后一次性小调用（同样 consistency-patrol 技能，提示词标「归并」）汇总各分块结果做全书归并，
-//     产出最终张力报告。
-//  3. 部分沉淀：归并失败但分块已有结果时，落库部分张力报告（verdict=needs_fix），
-//     杜绝「整轮高质量结论被丢弃」。
-//
-// 只报告不改写：结果绝不进 Audit/FixStates 等修复路由字段；失败只记日志。
+// 编排（单次归并 + 预筛证据内联，见文件头注释）：
+//  1. 本地向量预筛 → 跨章候选矛盾簇（免费，失败仅降级）；
+//  2. 一次 consistency-patrol 调用，提示词内联「台账快照 + 预筛候选簇」作为全部证据；
+//  3. 解析 JSON → 落库报告 + 广播；失败/拒绝 → 清晰失败态，绝不静默卡死。
 func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelID int64) {
 	bg := s.appCtx
 	defer s.endDetectByRunID(runID)
@@ -89,91 +84,44 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		defer s.endDetectCtx(DetectionKindStructure, novelID, nil)
 		bg = dctx
 	}
-	// 整体预算：约束所有分块 + 归并的总耗时上限（结构上替代旧单次 20min 硬超时）。
+	// 整体预算：约束预筛本地计算 + 单次归并调用的总耗时上限（结构上替代旧单次/分块硬超时）。
 	runCtx, runCancel := context.WithTimeout(bg, patrolOverallTimeout)
 	defer runCancel()
 
 	blocks := s.buildBlocks(bg, novelID, contextasm.PurposePatrol)
 	ledgers := s.dumpLedgers(bg, novelID)
 
-	// 列章：失败仅记日志降级（退回归并步直接分析整本语料），绝不阻断巡检——
+	// 列章：失败仅记日志降级（预筛退化为无候选、归并步仍用台账证据），绝不阻断巡检——
 	// 沿用 buildPatrolCorpus 的容错契约（列章失败→空章节，不硬失败）。
 	chapters, err := s.chapterStore.ListAllByNovel(bg, nil, novelID)
 	if err != nil {
-		s.logger.Warn("一致性巡检：列章失败，降级为整本单调用", "novel_id", novelID, "err", err)
+		s.logger.Warn("一致性巡检：列章失败，预筛退化为无候选", "novel_id", novelID, "err", err)
 		chapters = nil
 	}
 	total := len(chapters)
 	emitPatrolProgress(ctx, map[string]any{
-		"novel_id": novelID, "run_id": runID, "phase": "analyzing", "total": total, "done": 0,
+		"novel_id": novelID, "run_id": runID, "phase": "prescreen", "total": total, "done": 0,
 	})
 
-	// 向量预筛（Phase 2）：聚类跨章候选矛盾点，喂给归并步重点核对；失败/未就绪仅降级，不阻断巡检。
+	// 向量预筛（Phase 2，本地免费）：聚类跨章候选矛盾点，作为归并步的聚焦证据；失败/未就绪仅降级，不阻断。
 	prescreen := s.runPatrolPrescreen(runCtx, novelID, chapters)
-
-	// ── MAP：逐切片小调用，每块独立超时、互不牵连 ──
-	var allIssues []AuditIssue
-	var allRefs []CrossRef
-	windows := (total + patrolWindowSize - 1) / patrolWindowSize
-	for wi := 0; wi < total; wi += patrolWindowSize {
-		end := wi + patrolWindowSize
-		if end > total {
-			end = total
-		}
-		idx := wi/patrolWindowSize + 1
-		window := chapters[wi:end]
-		emitPatrolProgress(ctx, map[string]any{
-			"novel_id": novelID, "run_id": runID, "phase": "analyzing", "total": total, "done": wi,
-		})
-		chunkCtx, chunkCancel := context.WithTimeout(runCtx, patrolChunkTimeout)
-		windowCorpus := s.buildWindowCorpus(chunkCtx, novelID, runID, window)
-		out, derr := s.dispatchSkill(chunkCtx, "consistency-patrol", SkillInput{
-			NovelID:   novelID,
-			Prompt:    chunkPrompt(novelID, idx, windows, windowCorpus) + blocks.Render(contextasm.PurposePatrol),
-			MaxTurns:  6,
-			SessionID: fmt.Sprintf("pipeline:patrol:%d:chunk:%d", novelID, idx),
-			RunID:     runID,
-		})
-		chunkCancel()
-		if derr != nil {
-			s.logger.Warn("一致性巡检·分块失败（继续其余分块）", "window", idx, "err", derr)
-			continue
-		}
-		if refused, reason := isLLMRefusal(out.Text); refused {
-			s.logger.Warn("一致性巡检·分块被模型拒绝（跳过该块）", "window", idx, "reason", reason)
-			continue
-		}
-		data, refs, perr := parseChunkOutput(out.Text)
-		if perr != nil {
-			s.logger.Warn("一致性巡检·分块解析失败（跳过该块）", "window", idx, "err", perr)
-			continue
-		}
-		allIssues = append(allIssues, data.Issues...)
-		allRefs = append(allRefs, refs...)
-	}
 	emitPatrolProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "phase": "synthesizing", "total": total, "done": total,
 	})
 
-	// ── REDUCE：汇总各分块结果做全书归并 ──
-	redCtx, redCancel := context.WithTimeout(runCtx, patrolReduceTimeout)
-	reducePrompt := synthesizePrompt(novelID, allIssues, allRefs) + formatPrescreen(prescreen)
-	if len(chapters) == 0 {
-		// 无分块语料（列章失败或本书暂无章节）：把整本语料注入归并步，使其退化为「整本单次分析」，
-		// 保证仍有内容可读、结果与旧单调用等价（只报告不改写）。buildPatrolCorpus 已含台账快照。
-		reducePrompt += "\n### 本书语料（退回整本注入）\n" + s.buildPatrolCorpus(redCtx, novelID, runID)
-	} else {
-		reducePrompt += "\n### 台账快照（角色/关系/地点/时间线/弧线/读者视角/不变量/任务卡）\n" + ledgers
-	}
-	reducePrompt += blocks.Render(contextasm.PurposePatrol)
-	out, rerr := s.dispatchSkill(redCtx, "consistency-patrol", SkillInput{
+	// ── 单次归并：提示词内联「台账快照 + 预筛候选簇」作为全部证据 ──
+	synCtx, synCancel := context.WithTimeout(runCtx, patrolSynthesizeTimeout)
+	reducePrompt := synthesizePrompt(novelID, prescreen) +
+		"\n### 台账快照（角色/关系/地点/时间线/弧线/读者视角/不变量/任务卡）\n" + ledgers +
+		blocks.Render(contextasm.PurposePatrol)
+	out, rerr := s.dispatchSkill(synCtx, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    reducePrompt,
-		MaxTurns:  8,
-		SessionID: fmt.Sprintf("pipeline:patrol:%d:reduce", novelID),
+		MaxTurns:  6,
+		SessionID: fmt.Sprintf("pipeline:patrol:%d:synthesize", novelID),
 		RunID:     runID,
 	})
-	redCancel()
+	synCancel()
 
 	if rerr == nil {
 		if refused, reason := isLLMRefusal(out.Text); refused {
@@ -188,29 +136,11 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 			emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
 			return
 		} else {
-			rerr = fmt.Errorf("归并报告写回失败: %w", werr)
+			rerr = fmt.Errorf("巡检报告写回失败: %w", werr)
 		}
 	}
 
-	// 归并失败但有分块结果：落库部分张力报告（verdict=needs_fix），避免整轮高质量结论被丢弃。
-	if len(allIssues) > 0 {
-		why := "归并步异常"
-		if rerr != nil {
-			why = firstN(rerr.Error(), 80)
-		}
-		partial := AuditData{
-			Verdict:       "needs_fix",
-			Summary:       fmt.Sprintf("一致性巡检部分结果：归并步未完成（%s），以下为各分块已检出的 %d 处张力（尚未做全书归并去重，可能含重复/误报）。建议稍后重跑以生成完整报告。", why, len(allIssues)),
-			SchemaVersion: AuditSchemaVersion,
-			Issues:        allIssues,
-		}
-		if serr := s.storePatrolReport(bg, runID, partial); serr == nil {
-			emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
-			return
-		}
-	}
-
-	// 全无产出：落地清晰失败态（沿用既有分类文案）。
+	// 单次调用失败：落地清晰失败态（沿用既有分类文案），绝不静默卡死或丢成空报告。
 	verdict, summary := s.classifyPatrolFailure(rerr)
 	if serr := s.storePatrolReport(bg, runID, AuditData{Verdict: verdict, Summary: summary, Issues: []AuditIssue{}}); serr != nil {
 		s.logger.Warn("一致性巡检：写回失败态失败", "err", serr)
@@ -304,58 +234,24 @@ func refusalExcerpt(text string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "…"
 }
 
-// ── 分块 Map-Reduce 辅助：提示词构造与分块输出解析 ──
+// ── 单次归并提示词构造 ──
 
-// CrossRef 是分块分析（Map 步）抽取的「待全书尺度核对」事实锚点（consistency-patrol 分块提示词产出）。
-type CrossRef struct {
-	Kind       string  `json:"kind"`        // timeline | number | entity | claim | name
-	Text       string  `json:"text"`        // 原样摘录该事实所在的一句（含章内定位）
-	ChapterIDs []int64 `json:"chapter_ids"` // 涉及的章节全局阅读序号
-}
-
-// chunkPrompt 构造分块（Map 步）的任务提示词：只分析传入切片、产出 intra_issues + cross_refs。
-func chunkPrompt(novelID int64, idx, total int, windowCorpus string) string {
-	return fmt.Sprintf("本书 novel_id=%d。你正在执行一致性巡检的分块分析（第 %d/%d 块）。请**只分析下方【本书语料·切片】中的这几章**，不要假设能看到全书其他章节。\n"+
-		"产出两件事：①本切片内的张力（intra_issues，沿用全书巡检的张力契约：target_scope/dimension/direction/fix_type + 具体证据）；②需要全书尺度核对的跨引用事实锚点（cross_refs：本切片里任何后续章节可能冲突/呼应的数值、时间/时长、年龄、名字/称呼、实体关系、承诺/伏笔、设定常量；每条给 kind、原样文本、涉及章节全局阅读序号 chapter_ids）。\n"+
-		"只报告不改写。末尾**必须**附 ```json 代码块：{\"verdict\":\"pass|needs_fix\",\"summary\":\"...\",\"schema_version\":2,\"issues\":[...],\"cross_refs\":[{\"kind\":\"timeline|number|entity|claim|name\",\"text\":\"...\",\"chapter_ids\":[...]}]}。",
-		novelID, idx, total) + windowCorpus
-}
-
-// synthesizePrompt 构造归并（Reduce 步）的任务提示词：把各分块结果汇总为 JSON 锚点块，交 LLM 全书归并。
+// synthesizePrompt 构造全书归并（单次 consistency-patrol 调用）的任务提示词：
+// 把本地向量预筛得到的跨章候选矛盾簇（formatPrescreen）作为聚焦证据内联进提示词，
+// 并显式声明「全部证据已内联、不得调用 read/get_*/search 工具」，避免 agent 多轮工具抓取放大延迟。
 // 必须显式要求末尾附审计 JSON（与 patrolPrompt 同款契约），否则 parseFreshAudit 抽不到结构化结果。
-func synthesizePrompt(novelID int64, issues []AuditIssue, refs []CrossRef) string {
-	agg := struct {
-		Issues    []AuditIssue `json:"issues"`
-		CrossRefs []CrossRef   `json:"cross_refs"`
-	}{Issues: issues, CrossRefs: refs}
-	raw, _ := json.Marshal(agg)
-	return fmt.Sprintf("本书 novel_id=%d。你正在执行一致性巡检的归并（Reduce 步）。下方【分块结果汇总】是各分块已检出的张力与待全局核对的跨引用锚点，请在全书尺度上对照台账与既定事实做归并，产出最终张力报告（只报告不改写，verdict 只是给作者的参考信号）。\n"+
-		"【分块结果汇总】\n```json\n%s\n```\n", novelID, string(raw)) +
-		"最终回复末尾**必须**附一个 ```json 代码块，格式：" + auditFormatLine(true, issueSamplePatrol) + "——" + issueFieldRules()
-}
-
-// parseChunkOutput 解析分块（Map 步）输出：复用 extractAuditJSON 抽取 JSON 块，拆出本切片张力
-// issues 与跨引用锚点 cross_refs。解析失败返回 error（调用方跳过该块，不阻断整体）。
-func parseChunkOutput(text string) (AuditData, []CrossRef, error) {
-	raw := extractAuditJSON(text)
-	if raw == "" {
-		return AuditData{}, nil, fmt.Errorf("分块输出未含合法 JSON")
-	}
-	var cr struct {
-		AuditData
-		CrossRefs []CrossRef `json:"cross_refs"`
-	}
-	if err := json.Unmarshal([]byte(raw), &cr); err != nil {
-		return AuditData{}, nil, fmt.Errorf("分块 JSON 解析失败: %w", err)
-	}
-	if cr.Issues == nil {
-		cr.Issues = []AuditIssue{}
-	}
-	if cr.CrossRefs == nil {
-		cr.CrossRefs = []CrossRef{}
-	}
-	if cr.SchemaVersion == 0 {
-		cr.SchemaVersion = AuditSchemaVersion
-	}
-	return cr.AuditData, cr.CrossRefs, nil
+func synthesizePrompt(novelID int64, prescreen PrescreenReport) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "本书 novel_id=%d。请基于 consistency-patrol 方法论做一次**全书一致性巡检（张力报告）**："+
+		"对照下方【台账快照】（已冻结卷既定事实 + 当前台账）与【预筛候选矛盾点】，把前向适配累计出来的漂移（张力）标出来，供作者裁决。\n", novelID)
+	sb.WriteString("**全部证据已内联在下方（台账快照 + 预筛候选簇），你无需、也不得调用任何 read / get_* / search 工具去补读正文**——直接基于内联证据分析并输出报告；调用工具只会拖慢并可能触发超时。\n")
+	sb.WriteString("张力类型：设定失真 / 承诺未兑现 / 读者认知被悄悄改写 / 时间线漂移 / retcon 衔接裂缝；" +
+		"每条必须给具体证据（哪章/哪条既定事实），不报无据臆测、不报单章文笔/节奏类质量问题。\n")
+	sb.WriteString("方向建议：每条标 target_scope / dimension / direction（默认 forward_fix；仅硬矛盾且无法前向消解才 retcon_candidate）/ fix_type（正文↔台账对账冲突不预设谁对，按证据判方向）。\n")
+	sb.WriteString("这是**只报告不改写**的兜底巡检：你不改任何数据，verdict 只是给作者的参考信号（有张力→needs_fix，无→pass），" +
+		"不会触发任何自动修复，改不改由作者定。\n")
+	// 预筛候选矛盾簇（无 embedder/无候选时为空串，不影响归并）。
+	sb.WriteString(formatPrescreen(prescreen))
+	sb.WriteString("\n最终回复末尾**必须**附一个 ```json 代码块，格式：" + auditFormatLine(true, issueSamplePatrol) + "——" + issueFieldRules())
+	return sb.String()
 }
