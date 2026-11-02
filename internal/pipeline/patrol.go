@@ -108,6 +108,9 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		"novel_id": novelID, "run_id": runID, "phase": "analyzing", "total": total, "done": 0,
 	})
 
+	// 向量预筛（Phase 2）：聚类跨章候选矛盾点，喂给归并步重点核对；失败/未就绪仅降级，不阻断巡检。
+	prescreen := s.runPatrolPrescreen(runCtx, novelID, chapters)
+
 	// ── MAP：逐切片小调用，每块独立超时、互不牵连 ──
 	var allIssues []AuditIssue
 	var allRefs []CrossRef
@@ -154,7 +157,7 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 
 	// ── REDUCE：汇总各分块结果做全书归并 ──
 	redCtx, redCancel := context.WithTimeout(runCtx, patrolReduceTimeout)
-	reducePrompt := synthesizePrompt(novelID, allIssues, allRefs)
+	reducePrompt := synthesizePrompt(novelID, allIssues, allRefs) + formatPrescreen(prescreen)
 	if len(chapters) == 0 {
 		// 无分块语料（列章失败或本书暂无章节）：把整本语料注入归并步，使其退化为「整本单次分析」，
 		// 保证仍有内容可读、结果与旧单调用等价（只报告不改写）。buildPatrolCorpus 已含台账快照。
