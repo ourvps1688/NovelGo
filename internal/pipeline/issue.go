@@ -379,6 +379,22 @@ func (s *Store) RecordIssueVerify(ctx context.Context, novelID int64, runID, iss
 	return escalated, err
 }
 
+// RecordIssueVerifyUnverified 记录复验「未确认」（LLM 调用失败 / 供应商熔断 / 回执未解析 /
+// 回执未含本工单）：退回 pending 留待下轮，原因写入 note（前端可见），不计 verify_attempts
+// （与 rejected 区分，避免供应商抖动把尝试次数吃光而误转人工工单 skipped）。
+// 注意：此处必须写 note 而非 skip_reason——UpdateIssueStatus 的 skipReason 参数落的是 skip_reason
+// 列，而工单面板从不渲染 skip_reason，会导致复验失败原因对用户完全不可见（静默翻回待确认）。
+func (s *Store) RecordIssueVerifyUnverified(ctx context.Context, novelID int64, runID, issueKey, note string) error {
+	updates := map[string]any{
+		"status":     IssueStatusPending,
+		"note":       noteOrDefault(note, "复验未确认，已复位待复验"),
+		"updated_at": time.Now(),
+	}
+	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
+		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+		Updates(updates).Error
+}
+
 // ListIssueTicketsByNovel 列出一本书的全部发现项工单（工单面板列表，跨 run，新单在前）。
 func (s *Store) ListIssueTicketsByNovel(ctx context.Context, novelID int64) ([]PipelineIssue, error) {
 	var rows []PipelineIssue

@@ -146,6 +146,7 @@ func TestServiceVerifyIssueTicketsNoReceiptCompat(t *testing.T) {
 	rows, lerr := svc.store.ListIssues(ctx, 409, run.RunID)
 	require.NoError(t, lerr)
 	require.Equal(t, IssueStatusPending, rows[0].Status, "P2：回执未解析不再静默全过，工单复位 pending 留待下轮")
+	require.Contains(t, rows[0].Note, "复验回执未解析", "未确认原因须写入可见 note 列，否则前端静默无回执")
 }
 
 // TestManualBacklogSummary 验证人工工单摘要渲染（列表截断 + 原因）。

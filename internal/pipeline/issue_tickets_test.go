@@ -427,4 +427,5 @@ func TestServiceVerifyIssueTicketsSkillError(t *testing.T) {
 	rows, lerr := svc.store.ListIssues(ctx, 7, "run-a")
 	require.NoError(t, lerr)
 	require.Equal(t, IssueStatusPending, rows[0].Status, "复验失败不改工单状态（未确认留待下轮）")
+	require.Contains(t, rows[0].Note, "复验执行失败", "未确认原因须写入可见 note 列，否则前端静默无回执")
 }

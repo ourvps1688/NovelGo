@@ -507,7 +507,10 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 			}
 		default:
 			// 未确认（LLM 失败 / 回执未解析 / 回执未提及）：复位 pending 留待下轮，绝不静默判通过（审计 P2）。
-			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, noteOrDefault(note, "复验未确认，已复位待复验"))
+			// 原因写入 note（前端可见），不计 verify_attempts（与 rejected 区分，避免供应商抖动误转人工）。
+			if werr := s.store.RecordIssueVerifyUnverified(ctx, novelID, runID, r.IssueKey, noteOrDefault(note, "复验未确认，已复位待复验")); werr != nil {
+				s.logger.Warn("复验：未确认落库失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", werr)
+			}
 			summary.Unverified++
 		}
 		emitVerifyProgress(ctx, map[string]any{
