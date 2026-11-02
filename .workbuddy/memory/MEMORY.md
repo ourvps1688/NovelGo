@@ -24,6 +24,7 @@
 - 复验自动升级人工（2026-11-01）：复验「明确未通过」累计达 3 次（`verifyEscalateAfter`，仅计 rejected 不计 unverified）自动转 `skipped`（人工工单，复用既有语义；`PipelineIssue.verify_attempts` 计数，AutoMigrate 自动加列），skip_reason/note 写明「复验 N 次未通过，自动转人工工单」；前端状态徽章不变（skipped=已跳过），面板 note 区可见原因。防修复→复验失败无限空转。
 - 签约体检报告解析泄漏修复（2026-11-01, 7cb519d8）：`parseAudit`（service.go）此前 JSON 解析失败兜底把整段原始 LLM 输出塞进 Summary/issue.Desc 并持久化，致签约潜力评估面板把整份报告当纯文本铺开（含末尾原始 JSON）。改为健壮抽 JSON（json 代码围栏 + 末段平衡大括号兜底）+ 优雅降级（干净 P0 issue 提示重跑体检，绝不写原文）；新增 TestParseAuditNoRawTextLeak 回归测试。
 - 签约体检卡「一直运行中」死循环修复（2026-11-01, c4afcb37）：供应商「连得通但不吐数据」时，空闲看门狗每约9分钟超时一次，旧代码把空闲超时一律标 Retryable:true 且熔断刻意忽略空闲超时，致 agent 无限重试直到60分钟硬超时，界面表现为签约体检一直运行中卡死。修复：idleWatchdog 记录本次请求是否收到过字节；新增 idleRetryable 纯函数——零字节空转（死连接）判不可重试（直接失败并给「未收到任何字节/疑似供应商无响应」清晰错误），已收字节（真实慢生成/中途断流）仍保留可重试，不误杀思考模型长静默。非流式（generate.go）与流式（stream.go）两路径接入；新增 TestIdleRetryable/TestIdleTimeoutErrorGotBytes。熔断行为不变（仍不因子空闲超时熔断）。
+- 一致性巡检分块 Map-Reduce 重构（2026-11-02, 6b90e7d5）：旧单调用把整本书一次性塞进一个 LLM 调用，供应商稍慢即超时整轮作废、结论全丢。改为按 patrolWindowSize=5 切片 MAP 小调用 + 一次性 REDUCE 归并（复用单技能 consistency-patrol，仅提示词区分角色，零测试契约变更）；任一块失败不牵连；归并失败但有分块结果时落库 needs_fix 部分张力报告（杜绝结论丢弃）。列章失败降级整本单调用。Phase 2 确定性+向量预筛（patrol_prescreen.go 用 rag.Embedder bge 512 维聚类）待办。
 
 ## ONNX 现状（结论，细节见 docs/onnx-enhancement-development-plan.md）
 - 仅 `bge-small-zh-v1.5`（512维）做文本向量化（4 消费方全部优雅降级）。reranker 已 L3 彻底移除（真实评测净负优化）；P0-2 批处理/缓存 ✅；P1-1 长文分段聚合 ✅（不影响功能）；P1-2 升级 embedding 模型 评估后放弃（维度变更须重建向量库）；P2 本地分类器/NER 降级待触发。
@@ -39,3 +40,10 @@
 - 重启 wails dev：带全套 CGO export **+ `CODEBUDDY_SAFE_DELETE_ENABLED=0`** 跑 `wails.exe dev`。关键：WorkBuddy 的 node-safe-delete-shim（`app.asar.unpacked/cli/vendor/shim/node-safe-delete-shim.cjs`）会拦截 vite 的 emptyDir（threshold 50 / scope turn，抛 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`）；且 `wails dev` 跑 `tsc -b && vite build`，`tsc -b` 会在 rm 之后重新往 `dist/assets` 吐编译产物，故**仅预删 assets 无效**，必须靠该 env 关掉 shim 才能让 vite build 过。结束旧进程 `Stop-Process -Id <pid> -Force`（注意 `ps -W` 的 MinGW PID ≠ Windows 真实 PID，须用 PowerShell `Get-Process` 取真实 PID 再杀，否则杀不干净致旧实例残留）。浏览器访问 5173 白屏=正常（Wails 桥仅注入桌面 webview）。
 - vitest 沙箱偶发失败（资源受限）；前端用 format/i18n/lint(0 error)/build 兜底，vitest 脱沙箱跑。
 - wails 重启重产的前端绑定文件（App.d.ts/App.js/models.ts）常现纯缩进/排序噪声，git checkout 还原即可，勿混入提交。
+
+## 一致性巡检（consistency-patrol）架构（勿回退）
+- 设计收敛：单次巡检调用只按 novelID 读当前书（runConsistencyPatrol→SkillInput.NovelID→tc.NovelID；get_*/read 全带 WHERE novel_id），不存在读全库；旧「LLM 逐章读」与现「后端批量注入语料」都只碰当前书。
+- 编排（patrol.go runConsistencyPatrol）= 分块 Map-Reduce + 部分沉淀：按 patrolWindowSize=5 切连续章节，每块一次小调用（consistency-patrol 技能，提示词标「分块分析」/「归并」区分角色，复用单技能不改 dispatch 名称契约）；per-chunk 12min、reduce 12min、整体 60min；任块失败仅记日志继续；归并失败但有分块结果→落库 verdict=needs_fix 部分张力（杜绝结论丢弃）。列章失败降级整本单调用。
+- Phase 2 向量预筛（patrol_prescreen.go）：列章后跑 runPatrolPrescreen——抽「疑似主张句」→ BGE 512 维 EmbedBatch 单链聚类（余弦≥0.78，仅留跨章簇）→ detectDivergence 同单位数值分歧标 Divergent → formatPrescreen 注入归并步。embedder 取 rag.TryGetEmbedder() 全局单例，未就绪即降级不阻断；不调 Compact（共享全局）。测试经 patrolEmbedderProvider 注入 stub。
+- fail-fast（5775990b）：classifyPatrolFailure 区分 idle_timeout/DeadlineExceeded 给清晰「供应商无响应/半死连接」提示；agent idle EOF/重置分支计入 idleTimeouts 堵 idleRetryCap 漏检。
+- 验证铁律：pipeline 包四道闸（gofmt/build/vet/golangci-lint webkit2_41）/ 全量 go test 全绿；新功能必带单测（parseChunkOutput/partial-sink/prescreen 共 11 个）。
