@@ -606,6 +606,7 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerNa
 			StatusCode: 0,
 			Message:    msg,
 			Retryable:  retryable,
+			Kind:       "idle_timeout",
 		}}
 		// 流异常中断：不再做 tool call 收尾，避免与 invalidToolErrors 分支叠加
 		// 产生第二个 EventError（scanner.Err 后 accumulated 数据不可信，保守丢弃）

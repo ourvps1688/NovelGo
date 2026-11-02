@@ -65,7 +65,21 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		SessionID: "pipeline:patrol:" + strconv.FormatInt(novelID, 10),
 	})
 	if err != nil {
-		s.logger.Warn("一致性巡检执行失败（非阻断，跳过）", "run_id", runID, "err", err)
+		// 巡检失败（超时 / 供应商无响应 / 中断等）：落地清晰失败态并广播事件，
+		// 否则前端「运行中」提示会永久停留、看不到任何回执（此前仅模型拒绝分支落地失败态）。
+		s.logger.Warn("一致性巡检执行失败（落地失败态，非阻断）", "run_id", runID, "err", err)
+		reason := firstN(err.Error(), 200)
+		summary := "一致性巡检未能完成：" + reason + "\n" +
+			"可能原因：LLM 供应商长时间无响应（连接已建立但未吐出数据）、请求超时，或进程被中断。\n" +
+			"建议：稍后重试；若持续失败，可更换模型/供应商，或确认该模型支持本书体量所需的长上下文。"
+		if serr := s.storePatrolReport(s.appCtx, runID, AuditData{
+			Verdict: "error",
+			Summary: summary,
+			Issues:  []AuditIssue{},
+		}); serr != nil {
+			s.logger.Warn("一致性巡检：写回失败态失败", "err", serr)
+		}
+		emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
 		return
 	}
 	// 拒绝 / 安全审核拦截：上游把拒绝语当正常 content 返回（err == nil），必须在此拦截，

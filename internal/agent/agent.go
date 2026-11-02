@@ -228,6 +228,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		pendingInjects := make(map[string][]mcp_tools.InjectMessage)
 		// P2: 本轮 LLM 调用重试计数（不消耗 MaxTurns）
 		retryCount := 0
+		// 连续空闲超时计数（供应商半死连接）：单轮内连续命中 idleRetryCap 即放弃重试，
+		// 避免 8×9 分钟空转。非空闲错误会清零该计数。
+		idleTimeouts := 0
 		// tool_args_invalid 首次提醒标志：同一 turn 内只加一次 reminder，
 		// 避免重试耗尽后 DB 残留多条孤立 user reminder 污染下轮 LLM 上下文
 		reminderAdded := false
@@ -434,6 +437,14 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						a.logger.Warn("agent event error", "err", event.Error)
 					}
 
+					// 连续空闲超时计数（供应商「连得通但不吐数据」的半死连接）：
+					// 单轮内连续命中达到 idleRetryCap 即判不可重试，避免 8×9 分钟空转。
+					if apiErr != nil && apiErr.Kind == "idle_timeout" {
+						idleTimeouts++
+					} else {
+						idleTimeouts = 0
+					}
+
 					// tool arguments 解析失败：丢弃所有输出 + appendMsg reminder + 走自动重试
 					// 与 P2 重试的区别：需要 appendMsg user reminder 告诉 LLM 刚才 tool call 解析失败
 					if apiErr != nil && apiErr.Kind == "tool_args_invalid" {
@@ -492,7 +503,9 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					}
 
 					// P2: 可恢复错误重试（不重试 ctx.Canceled / 不可恢复错误 / 非 *APIError）
-					if apiErr != nil && apiErr.Retryable && retryCount < maxRetries {
+					// 连续空闲超时达上限的半死连接不再重试（idleRetryCap）。
+					idleExhausted := apiErr != nil && apiErr.Kind == "idle_timeout" && idleTimeouts >= idleRetryCap
+					if apiErr != nil && apiErr.Retryable && !idleExhausted && retryCount < maxRetries {
 						retryCount++
 						backoff := computeBackoff(retryCount, apiErr.RetryAfter)
 						a.logger.Warn("agent retrying llm call",
