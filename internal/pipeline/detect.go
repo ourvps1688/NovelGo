@@ -203,9 +203,15 @@ var verifyCallTimeout = 120 * time.Minute
 // verifyTicketTimeout 是单工单复验 LLM 调用的墙钟上限（逐工单预算，独立于 verifyCallTimeout）：
 // 复验逐工单顺序执行，若某工单的 LLM 调用卡住（供应商静默/空闲超时），不兜底会拖住整批。
 // 此处给每张工单单独的预算，超时的工单单独复位 pending 并让后续工单继续，避免「一张卡死、
-// 整批无进展」。实测 mimo-v2.6-pro 在 ~10万 token 章节上下文下单轮就要 1-2min，5min 往往在
-// 出回执前就被斩断；放宽到 8min 仍早于 thinking 模型 9 分钟空闲看门狗，使其干净超时而非硬等。
-var verifyTicketTimeout = 8 * time.Minute
+// 整批无进展」。
+//
+// 取值纪律（关键）：必须 > thinkingIdleTimeout（9min，见 internal/llm/stream.go）。原因：
+// 思考模型在「活跃产出推理 token」时相邻 chunk 间隔可能远小于 9min，但单轮墙钟可累计超过
+// 9min 才出回执——此时空闲看门狗不会触发（它只在「整段静默」时斩断，专杀死连接），真正
+// 需要的是给这种「活着但慢」的轮次足够的墙钟；若此处 ≤ 9min，思考模型复验常被墙钟提前斩断
+// 而报 context deadline exceeded（如 #13 设料自洽复验）。故取 15min：留给思考模型单轮充分余量，
+// 同时仍由 9min 空闲看门狗兜底真死连接、由 verifyCallTimeout(120min) 兜住整轮失控。
+var verifyTicketTimeout = 15 * time.Minute
 
 // verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，需逐章节
 // read 后再出回执，多章节工单 6 轮不够（未出回执即被截断 → 整批复验失败）。放宽到 12 轮，
