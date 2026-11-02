@@ -34,6 +34,9 @@ import (
 // 现行方案（单次归并 + 全书语料内联 + 预筛聚焦）：
 //  1. 后端批量预取全书语料（章正文 + 台账快照，本地读取秒级）拼成【本书语料】注入提示词，
 //     LLM 一次性通读分析——替代「让 agent 逐章 read」（旧设计 50+ 次工具往返、易卡死），这是唯一完整证据源；
+//     【2026-11-03 收紧】该供应商对大上下文极慢（思考模型单调用 >45min 仍吐不完），且无法换更快模型，
+//     故语料预算收敛为 patrolChapterCap=2000 / patrolLedgerCap=20000 / patrolCorpusCap=120000（上下文约原 40%），
+//     并约束模型「输出从简、只交 JSON」——在 45min 预算内稳定收口，详见下方常量注释。
 //  2. 本地向量预筛（Phase 2，免费、严格限时）把「跨章、语义相近、数值/事实可能分歧」的陈述聚成候选矛盾簇，
 //     仅作归并步的聚焦提示（非证据必需，超时/失败仅降级）；
 //  3. 仅**一次** consistency-patrol 调用，提示词内联【本书语料】+ 预筛候选簇，明确禁止 read/get_*/search 工具；
@@ -41,9 +44,9 @@ import (
 
 const (
 	// patrolSynthesizeTimeout 单次归并（全书核对）调用的硬超时：证据已内联【本书语料】
-	// （章正文+台账快照，patrolCorpusCap 上限 200k 字符）+ 预筛候选簇，提示词体量远大于旧
-	// 「台账+预筛簇」方案（注入全书语料后约为旧方案的 5~10 倍）；思考模型通读全书并吐完整
-	// JSON 张力报告耗时显著增加，故给足 45min 预算（patrolOverallTimeout 60min 兜底）。
+	// （章正文+台账快照，经 2026-11-03 收紧：patrolChapterCap=2000 / patrolLedgerCap=20000 /
+	// patrolCorpusCap=120000，单调用上下文压到约原 40%）+ 预筛候选簇，并约束模型「输出从简、
+	// 只交 JSON 不写长篇分析」以削减思维模型冗长输出；45min 预算对收紧后的体量绰绰有余。
 	// 超时即清晰失败态（classifyPatrolFailure），绝不静默卡死。
 	patrolSynthesizeTimeout = 45 * time.Minute
 	// patrolOverallTimeout 单次巡检整体预算（含预筛本地计算 + 单次归并调用），兜底防无限拖延。
@@ -257,6 +260,7 @@ func synthesizePrompt(novelID int64, prescreen PrescreenReport) string {
 	fmt.Fprintf(&sb, "本书 novel_id=%d。请基于 consistency-patrol 方法论做一次**全书一致性巡检（张力报告）**："+
 		"对照下方【本书语料】（已批量取好的全书正文 + 台账快照）与【预筛候选矛盾点】，把前向适配累计出来的漂移（张力）标出来，供作者裁决。\n", novelID)
 	sb.WriteString("**全部证据已内联在下方（【本书语料】含全书正文与台账快照 + 预筛候选簇），你无需、也不得调用任何 read / get_* / search 工具去补读正文**——直接基于内联证据分析并输出报告；调用工具只会拖慢并可能触发超时。\n")
+	sb.WriteString("**输出从简（关键，决定能否在预算内跑完）**：末尾的 ```json 代码块是必交产物；JSON 之前最多用 2-3 句话点明总体结论，**不要撰写长篇逐条分析论证**——每条张力在 JSON 的 evidence 字段用一句话点明证据即可，无需展开推理过程。不要重复罗列已在 JSON 中的内容。\n")
 	sb.WriteString("张力类型：设定失真 / 承诺未兑现 / 读者认知被悄悄改写 / 时间线漂移 / retcon 衔接裂缝；" +
 		"每条必须给具体证据（哪章/哪条既定事实），不报无据臆测、不报单章文笔/节奏类质量问题。\n")
 	sb.WriteString("方向建议：每条标 target_scope / dimension / direction（默认 forward_fix；仅硬矛盾且无法前向消解才 retcon_candidate）/ fix_type（正文↔台账对账冲突不预设谁对，按证据判方向）。\n")
