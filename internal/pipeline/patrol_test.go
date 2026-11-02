@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,11 @@ import (
 const patrolJSONFixture = `{"verdict":"needs_fix","score":0,"summary":"发现 2 处张力","schema_version":2,"issues":[` +
 	`{"id":"T1","level":"P1","area":"timeline","desc":"第9卷称三年后，冻结锚点是五年","fix_type":"body","target_scope":"active_volume","dimension":"timeline","direction":"forward_fix"},` +
 	`{"id":"T2","level":"P0","area":"reader_pov","desc":"已揭示真相被当未知写，需回改前卷才能自洽","fix_type":"ledger","target_scope":"frozen_volume","dimension":"reader_pov","direction":"retcon_candidate"}]}`
+
+// chunkJSONFixture 是分块（Map 步）输出的结构化样例：含本切片张力 + 待全局核对的跨引用锚点。
+const chunkJSONFixture = `{"verdict":"needs_fix","summary":"本切片张力",` +
+	`"issues":[{"id":"C1","level":"P1","area":"timeline","desc":"切片内时间线张力","fix_type":"ledger","target_scope":"active_volume","dimension":"timeline","direction":"forward_fix"}],` +
+	`"cross_refs":[{"kind":"timeline","text":"某时间锚点表述","chapter_ids":[1]}]}`
 
 // capturePatrolEmit 把巡检事件发射器换成通道捕获（异步触发测试用），测试结束恢复。
 func capturePatrolEmit(t *testing.T) <-chan map[string]any {
@@ -316,6 +322,72 @@ func TestPatrolTriggeredAtVolumeFreeze(t *testing.T) {
 		return SkillOutput{}, errors.New("unreachable")
 	}
 	failed.freezeVolumeWithNote(ctx, run2.NovelID, 12, run2.RunID, StageS3, StatusRunning)
+}
+
+// TestParseChunkOutput 验证分块（Map 步）输出的解析：抽出本切片张力 issues 与跨引用锚点
+// cross_refs；无合法 JSON 时返回 error（调用方跳过该块，不阻断整体）。
+func TestParseChunkOutput(t *testing.T) {
+	text := "分析如下：\n```json\n" + chunkJSONFixture + "\n```\n以上为本切片结论。"
+	data, refs, err := parseChunkOutput(text)
+	require.NoError(t, err)
+	require.Len(t, data.Issues, 1, "应解析出 1 条切片内张力")
+	require.Equal(t, "C1", data.Issues[0].ID)
+	require.Equal(t, AuditSchemaVersion, data.SchemaVersion, "应补标当前契约版本")
+	require.Len(t, refs, 1, "应解析出 1 条跨引用锚点")
+	require.Equal(t, "timeline", refs[0].Kind)
+	require.Equal(t, []int64{1}, refs[0].ChapterIDs)
+
+	// 无合法 JSON → 错误（调用方跳过该块）。
+	_, _, err2 := parseChunkOutput("这段文本里没有任何 JSON 内容")
+	require.Error(t, err2)
+}
+
+// TestRunConsistencyPatrolPartialSink 验证部分沉淀（混合方案核心兜底）：归并步失败但有分块
+// 已检出张力时，绝不再丢弃整轮高质量结论，而是落库部分张力报告（verdict=needs_fix、保留已检
+// 出的张力项）。此前单调用设计在超时/失败时把整轮结论判为 error 并清零 issues，正是用户反馈的
+// 「巡检跑不出来、结论全丢」根因。
+func TestRunConsistencyPatrolPartialSink(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}))
+	chStore := chapter.NewStore(db, slog.Default())
+	for i := 0; i < 3; i++ { // 3 章 → 1 个分块窗口（patrolWindowSize=5）
+		_, cerr := chStore.Create(context.Background(), nil, 720, nil, fmt.Sprintf("第%d章", i+1))
+		require.NoError(t, cerr)
+	}
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.SetChapterTextReader(func(_ context.Context, _ int64, _ int64) (string, error) {
+		return "正文内容", nil
+	})
+	ctx := context.Background()
+	run, err := svc.StartPipeline(ctx, 720, "new", nil, false)
+	require.NoError(t, err)
+
+	captured := capturePatrolEmit(t)
+	svc.skillRunner = func(_ context.Context, name string, in SkillInput) (SkillOutput, error) {
+		require.Equal(t, "consistency-patrol", name)
+		if strings.Contains(in.Prompt, "分块分析") {
+			// MAP 步：返回分块结构化结果（含 issues + cross_refs）。
+			return SkillOutput{Text: "```json\n" + chunkJSONFixture + "\n```"}, nil
+		}
+		// REDUCE 步：模拟失败（供应商无响应），验证部分沉淀兜底。
+		return SkillOutput{}, errors.New("llm down")
+	}
+	svc.runConsistencyPatrol(ctx, run.RunID, run.NovelID)
+
+	got, gerr := svc.store.GetByRunID(ctx, run.RunID)
+	require.NoError(t, gerr)
+	var ctxt GateContext
+	require.NoError(t, json.Unmarshal([]byte(got.ContextJSON), &ctxt))
+	require.NotEmpty(t, ctxt.PatrolReport, "归并失败但有分块结果应落地部分张力报告（非空）")
+	var report AuditData
+	require.NoError(t, json.Unmarshal([]byte(ctxt.PatrolReport), &report))
+	require.Equal(t, "needs_fix", report.Verdict, "部分沉淀应为 needs_fix 而非 error/丢弃")
+	require.Len(t, report.Issues, 1, "应保留分块已检出的张力（不丢结论）")
+	require.Equal(t, "C1", report.Issues[0].ID)
+	require.Contains(t, report.Summary, "部分结果", "部分沉淀应说明归并未完成")
+
+	p := <-captured
+	require.Equal(t, run.RunID, p["run_id"])
 }
 
 // TestClassifyPatrolFailure 验证巡检失败归约：区分供应商无响应/流式中断与通用错误，
