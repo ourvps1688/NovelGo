@@ -40,9 +40,12 @@ import (
 //  4. 单次调用给足超时预算（patrolSynthesizeTimeout）；失败走 classifyPatrolFailure 落清晰失败态，绝不静默卡死。
 
 const (
-	// patrolSynthesizeTimeout 单次归并（全书核对）调用的硬超时：证据已内联（台账+预筛簇），
-	// 体量远小于旧「整本/分块全文」方案，给思考模型留足吐完整 JSON 的余量；超时即清晰失败态。
-	patrolSynthesizeTimeout = 20 * time.Minute
+	// patrolSynthesizeTimeout 单次归并（全书核对）调用的硬超时：证据已内联【本书语料】
+	// （章正文+台账快照，patrolCorpusCap 上限 200k 字符）+ 预筛候选簇，提示词体量远大于旧
+	// 「台账+预筛簇」方案（注入全书语料后约为旧方案的 5~10 倍）；思考模型通读全书并吐完整
+	// JSON 张力报告耗时显著增加，故给足 45min 预算（patrolOverallTimeout 60min 兜底）。
+	// 超时即清晰失败态（classifyPatrolFailure），绝不静默卡死。
+	patrolSynthesizeTimeout = 45 * time.Minute
 	// patrolOverallTimeout 单次巡检整体预算（含预筛本地计算 + 单次归并调用），兜底防无限拖延。
 	patrolOverallTimeout = 60 * time.Minute
 )
