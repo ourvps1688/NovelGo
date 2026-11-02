@@ -31,12 +31,13 @@ import (
 // 且归并步在 12 分钟预算内吐不完 → 只落残缺报告（verdict=needs_fix 但 summary 写着「建议重跑」），
 // 用户体感即「一直检测中 / 卡死」。
 //
-// 现行方案（单次归并 + 预筛证据内联）：
-//  1. 本地向量预筛（Phase 2，免费）先把「跨章、语义相近、数值/事实可能分歧」的陈述聚成候选矛盾簇；
-//  2. 仅**一次** consistency-patrol 调用，提示词内联「台账快照（既定事实+当前台账）+ 预筛候选簇」
-//     作为全部证据——不再喂整本书、也不再喂各分块全文，prompt 体量远小于旧方案；
-//  3. 提示词明确禁止调用 read/get_*/search 工具（证据已内联），杜绝 agent 多轮工具抓取把延迟放大；
-//  4. 单次调用给足超时预算；失败走 classifyPatrolFailure 落清晰失败态，绝不静默卡死。
+// 现行方案（单次归并 + 全书语料内联 + 预筛聚焦）：
+//  1. 后端批量预取全书语料（章正文 + 台账快照，本地读取秒级）拼成【本书语料】注入提示词，
+//     LLM 一次性通读分析——替代「让 agent 逐章 read」（旧设计 50+ 次工具往返、易卡死），这是唯一完整证据源；
+//  2. 本地向量预筛（Phase 2，免费、严格限时）把「跨章、语义相近、数值/事实可能分歧」的陈述聚成候选矛盾簇，
+//     仅作归并步的聚焦提示（非证据必需，超时/失败仅降级）；
+//  3. 仅**一次** consistency-patrol 调用，提示词内联【本书语料】+ 预筛候选簇，明确禁止 read/get_*/search 工具；
+//  4. 单次调用给足超时预算（patrolSynthesizeTimeout）；失败走 classifyPatrolFailure 落清晰失败态，绝不静默卡死。
 
 const (
 	// patrolSynthesizeTimeout 单次归并（全书核对）调用的硬超时：证据已内联（台账+预筛簇），
@@ -89,13 +90,11 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	defer runCancel()
 
 	blocks := s.buildBlocks(bg, novelID, contextasm.PurposePatrol)
-	ledgers := s.dumpLedgers(bg, novelID)
 
-	// 列章：失败仅记日志降级（预筛退化为无候选、归并步仍用台账证据），绝不阻断巡检——
-	// 沿用 buildPatrolCorpus 的容错契约（列章失败→空章节，不硬失败）。
+	// 列章：失败仅记日志降级（预筛退化为无候选、语料退化为无章正文，归并步仍用台账证据），绝不阻断巡检。
 	chapters, err := s.chapterStore.ListAllByNovel(bg, nil, novelID)
 	if err != nil {
-		s.logger.Warn("一致性巡检：列章失败，预筛退化为无候选", "novel_id", novelID, "err", err)
+		s.logger.Warn("一致性巡检：列章失败，预筛/语料退化为无章正文", "novel_id", novelID, "err", err)
 		chapters = nil
 	}
 	total := len(chapters)
@@ -103,17 +102,27 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		"novel_id": novelID, "run_id": runID, "phase": "prescreen", "total": total, "done": 0,
 	})
 
-	// 向量预筛（Phase 2，本地免费）：聚类跨章候选矛盾点，作为归并步的聚焦证据；失败/未就绪仅降级，不阻断。
-	prescreen := s.runPatrolPrescreen(runCtx, novelID, chapters)
+	// 向量预筛（Phase 2，本地免费）：聚类跨章候选矛盾点，仅作归并步的聚焦提示；失败/未就绪/超时仅降级，不阻断。
+	// 关键：预筛须严格限时——EmbedBatch 走本地 ONNX，异常时可能同步阻塞，故套短超时 + goroutine 兜底
+	// （见 clusterPrescreenCands），绝不允许预筛卡死拖垮整轮巡检。
+	prescreenCtx, prescreenCancel := context.WithTimeout(runCtx, 90*time.Second)
+	defer prescreenCancel()
+	prescreen := s.runPatrolPrescreen(prescreenCtx, novelID, chapters)
+	emitPatrolProgress(ctx, map[string]any{
+		"novel_id": novelID, "run_id": runID, "phase": "reading", "total": total, "done": 0,
+	})
+
+	// 全书语料（章正文 + 台账快照）后端批量预取、本地读取秒级完成，拼成【本书语料】注入提示词——
+	// 本巡检唯一完整证据源，替代「让 agent 逐章 read」（旧设计 50+ 次工具往返、易卡死）。
+	// 语料缺失（无章正文）时归并步仍可用台账快照分析；buildPatrolCorpus 自带容错降级。
+	corpus := s.buildPatrolCorpus(runCtx, novelID, runID)
 	emitPatrolProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "phase": "synthesizing", "total": total, "done": total,
 	})
 
-	// ── 单次归并：提示词内联「台账快照 + 预筛候选簇」作为全部证据 ──
+	// ── 单次归并：提示词内联【本书语料】（全书正文+台账）+ 预筛候选簇 作为全部证据 ──
 	synCtx, synCancel := context.WithTimeout(runCtx, patrolSynthesizeTimeout)
-	reducePrompt := synthesizePrompt(novelID, prescreen) +
-		"\n### 台账快照（角色/关系/地点/时间线/弧线/读者视角/不变量/任务卡）\n" + ledgers +
-		blocks.Render(contextasm.PurposePatrol)
+	reducePrompt := synthesizePrompt(novelID, prescreen) + corpus + blocks.Render(contextasm.PurposePatrol)
 	out, rerr := s.dispatchSkill(synCtx, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    reducePrompt,
@@ -243,8 +252,8 @@ func refusalExcerpt(text string, maxRunes int) string {
 func synthesizePrompt(novelID int64, prescreen PrescreenReport) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "本书 novel_id=%d。请基于 consistency-patrol 方法论做一次**全书一致性巡检（张力报告）**："+
-		"对照下方【台账快照】（已冻结卷既定事实 + 当前台账）与【预筛候选矛盾点】，把前向适配累计出来的漂移（张力）标出来，供作者裁决。\n", novelID)
-	sb.WriteString("**全部证据已内联在下方（台账快照 + 预筛候选簇），你无需、也不得调用任何 read / get_* / search 工具去补读正文**——直接基于内联证据分析并输出报告；调用工具只会拖慢并可能触发超时。\n")
+		"对照下方【本书语料】（已批量取好的全书正文 + 台账快照）与【预筛候选矛盾点】，把前向适配累计出来的漂移（张力）标出来，供作者裁决。\n", novelID)
+	sb.WriteString("**全部证据已内联在下方（【本书语料】含全书正文与台账快照 + 预筛候选簇），你无需、也不得调用任何 read / get_* / search 工具去补读正文**——直接基于内联证据分析并输出报告；调用工具只会拖慢并可能触发超时。\n")
 	sb.WriteString("张力类型：设定失真 / 承诺未兑现 / 读者认知被悄悄改写 / 时间线漂移 / retcon 衔接裂缝；" +
 		"每条必须给具体证据（哪章/哪条既定事实），不报无据臆测、不报单章文笔/节奏类质量问题。\n")
 	sb.WriteString("方向建议：每条标 target_scope / dimension / direction（默认 forward_fix；仅硬矛盾且无法前向消解才 retcon_candidate）/ fix_type（正文↔台账对账冲突不预设谁对，按证据判方向）。\n")

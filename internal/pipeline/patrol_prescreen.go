@@ -173,9 +173,28 @@ func clusterPrescreenCands(ctx context.Context, emb prescreenEmbedder, cands []P
 		for j := i; j < end; j++ {
 			batch = append(batch, cands[j].Sentence)
 		}
-		v, err := emb.EmbedBatch(ctx, batch)
-		if err != nil {
-			return nil, err
+		// EmbedBatch 走本地 ONNX，异常时可能同步阻塞且不响应 ctx 取消；用 goroutine + select 兜底，
+		// 确保 ctx 超时/取消后必返回（底层 embedder 即便仍阻塞在后台 goroutine 也不影响主流程），
+		// 绝不让聚类卡死整轮巡检。
+		type embedResult struct {
+			vecs [][]float32
+			err  error
+		}
+		resCh := make(chan embedResult, 1)
+		go func() {
+			v, e := emb.EmbedBatch(ctx, batch)
+			resCh <- embedResult{v, e}
+		}()
+		var v [][]float32
+		var e error
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case r := <-resCh:
+			v, e = r.vecs, r.err
+		}
+		if e != nil {
+			return nil, e
 		}
 		vecs = append(vecs, v...)
 	}
