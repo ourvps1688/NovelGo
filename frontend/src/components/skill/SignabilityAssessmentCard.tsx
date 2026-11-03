@@ -1,17 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { usePanelStore } from "@/stores/usePanelStore";
 import type { pipeline } from "@/lib/wailsjs/go/models";
-
-// verdict → i18n key（book/volume=pass|needs_fix|error；章节质量档案=checked|pending|
-// skipped）。未知值如实显示原值（宁缺勿错不造词）。
-const VERDICT_KEYS: Record<string, string> = {
-  pass: "journey.quality.detect.verdict.pass",
-  needs_fix: "journey.quality.detect.verdict.needs_fix",
-  checked: "journey.quality.detect.verdict.checked",
-  pending: "journey.quality.detect.verdict.pending",
-  skipped: "journey.quality.detect.verdict.skipped",
-  error: "journey.quality.detect.verdict.error",
-};
+import { VERDICT_KEYS } from "./verdictKeys";
 
 // 工单状态徽章配色（与 IssueTicketsPanel 同口径）：内联评估只读展示用。
 const STATUS_CLS: Record<string, string> = {

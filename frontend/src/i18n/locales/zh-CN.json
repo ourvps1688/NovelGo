@@ -2088,6 +2088,8 @@
         "cancelled": "已取消",
         "never": "尚未检测",
         "lastRun": "上次检测 {{at}} · {{count}} 项发现",
+        "doneToast": "检测完成（{{verdict}}）：{{count}} 项发现",
+        "patrolDoneToast": "结构巡检已结束，张力报告已更新",
         "chapter": "章节检测",
         "chapterDesc": "单章 L0/L1 质检，结果落质量档案",
         "volume": "卷体检",

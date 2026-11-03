@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Target, Play, AlertTriangle, Loader2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,10 +9,12 @@ import {
 } from "@/lib/wailsjs/go/app/App";
 import { detectionKeys } from "@/lib/queryKeys";
 import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
+import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
-import { toastError } from "@/utils/toast";
+import { VERDICT_KEYS } from "./verdictKeys";
+import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import type { pipeline } from "@/lib/wailsjs/go/models";
 
@@ -59,6 +61,46 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
     if (!runId) return [];
     return (allIssues ?? []).filter((r) => r.run_id === runId);
   }, [allIssues, bookSt?.last_run_id]);
+
+  // P0-A/B 检测完成反馈闭环：book 体检完成事件到达即失效重拉内联工单——
+  // 修复「旧缓存 × 新 last_run_id 过滤必空」缺陷（状态轮询会先翻新 last_run_id，
+  // 与旧缓存求交集必为空，落库的发现项界面上一条不显）；并弹一次性完成 toast
+  // （P0-B：verdict + 发现数），消除「跑完没有任何反馈」。事件载荷
+  // {novel_id, kind, verdict, issue_count}（detect.go emitDetectDone），kind 不符静默忽略。
+  useEffect(() => {
+    if (!novelId) return;
+    const off = EventsOn(
+      "pipeline:detect_done",
+      (p: {
+        novel_id?: number;
+        kind?: string;
+        verdict?: string;
+        issue_count?: number;
+      }) => {
+        if (p.novel_id !== novelId || p.kind !== "book") return;
+        queryClient.invalidateQueries({
+          queryKey: ["signability-inline-issues", novelId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: detectionKeys.list(novelId),
+        });
+        const verdict = p.verdict ?? "";
+        const verdictLabel = VERDICT_KEYS[verdict]
+          ? t(VERDICT_KEYS[verdict])
+          : verdict;
+        toastSuccess(
+          t("journey.quality.detect.doneToast", {
+            verdict: verdictLabel,
+            count: p.issue_count ?? 0,
+          }),
+        );
+      },
+    );
+    return () => {
+      // 测试环境 EventsOn 可能无返回值（同 useDetectionFeedback 口径），可选调用。
+      off?.();
+    };
+  }, [novelId, queryClient, t]);
 
   const handleStart = useCallback(async () => {
     if (!novelId) {

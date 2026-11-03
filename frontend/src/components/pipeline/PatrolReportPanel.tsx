@@ -105,9 +105,11 @@ export default function PatrolReportPanel({
       });
   }, [novelId, runId]);
 
+  // tick 变化（巡检完成事件驱动）也重载工单徽章：新张力项落工单后立即可见——
+  // run_id 复用时 runId prop 不变，仅靠 loadTickets 依赖不会重拉（陈旧徽章缺口）。
   useEffect(() => {
     loadTickets();
-  }, [loadTickets]);
+  }, [loadTickets, tick]);
 
   // 订阅一致性巡检进度（后端批量取语料阶段）：读取正文 N/M、分析中，避免面板死转圈。
   useEffect(() => {

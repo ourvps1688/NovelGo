@@ -2128,6 +2128,8 @@
         "cancelled": "Cancelled",
         "never": "Not run yet",
         "lastRun": "Last run {{at}} · {{count}} findings",
+        "doneToast": "Detection finished ({{verdict}}) — {{count}} findings",
+        "patrolDoneToast": "Structure patrol finished — tension report updated",
         "chapter": "Chapter check",
         "chapterDesc": "Per-chapter L0/L1 checks, written to the quality ledger",
         "volume": "Volume audit",

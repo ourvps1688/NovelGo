@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   FileText,
@@ -23,7 +23,7 @@ import { useChapters } from "@/components/chapter/useChapters";
 import { useVolumes } from "@/components/volume/useVolumes";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
-import { toastError } from "@/utils/toast";
+import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import type {
   pipeline,
@@ -34,23 +34,12 @@ import type {
 import type { AuditData } from "@/types/pipeline";
 import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
+import { VERDICT_KEYS } from "./verdictKeys";
 
 type DetectKind = "chapter" | "volume" | "structure";
 
-// verdict → i18n key（卷/结构=pass|needs_fix；章节=质量档案 L1Status
-// checked|pending|skipped）。未知值如实显示原值（宁缺勿错不造词）。
-const VERDICT_KEYS: Record<string, string> = {
-  pass: "journey.quality.detect.verdict.pass",
-  needs_fix: "journey.quality.detect.verdict.needs_fix",
-  checked: "journey.quality.detect.verdict.checked",
-  pending: "journey.quality.detect.verdict.pending",
-  skipped: "journey.quality.detect.verdict.skipped",
-  error: "journey.quality.detect.verdict.error",
-};
-
-// 工单状态徽章配色（与 IssueTicketsPanel 同口径）：内联结果只读展示用——
-// 已迁入 SignabilityAssessmentCard 复用，本文件仅保留章节质量档案跳转所需的
-// VERDICT_KEYS / fmtTime（卷体检走共用评估卡，不再在此渲染工单预览）。
+// verdict → i18n key 映射收口在 ./verdictKeys（单源），本文件 import 复用
+// （卷体检走共用评估卡 + 章节质量档案跳转均需同一份映射）。
 
 const SELECT_CLS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -151,6 +140,9 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   }, [patrolView?.report]);
 
   // 结构巡检完成事件到达即失效重拉；tick 驱动 PatrolReportPanel 收起「运行中」提示。
+  // 同步失效内联工单缓存（张力项落工单后徽章立即可见）并弹中性完成提示——
+  // 该事件成功/失败/拒绝三路都会发（patrol.go 三处 emitConsistencyPatrol），
+  // 语义是「已结束、报告已落库」，故文案不称成功、用 toastInfo。
   const [patrolTick, setPatrolTick] = useState(0);
   useEffect(() => {
     if (!novelId || kind !== "structure") return;
@@ -161,13 +153,72 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
         queryClient.invalidateQueries({
           queryKey: patrolKeys.report(novelId),
         });
+        queryClient.invalidateQueries({
+          queryKey: ["detect-inline-issues", novelId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: detectionKeys.list(novelId),
+        });
         setPatrolTick((prev) => prev + 1);
+        toastInfo(t("journey.quality.detect.patrolDoneToast"));
       },
     );
     return () => {
       off?.();
     };
-  }, [novelId, kind, queryClient]);
+  }, [novelId, kind, queryClient, t]);
+
+  // P0-A/B 检测完成反馈闭环（volume）：完成事件到达即失效重拉内联工单——
+  // 修复「旧缓存 × 新 last_run_id 过滤必空」缺陷（状态轮询先翻新 last_run_id，
+  // 与旧缓存求交集必为空，落库的发现项界面上一条不显）；并弹一次性完成 toast
+  // （P0-B：verdict + 发现数）。chapter 无完成事件（见下方进行态边沿兜底），
+  // structure 走上方巡检事件；kind 不符静默忽略。
+  useEffect(() => {
+    if (!novelId) return;
+    const off = EventsOn(
+      "pipeline:detect_done",
+      (p: {
+        novel_id?: number;
+        kind?: string;
+        verdict?: string;
+        issue_count?: number;
+      }) => {
+        if (p.novel_id !== novelId || p.kind !== kind) return;
+        queryClient.invalidateQueries({
+          queryKey: ["detect-inline-issues", novelId],
+        });
+        queryClient.invalidateQueries({
+          queryKey: detectionKeys.list(novelId),
+        });
+        const verdict = p.verdict ?? "";
+        const verdictLabel = VERDICT_KEYS[verdict]
+          ? t(VERDICT_KEYS[verdict])
+          : verdict;
+        toastSuccess(
+          t("journey.quality.detect.doneToast", {
+            verdict: verdictLabel,
+            count: p.issue_count ?? 0,
+          }),
+        );
+      },
+    );
+    return () => {
+      off?.();
+    };
+  }, [novelId, kind, queryClient, t]);
+
+  // chapter 无完成事件（结果直写质量档案）：以进行态 true→false 边沿兜底刷新
+  // 质量档案缓存，修掉与内联工单同款的「完成后陈旧」缺口。不弹 toast——
+  // 边沿区分不了「完成/取消/失败」（取消有 detect_cancelled 但无结果），误报不如不报。
+  const prevRunningRef = useRef(running);
+  useEffect(() => {
+    if (kind !== "chapter") return;
+    const wasRunning = prevRunningRef.current;
+    prevRunningRef.current = running;
+    if (wasRunning && !running) {
+      queryClient.invalidateQueries({ queryKey: ["chapter-quality-archive"] });
+    }
+  }, [kind, running, queryClient]);
 
   const scopeReady =
     kind === "chapter"
