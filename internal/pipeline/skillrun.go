@@ -93,6 +93,9 @@ type SkillInput struct {
 	Prompt    string
 	Whitelist []string // 预留：RunSkill 内部统一使用 agentcfg.BlueprintAgent 白名单
 	MaxTurns  int
+	// MaxTokens 单次 LLM 调用输出 token 上限（0 = 模型默认）。巡检等单调用重任务用它
+	// 压住思考模型的思维块膨胀，保证按时收口（详见 agent.RunOptions.MaxTokens）。
+	MaxTokens int
 	// SessionID 用于多轮会话落库（选项 a）。为空时内部生成，便于审计与回放。
 	SessionID string
 	// RunID 是本次派发归属的流水线 run（R0 观测用：按 run 聚合 S5 修复轮数等）。
@@ -153,6 +156,7 @@ func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llm
 		ProviderName: providerName,
 		AgentType:    skillAgentTypeString(name),
 		MaxTurns:     input.MaxTurns,
+		MaxTokens:    input.MaxTokens,
 		// pipeline 会话事件走独立前缀（pipeline-agent:1），前端流水线视图监听它展示
 		// S5 修复等阶段的活动流；主聊天仍用默认 "agent:"，互不干扰。
 		EventPrefix: "pipeline-agent:",

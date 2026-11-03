@@ -36,7 +36,8 @@ import (
 //     LLM 一次性通读分析——替代「让 agent 逐章 read」（旧设计 50+ 次工具往返、易卡死），这是唯一完整证据源；
 //     【2026-11-03 收紧】该供应商对大上下文极慢（思考模型单调用 >45min 仍吐不完），且无法换更快模型，
 //     故语料预算收敛为 patrolChapterCap=2000 / patrolLedgerCap=20000 / patrolCorpusCap=120000（上下文约原 40%），
-//     并约束模型「输出从简、只交 JSON」——在 45min 预算内稳定收口，详见下方常量注释。
+//     并约束模型「输出从简、只交 JSON」，再以 patrolSynthesizeMaxTokens 硬顶输出 token（压思维块膨胀，
+//     实测思维块可空转 20 万+字符拖满超时）——在 45min 预算内稳定收口，详见下方常量注释。
 //  2. 本地向量预筛（Phase 2，免费、严格限时）把「跨章、语义相近、数值/事实可能分歧」的陈述聚成候选矛盾簇，
 //     仅作归并步的聚焦提示（非证据必需，超时/失败仅降级）；
 //  3. 仅**一次** consistency-patrol 调用，提示词内联【本书语料】+ 预筛候选簇，明确禁止 read/get_*/search 工具；
@@ -49,6 +50,12 @@ const (
 	// 只交 JSON 不写长篇分析」以削减思维模型冗长输出；45min 预算对收紧后的体量绰绰有余。
 	// 超时即清晰失败态（classifyPatrolFailure），绝不静默卡死。
 	patrolSynthesizeTimeout = 45 * time.Minute
+	// patrolSynthesizeMaxTokens 归并调用的输出 token 硬上限（MiMo 映射 max_completion_tokens=
+	// 思考+回答总量）。实测该供应商思考模型的思维块不限时可膨胀到 20 万+字符（≈10 万 token），
+	// 以约 50 token/s 的速度把单调用拖满 45min 仍收不了口——语料收紧后思维量仍不按比例缩，
+	// 必须用输出上限硬性压思维预算：报告 JSON 仅 2~4k token，48k 上限给足精简思考空间，
+	// 同时把最坏生成时长钉在 ~16min。触顶截断时 parseFreshAudit 降级落清晰失败态，绝不静默。
+	patrolSynthesizeMaxTokens = 48_000
 	// patrolOverallTimeout 单次巡检整体预算（含预筛本地计算 + 单次归并调用），兜底防无限拖延。
 	patrolOverallTimeout = 60 * time.Minute
 )
@@ -133,6 +140,7 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		NovelID:   novelID,
 		Prompt:    reducePrompt,
 		MaxTurns:  6,
+		MaxTokens: patrolSynthesizeMaxTokens,
 		SessionID: fmt.Sprintf("pipeline:patrol:%d:synthesize", novelID),
 		RunID:     runID,
 	})

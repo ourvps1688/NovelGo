@@ -58,6 +58,10 @@ type RunOptions struct {
 	EventPrefix     string // 事件名前缀（默认 "agent:"）；pipeline 等独立会话用独立前缀避免与主聊天混淆
 	MaxTurns        int
 	ReasoningEffort string // 用户选择的推理等级
+	// MaxTokens 单次 LLM 调用输出 token 上限（0 = ModelInfo 默认）。
+	// 思考模型的思维块计入输出：不限时可膨胀到十几万 token，把单调用巡检/归并拖到几十分钟。
+	// 调用方（如一致性巡检）可按任务特性给硬上限，逼模型精简思考、按时收口。
+	MaxTokens int
 	// RunningTokens 由调用方预计算的 token 预算（来自持久化的 token_count 累加）。
 	// 非空时 Run 直接复用，跳过对整段历史消息的重新 BPE 编码；为空则退回 InitRunningTokens。
 	RunningTokens map[string]int
@@ -269,6 +273,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		callOpts.SessionID = opts.SessionID // 会话标识，供需要会话感知的服务商（如 OpenCode Go 的 x-opencode-session）使用
 		if opts.ReasoningEffort != "" {
 			callOpts.ReasoningEffort = &opts.ReasoningEffort
+		}
+		if opts.MaxTokens > 0 {
+			mt := opts.MaxTokens
+			callOpts.MaxTokens = &mt
 		}
 	RETRY_STREAM:
 		// 记录本轮 streamLoop 第一个事件 seq（前端据此清空本轮 partial segments）
