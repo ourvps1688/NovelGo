@@ -28,6 +28,7 @@
 
 ## 架构决策（2026-11-03）
 - 四检测工作流（chapter/volume/book/structure）**否决进程/模块级大拆分**（评估报告 docs/detection-workflow-coupling-report-2026-11-03.md）：code 路径已按 kind 分治，共享的熔断器/队列/SQLite 必须共享；「跑很久没结果」类投诉先查①供应商流式停滞（idle watchdog 日志）②前端 query 失效缺口（旧缓存×新 run_id 过滤必空模式：`["signability-inline-issues"]`/`["detect-inline-issues"]` 无失效是已知坑）③重启 AbandonActive 杀在途任务。
+- P0/P1 已落地（d144ec5e/011b44fa）：P0=检测完成事件失效内联查询+完成 toast；P1=①verifyTicketTimeout 25min+复验失败 note 三档（整轮超时/单工单「复验超时未验证」/执行失败）+巡检卡片 note 明示②DetectionTaskStatus 增 running_since/stall_count（detectRunInfo 登记启动时刻，stall=llm.RecentIdleTimeouts 自启动起算）+DetectRunningHint 三处运行态「已运行 X」+供应商缓慢提示③ResetAllStuckFixing 启动清扫（fixing→pending note 明示中断，RecoverInterruptedRuns 挂钩，零自动派发不变）。P2（确定性+向量预筛等）未动。
 
 ## ONNX 现状（结论，细节见 docs/onnx-enhancement-development-plan.md）
 - 仅 `bge-small-zh-v1.5`（512维）做文本向量化（4 消费方全部优雅降级）。reranker 已 L3 彻底移除（真实评测净负优化）；P0-2 批处理/缓存 ✅；P1-1 长文分段聚合 ✅（不影响功能）；P1-2 升级 embedding 模型 评估后放弃（维度变更须重建向量库）；P2 本地分类器/NER 降级待触发。
@@ -41,6 +42,10 @@
 
 ## 排障
 - 重启 wails dev：带全套 CGO export **+ `CODEBUDDY_SAFE_DELETE_ENABLED=0`** 跑 `wails.exe dev`。关键：WorkBuddy 的 node-safe-delete-shim（`app.asar.unpacked/cli/vendor/shim/node-safe-delete-shim.cjs`）会拦截 vite 的 emptyDir（threshold 50 / scope turn，抛 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`）；且 `wails dev` 跑 `tsc -b && vite build`，`tsc -b` 会在 rm 之后重新往 `dist/assets` 吐编译产物，故**仅预删 assets 无效**，必须靠该 env 关掉 shim 才能让 vite build 过。结束旧进程 `Stop-Process -Id <pid> -Force`（注意 `ps -W` 的 MinGW PID ≠ Windows 真实 PID，须用 PowerShell `Get-Process` 取真实 PID 再杀，否则杀不干净致旧实例残留）。浏览器访问 5173 白屏=正常（Wails 桥仅注入桌面 webview）。
+- wails dev watcher 会失活（一次 rebuild 后对后续 Go 保存零反应，touch 无效）：判据=日志无 [Rebuild triggered]+novelgo-dev.exe mtime 停滞+models.ts 缺新 DTO 字段；处置=整机重启 dev（换新日志名）。
+- git commit 含 Go 文件必须同条命令带全套 export（钩子 golangci-lint 要 go/GOCACHE/GOLANGCI_LINT_CACHE/LOCALAPPDATA，缺失即 BLOCKED；纯前端提交无感）。shell 状态不跨命令持久。
+- render 里禁 Date.now()/new Date()（react-hooks purity error 级）：走针用 SubagentCard 模式 useState(()=>Date.now())+setInterval 回调；Date.parse(str) 不触发。
+- 无 sqlite3 CLI 查库：`node -e "require('node:sqlite').DatabaseSync(...,{readOnly:true})"`；tasks 非终态=status NOT IN ('done','dead')。
 - vitest 沙箱偶发失败（资源受限）；前端用 format/i18n/lint(0 error)/build 兜底，vitest 脱沙箱跑。
 - wails 重启重产的前端绑定文件（App.d.ts/App.js/models.ts）常现纯缩进/排序噪声，git checkout 还原即可，勿混入提交。
 
