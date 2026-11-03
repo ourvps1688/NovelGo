@@ -261,6 +261,22 @@ func (s *Store) ResetAllStuckVerifying(ctx context.Context) (int64, error) {
 	return res.RowsAffected, res.Error
 }
 
+// ResetAllStuckFixing 启动期（RecoverInterruptedRuns）全局清扫：把所有 novel 残留的
+// fixing 态工单一次性复位为 pending 并 note 明示中断。修复执行体随进程退出而消亡
+// （任务队列启动清扫 AbandonActive），崩溃/重启发生在修复中途时，残留的 fixing 工单
+// 会永久显示「修复中」（2026-11-04 00:14 dev 退出实况）；此处兜底复位，用户点「去修复」
+// 即可重新执行（零自动派发契约不变——绝不自动重派修复执行体）。
+// fixing→pending 是状态机合法迁移（issueTicketNext，与人工「退回待修」同语义）；人工
+// 修复流（巡检卡片去修复→聊天手改）被打断时同样复位——重启后聊天上下文已断，重走
+// 「去修复」重新取清理内容比永久卡「修复中」诚实。
+func (s *Store) ResetAllStuckFixing(ctx context.Context) (int64, error) {
+	res := s.db.WithContext(ctx).
+		Model(&PipelineIssue{}).
+		Where("status = ?", IssueStatusFixing).
+		Updates(map[string]any{"status": IssueStatusPending, "note": "应用重启导致修复中断，已复位待修复（可点「去修复」重新执行）"})
+	return res.RowsAffected, res.Error
+}
+
 // ── 发现项工单（R5-1，提案 §10.2/§10.7）──────────────────────────────────────
 // issue 台账升格为工单：状态机（发现→确认→（人工）修复中→复验通过/驳回）+ 复验回执。
 // 工单面板按钮经 Service 走本组方法；流水线内部同步（UpdateIssueStatus）不走状态机

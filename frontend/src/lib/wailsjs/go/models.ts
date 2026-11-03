@@ -2799,6 +2799,9 @@ export namespace pipeline {
 	    novel_id: number;
 	    scope_id?: number;
 	    running: boolean;
+	    // Go type: time
+	    running_since?: any;
+	    stall_count?: number;
 	    last_run_id?: string;
 	    last_verdict?: string;
 	    last_score?: number;
@@ -2817,6 +2820,8 @@ export namespace pipeline {
 	        this.novel_id = source["novel_id"];
 	        this.scope_id = source["scope_id"];
 	        this.running = source["running"];
+	        this.running_since = this.convertValues(source["running_since"], null);
+	        this.stall_count = source["stall_count"];
 	        this.last_run_id = source["last_run_id"];
 	        this.last_verdict = source["last_verdict"];
 	        this.last_score = source["last_score"];

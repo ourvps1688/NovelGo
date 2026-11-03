@@ -2090,6 +2090,8 @@
         "lastRun": "上次检测 {{at}} · {{count}} 项发现",
         "doneToast": "检测完成（{{verdict}}）：{{count}} 项发现",
         "patrolDoneToast": "结构巡检已结束，张力报告已更新",
+        "runningSince": "已运行 {{duration}}",
+        "slowProvider": "供应商响应缓慢：已停滞 {{count}} 次（自动重试中），完成可能延迟",
         "chapter": "章节检测",
         "chapterDesc": "单章 L0/L1 质检，结果落质量档案",
         "volume": "卷体检",

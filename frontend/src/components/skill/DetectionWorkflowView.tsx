@@ -33,6 +33,7 @@ import type {
 } from "@/lib/wailsjs/go/models";
 import type { AuditData } from "@/types/pipeline";
 import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
+import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
 import { VERDICT_KEYS } from "./verdictKeys";
 
@@ -403,9 +404,10 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
           </div>
         )}
         {running ? (
-          <p className="flex items-center gap-1.5 text-xs text-primary/80 mb-2">
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-primary/80 mb-2">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            {t("journey.quality.detect.running")}
+            <span>{t("journey.quality.detect.running")}</span>
+            <DetectRunningHint status={st} />
           </p>
         ) : null}
         <div className="flex items-center gap-2">

@@ -209,9 +209,13 @@ var verifyCallTimeout = 120 * time.Minute
 // 思考模型在「活跃产出推理 token」时相邻 chunk 间隔可能远小于 9min，但单轮墙钟可累计超过
 // 9min 才出回执——此时空闲看门狗不会触发（它只在「整段静默」时斩断，专杀死连接），真正
 // 需要的是给这种「活着但慢」的轮次足够的墙钟；若此处 ≤ 9min，思考模型复验常被墙钟提前斩断
-// 而报 context deadline exceeded（如 #13 设料自洽复验）。故取 15min：留给思考模型单轮充分余量，
-// 同时仍由 9min 空闲看门狗兜底真死连接、由 verifyCallTimeout(120min) 兜住整轮失控。
-var verifyTicketTimeout = 15 * time.Minute
+// 而报 context deadline exceeded（如 #13 设料自洽复验）。
+// 15min 实测仍不够（P1-C，2026-11-03 签约卡死复盘）：供应商一次 9min 空闲超时（gotBytes
+// 可重试）后再次思考输出，累计即可突破 15min，正常慢轮被墙钟误伤。放宽到 25min 可容纳
+// 「9min 空闲超时 + 退避重试 + 再一轮思考」的叠加情形，同时仍由 9min 空闲看门狗兜底真死
+// 连接、由 verifyCallTimeout(120min) 兜住整轮失控。超时的工单单独标「超时未验证」复位
+// pending（note 明示，见 verifyOneTicket），后续工单继续。
+var verifyTicketTimeout = 25 * time.Minute
 
 // verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，需逐章节
 // read 后再出回执，多章节工单 6 轮不够（未出回执即被截断 → 整批复验失败）。放宽到 12 轮，

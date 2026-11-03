@@ -45,6 +45,51 @@ func detectStatusGateCtx(key, auditJSON, stamp string) string {
 	return fmt.Sprintf(`{%q:%s,"patrol_report_at":%q}`, key, lit, stamp)
 }
 
+// TestDetectRunningObservability 验收 P1-D 运行可观测：beginDetect 记启动时刻，
+// 状态查询 Running=true 时填 RunningSince；收口注销后不填。概览口径（scopeID=nil）
+// 取任意作用域最早启动时刻；endDetectByRunID 按 runID 精确注销不误删他 kind 登记。
+func TestDetectRunningObservability(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	volID := int64(9)
+
+	// 未进行中：Running=false，RunningSince 不填。
+	st, err := svc.GetDetectionTaskStatus(ctx, 401, DetectionKindVolume, &volID)
+	require.NoError(t, err)
+	require.False(t, st.Running)
+	require.Nil(t, st.RunningSince)
+
+	before := time.Now()
+	svc.beginDetect(DetectionKindVolume, 401, &volID, "run-v")
+	svc.beginDetect(DetectionKindBook, 401, nil, "run-b")
+	after := time.Now()
+
+	// 进行中：启动时刻在 [before, after] 区间内。
+	st, err = svc.GetDetectionTaskStatus(ctx, 401, DetectionKindVolume, &volID)
+	require.NoError(t, err)
+	require.True(t, st.Running)
+	require.NotNil(t, st.RunningSince)
+	require.False(t, st.RunningSince.Before(before), "启动时刻不得早于 beginDetect")
+	require.False(t, st.RunningSince.After(after), "启动时刻不得晚于取值")
+
+	// 概览口径：任意作用域进行中 → Running=true 且有启动时刻。
+	st, err = svc.GetDetectionTaskStatus(ctx, 401, DetectionKindVolume, nil)
+	require.NoError(t, err)
+	require.True(t, st.Running)
+	require.NotNil(t, st.RunningSince)
+
+	// 收口注销：run-v 精确注销后卷检测不再进行中，book 登记不受影响。
+	svc.endDetectByRunID("run-v")
+	st, err = svc.GetDetectionTaskStatus(ctx, 401, DetectionKindVolume, &volID)
+	require.NoError(t, err)
+	require.False(t, st.Running)
+	require.Nil(t, st.RunningSince)
+	stb, err := svc.GetDetectionTaskStatus(ctx, 401, DetectionKindBook, nil)
+	require.NoError(t, err)
+	require.True(t, stb.Running, "book 登记不得被 endDetectByRunID(run-v) 误删")
+}
+
 // TestDetectContainersPerKindIsolation 验收①（开放设计点①）：book 与 structure 共享
 // 全书作用域但各自独立容器（mode='detect:<kind>'）；同 kind+scope 复用同 RunID。
 func TestDetectContainersPerKindIsolation(t *testing.T) {

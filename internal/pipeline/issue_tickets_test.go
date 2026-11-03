@@ -94,6 +94,44 @@ func TestStoreIssueTicketDismissAndReverifyFail(t *testing.T) {
 	require.NotNil(t, rows[1].VerifyAt)
 }
 
+// TestStoreResetAllStuckFixing 验收 P1-E 启动清扫：fixing 态残留（修复执行体随进程死亡）
+// 一次性复位 pending 并 note 明示中断；非 fixing 态（终态/原生 pending）不动；幂等。
+func TestStoreResetAllStuckFixing(t *testing.T) {
+	db := newTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	require.NoError(t, s.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇", Desc: "问题1"},
+		{ID: "I2", Level: "P1", Area: "人设", Desc: "问题2"},
+		{ID: "I3", Level: "P1", Area: "节奏", Desc: "问题3"},
+	}))
+	// I1 fixing（执行体死亡残留）；I2 verified 终态；I3 原生 pending。
+	require.NoError(t, s.TransitionIssueTicket(ctx, 7, "run-a", "I1", IssueStatusFixing, ""))
+	_, err := s.RecordIssueVerify(ctx, 7, "run-a", "I2", true, "已修复")
+	require.NoError(t, err)
+
+	n, err := s.ResetAllStuckFixing(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n, "只清扫 fixing 态")
+
+	rows, err := s.ListIssues(ctx, 7, "run-a")
+	require.NoError(t, err)
+	byID := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byID[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusPending, byID["I1"].Status, "fixing 残留复位 pending")
+	require.Contains(t, byID["I1"].Note, "修复中断", "note 明示中断原因")
+	require.Equal(t, IssueStatusVerified, byID["I2"].Status, "终态不动")
+	require.Equal(t, IssueStatusPending, byID["I3"].Status)
+	require.Empty(t, byID["I3"].Note, "非 fixing 态 note 不被覆盖")
+
+	// 幂等：二次清扫 0 行。
+	n, err = s.ResetAllStuckFixing(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), n)
+}
+
 // TestStoreIssueVerifyAutoEscalate 验收复验多次「明确未通过」自动升级为人工工单（skipped）：
 // 累计未通过达 verifyEscalateAfter 阈值，第 N 次未通过即转 skipped（而非 pending），
 // 并在 skip_reason/note 写明原因；阈值前的未通过保持 pending 且尝试次数递增。

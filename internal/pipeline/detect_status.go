@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/quality"
 )
 
@@ -38,6 +39,13 @@ type DetectionTaskStatus struct {
 	ScopeID *int64 `json:"scope_id,omitempty"`
 	// Running 是检测进行态（含排队中）：派发即 true，执行体收口（含失败）回 false。
 	Running bool `json:"running"`
+	// RunningSince 是本次检测的启动时刻（P1-D 运行时长可观测）：仅 Running=true 有值，
+	// 供前端渲染「已运行 X 分钟」；排队/执行全阶段共用派发时刻起算。
+	RunningSince *time.Time `json:"running_since,omitempty"`
+	// StallCount 是本次检测运行期间 LLM 流式空闲超时（供应商疑似停滞）的累计次数
+	// （P1-D 供应商缓慢提示，llm.RecentIdleTimeouts 自启动时刻起算；0=无停滞）。
+	// 进程级信号：并发的聊天/修复停滞也计入，只作「供应商缓慢」提示，不作精确记账。
+	StallCount int `json:"stall_count,omitempty"`
 	// LastRunID 是最近一次结果容器的 RunID（chapter 无容器，为空）。
 	LastRunID string `json:"last_run_id,omitempty"`
 	// LastVerdict 是最近一次结果结论：volume/book=体检 verdict（pass|needs_fix）、
@@ -84,10 +92,17 @@ func detectKey(kind string, novelID int64, scopeID *int64) string {
 	return fmt.Sprintf("detect:%s:%d:%d", kind, novelID, scope)
 }
 
+// detectRunInfo 是登记表值：结果容器 RunID（章节检测为空串）+ 启动时刻
+// （P1-D 运行时长可观测，beginDetect 即记，供状态查询填 RunningSince）。
+type detectRunInfo struct {
+	runID     string
+	startedAt time.Time
+}
+
 // beginDetect 登记检测进行态（派发口调用，覆盖排队/执行/legacy 直跑全阶段）。
 // runID 是结果容器 RunID（章节检测无容器传空串），供执行体收口按 runID 注销。
 func (s *Service) beginDetect(kind string, novelID int64, scopeID *int64, runID string) {
-	s.detectRunning.Store(detectKey(kind, novelID, scopeID), runID)
+	s.detectRunning.Store(detectKey(kind, novelID, scopeID), detectRunInfo{runID: runID, startedAt: time.Now()})
 }
 
 // endDetect 按 key 注销检测进行态（章节检测收口用：无 runID 可寻址）。
@@ -96,17 +111,64 @@ func (s *Service) endDetect(kind string, novelID int64, scopeID *int64) {
 }
 
 // endDetectByRunID 按结果容器 RunID 注销检测进行态（卷/书/结构执行体收口用，
-// 含加载失败早退路径）。空 runID 直接返回，防误删章节条目（其 value 为空串）。
+// 含加载失败早退路径）。空 runID 直接返回，防误删章节条目（其 runID 为空串）。
 func (s *Service) endDetectByRunID(runID string) {
 	if runID == "" {
 		return
 	}
 	s.detectRunning.Range(func(k, v any) bool {
-		if rid, ok := v.(string); ok && rid == runID {
+		if info, ok := v.(detectRunInfo); ok && info.runID == runID {
 			s.detectRunning.Delete(k)
 		}
 		return true
 	})
+}
+
+// detectSince 返回该 kind 该作用域进行中检测的启动时刻（未进行中返回 nil，P1-D）。
+func (s *Service) detectSince(kind string, novelID int64, scopeID *int64) *time.Time {
+	v, ok := s.detectRunning.Load(detectKey(kind, novelID, scopeID))
+	if !ok {
+		return nil
+	}
+	info, ok := v.(detectRunInfo)
+	if !ok {
+		return nil
+	}
+	at := info.startedAt
+	return &at
+}
+
+// earliestDetectSince 返回该 kind 该书任意作用域进行中检测的最早启动时刻（概览口径；
+// 无进行中返回 nil）。多作用域并发时取最早者——「已运行时长」按最久等待起算。
+func (s *Service) earliestDetectSince(kind string, novelID int64) *time.Time {
+	prefix := fmt.Sprintf("detect:%s:%d:", kind, novelID)
+	var earliest *time.Time
+	s.detectRunning.Range(func(k, v any) bool {
+		key, ok := k.(string)
+		if !ok || !strings.HasPrefix(key, prefix) {
+			return true
+		}
+		info, ok := v.(detectRunInfo)
+		if !ok {
+			return true
+		}
+		at := info.startedAt
+		if earliest == nil || at.Before(*earliest) {
+			earliest = &at
+		}
+		return true
+	})
+	return earliest
+}
+
+// fillRunningObservability 填充运行可观测字段（P1-D）：启动时刻 + 运行期间供应商
+// 停滞计数（llm.RecentIdleTimeouts 按 trailing window 口径≈自启动起算）。未进行中不填。
+func (s *Service) fillRunningObservability(st *DetectionTaskStatus, since *time.Time) {
+	if since == nil {
+		return
+	}
+	st.RunningSince = since
+	st.StallCount = llm.RecentIdleTimeouts(time.Since(*since))
 }
 
 // isDetectRunning 报告某 kind 某作用域的检测是否进行中（含排队中）。
@@ -232,8 +294,10 @@ func (s *Service) ListDetectionTaskStatuses(ctx context.Context, novelID int64) 
 func (s *Service) chapterDetectStatus(ctx context.Context, novelID int64, scopeID *int64, st *DetectionTaskStatus) {
 	if scopeID != nil {
 		st.Running = s.isDetectRunning(DetectionKindChapter, novelID, scopeID)
+		s.fillRunningObservability(st, s.detectSince(DetectionKindChapter, novelID, scopeID))
 	} else {
 		st.Running = s.anyDetectRunning(DetectionKindChapter, novelID)
+		s.fillRunningObservability(st, s.earliestDetectSince(DetectionKindChapter, novelID))
 	}
 	if s.qualityStore == nil {
 		return
@@ -314,8 +378,10 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 func (s *Service) scopedDetectStatus(ctx context.Context, novelID int64, kind string, scopeID *int64, st *DetectionTaskStatus) {
 	if scopeID != nil {
 		st.Running = s.isDetectRunning(kind, novelID, scopeID)
+		s.fillRunningObservability(st, s.detectSince(kind, novelID, scopeID))
 	} else {
 		st.Running = s.anyDetectRunning(kind, novelID)
+		s.fillRunningObservability(st, s.earliestDetectSince(kind, novelID))
 	}
 	var (
 		run *PipelineRun
@@ -349,6 +415,7 @@ func (s *Service) scopedDetectStatus(ctx context.Context, novelID int64, kind st
 // （旧数据无时间戳回退容器 UpdatedAt）。
 func (s *Service) structureDetectStatus(ctx context.Context, novelID int64, st *DetectionTaskStatus) {
 	st.Running = s.anyDetectRunning(DetectionKindStructure, novelID)
+	s.fillRunningObservability(st, s.earliestDetectSince(DetectionKindStructure, novelID))
 	run, err := s.store.GetDetectRun(ctx, novelID, DetectionKindStructure, nil)
 	if err != nil || run == nil {
 		return // 无检测历史：零结果

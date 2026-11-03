@@ -2130,6 +2130,8 @@
         "lastRun": "Last run {{at}} · {{count}} findings",
         "doneToast": "Detection finished ({{verdict}}) — {{count}} findings",
         "patrolDoneToast": "Structure patrol finished — tension report updated",
+        "runningSince": "Running for {{duration}}",
+        "slowProvider": "Slow provider: stalled {{count}}x (auto-retrying) — completion may be delayed",
         "chapter": "Chapter check",
         "chapterDesc": "Per-chapter L0/L1 checks, written to the quality ledger",
         "volume": "Volume audit",

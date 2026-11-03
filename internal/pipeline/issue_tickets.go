@@ -556,7 +556,8 @@ func (s *Service) verifyOneTicket(ctx context.Context, novelID int64, runID stri
 		return lv, !lv, lnote
 	}
 	// 单工单独立墙钟预算：避免某工单的 LLM 调用卡住（供应商静默/空闲超时）拖住整批复验。
-	// 超时即该工单复位 pending 留待下轮，后续工单继续；早于 thinking 模型 9 分钟空闲看门狗。
+	// 超时即该工单复位 pending 留待下轮，后续工单继续；墙钟预算（25min）宽于 thinking 模型
+	// 9 分钟空闲看门狗（真死连接由看门狗先斩断，本预算兜「活着但慢」的轮次，见 detect.go）。
 	// L0 快路径（已在上文）不在此预算内，只有真正 LLM 调用受约束。
 	tctx, tcancel := context.WithTimeout(ctx, verifyTicketTimeout)
 	defer tcancel()
@@ -569,6 +570,16 @@ func (s *Service) verifyOneTicket(ctx context.Context, novelID int64, runID stri
 	})
 	if derr != nil {
 		// 供应商熔断/超时/网络失败：整工单未确认，留待下轮（不报错中断整批）。
+		// 失败原因分层成文（P1-C「超时未验证」UI 明示）：整轮超时/取消 与 单工单预算耗尽
+		// 与 一般执行失败 区分措辞，note 原文进前端两面板（工单面板/巡检卡片），避免含混。
+		if ctx.Err() != nil {
+			s.logger.Warn("复验：整轮超时/取消，工单标未确认留待下轮", "run_id", runID, "issue", row.IssueKey)
+			return false, false, "复验整轮超时或取消，已复位待复验"
+		}
+		if errors.Is(derr, context.DeadlineExceeded) || tctx.Err() == context.DeadlineExceeded {
+			s.logger.Warn("复验：单工单超时未验证，标未确认留待下轮", "run_id", runID, "issue", row.IssueKey, "err", derr)
+			return false, false, fmt.Sprintf("复验超时未验证（单工单 %d 分钟预算耗尽），已复位待复验", int(verifyTicketTimeout.Minutes()))
+		}
 		s.logger.Warn("复验：单工单执行失败，标未确认留待下轮", "run_id", runID, "issue", row.IssueKey, "err", derr)
 		return false, false, "复验执行失败（" + derr.Error() + "），已复位待复验"
 	}

@@ -21,6 +21,7 @@ import { useDetectionFeedback } from "@/hooks/useDetectionFeedback";
 import { usePanelStore } from "@/stores/usePanelStore";
 import type { PanelId } from "@/types/panel";
 import type { chapter, volume } from "@/lib/wailsjs/go/models";
+import DetectRunningHint from "@/components/journey/DetectRunningHint";
 
 type DetectKind = "chapter" | "volume" | "book" | "structure";
 
@@ -116,8 +117,9 @@ export default function DetectionTasks() {
     const st = statusOf(kind);
     if (st?.running) {
       return (
-        <p className="text-[10px] text-primary/80">
-          {t("journey.quality.detect.running")}
+        <p className="flex flex-wrap items-center gap-1.5 text-[10px] text-primary/80">
+          <span>{t("journey.quality.detect.running")}</span>
+          <DetectRunningHint status={st} />
         </p>
       );
     }

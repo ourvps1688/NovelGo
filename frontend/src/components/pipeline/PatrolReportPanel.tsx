@@ -416,6 +416,13 @@ export default function PatrolReportPanel({
                       ：{tickets[it.id].verify_receipt}
                     </p>
                   ) : null}
+                  {/* 工单备注（P1-C 明示）：复验超时未验证/执行失败、启动清扫中断等后端
+                      note 原文在卡片级可见（与工单面板同口径），避免关键状态只藏在面板里。 */}
+                  {it.id && tickets[it.id]?.note ? (
+                    <p className="mt-1 whitespace-pre-wrap break-words rounded border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                      {t("pipeline.tickets.note")}：{tickets[it.id].note}
+                    </p>
+                  ) : null}
                   <IssueScopeTags issue={it} />
                   {/* 单条人工入口（复用工单闭环）：去修复=发聊天+标修复中；复验=定点核验。
                       仅在能定位工单（runId+issue.id）时渲染；动作均人工触发，不自动改稿。 */}

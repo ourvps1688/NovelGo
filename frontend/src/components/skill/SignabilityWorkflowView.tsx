@@ -14,6 +14,7 @@ import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
 import { VERDICT_KEYS } from "./verdictKeys";
+import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import { toastError, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import type { pipeline } from "@/lib/wailsjs/go/models";
@@ -168,9 +169,10 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
           </div>
         )}
         {bookRunning ? (
-          <p className="flex items-center gap-1.5 text-xs text-primary/80">
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-primary/80">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            {t("signability.auditing")}
+            <span>{t("signability.auditing")}</span>
+            <DetectRunningHint status={bookSt} />
           </p>
         ) : null}
         <button

@@ -2882,6 +2882,14 @@ func (s *Service) RecoverInterruptedRuns() {
 	} else if v > 0 {
 		s.logger.Warn("启动恢复：已复位崩溃残留的 verifying 工单", "count", v)
 	}
+	// 启动清扫（P1-E）：修复执行体同理随进程退出而消亡，残留的 fixing 工单会永久显示
+	// 「修复中」（2026-11-04 00:14 实况）。复位 pending 并 note 明示中断，用户点「去修复」
+	// 重新执行（零自动派发：不自动重派修复执行体）。
+	if v, rerr := s.store.ResetAllStuckFixing(ctx); rerr != nil {
+		s.logger.Error("启动恢复：清扫残留 fixing 工单失败", "err", rerr)
+	} else if v > 0 {
+		s.logger.Warn("启动恢复：已复位崩溃残留的 fixing 工单", "count", v)
+	}
 }
 
 // redispatchIfNeeded 在恢复（resume）后按需重新派发执行体。执行体存活以任务队列的
