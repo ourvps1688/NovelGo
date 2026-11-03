@@ -46,6 +46,7 @@
 - git commit 含 Go 文件必须同条命令带全套 export（钩子 golangci-lint 要 go/GOCACHE/GOLANGCI_LINT_CACHE/LOCALAPPDATA，缺失即 BLOCKED；纯前端提交无感）。shell 状态不跨命令持久。
 - render 里禁 Date.now()/new Date()（react-hooks purity error 级）：走针用 SubagentCard 模式 useState(()=>Date.now())+setInterval 回调；Date.parse(str) 不触发。
 - 无 sqlite3 CLI 查库：`node -e "require('node:sqlite').DatabaseSync(...,{readOnly:true})"`；tasks 非终态=status NOT IN ('done','dead')。
+- `npm run build` 写 dist/assets 会撞死 dev 里的 app（assetserver panic，wails 工具不拉起）：判据=队列轮询日志停更；处置=重启 dev。build 闸门后须查 dev 存活。
 - vitest 沙箱偶发失败（资源受限）；前端用 format/i18n/lint(0 error)/build 兜底，vitest 脱沙箱跑。
 - wails 重启重产的前端绑定文件（App.d.ts/App.js/models.ts）常现纯缩进/排序噪声，git checkout 还原即可，勿混入提交。
 
