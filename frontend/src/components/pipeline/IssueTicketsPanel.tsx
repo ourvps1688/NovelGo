@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ClipboardCheck,
@@ -130,6 +130,9 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   const [tripError, setTripError] = useState("");
   // 复验进行态（审计 P0：后台异步、逐工单、可取消）：按 run_id 跟踪在飞复验与逐工单进度。
   const [verifyingRuns, setVerifyingRuns] = useState<Set<string>>(new Set());
+  // 本面板派发的复验 run（「谁派发谁提示」）：verify_done/cancelled 的结果 toast 只弹
+  // 本面板发起的，避免与巡检报告卡片（同屏常驻，同款 toast）双弹；卡片派发的由卡片自弹。
+  const initiatedRuns = useRef<Set<string>>(new Set());
   const [verifyProgress, setVerifyProgress] = useState<
     Record<string, { done: number; total: number }>
   >({});
@@ -198,13 +201,16 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
           delete next[p.run_id!];
           return next;
         });
-        toastSuccess(
-          t("pipeline.tickets.verifyOk", {
-            confirmed: p.confirmed ?? 0,
-            rejected: p.rejected ?? 0,
-            unverified: p.unverified ?? 0,
-          }),
-        );
+        // 谁派发谁提示：本面板发起的复验才弹结果 toast（巡检卡片派发的由卡片自弹）。
+        if (initiatedRuns.current.delete(p.run_id!)) {
+          toastSuccess(
+            t("pipeline.tickets.verifyOk", {
+              confirmed: p.confirmed ?? 0,
+              rejected: p.rejected ?? 0,
+              unverified: p.unverified ?? 0,
+            }),
+          );
+        }
         load();
       },
     );
@@ -222,7 +228,9 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
           delete next[p.run_id!];
           return next;
         });
-        toastInfo(t("pipeline.tickets.verifyCancelled"));
+        if (initiatedRuns.current.delete(p.run_id!)) {
+          toastInfo(t("pipeline.tickets.verifyCancelled"));
+        }
         load();
       },
     );
@@ -377,6 +385,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       runs.forEach((r) => next.add(r));
       return next;
     });
+    runs.forEach((r) => initiatedRuns.current.add(r));
     setBusy("verify");
     try {
       await VerifyIssueTickets(novelId, refs);
@@ -384,12 +393,13 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       setSelected(new Set());
       load();
     } catch (error) {
-      // 派发失败：回滚 verifyingRuns，避免误显示「复验中」。
+      // 派发失败：回滚 verifyingRuns/initiatedRuns，避免误显示「复验中」与错位 toast。
       setVerifyingRuns((prev) => {
         const next = new Set(prev);
         runs.forEach((r) => next.delete(r));
         return next;
       });
+      runs.forEach((r) => initiatedRuns.current.delete(r));
       const msg = toErrorMessage(error);
       if (isProviderTrip(msg)) {
         setTripError(msg);

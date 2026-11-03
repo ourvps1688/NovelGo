@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ClipboardCheck,
@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Wrench,
 } from "lucide-react";
+import type { pipeline } from "@/lib/wailsjs/go/models";
 import {
   ListIssueTickets,
   StartIssueFixTickets,
@@ -19,6 +20,26 @@ import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
 import { IssueScopeTags } from "./IssueTags";
+
+function fmtTime(v?: unknown): string {
+  if (!v) return "";
+  const d = new Date(String(v));
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
+}
+
+// 工单状态徽章配色（与 IssueTicketsPanel STATUS_CLS 同口径）。
+const TICKET_STATUS_CLS: Record<string, string> = {
+  pending: "bg-warning/10 text-warning-foreground",
+  confirmed: "bg-primary/10 text-primary",
+  fixing: "bg-primary/10 text-primary",
+  fixed: "bg-primary/10 text-primary",
+  verified: "bg-success/10 text-success-foreground",
+  dismissed: "bg-muted text-muted-foreground",
+  skipped: "bg-muted text-muted-foreground",
+  rewrite: "bg-warning/10 text-warning-foreground",
+  retcon: "bg-warning/10 text-warning-foreground",
+  verifying: "bg-primary/10 text-primary",
+};
 
 // PatrolReportPanel 展示全书一致性巡检（WBS 3.3「张力报告」）：
 // 对照「已冻结卷既定事实」与当前台账/正文，报告前向适配累计出来的漂移张力
@@ -62,6 +83,31 @@ export default function PatrolReportPanel({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // 后台复验在飞的张力项 id（verify_done/verify_cancelled 事件清空）。
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  // 事件回调闭包读不到最新 state，用 ref 判定「本次复验是否本面板派发」（谁派发谁提示）。
+  const verifyingIdRef = useRef<string | null>(null);
+  // 本 run 的工单行（issue_key → 行）：卡片直接呈现工单状态与复验回执，
+  // 让「复验中 → 复验通过/未通过」的收口在卡片上有可见反馈（修复前 spinner 清空即无痕）。
+  const [tickets, setTickets] = useState<
+    Record<string, pipeline.PipelineIssue>
+  >({});
+
+  const loadTickets = useCallback(() => {
+    if (!novelId || !runId) return;
+    ListIssueTickets(novelId)
+      .then((list) => {
+        const map: Record<string, pipeline.PipelineIssue> = {};
+        for (const r of list ?? [])
+          if (r.run_id === runId) map[r.issue_key] = r;
+        setTickets(map);
+      })
+      .catch(() => {
+        // 展示增强失败静默降级（不打断主流程）。
+      });
+  }, [novelId, runId]);
+
+  useEffect(() => {
+    loadTickets();
+  }, [loadTickets]);
 
   // 订阅一致性巡检进度（后端批量取语料阶段）：读取正文 N/M、分析中，避免面板死转圈。
   useEffect(() => {
@@ -86,29 +132,67 @@ export default function PatrolReportPanel({
     return off;
   }, [novelId]);
 
-  // 订阅复验收口事件（run 级）：清「复验中」态。结果 toast 由 IssueTicketsPanel
-  // 统一弹出（两面板同屏常驻，避免双 toast）；本面板只收进行态。
+  // 订阅工单闭环事件（run 级）：复验收口清「复验中」并**在卡片上落反馈**（状态+回执经
+  // loadTickets 刷新呈现）；结果 toast 只在本面板派发的复验时弹出（与 IssueTicketsPanel
+  // 「谁派发谁提示」分工，避免双 toast，也避免检测工作流页（无工单面板）零反馈）。
+  // fix_start/fix_done 一并刷新：去修复标记/修复收口时卡片状态徽章同步翻转。
   useEffect(() => {
     if (!novelId || !runId) return;
     const match = (p: { novel_id?: number; run_id?: string }) =>
       p?.novel_id === novelId && p.run_id === runId;
     const offDone = EventsOn(
       "pipeline:verify_done",
-      (p: { novel_id?: number; run_id?: string }) => {
-        if (match(p)) setVerifyingId(null);
+      (p: {
+        novel_id?: number;
+        run_id?: string;
+        confirmed?: number;
+        rejected?: number;
+        unverified?: number;
+      }) => {
+        if (!match(p)) return;
+        const mine = verifyingIdRef.current !== null;
+        verifyingIdRef.current = null;
+        setVerifyingId(null);
+        void loadTickets();
+        if (mine) {
+          toastSuccess(
+            t("pipeline.tickets.verifyOk", {
+              confirmed: p.confirmed ?? 0,
+              rejected: p.rejected ?? 0,
+              unverified: p.unverified ?? 0,
+            }),
+          );
+        }
       },
     );
     const offCancel = EventsOn(
       "pipeline:verify_cancelled",
       (p: { novel_id?: number; run_id?: string }) => {
-        if (match(p)) setVerifyingId(null);
+        if (!match(p)) return;
+        verifyingIdRef.current = null;
+        setVerifyingId(null);
+        void loadTickets();
+      },
+    );
+    const offFixStart = EventsOn(
+      "pipeline:fix_start",
+      (p: { novel_id?: number; run_id?: string }) => {
+        if (match(p)) void loadTickets();
+      },
+    );
+    const offFixDone = EventsOn(
+      "pipeline:fix_done",
+      (p: { novel_id?: number; run_id?: string }) => {
+        if (match(p)) void loadTickets();
       },
     );
     return () => {
       offDone?.();
       offCancel?.();
+      offFixStart?.();
+      offFixDone?.();
     };
-  }, [novelId, runId]);
+  }, [novelId, runId, t, loadTickets]);
 
   // 每次巡检完成事件到达（tick 变化）都收起「运行中」提示并清进度：渲染期重置而非 effect，
   // 避免 set-state-in-effect 级联渲染告警。
@@ -151,13 +235,14 @@ export default function PatrolReportPanel({
         } else {
           toastInfo(t("pipeline.patrol.fixNoTicket"));
         }
+        void loadTickets();
       } catch (error) {
         toastError(toErrorMessage(error));
       } finally {
         setBusyKey(null);
       }
     },
-    [novelId, runId, t],
+    [novelId, runId, t, loadTickets],
   );
 
   // 单条「复验」（复用工单复验闭环）：定点核验该张力项的修复效果，逐条落复验回执；
@@ -178,10 +263,12 @@ export default function PatrolReportPanel({
           return;
         }
         // 先登记在飞态再派发，避免后端已置 verifying、前端短暂无状态（与工单面板同则）。
+        verifyingIdRef.current = it.id;
         setVerifyingId(it.id);
         await VerifyIssueTickets(novelId, [ref]);
         toastInfo(t("pipeline.tickets.verifyStarted", { count: 1 }));
       } catch (error) {
+        verifyingIdRef.current = null;
         setVerifyingId(null);
         toastError(toErrorMessage(error));
       } finally {
@@ -300,11 +387,31 @@ export default function PatrolReportPanel({
                         <Loader2 className="h-3 w-3 animate-spin" />
                         {t("pipeline.tickets.verifying")}
                       </span>
+                    ) : it.id && tickets[it.id] ? (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-xs ${
+                          TICKET_STATUS_CLS[tickets[it.id].status] ??
+                          "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {t(`pipeline.tickets.status.${tickets[it.id].status}`)}
+                      </span>
                     ) : null}
                   </div>
                   {it.desc ? (
                     <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
                       {it.desc}
+                    </p>
+                  ) : null}
+                  {/* 复验回执（卡片级反馈）：复验收口后结论直接可见，
+                      避免「复验中」消失后卡片无痕（用户须翻工单面板才能看到结果）。 */}
+                  {it.id && tickets[it.id]?.verify_receipt ? (
+                    <p className="mt-1 whitespace-pre-wrap break-words rounded border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                      {t("pipeline.tickets.verifyReceipt")}
+                      {tickets[it.id].verify_at
+                        ? `（${fmtTime(tickets[it.id].verify_at)}）`
+                        : ""}
+                      ：{tickets[it.id].verify_receipt}
                     </p>
                   ) : null}
                   <IssueScopeTags issue={it} />
