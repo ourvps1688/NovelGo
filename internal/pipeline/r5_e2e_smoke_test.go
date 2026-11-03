@@ -163,7 +163,7 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 	bookDone := waitForDetectDone(t, detectCh)
 	require.Equal(t, DetectionKindBook, bookDone["kind"])
 
-	// ④ 巡检·结构 → 张力报告（只报告，零发现项工单）。
+	// ④ 巡检·结构 → 张力报告（只报告不改写；张力项落工单供人工闭环）。
 	structRes, err := svc.RunDetectionTask(ctx, novelID, DetectionKindStructure, nil)
 	require.NoError(t, err)
 	select {
@@ -173,7 +173,7 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 		t.Fatal("巡检完成事件未到达")
 	}
 
-	// 工单沉淀口径：卷/书各 2 条 pending，巡检零工单。
+	// 工单沉淀口径：卷/书/巡检各 2 条 pending（巡检工单供人工闭环，零自动流转）。
 	volRows, lerr := svc.store.ListIssues(ctx, novelID, volRes.RunID)
 	require.NoError(t, lerr)
 	require.Len(t, volRows, 2, "卷体检发现项应落检测容器工单")
@@ -182,7 +182,10 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 	require.Len(t, bookRows, 2)
 	structRows, lerr := svc.store.ListIssues(ctx, novelID, structRes.RunID)
 	require.NoError(t, lerr)
-	require.Empty(t, structRows, "巡检只报告不改写：零发现项工单")
+	require.Len(t, structRows, 2, "张力项应落发现项工单（人工闭环入口）")
+	for _, r := range structRows {
+		require.Equal(t, IssueStatusPending, r.Status, "巡检工单不得自动流转（人工在环）")
+	}
 
 	// ── 阶段 3：人工确认 + 去修复（工单执行体，显式触发）。
 	refs := []IssueTicketRef{{RunID: volRes.RunID, IssueKey: "I1"}, {RunID: volRes.RunID, IssueKey: "I2"}}
@@ -272,7 +275,8 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 	require.Equal(t, "needs_fix", bookAudit.Verdict, "书容器结论不受卷容器刷新影响")
 	require.Equal(t, "检测出2条问题", bookAudit.Summary)
 	// 未决工单计数 = 非终态行数（verified/dismissed 不计未决）：
-	// 卷容器整批替换后仅剩书容器 I1（pending）+ I2（dismissed 终态）。
+	// 卷容器整批替换后剩书容器 I1（pending）+ I2（dismissed 终态）
+	// + 巡检容器 I1/I2（pending，张力项工单供人工闭环，全程未触碰）。
 	allRows, lerr := svc.ListIssueTickets(ctx, novelID)
 	require.NoError(t, lerr)
 	pending, terminal := 0, 0
@@ -283,7 +287,7 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 			pending++
 		}
 	}
-	require.Equal(t, 1, pending, "未决工单计数口径：非终态行")
+	require.Equal(t, 3, pending, "未决工单计数口径：非终态行（书 I1 + 巡检 I1/I2）")
 	require.Equal(t, 1, terminal, "终态行（dismissed）不计未决")
 
 	// 全程零闸门：写循环不弹闸（R5-4）+ 检测/工单/复验零闸门广播（检测核心）。

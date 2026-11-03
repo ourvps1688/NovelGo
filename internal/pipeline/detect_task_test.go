@@ -166,7 +166,8 @@ func TestRunDetectionTaskVolumeAndBookLandTickets(t *testing.T) {
 }
 
 // TestRunDetectionTaskStructureLandsPatrolReport 验收①②（structure）：无活跃流水线
-// 直接启动巡检·结构——张力报告落检测容器 PatrolReport（只报告：零发现项工单），
+// 直接启动巡检·结构——张力报告落检测容器 PatrolReport（只报告不改写：不进修复路由；
+// 张力项落发现项工单仅供人工确认/去修复/复验闭环），
 // 完成沿用既有 consistency_patrol 事件通道。
 func TestRunDetectionTaskStructureLandsPatrolReport(t *testing.T) {
 	db := newTestDB(t) // 队列不可用→legacy 直跑（验收③）
@@ -200,7 +201,12 @@ func TestRunDetectionTaskStructureLandsPatrolReport(t *testing.T) {
 	require.NotNil(t, ctxt.PatrolReportAt, "张力报告落库应打时间戳（T1.3 双源合并判据）")
 	rows, lerr := svc.store.ListIssues(ctx, 902, res.RunID)
 	require.NoError(t, lerr)
-	require.Empty(t, rows, "巡检只报告不改写：零发现项工单")
+	// 张力项落发现项工单（人工确认/去修复/复验闭环入口）。「只报告不改写」指不自动
+	// 修复、不进修复路由——落工单仅供人工触发，状态须停在 pending（零自动流转）。
+	require.Len(t, rows, 2, "张力项应落发现项工单（人工闭环入口）")
+	for _, r := range rows {
+		require.Equal(t, IssueStatusPending, r.Status, "巡检工单不得自动流转（人工在环）")
+	}
 }
 
 // TestRunDetectionTaskAuditRejectionLandsNoTickets 验收回归：签约体检（S4）被模型拒绝/

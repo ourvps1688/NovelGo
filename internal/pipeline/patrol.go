@@ -156,6 +156,12 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		}
 		data := parseFreshAudit(out.Text)
 		if werr := s.storePatrolReport(bg, runID, data); werr == nil {
+			// 张力项同步沉淀为发现项工单（复用工单闭环：确认/去修复/复验/驳回）。
+			// 按 run 整批替换（ReplaceIssues 契约：新体检=新问题清单）；失败只告警不阻断——
+			// 报告本体已落库，工单缺失可由后续体检/回填补齐。失败/拒绝路径不落工单（避免清掉旧清单）。
+			if terr := s.store.ReplaceIssues(bg, novelID, runID, 0, data.Issues); terr != nil {
+				s.logger.Warn("一致性巡检：张力项落工单失败（非阻断）", "run_id", runID, "err", terr)
+			}
 			emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
 			return
 		} else {

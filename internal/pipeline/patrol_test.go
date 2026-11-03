@@ -108,6 +108,43 @@ func TestRunConsistencyPatrolStoresReportAndEmits(t *testing.T) {
 	require.Equal(t, run.NovelID, p["novel_id"])
 }
 
+// TestRunConsistencyPatrolLandsIssueTickets 验证张力项落工单契约（复用工单闭环）：
+// 成功路径按 run 整批 ReplaceIssues 把张力项落为 pipeline_issues 发现项工单（pending，
+// 可走确认/去修复/复验/驳回）；失败路径不落新工单、也不清既有工单（失败态不得抹掉
+// 上次成功留下的可修复清单）。
+func TestRunConsistencyPatrolLandsIssueTickets(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	run, err := svc.StartPipeline(ctx, 707, "new", nil, false)
+	require.NoError(t, err)
+
+	capturePatrolEmit(t)
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{Text: "张力小结：发现 2 处。\n```json\n" + patrolJSONFixture + "\n```"}, nil
+	}
+	svc.runConsistencyPatrol(ctx, run.RunID, run.NovelID)
+
+	rows, lerr := svc.store.ListIssues(ctx, run.NovelID, run.RunID)
+	require.NoError(t, lerr)
+	require.Len(t, rows, 2, "张力项应整批落为发现项工单")
+	require.Equal(t, "T1", rows[0].IssueKey)
+	require.Equal(t, IssueStatusPending, rows[0].Status, "新落工单应为待处理（可确认/去修复/复验）")
+	require.Equal(t, "T2", rows[1].IssueKey)
+	require.Equal(t, "timeline", rows[0].Area, "结构化字段应随工单落列")
+
+	// 失败路径：同 run 既有工单不被失败态清掉。
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{}, errors.New("llm down")
+	}
+	svc.runConsistencyPatrol(ctx, run.RunID, run.NovelID)
+
+	rows, lerr = svc.store.ListIssues(ctx, run.NovelID, run.RunID)
+	require.NoError(t, lerr)
+	require.Len(t, rows, 2, "巡检失败不得清掉既有工单（失败/拒绝路径不动工单）")
+	require.Equal(t, "T1", rows[0].IssueKey)
+}
+
 // TestRunConsistencyPatrolDegradesOnFailure 验证降级链：巡检失败不 panic、不阻断，
 // 但须落地清晰的 verdict=error 失败态并广播事件（面板需回执，避免永久「运行中」），
 // 且不产生任何垃圾张力项（只报告不改写）。

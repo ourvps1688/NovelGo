@@ -108,7 +108,7 @@ func TestR53Acceptance_DetectIndependence(t *testing.T) {
 	require.NoError(t, lerr)
 	require.Len(t, rowsB, 2, "书体检发现项应落工单")
 
-	// ── 巡检·结构 → 张力报告（只报告不改写：零工单）。
+	// ── 巡检·结构 → 张力报告（只报告不改写：不自动修复；张力项落工单供人工闭环）。
 	resS, err := svc.RunDetectionTask(ctx, 905, DetectionKindStructure, nil)
 	require.NoError(t, err)
 	select {
@@ -124,7 +124,10 @@ func TestR53Acceptance_DetectIndependence(t *testing.T) {
 	require.Contains(t, ctxt.PatrolReport, "检测出2条问题", "巡检张力报告应落检测容器")
 	rowsS, lerr := svc.store.ListIssues(ctx, 905, resS.RunID)
 	require.NoError(t, lerr)
-	require.Empty(t, rowsS, "巡检只报告不改写：零发现项工单")
+	require.Len(t, rowsS, 2, "张力项应落发现项工单（人工闭环入口）")
+	for _, r := range rowsS {
+		require.Equal(t, IssueStatusPending, r.Status, "巡检工单不得自动流转（人工在环）")
+	}
 
 	// ── 检测-only 零 auto-advance/fix/gate。
 	require.Zero(t, gateN.Load(), "检测-only 零闸门广播")
