@@ -1999,6 +1999,10 @@
       "issues": "Tension List",
       "noIssues": "No significant tensions found.",
       "noReport": "No patrol report yet: one runs automatically after a volume freeze; you can also trigger it with Run Patrol.",
+      "fixPromptTitle": "Please help fix the following tension found by the consistency patrol:",
+      "fixSent": "Sent this tension to the chat window and marked it as \"fixing\"; collaborate with the AI in the chat box below",
+      "fixNoTicket": "This report has no matching ticket record (older report); the tension was sent straight to the chat window",
+      "verifyNoTicket": "This report has no matching ticket record, so it cannot be verified; running the patrol again will file tickets automatically",
       "progress": {
         "reading": "Reading chapters {{done}}/{{total}}…",
         "analyzing": "Corpus ready, LLM analyzing…"

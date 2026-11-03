@@ -105,6 +105,7 @@ export default function DetectionCorePanel({ novelId }: Props) {
                 data={patrolData}
                 tick={tick}
                 novelId={novelId}
+                runId={patrolView?.run_id ?? ""}
                 independentNote={t("pipeline.patrol.independentNote")}
                 onRun={() => {
                   trackFeature(ACTION_FEATURE_KEYS.patrol);
@@ -118,6 +119,7 @@ export default function DetectionCorePanel({ novelId }: Props) {
                 data={patrolData}
                 tick={tick}
                 novelId={novelId}
+                runId={patrolView?.run_id ?? ""}
                 onRun={() => {
                   trackFeature(ACTION_FEATURE_KEYS.patrol);
                   RunDetectionTask(novelId, "structure", null).catch(() => {});

@@ -133,7 +133,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
 
   // 巡检·结构结果消费面：经 GetPatrolReport 双源合并取数（活跃 run + structure 检测容器，
   // 按落库时间戳最新者胜），解析张力报告 AuditData 喂 PatrolReportPanel——
-  // 取代旧「通用工单列表」呈现，使结构巡检与书体检/章节严格区分（结构只报告张力、零工单）。
+  // 取代旧「通用工单列表」呈现，使结构巡检与书体检/章节严格区分（结构只报告张力、
+  // 不进自动修复路由；张力项沉淀为发现项工单后由卡片提供人工「去修复/复验」入口）。
   const { data: patrolView } = useQuery({
     queryKey: patrolKeys.report(novelId),
     queryFn: async () => (await GetPatrolReport(novelId)) ?? null,
@@ -285,6 +286,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
             data={patrolData}
             tick={patrolTick}
             novelId={novelId}
+            runId={patrolView?.run_id ?? ""}
             onRun={() => {
               trackFeature(ACTION_FEATURE_KEYS.patrol);
               handleStart();

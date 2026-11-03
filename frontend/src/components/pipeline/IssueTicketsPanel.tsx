@@ -147,8 +147,17 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
 
   // 订阅复验事件流（审计 P0）：progress 推逐工单进度、done 收口并刷新、cancelled 取消清态。
   // 置于 load 声明之后，避免 effect 依赖在 TDZ 内被提前引用（React Compiler/eslint 约束）。
+  // fix_start 联动：工单在别处（如巡检报告卡片「去修复」）被标记「修复中」时刷新本面板，
+  // 避免状态陈旧。
   useEffect(() => {
     if (!novelId) return;
+    const offFixStart = EventsOn(
+      "pipeline:fix_start",
+      (p: { novel_id?: number }) => {
+        if (p?.novel_id !== novelId) return;
+        load();
+      },
+    );
     const offProgress = EventsOn(
       "pipeline:verify_progress",
       (p: {
@@ -218,6 +227,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       },
     );
     return () => {
+      offFixStart?.();
       offProgress?.();
       offDone?.();
       offCancel?.();
