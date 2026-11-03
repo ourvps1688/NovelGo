@@ -43,7 +43,7 @@
 
 ## 一致性巡检（consistency-patrol）架构（勿回退）
 - 设计收敛：单次巡检调用只按 novelID 读当前书（runConsistencyPatrol→SkillInput.NovelID→tc.NovelID；get_*/read 全带 WHERE novel_id），不存在读全库；旧「LLM 逐章读」与现「后端批量注入语料」都只碰当前书。
-- 编排（patrol.go runConsistencyPatrol）= 分块 Map-Reduce + 部分沉淀：按 patrolWindowSize=5 切连续章节，每块一次小调用（consistency-patrol 技能，提示词标「分块分析」/「归并」区分角色，复用单技能不改 dispatch 名称契约）；per-chunk 12min、reduce 12min、整体 60min；任块失败仅记日志继续；归并失败但有分块结果→落库 verdict=needs_fix 部分张力（杜绝结论丢弃）。列章失败降级整本单调用。
+- 编排（patrol.go runConsistencyPatrol）= **单次归并调用**（收敛自旧分块 Map-Reduce，commit 0da8355c）：本地预筛（Phase 2，免费）聚跨章候选矛盾簇→仅**一次** consistency-patrol 调用，提示词内联【本书语料】（buildPatrolCorpus：章正文 patrolChapterCap=2000/章 + 台账快照 patrolLedgerCap=20000，patrolCorpusCap=120000 字符上限；唯一完整证据源，替代旧「LLM 逐章 read」50+ 工具往返）——明确禁止 read/get_*/search 工具；**语料体量是超时成败关键**：原 4000/60000/200000 配置（~112k 字符）思考模型 45min 都跑不完（实测 task 105 verdict:error），收紧至 2000/20000/120000（约 40% 体量）+ synthesizePrompt 输出约束（末尾只交 JSON、之前最多 2-3 句）后 45min 预算绰绰有余；分块不能省总思维量（台账每块重复），勿再走回分块。patrolSynthesizeTimeout=**45min**（commit 2b0335a2）、patrolOverallTimeout=60min 兜底；失败走 classifyPatrolFailure 落清晰失败态，绝不静默卡死。列章失败→预筛/语料降级为空，归并步仍可用台账证据。
 - Phase 2 向量预筛（patrol_prescreen.go）：列章后跑 runPatrolPrescreen——抽「疑似主张句」→ BGE 512 维 EmbedBatch 单链聚类（余弦≥0.78，仅留跨章簇）→ detectDivergence 同单位数值分歧标 Divergent → formatPrescreen 注入归并步。embedder 取 rag.TryGetEmbedder() 全局单例，未就绪即降级不阻断；不调 Compact（共享全局）。测试经 patrolEmbedderProvider 注入 stub。
 - fail-fast（5775990b）：classifyPatrolFailure 区分 idle_timeout/DeadlineExceeded 给清晰「供应商无响应/半死连接」提示；agent idle EOF/重置分支计入 idleTimeouts 堵 idleRetryCap 漏检。
 - 验证铁律：pipeline 包四道闸（gofmt/build/vet/golangci-lint webkit2_41）/ 全量 go test 全绿；新功能必带单测（parseChunkOutput/partial-sink/prescreen 共 11 个）。
