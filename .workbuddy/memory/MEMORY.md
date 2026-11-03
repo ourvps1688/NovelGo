@@ -26,6 +26,9 @@
 - 签约体检卡「一直运行中」死循环修复（2026-11-01, c4afcb37）：供应商「连得通但不吐数据」时，空闲看门狗每约9分钟超时一次，旧代码把空闲超时一律标 Retryable:true 且熔断刻意忽略空闲超时，致 agent 无限重试直到60分钟硬超时，界面表现为签约体检一直运行中卡死。修复：idleWatchdog 记录本次请求是否收到过字节；新增 idleRetryable 纯函数——零字节空转（死连接）判不可重试（直接失败并给「未收到任何字节/疑似供应商无响应」清晰错误），已收字节（真实慢生成/中途断流）仍保留可重试，不误杀思考模型长静默。非流式（generate.go）与流式（stream.go）两路径接入；新增 TestIdleRetryable/TestIdleTimeoutErrorGotBytes。熔断行为不变（仍不因子空闲超时熔断）。
 - 一致性巡检分块 Map-Reduce 重构（2026-11-02, 6b90e7d5）：旧单调用把整本书一次性塞进一个 LLM 调用，供应商稍慢即超时整轮作废、结论全丢。改为按 patrolWindowSize=5 切片 MAP 小调用 + 一次性 REDUCE 归并（复用单技能 consistency-patrol，仅提示词区分角色，零测试契约变更）；任一块失败不牵连；归并失败但有分块结果时落库 needs_fix 部分张力报告（杜绝结论丢弃）。列章失败降级整本单调用。Phase 2 确定性+向量预筛（patrol_prescreen.go 用 rag.Embedder bge 512 维聚类）待办。
 
+## 架构决策（2026-11-03）
+- 四检测工作流（chapter/volume/book/structure）**否决进程/模块级大拆分**（评估报告 docs/detection-workflow-coupling-report-2026-11-03.md）：code 路径已按 kind 分治，共享的熔断器/队列/SQLite 必须共享；「跑很久没结果」类投诉先查①供应商流式停滞（idle watchdog 日志）②前端 query 失效缺口（旧缓存×新 run_id 过滤必空模式：`["signability-inline-issues"]`/`["detect-inline-issues"]` 无失效是已知坑）③重启 AbandonActive 杀在途任务。
+
 ## ONNX 现状（结论，细节见 docs/onnx-enhancement-development-plan.md）
 - 仅 `bge-small-zh-v1.5`（512维）做文本向量化（4 消费方全部优雅降级）。reranker 已 L3 彻底移除（真实评测净负优化）；P0-2 批处理/缓存 ✅；P1-1 长文分段聚合 ✅（不影响功能）；P1-2 升级 embedding 模型 评估后放弃（维度变更须重建向量库）；P2 本地分类器/NER 降级待触发。
 
