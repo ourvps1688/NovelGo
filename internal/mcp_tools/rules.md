@@ -117,6 +117,8 @@ type XxxArgs struct {
 
 `tc.RawArgs` 由 Registry.Execute 在调用工具前注入，存放 LLM 传的原始 JSON。
 
+**注意**：Args 中声明为 string 的「JSON 文本」字段（abilities/personality/detail_json/tags/params 等）若被 LLM 传真 JSON 数组/对象，Registry.Execute 会在解码前就地规范化为紧凑 JSON 文本（见 `args_coerce.go`），`tc.RawArgs` 亦为规范化后的字节——故 PATCH 到 entity 的 string 字段时拿到的一定是 JSON 文本，两条解码路径（Args 解码与下方 Unmarshal）都不会因数组/对象参数报 "cannot unmarshal array into … of type string"。
+
 Unmarshal 是 PATCH 语义：JSON 里传了哪些 key 就改哪些字段，未出现的保持原值。
 
 **约束**：Args 只放允许 LLM 自由修改的字段。Finder 字段（`character_id` / `entry_id` / `relation_id` 等）的 json tag 刻意与 DB 模型 PK（`id`）不同名——不是因为 unmarshal 有风险，而是让 json tag 自说明字段用途，LLM 看到 `entry_id` 就知道填什么。

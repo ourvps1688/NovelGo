@@ -127,7 +127,7 @@ type CreateTimelineEntryItem struct {
 	Category            string `json:"category" jsonschema:"required,description=条目类型,enum=foreshadowing,enum=user_directive" validate:"required,oneof=foreshadowing user_directive"`
 	Title               string `json:"title" jsonschema:"required,description=简短标题"                                   validate:"required"`
 	Content             string `json:"content" jsonschema:"description=详细描述"`
-	DetailJSON          string `json:"detail_json" jsonschema:"description=字符串形式的JSON，结构化数据"`
+	DetailJSON          string `json:"detail_json" jsonschema:"description=JSON（对象/数组或字符串形式JSON文本均可），结构化数据"`
 	TargetReadingNumber int    `json:"target_reading_number" jsonschema:"required,description=预计回收的阅读序号。用于未来计划位置，不是章节 ID" validate:"required,min=1"`
 	Importance          int    `json:"importance" jsonschema:"description=重要度1-5,default=3,minimum=1,maximum=5"         validate:"omitempty,min=1,max=5"`
 	SourceChapterID     *int64 `json:"source_chapter_id" jsonschema:"description=在哪章创建/埋下的稳定章节 ID" validate:"omitempty,min=1"`
@@ -223,7 +223,7 @@ type UpdateTimelineEntryArgs struct {
 	EntryID             int64  `json:"entry_id" jsonschema:"required,description=条目ID"              validate:"required,min=1"`
 	Title               string `json:"title" jsonschema:"description=新的标题"`
 	Content             string `json:"content" jsonschema:"description=新的描述"`
-	DetailJSON          string `json:"detail_json" jsonschema:"description=新的结构化数据（完全替换旧的）"`
+	DetailJSON          string `json:"detail_json" jsonschema:"description=新的结构化数据（JSON 或字符串形式 JSON 文本均可，完全替换旧的）"`
 	TargetReadingNumber int    `json:"target_reading_number" jsonschema:"description=新的目标阅读序号,minimum=1" validate:"omitempty,min=1"`
 	Importance          int    `json:"importance" jsonschema:"description=新的重要度1-5,minimum=1,maximum=5"`
 	Status              string `json:"status" jsonschema:"description=新状态,enum=pending,enum=resolved,enum=abandoned" validate:"omitempty,oneof=pending resolved abandoned"`

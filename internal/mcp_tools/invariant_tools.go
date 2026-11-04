@@ -15,7 +15,7 @@ import (
 type UpsertPinnedInvariantArgs struct {
 	Kind      string `json:"kind" jsonschema:"required,description=不变量类型,enum=character_alive_before,enum=capability_ceiling,enum=custom" validate:"required,oneof=character_alive_before capability_ceiling custom"`
 	Statement string `json:"statement" jsonschema:"required,description=作者声明原文（如「主角第50章前不死」「力量体系上限9000」）" validate:"required"`
-	Params    string `json:"params" jsonschema:"description=结构化参数 JSON 对象文本：character_alive_before 须含 character+before_reading_number（<=0=全书不死）；capability_ceiling 须含 character+ceiling；custom 可省略" validate:"omitempty"`
+	Params    string `json:"params" jsonschema:"description=结构化参数（JSON 对象或字符串形式 JSON 对象文本均可）：character_alive_before 须含 character+before_reading_number（<=0=全书不死）；capability_ceiling 须含 character+ceiling；custom 可省略" validate:"omitempty"`
 	Confirmed bool   `json:"confirmed" jsonschema:"description=人工确认标记（作者显式确认后置 true）"`
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -54,7 +55,7 @@ type ToolContext struct {
 	DB           *gorm.DB
 	NovelID      int64
 	ToolID       string
-	RawArgs      json.RawMessage                                                  // 原始 JSON，update 工具用于 PATCH DB 实体
+	RawArgs      json.RawMessage                                                  // 原始 JSON（string 字段的数组/对象参数已规范化为紧凑 JSON 文本，见 args_coerce.go），update 工具用于 PATCH DB 实体
 	Approver     approval.Approver                                                // 审批能力，nil 表示工具无需审批
 	EmitApproval func(toolID string, approvalType string, payload map[string]any) // 向 agent 事件流推送审批事件（EventToolCall, phase="awaiting_approval"）
 
@@ -296,6 +297,11 @@ func (r *Registry) Execute(ctx context.Context, name string, rawArgs json.RawMes
 
 	// 反序列化 + 校验
 	args := t.NewArgs()
+	// JSON 文本字段宽容化：string 声明的 JSON 文本参数（abilities/personality/
+	// detail_json/tags/params 等）LLM 常直接传成数组/对象，反序列化必炸。先按
+	// Args 结构把这类值就地规范化为紧凑 JSON 文本（args_coerce.go）；tc.RawArgs
+	// 亦用规范化后的字节，工具内部 PATCH 二次 Unmarshal 同步受益。
+	rawArgs = coerceJSONTextArgs(reflect.TypeOf(args).Elem(), rawArgs)
 	// DisallowUnknownFields：拒绝 schema 外字段，防止 LLM 传 id/novel_id 等额外字段
 	// 经第二次 Unmarshal（工具内部）覆盖 entity 不可变字段
 	dec := json.NewDecoder(bytes.NewReader(rawArgs))

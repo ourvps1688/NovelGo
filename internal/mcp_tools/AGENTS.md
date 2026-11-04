@@ -13,7 +13,7 @@
 
 - Args 字段同时使用 `jsonschema` 和 `validate` tag；`jsonschema` 面向 LLM，`validate` 面向 Registry。
 - 参数校验由 `Registry.Execute` 统一执行。工具不要自行 `json.Unmarshal` 参数或调用 `validate.Struct`，直接使用已校验的 `args.(*XxxArgs)`。
-- `tc.RawArgs` 是 Registry 注入的原始 JSON。PATCH 型 update 工具可对允许修改的 Args 使用 `json.Unmarshal(tc.RawArgs, &entity)`，JSON 中未出现的字段保持原值。
+- `tc.RawArgs` 是 Registry 注入的原始 JSON（string 声明的 JSON 文本字段若被传真数组/对象，已统一规范化为紧凑 JSON 文本，见 `args_coerce.go`）。PATCH 型 update 工具可对允许修改的 Args 使用 `json.Unmarshal(tc.RawArgs, &entity)`，JSON 中未出现的字段保持原值。
 - Finder 字段使用清晰的 JSON 名称，如 `character_id`、`entry_id`、`relation_id`，不要为了复用数据库主键字段改成 `id`。
 
 ## 错误处理
