@@ -200,10 +200,10 @@ var detectTaskTimeout = 60 * time.Minute
 // 逐工单循环每步先查 ctx.Err，超时/取消后安全退出（未复验工单复位 pending，可重跑）。
 var verifyCallTimeout = 120 * time.Minute
 
-// verifyTicketTimeout 是单工单复验 LLM 调用的墙钟上限（逐工单预算，独立于 verifyCallTimeout）：
-// 复验逐工单顺序执行，若某工单的 LLM 调用卡住（供应商静默/空闲超时），不兜底会拖住整批。
-// 此处给每张工单单独的预算，超时的工单单独复位 pending 并让后续工单继续，避免「一张卡死、
-// 整批无进展」。
+// verifyTicketTimeout 是单批复验 LLM 调用的墙钟上限（逐批预算，独立于 verifyCallTimeout）：
+// 复验分批执行（批间有限并发），若某批的 LLM 调用卡住（供应商静默/空闲超时），不兜底会拖住整轮。
+// 此处给每批单独的预算，超时的批单独复位 pending 并让后续批次继续，避免「一批卡死、
+// 整轮无进展」。
 //
 // 取值纪律（关键）：必须 > thinkingIdleTimeout（9min，见 internal/llm/stream.go）。原因：
 // 思考模型在「活跃产出推理 token」时相邻 chunk 间隔可能远小于 9min，但单轮墙钟可累计超过
@@ -217,10 +217,29 @@ var verifyCallTimeout = 120 * time.Minute
 // pending（note 明示，见 verifyOneTicket），后续工单继续。
 var verifyTicketTimeout = 25 * time.Minute
 
-// verifyMaxTurns 是单工单复验 LLM 调用的轮数上限：复验是「定点核对已修复项」，需逐章节
-// read 后再出回执，多章节工单 6 轮不够（未出回执即被截断 → 整批复验失败）。放宽到 12 轮，
-// 仍轻于整批复验的 18 轮。
-const verifyMaxTurns = 12
+// verifyMaxTurns 是单批复验 LLM 调用的轮数上限：2026-11-05 复验终极提速（语料内联）后，
+// 证据已在提示词内联、禁止工具往返（verify_corpus.go），一轮推理即可出多目标复验回执——
+// 3 轮=1 次出回执 + 2 轮余量（防偶发工具冲动/单轮重试）。旧值 12 服务于「agent 逐章
+// read 取数」的多轮取数设计（多章节工单 6 轮不够的历史教训），随取数与推理分离一并退役。
+const verifyMaxTurns = 3
+
+// verifyMaxTokens 是单次复验 LLM 调用的输出 token 上限（0=模型默认）：复验回执很短，
+// 但思考模型思维块可膨胀（巡检实测单次 ~35k output_tokens 空转）；24k 上限压住思维膨胀
+// （SkillInput.MaxTokens→MiMo max_completion_tokens=思考+回答总量），防「活着但慢」
+// 空转拖满单批预算。
+const verifyMaxTokens = 24000
+
+// verifyBatchSize 是同批合验的工单数上限：verifyPrompt/复验回执契约原生支持多目标
+// （[]verifyTarget + 逐 id 回执），同批合验把 N 次调用压到 ⌈N/verifyBatchSize⌉ 次。
+// 4 张工单的作用域语料通常 ≤30k 字符，单调用上下文可控（巡检 44k 字符实测 16.8min 成功，
+// 复验定点核对远轻于全书归并）。故障隔离粒度随批变粗（批失败=整批未确认留待下轮），
+// 但逐 id 回执拆分保持——回执未提及的工单单列未确认，绝不静默全过。
+const verifyBatchSize = 4
+
+// verifyBatchParallel 是批间并发上限：批与批互不依赖（逐工单故障隔离语义不变），
+// 批间有限并发再摊薄墙钟。取 2 保守起步（agent.Run 并发面已由多检测 kind 并跑验证）；
+// 落库由收集循环单 goroutine 串行写，避开 SQLite 并发写锁竞争（database is locked 前科）。
+const verifyBatchParallel = 2
 
 // verifyEscalateAfter 是复验「明确未通过」的自动升级阈值（防无限空转）：同一工单复验
 // 连续被判定未通过累计达此次数，自动从 pending 升级为 skipped（人工工单，契约本就规定

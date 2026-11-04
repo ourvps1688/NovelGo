@@ -341,9 +341,10 @@ func (s *Service) transitionIssueTickets(ctx context.Context, novelID int64, ref
 // **后台异步、逐工单、作用域化、可取消、有界超时**的复验：
 //   - 入口只做校验 + 选票分组 + 置 verifying 态 + 按 run 派发后台执行体，立即返回
 //     Queued=已派工单数（不再同步阻塞整段 LLM 调用）；
-//   - 实际复验由 runVerifyTickets 逐工单执行：每个工单独立一次 signability-verify 调用，
+//   - 实际复验由 runVerifyTickets 两段式执行（L0 快路径 + 批量合验，2026-11-05 终极提速）：
+//     每批一次 signability-verify 调用（verifyBatchSize 合验 + 多目标回执逐 id 落库），
 //     **不注入整书审计上下文**（传空 ContextBlocks，复验本就「定点核对修过的作用域」，
-//     上下文由 agent 经工具按需读取），scope 收窄到该工单 chapters + 本轮修复日志；
+//     作用域证据由 verify_corpus 预取内联、禁止工具往返），scope 收窄到该批 chapters + 本轮修复日志；
 //   - 逐工单故障隔离：单工单 LLM 失败/回执未解析 → 标未复验（复位 pending）继续，
 //     绝不整批失败；回执未解析**不再静默全过**（审计 P2）；
 //   - 全程有界 ctx（verifyCallTimeout）+ 可取消（CancelIssueVerify），超时/取消后安全退出；
@@ -400,10 +401,17 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 	return summary, nil
 }
 
-// runVerifyTickets 是复验执行体（审计 P0）：处理本 run 的复验工单，逐工单定点复验。
-// 每个工单一次独立 signability-verify 调用（作用域化、MaxTurns=verifyMaxTurns），故障隔离；
-// verified→verified（终态）/ 未通过→pending（退回待修）/ 未确认（LLM 失败或回执未解析）→
-// pending（留待下轮），绝不静默全过。整轮受 verifyCallTimeout 有界 ctx 约束，可被 CancelIssueVerify 取消。
+// runVerifyTickets 是复验执行体（审计 P0；2026-11-05 终极提速重构）：处理本 run 的复验工单。
+// 两段式执行：
+//   - 阶段 1 L0 快路径（串行）：机械类工单确定性判定（tryL0Verify），命中免 LLM 直接落结论；
+//   - 阶段 2 批量合验（批间有限并发）：余下工单按 verifyBatchSize 分批，每批一次
+//     signability-verify 调用——证据由 verify_corpus 预取内联（禁止工具往返），
+//     一次推理出多目标复验回执，按 id 逐条落库。调用次数 N→⌈N/verifyBatchSize⌉、
+//     单次轮数 12→3，整体提速一个量级（根治「复验慢」：取数与推理分离 + 合验）。
+//
+// 语义不变量：verified→verified（终态）/ 未通过→pending（退回待修）/ 未确认（LLM 失败
+// 或回执未解析/未提及）→ pending（留待下轮），绝不静默全过。整轮受 verifyCallTimeout
+// 有界 ctx 约束，可被 CancelIssueVerify 取消。
 //
 // keys 为显式工单键（由 VerifyIssueTickets 透传）：优先按 key 精确加载，彻底消除「执行体回扫
 // verifying 态」的读己写竞态（竞态曾让执行体读到 0 行而提前返回，工单永久卡在 verifying）。
@@ -479,45 +487,62 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 	emitVerifyProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "total": total, "done": 0, "status": "start",
 	})
-	for i, r := range rows {
+
+	// ── 阶段 1：L0 确定性快路径（串行，本地判定，免 LLM）──
+	// 机械类工单（字数/章尾钩子/AI味/称呼/死人/战力/文风）由 quality.RunL0Checks 确定性
+	// 判定修复状态，直接落结论；未命中的进阶段 2 合验。tryL0Verify 内含台账装配（DB 读），
+	// 置于并行段之前串行完成，保证阶段 2 的 worker 零 DB 读写（落库收敛在下方收集循环）。
+	done := 0
+	needLLM := make([]PipelineIssue, 0, len(rows))
+	for _, r := range rows {
 		if ctx.Err() != nil {
 			break // 超时或被取消：剩余工单保持 verifying，收口时复位 pending。
 		}
-		verified, rejected, note := s.verifyOneTicket(ctx, novelID, runID, r, ledgerNotes, prop.block())
-		switch {
-		case verified:
-			if _, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, true, note); err != nil {
-				s.logger.Warn("复验：落库 verified 失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
-				s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验通过落库失败，已复位待复验")
-				summary.Unverified++
-			} else {
-				summary.Confirmed++
-			}
-		case rejected:
-			escalated, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, false, note)
-			if err != nil {
-				s.logger.Warn("复验：落库未通过失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
-				s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验未通过落库失败，已复位待复验")
-				summary.Unverified++
-			} else {
-				summary.Rejected++
-				if escalated {
-					summary.Escalated++
-				}
-			}
-		default:
-			// 未确认（LLM 失败 / 回执未解析 / 回执未提及）：复位 pending 留待下轮，绝不静默判通过（审计 P2）。
-			// 原因写入 note（前端可见），不计 verify_attempts（与 rejected 区分，避免供应商抖动误转人工）。
-			if werr := s.store.RecordIssueVerifyUnverified(ctx, novelID, runID, r.IssueKey, noteOrDefault(note, "复验未确认，已复位待复验")); werr != nil {
-				s.logger.Warn("复验：未确认落库失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", werr)
-			}
-			summary.Unverified++
+		if decided, verified, note := s.tryL0Verify(ctx, novelID, runID, r, s.l0Reader); decided {
+			done++
+			s.applyVerifyOutcome(ctx, summary, novelID, runID, r,
+				verifyOutcome{verified: verified, rejected: !verified, note: note}, total, done)
+			continue
 		}
-		emitVerifyProgress(ctx, map[string]any{
-			"novel_id": novelID, "run_id": runID, "total": total, "done": i + 1,
-			"last_key": r.IssueKey, "last_ok": verified, "last_rejected": rejected,
-			"last_note": note, "status": "progress",
-		})
+		needLLM = append(needLLM, r)
+	}
+
+	// ── 阶段 2：批量合验（语料内联 + 批间有限并发，终极提速）──
+	// 每批一次 signability-verify 调用（证据内联、多目标回执），调用次数 ⌈N/verifyBatchSize⌉；
+	// 批间 verifyBatchParallel 并发摊薄墙钟，落库统一在收集循环单 goroutine 串行写
+	// （避开 SQLite 并发写锁竞争），计数/进度事件随落库推进。
+	src := s.loadVerifyCorpusSource(ctx, novelID)
+	batches := chunkIssues(needLLM, verifyBatchSize)
+	type batchResult struct {
+		idx      int
+		outcomes map[string]verifyOutcome
+	}
+	resCh := make(chan batchResult, len(batches))
+	sem := make(chan struct{}, verifyBatchParallel)
+	for bi, batch := range batches {
+		go func(bi int, batch []PipelineIssue) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				resCh <- batchResult{idx: bi} // 超时/取消：本批留 verifying，收口复位
+				return
+			}
+			resCh <- batchResult{idx: bi, outcomes: s.verifyBatch(ctx, novelID, runID, batch, ledgerNotes, prop.block(), src)}
+		}(bi, batch)
+	}
+	for range batches {
+		br := <-resCh
+		if br.outcomes == nil {
+			continue
+		}
+		for _, r := range batches[br.idx] {
+			oc, ok := br.outcomes[r.IssueKey]
+			if !ok {
+				oc = verifyOutcome{note: "复验回执未包含本工单，留待下轮"}
+			}
+			done++
+			s.applyVerifyOutcome(ctx, summary, novelID, runID, r, oc, total, done)
+		}
 	}
 	// 收口：任何残留 verifying 态（超时/取消中断）→ 复位 pending，避免永久卡死。
 	if v, lerr := s.store.ResetStuckVerifying(ctx, novelID); lerr == nil && v > 0 {
@@ -544,59 +569,148 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 	})
 }
 
-// verifyOneTicket 对单个工单做一次作用域化复验：只注入该工单 chapters + 本轮修复日志
-// （不含整书审计上下文），经 signability-verify 定点核验。返回 (verified, rejected, note)：
+// verifyOutcome 是单张工单的复验结论（L0 确定性判定与 LLM 批量回执统一投影）：
 //   - verified=true  → 复验通过（→verified）
 //   - verified=false && rejected=true  → 复验明确未通过（→pending 退回待修）
 //   - verified=false && rejected=false → 未确认：LLM 调用失败 / 回执未解析 / 回执未提及本工单
 //     （→pending 留待下轮，绝不静默判通过）
-func (s *Service) verifyOneTicket(ctx context.Context, novelID int64, runID string, row PipelineIssue, ledgerNotes []string, propBlock string) (verified, rejected bool, note string) {
-	// P1：机械类工单先走 L0 确定性快路径，命中则免 LLM 调用（P0+P2 语义不变）。
-	if decided, lv, lnote := s.tryL0Verify(ctx, novelID, runID, row, s.l0Reader); decided {
-		return lv, !lv, lnote
+type verifyOutcome struct {
+	verified bool
+	rejected bool
+	note     string
+}
+
+// applyVerifyOutcome 落库单张工单的复验结论并推进计数/进度（L0 与 LLM 批量共用同一收口）。
+// 语义与旧逐工单循环逐字一致：verified→verified；rejected→pending 计 verify_attempts
+// （3 次自动转人工）；未确认→pending 留待下轮且不计 attempts（防供应商抖动误转人工）。
+func (s *Service) applyVerifyOutcome(ctx context.Context, summary *IssueVerifySummary, novelID int64, runID string, r PipelineIssue, oc verifyOutcome, total, done int) {
+	switch {
+	case oc.verified:
+		if _, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, true, oc.note); err != nil {
+			s.logger.Warn("复验：落库 verified 失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
+			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验通过落库失败，已复位待复验")
+			summary.Unverified++
+		} else {
+			summary.Confirmed++
+		}
+	case oc.rejected:
+		escalated, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, false, oc.note)
+		if err != nil {
+			s.logger.Warn("复验：落库未通过失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
+			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验未通过落库失败，已复位待复验")
+			summary.Unverified++
+		} else {
+			summary.Rejected++
+			if escalated {
+				summary.Escalated++
+			}
+		}
+	default:
+		// 未确认（LLM 失败 / 回执未解析 / 回执未提及）：复位 pending 留待下轮，绝不静默判通过（审计 P2）。
+		// 原因写入 note（前端可见），不计 verify_attempts（与 rejected 区分，避免供应商抖动误转人工）。
+		if werr := s.store.RecordIssueVerifyUnverified(ctx, novelID, runID, r.IssueKey, noteOrDefault(oc.note, "复验未确认，已复位待复验")); werr != nil {
+			s.logger.Warn("复验：未确认落库失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", werr)
+		}
+		summary.Unverified++
 	}
-	// 单工单独立墙钟预算：避免某工单的 LLM 调用卡住（供应商静默/空闲超时）拖住整批复验。
-	// 超时即该工单复位 pending 留待下轮，后续工单继续；墙钟预算（25min）宽于 thinking 模型
-	// 9 分钟空闲看门狗（真死连接由看门狗先斩断，本预算兜「活着但慢」的轮次，见 detect.go）。
-	// L0 快路径（已在上文）不在此预算内，只有真正 LLM 调用受约束。
+	emitVerifyProgress(ctx, map[string]any{
+		"novel_id": novelID, "run_id": runID, "total": total, "done": done,
+		"last_key": r.IssueKey, "last_ok": oc.verified, "last_rejected": oc.rejected,
+		"last_note": oc.note, "status": "progress",
+	})
+}
+
+// verifyBatch 对一小批工单做一次「语料内联」的 signability-verify 调用，按回执 id 逐条
+// 返回逐工单结论（2026-11-05 复验终极提速：证据预取内联（verify_corpus）+ 多目标合验）。
+// 失败分层 note（P1-C 三档）保持：整轮超时/取消 / 单批预算耗尽 / 一般执行失败。
+// 故障隔离语义（审计 P0/P2）保持：调用失败/回执未解析 → 整批未确认（复位 pending 留待下轮），
+// 绝不静默全过；回执逐 id 拆分，未提及的工单单列未确认。
+func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, batch []PipelineIssue, ledgerNotes []string, propBlock string, src verifyCorpusSource) map[string]verifyOutcome {
+	targets := make([]verifyTarget, 0, len(batch))
+	nums := make([]int64, 0, len(batch))
+	for _, row := range batch {
+		chs := issueChapterIDs(AuditIssue{
+			Area: row.Area, Desc: row.Desc, ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON),
+		})
+		targets = append(targets, verifyTarget{
+			ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc, Chapters: chs, FixNote: row.Note,
+		})
+		nums = append(nums, chs...)
+	}
+	corpus := s.buildVerifyCorpus(ctx, novelID, src, nums)
+	// 单批独立墙钟预算：某批卡住（供应商静默/慢轮）单独超时复位 pending，后续批次继续；
+	// 墙钟预算（25min）宽于 thinking 模型 9 分钟空闲看门狗（真死连接由看门狗先斩断，
+	// 本预算兜「活着但慢」的轮次，见 detect.go）。
 	tctx, tcancel := context.WithTimeout(ctx, verifyTicketTimeout)
 	defer tcancel()
 	out, derr := s.dispatchSkill(tctx, "signability-verify", SkillInput{
 		NovelID:   novelID,
-		Prompt:    verifyPrompt(novelID, []verifyTarget{{ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc, Chapters: issueChapterIDs(AuditIssue{Area: row.Area, Desc: row.Desc, ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON)}), FixNote: row.Note}}, ledgerNotes, propBlock, contextasm.ContextBlocks{}),
+		Prompt:    verifyPrompt(novelID, targets, ledgerNotes, propBlock, contextasm.ContextBlocks{}) + corpus,
 		MaxTurns:  verifyMaxTurns,
+		MaxTokens: verifyMaxTokens,
 		SessionID: "pipeline:issue-tickets:verify:" + uuid.NewString(),
 		RunID:     runID,
 	})
+	outcomes := make(map[string]verifyOutcome, len(batch))
 	if derr != nil {
-		// 供应商熔断/超时/网络失败：整工单未确认，留待下轮（不报错中断整批）。
-		// 失败原因分层成文（P1-C「超时未验证」UI 明示）：整轮超时/取消 与 单工单预算耗尽
+		// 供应商熔断/超时/网络失败：整批未确认，留待下轮（不报错中断整轮）。
+		// 失败原因分层成文（P1-C「超时未验证」UI 明示）：整轮超时/取消 与 单批预算耗尽
 		// 与 一般执行失败 区分措辞，note 原文进前端两面板（工单面板/巡检卡片），避免含混。
-		if ctx.Err() != nil {
-			s.logger.Warn("复验：整轮超时/取消，工单标未确认留待下轮", "run_id", runID, "issue", row.IssueKey)
-			return false, false, "复验整轮超时或取消，已复位待复验"
+		note := "复验执行失败（" + derr.Error() + "），已复位待复验"
+		switch {
+		case ctx.Err() != nil:
+			s.logger.Warn("复验：整轮超时/取消，本批标未确认留待下轮", "run_id", runID, "batch", len(batch))
+			note = "复验整轮超时或取消，已复位待复验"
+		case errors.Is(derr, context.DeadlineExceeded) || tctx.Err() == context.DeadlineExceeded:
+			s.logger.Warn("复验：单批超时未验证，本批标未确认留待下轮", "run_id", runID, "batch", len(batch), "err", derr)
+			note = fmt.Sprintf("复验超时未验证（单批 %d 分钟预算耗尽），已复位待复验", int(verifyTicketTimeout.Minutes()))
+		default:
+			s.logger.Warn("复验：单批执行失败，本批标未确认留待下轮", "run_id", runID, "batch", len(batch), "err", derr)
 		}
-		if errors.Is(derr, context.DeadlineExceeded) || tctx.Err() == context.DeadlineExceeded {
-			s.logger.Warn("复验：单工单超时未验证，标未确认留待下轮", "run_id", runID, "issue", row.IssueKey, "err", derr)
-			return false, false, fmt.Sprintf("复验超时未验证（单工单 %d 分钟预算耗尽），已复位待复验", int(verifyTicketTimeout.Minutes()))
+		for _, row := range batch {
+			outcomes[row.IssueKey] = verifyOutcome{note: note}
 		}
-		s.logger.Warn("复验：单工单执行失败，标未确认留待下轮", "run_id", runID, "issue", row.IssueKey, "err", derr)
-		return false, false, "复验执行失败（" + derr.Error() + "），已复位待复验"
+		return outcomes
 	}
 	results, _, found := parseVerifyReceipt(out.Text)
 	if !found {
-		// 审计 P2：回执未解析 → 不再静默全过，标未确认留待下轮。
-		s.logger.Warn("复验：回执未解析，工单状态未改动（复位 pending 留待下轮）", "run_id", runID, "issue", row.IssueKey)
-		return false, false, "复验回执未解析，状态未改动"
+		// 审计 P2：回执未解析 → 不再静默全过，整批标未确认留待下轮。
+		s.logger.Warn("复验：回执未解析，本批工单状态未改动（复位 pending 留待下轮）", "run_id", runID, "batch", len(batch))
+		for _, row := range batch {
+			outcomes[row.IssueKey] = verifyOutcome{note: "复验回执未解析，状态未改动"}
+		}
+		return outcomes
 	}
-	res, ok := results[row.IssueKey]
-	if !ok {
-		return false, false, "复验回执未包含本工单，留待下轮"
+	for _, row := range batch {
+		res, ok := results[row.IssueKey]
+		if !ok {
+			outcomes[row.IssueKey] = verifyOutcome{note: "复验回执未包含本工单，留待下轮"}
+			continue
+		}
+		if res.OK {
+			outcomes[row.IssueKey] = verifyOutcome{verified: true, note: res.Note}
+		} else {
+			outcomes[row.IssueKey] = verifyOutcome{rejected: true, note: res.Note}
+		}
 	}
-	if res.OK {
-		return true, false, res.Note
+	return outcomes
+}
+
+// chunkIssues 把工单按 size 切批（末批可小），批间并发、批内合验。
+func chunkIssues(rows []PipelineIssue, size int) [][]PipelineIssue {
+	if size <= 0 {
+		size = 1
 	}
-	return false, true, res.Note
+	var batches [][]PipelineIssue
+	for len(rows) > 0 {
+		n := size
+		if n > len(rows) {
+			n = len(rows)
+		}
+		batches = append(batches, rows[:n])
+		rows = rows[n:]
+	}
+	return batches
 }
 
 // noteOrDefault 返回非空 note，否则回退默认文案（避免空备注）。
