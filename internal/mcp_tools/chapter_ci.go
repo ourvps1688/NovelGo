@@ -78,6 +78,7 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 		TabooList:        cfg.Taboos(),
 		Characters:       chapterCICharacters(ctx, tc),
 		PowerLevels:      chapterCIPowerLevels(ctx, tc),
+		Opening:          cfg.Opening(),
 	})
 	err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).UpsertL0(ctx, &quality.ChapterQuality{
 		NovelID:       tc.NovelID,
@@ -222,7 +223,7 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 		fmt.Sprint(chapterID) + ".md）、前一章结尾/次一章开头片段（get_chapter_list 定位）、" +
 		"本章计划卡（get_chapter_task_card）、涉及台账条目（get_* 定点读取）。\n")
 	b.WriteString("检查项：continuity 一致性/连贯、pacing 节奏、foreshadow 伏笔 lifecycle、" +
-		"reader_state 读者认知态、task_card 任务卡兑现。\n")
+		"reader_state 读者认知态、task_card 任务卡兑现、immersion_anchor 代入感锚点。\n")
 	b.WriteString("只报告不改写：不调用任何写工具、不评分、不给 verdict；零发现报空清单。\n")
 	if skillStore != nil {
 		if sk, ok := skillStore.Get(0, "chapter-ci"); ok && strings.TrimSpace(sk.Content) != "" {

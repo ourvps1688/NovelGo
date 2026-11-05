@@ -20,20 +20,28 @@ func TestCheckerConfigValidate(t *testing.T) {
 		{TabooList: `["虐主"`},
 		{TabooList: `{"a":1}`},
 		{TabooList: `["a", 1]`},
+		{PremiseList: `["灾星"`},
+		{CheatList: `{"a":1}`},
+		{ProtagonistList: `["林澈", 1]`},
 	}
 	for i := range bad {
 		require.Error(t, bad[i].Validate(), "case %d 应拒收", i)
 	}
 
 	// 归一化：去空去重保序。
-	cfg := CheckerConfig{TabooList: `[" 虐主 ", "", "破墙", "虐主"]`}
+	cfg := CheckerConfig{TabooList: `[" 虐主 ", "", "破墙", "虐主"]`,
+		PremiseList: `[" 灾星 ", "", "深地", "灾星"]`}
 	require.NoError(t, cfg.Validate())
 	assert.Equal(t, `["虐主","破墙"]`, cfg.TabooList)
+	assert.Equal(t, `["灾星","深地"]`, cfg.PremiseList)
 
 	// 空清单归一 []。
 	empty := CheckerConfig{}
 	require.NoError(t, empty.Validate())
 	assert.Equal(t, "[]", empty.TabooList)
+	assert.Equal(t, "[]", empty.PremiseList)
+	assert.Equal(t, "[]", empty.CheatList)
+	assert.Equal(t, "[]", empty.ProtagonistList)
 }
 
 // TestCheckerConfigAccessors 缺省口径：HookRequired nil=true、OverdueGrace 负归 0、
@@ -51,6 +59,17 @@ func TestCheckerConfigAccessors(t *testing.T) {
 	assert.Equal(t, 0, cfg.OverdueGrace(), "负宽限归 0")
 	cfg.TabooList = "not-json"
 	assert.Empty(t, cfg.Taboos(), "坏数据按空清单（不炸不误报）")
+
+	// 开篇体检投影（P0-0）：三组全空=nil=整专项不检查；任一非空=启用。
+	assert.Nil(t, DefaultCheckerConfig(9).Opening(), "缺省不启用开篇体检（现行行为逐字一致）")
+	o := CheckerConfig{PremiseList: "not-json"}
+	assert.Nil(t, o.Opening(), "坏数据按空=不启用（宁缺勿错）")
+	o2 := CheckerConfig{CheatList: `["吞星炼命"]`}
+	opening := o2.Opening()
+	require.NotNil(t, opening)
+	assert.Equal(t, []string{"吞星炼命"}, opening.CheatKeywords)
+	assert.Empty(t, opening.PremiseKeywords)
+	assert.Empty(t, opening.ProtagonistNames)
 }
 
 // TestGetCheckerConfigDefault 未配置 → 缺省（不报错，逐字一致口径）。
@@ -74,7 +93,8 @@ func TestSaveCheckerConfigRoundTrip(t *testing.T) {
 
 	f := false
 	cfg := &CheckerConfig{NovelID: 7, BeatDensityMin: 1.5, TailHookRequired: &f,
-		WindowN: 3, TabooList: `["虐主"]`}
+		WindowN: 3, TabooList: `["虐主"]`, PremiseList: `["灾星"]`,
+		CheatList: `["吞星炼命"]`, ProtagonistList: `["林澈","阿澈"]`}
 	require.NoError(t, s.SaveCheckerConfig(ctx, cfg))
 
 	got, err := s.GetCheckerConfig(ctx, 7)
@@ -83,9 +103,14 @@ func TestSaveCheckerConfigRoundTrip(t *testing.T) {
 	assert.False(t, got.HookRequired(), "显式 false 必须落库（零值跳写坑回归）")
 	assert.Equal(t, 3, got.OverdueGrace())
 	assert.Equal(t, []string{"虐主"}, got.Taboos())
+	assert.Equal(t, []string{"灾星"}, got.Premises())
+	assert.Equal(t, []string{"吞星炼命"}, got.Cheats())
+	assert.Equal(t, []string{"林澈", "阿澈"}, got.Protagonists())
 
-	// 同书覆盖（局部字段整行覆盖语义由工具层拼装，这里验证同书单行不重复）。
-	cfg2 := &CheckerConfig{NovelID: 7, BeatDensityMin: 0, TabooList: "[]"}
+	// 同书覆盖（局部字段整行覆盖语义由工具层拼装，这里验证同书单行不重复 +
+	// 新列进 DoUpdates 覆盖而非残留旧值）。
+	cfg2 := &CheckerConfig{NovelID: 7, BeatDensityMin: 0, TabooList: "[]",
+		PremiseList: "[]", CheatList: "[]", ProtagonistList: "[]"}
 	require.NoError(t, s.SaveCheckerConfig(ctx, cfg2))
 	var count int64
 	require.NoError(t, s.DB.Model(&CheckerConfig{}).Where("novel_id = ?", 7).Count(&count).Error)
@@ -94,6 +119,9 @@ func TestSaveCheckerConfigRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0.0, got.BeatDensityMin)
 	assert.True(t, got.HookRequired(), "nil=缺省 true")
+	assert.Empty(t, got.Premises(), "新列必须进 DoUpdates 覆盖，不残留旧值")
+	assert.Empty(t, got.Cheats())
+	assert.Empty(t, got.Protagonists())
 
 	// 跨书隔离。
 	other, err := s.GetCheckerConfig(ctx, 8)

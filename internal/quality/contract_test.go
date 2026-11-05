@@ -67,7 +67,7 @@ func TestParseL1Receipt(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, r.Findings, 1)
 	assert.Equal(t, "L1-1", r.Findings[0].ID)
-	assert.Equal(t, "continuity|pacing|foreshadow|reader_state|task_card", r.Findings[0].Check)
+	assert.Equal(t, "continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor", r.Findings[0].Check)
 	assert.Equal(t, []int64{12}, r.Findings[0].ChapterIDs)
 
 	// 零发现回执合法（空清单=已查零发现）。
@@ -113,18 +113,22 @@ func TestL1ReceiptToFindings(t *testing.T) {
 
 // TestL1CheckEnum 检查项枚举单源。
 func TestL1CheckEnum(t *testing.T) {
-	for _, c := range []string{L1CheckContinuity, L1CheckPacing, L1CheckForeshadow, L1CheckReaderState, L1CheckTaskCard} {
+	for _, c := range []string{L1CheckContinuity, L1CheckPacing, L1CheckForeshadow, L1CheckReaderState, L1CheckTaskCard, L1CheckImmersion} {
 		assert.True(t, L1CheckValid(c), c)
 	}
 	assert.False(t, L1CheckValid(""))
 	assert.False(t, L1CheckValid("word_count"), "L0 检查项不进 L1 回执枚举")
 }
 
-// TestL1FormatLineKeysLocked 格式串键集合与契约 struct 对齐（防手抄漂移）。
+// TestL1FormatLineKeysLocked 格式串键集合与契约 struct 对齐（防手抄漂移）；
+// 枚举全集必须出现在格式串的 check 取值域里（skill md 同步由下一条测试锁定）。
 func TestL1FormatLineKeysLocked(t *testing.T) {
 	line := L1ReceiptFormatLine()
 	for _, k := range []string{`"findings"`, `"id"`, `"check"`, `"desc"`, `"chapter_ids"`, `"ledger_refs"`, `"summary"`} {
 		assert.True(t, strings.Contains(line, k), "格式串缺键 %s", k)
 	}
-	assert.Equal(t, 1, L1SchemaVersion)
+	for _, c := range []string{L1CheckContinuity, L1CheckPacing, L1CheckForeshadow, L1CheckReaderState, L1CheckTaskCard, L1CheckImmersion} {
+		assert.True(t, strings.Contains(line, c), "格式串 check 取值域缺枚举 %s", c)
+	}
+	assert.Equal(t, 2, L1SchemaVersion)
 }

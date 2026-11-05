@@ -174,6 +174,10 @@
    与标题承诺）在前 500 字的实体化、主角个人利害出现字位、POV 聚焦度、章长 fit。
    L0 能查字位/占比，代入感交给 L1 回执新增 `immersion_anchor` 检查项。
    signability-audit.md dim1/dim2 措辞补七猫量化口径（200/500/800 节点+卖点占比）。
+   **状态：已实施**（L0 开篇四查 `premise_late/cheat_late/protagonist_late/opening_length`，
+   位次三查仅第 1 章、章长查黄金三章，CheckerConfig 三组关键词驱动、未配置=不检查；
+   L1 契约 v2 增 `immersion_anchor`；`upsert_checker_config` 工具可配关键词；
+   个人利害/POV 聚焦的语义判读在 L1，位次数字由 L0 确定性兜底）。
 2. **P1-1 编辑反馈回流**紧随（本节 7.1 即首批输入样本）。
 3. 原 P0-2 情绪账（爽点密度/拖沓段）降为 P0-1 之后——两条驳回都没提节奏，
    真实信号显示开篇卖点 >> 中段节奏密度。

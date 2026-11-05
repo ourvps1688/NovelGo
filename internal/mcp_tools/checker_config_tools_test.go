@@ -47,13 +47,16 @@ func TestCheckerConfigToolsClosedLoop(t *testing.T) {
 	require.Equal(t, true, res.Data["tail_hook_required"], "缺省钩子必需")
 	require.Equal(t, 0, res.Data["window_n"])
 
-	// 首次配置：全字段。
+	// 首次配置：全字段（含 P0-0 开篇体检关键词）。
 	f := false
 	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{
 		BeatDensityMin:   ptrFloat(1.5),
 		TailHookRequired: &f,
 		WindowN:          ptrInt(3),
 		TabooList:        []string{"虐主", "破墙"},
+		PremiseKeywords:  []string{"灾星"},
+		CheatKeywords:    []string{"吞星炼命"},
+		ProtagonistNames: []string{"林澈", "阿澈"},
 	}, tc)
 	require.NoError(t, err)
 	require.True(t, res.Success)
@@ -66,12 +69,17 @@ func TestCheckerConfigToolsClosedLoop(t *testing.T) {
 	require.Equal(t, false, res.Data["tail_hook_required"], "未给字段保持现值")
 	require.Equal(t, 5, res.Data["window_n"])
 	require.Equal(t, []string{"虐主", "破墙"}, res.Data["taboo_list"])
+	require.Equal(t, []string{"灾星"}, res.Data["premise_keywords"], "开篇关键词未给=保持现值")
+	require.Equal(t, []string{"吞星炼命"}, res.Data["cheat_keywords"])
+	require.Equal(t, []string{"林澈", "阿澈"}, res.Data["protagonist_names"])
 
 	// 空数组=清空清单。
-	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{TabooList: []string{}}, tc)
+	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{TabooList: []string{}, PremiseKeywords: []string{}}, tc)
 	require.NoError(t, err)
 	require.True(t, res.Success)
 	require.Empty(t, res.Data["taboo_list"], "空数组=清空")
+	require.Empty(t, res.Data["premise_keywords"], "空数组=清空（开篇关键词同语义）")
+	require.Equal(t, []string{"吞星炼命"}, res.Data["cheat_keywords"], "同批未给字段仍保持现值")
 
 	// 契约拒收：负数不落库（业务拒绝 Success=false，不返回 error）。
 	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{WindowN: ptrInt(-1)}, tc)

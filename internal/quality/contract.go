@@ -16,7 +16,8 @@ import (
 )
 
 // L1SchemaVersion 是 L1 回执契约的版本号。每次给回执增删字段或变更语义时 +1。
-const L1SchemaVersion = 1
+// v2：新增 immersion_anchor 检查项（P0-0 开篇体检，代入感语义级判读）。
+const L1SchemaVersion = 2
 
 // L1 检查项枚举（回执 check 字段取值单源；与 Summary.ByCheck 键同域）。
 const (
@@ -25,12 +26,16 @@ const (
 	L1CheckForeshadow  = "foreshadow"   // 伏笔 lifecycle（埋/收/烂尾）
 	L1CheckReaderState = "reader_state" // 读者认知态（已知/误知/剧透）
 	L1CheckTaskCard    = "task_card"    // 本章计划卡（钩子/爽点/人设时刻/推进）兑现
+	// L1CheckImmersion 代入感锚点（P0-0）：个人利害是否尽早绑定（主角与事件利害相关、
+	// 非旁观者）、POV 是否聚焦主角内心、标题/简介卖点是否在开篇实体化——
+	// 位次数字（200/500/800 字）由 L0 开篇体检确定性兜底，本项只报语义级判读。
+	L1CheckImmersion = "immersion_anchor"
 )
 
 // L1CheckValid 判断 L1 检查项枚举值是否合法。
 func L1CheckValid(s string) bool {
 	switch s {
-	case L1CheckContinuity, L1CheckPacing, L1CheckForeshadow, L1CheckReaderState, L1CheckTaskCard:
+	case L1CheckContinuity, L1CheckPacing, L1CheckForeshadow, L1CheckReaderState, L1CheckTaskCard, L1CheckImmersion:
 		return true
 	}
 	return false
@@ -58,7 +63,7 @@ type L1Receipt struct {
 
 // L1ReceiptFormatLine 生成 L1 回执 JSON 格式串（skill md 输出格式节原样引用，契约测试锁定）。
 func L1ReceiptFormatLine() string {
-	return `{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"summary":"一句话小结"}`
+	return `{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"summary":"一句话小结"}`
 }
 
 // l1JSONBlockRe 匹配 ```json 或裸 ``` 围栏内的 JSON 块（回执在最终回复末尾）。

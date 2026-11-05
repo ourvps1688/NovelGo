@@ -31,9 +31,19 @@ type CheckerConfig struct {
 	WindowN int `gorm:"column:window_n;not null;default:0" json:"window_n"`
 	// TabooList 是禁忌清单（JSON 字符串数组，如 ["虐主","破墙"]）：L0 逐词确定性扫描，
 	// 空清单=不检查（现行行为）。主题级禁忌（禁虐主等）由作者以关键词形式钉入。
-	TabooList string    `gorm:"column:taboo_list;type:text" json:"taboo_list"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	TabooList string `gorm:"column:taboo_list;type:text" json:"taboo_list"`
+	// PremiseList 是开篇核心看点关键词（JSON 字符串数组，如 ["灾星","吞星炼命"]）：
+	// 标题/简介卖点词，第 1 章前 500 字内须实体化（P0-0 开篇体检，七猫量化口径）；
+	// 空清单=不检查（现行行为）。
+	PremiseList string `gorm:"column:premise_list;type:text" json:"premise_list"`
+	// CheatList 是金手指/核心机制关键词（JSON 字符串数组）：第 1 章前 800 字内须出场
+	// （P0-0 开篇体检）；空清单=不检查（现行行为）。
+	CheatList string `gorm:"column:cheat_list;type:text" json:"cheat_list"`
+	// ProtagonistList 是主角称呼（正名+常用别名，JSON 字符串数组）：第 1 章前 200 字内
+	// 主角须首现入戏（P0-0 开篇体检）；空清单=不检查（现行行为）。
+	ProtagonistList string    `gorm:"column:protagonist_list;type:text" json:"protagonist_list"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
 // TableName 返回物理表名。
@@ -47,6 +57,9 @@ func DefaultCheckerConfig(novelID int64) *CheckerConfig {
 		TailHookRequired: nil,
 		WindowN:          0,
 		TabooList:        "[]",
+		PremiseList:      "[]",
+		CheatList:        "[]",
+		ProtagonistList:  "[]",
 	}
 }
 
@@ -64,33 +77,52 @@ func (c *CheckerConfig) OverdueGrace() int {
 }
 
 // Taboos 解析禁忌清单（坏数据按空清单，宁缺勿错）。
-func (c *CheckerConfig) Taboos() []string {
-	if strings.TrimSpace(c.TabooList) == "" {
+func (c *CheckerConfig) Taboos() []string { return parseStringList(c.TabooList) }
+
+// Premises 解析开篇核心看点关键词（坏数据按空清单，宁缺勿错）。
+func (c *CheckerConfig) Premises() []string { return parseStringList(c.PremiseList) }
+
+// Cheats 解析金手指/核心机制关键词（坏数据按空清单，宁缺勿错）。
+func (c *CheckerConfig) Cheats() []string { return parseStringList(c.CheatList) }
+
+// Protagonists 解析主角称呼（坏数据按空清单，宁缺勿错）。
+func (c *CheckerConfig) Protagonists() []string { return parseStringList(c.ProtagonistList) }
+
+// Opening 投影开篇体检规则到 L0 输入（P0-0）：三组关键词全空 → nil=整专项不检查
+// （缺省=现行行为逐字一致）。
+func (c *CheckerConfig) Opening() *L0Opening {
+	o := &L0Opening{
+		PremiseKeywords:  c.Premises(),
+		CheatKeywords:    c.Cheats(),
+		ProtagonistNames: c.Protagonists(),
+	}
+	if len(o.PremiseKeywords) == 0 && len(o.CheatKeywords) == 0 && len(o.ProtagonistNames) == 0 {
+		return nil
+	}
+	return o
+}
+
+// parseStringList 解析 JSON 字符串数组（坏数据按空清单，宁缺勿错）。
+func parseStringList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	var list []string
-	if err := json.Unmarshal([]byte(c.TabooList), &list); err != nil {
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
 		return nil
 	}
 	return list
 }
 
-// Validate 校验并归一化配置：负数拒绝；禁忌清单须为 JSON 字符串数组（TrimSpace 去空去重）。
-func (c *CheckerConfig) Validate() error {
-	if c.BeatDensityMin < 0 {
-		return fmt.Errorf("检查器配置爽点密度下限不得为负（beat_density_min=%.2f）", c.BeatDensityMin)
-	}
-	if c.WindowN < 0 {
-		return fmt.Errorf("检查器配置窗口 N 不得为负（window_n=%d）", c.WindowN)
-	}
-	raw := strings.TrimSpace(c.TabooList)
-	if raw == "" {
-		c.TabooList = "[]"
-		return nil
+// normalizeStringList 归一化 JSON 字符串数组：TrimSpace 去空去重保序后重新序列化；
+// 空输入归一 []；非 JSON 字符串数组报错。
+func normalizeStringList(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "[]", nil
 	}
 	var list []string
 	if err := json.Unmarshal([]byte(raw), &list); err != nil {
-		return fmt.Errorf("检查器配置禁忌清单不是 JSON 字符串数组：%w", err)
+		return "", err
 	}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(list))
@@ -104,9 +136,35 @@ func (c *CheckerConfig) Validate() error {
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		return fmt.Errorf("检查器配置禁忌清单序列化失败：%w", err)
+		return "", fmt.Errorf("序列化失败：%w", err)
 	}
-	c.TabooList = string(b)
+	return string(b), nil
+}
+
+// Validate 校验并归一化配置：负数拒绝；四组清单须为 JSON 字符串数组（TrimSpace 去空去重）。
+func (c *CheckerConfig) Validate() error {
+	if c.BeatDensityMin < 0 {
+		return fmt.Errorf("检查器配置爽点密度下限不得为负（beat_density_min=%.2f）", c.BeatDensityMin)
+	}
+	if c.WindowN < 0 {
+		return fmt.Errorf("检查器配置窗口 N 不得为负（window_n=%d）", c.WindowN)
+	}
+	lists := []struct {
+		name string
+		raw  *string
+	}{
+		{"禁忌清单", &c.TabooList},
+		{"开篇核心看点关键词", &c.PremiseList},
+		{"金手指关键词", &c.CheatList},
+		{"主角称呼", &c.ProtagonistList},
+	}
+	for _, item := range lists {
+		out, err := normalizeStringList(*item.raw)
+		if err != nil {
+			return fmt.Errorf("检查器配置%s不是 JSON 字符串数组：%w", item.name, err)
+		}
+		*item.raw = out
+	}
 	return nil
 }
 
@@ -129,6 +187,6 @@ func (s *Store) SaveCheckerConfig(ctx context.Context, cfg *CheckerConfig) error
 	}
 	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "novel_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"beat_density_min", "tail_hook_required", "window_n", "taboo_list", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"beat_density_min", "tail_hook_required", "window_n", "taboo_list", "premise_list", "cheat_list", "protagonist_list", "updated_at"}),
 	}).Create(cfg).Error
 }

@@ -1,6 +1,6 @@
 ---
 name: chapter-ci
-description: 章节 CI（R2 L1 增量检查）：每章正文落盘后自动做小上下文定点质检（一致性/节奏/伏笔/读者认知/任务卡兑现），只读、只报告不改写，发现按回执契约落章节质量档案。由写后钩子自动调用，用户一般不直接触发。
+description: 章节 CI（R2 L1 增量检查）：每章正文落盘后自动做小上下文定点质检（一致性/节奏/伏笔/读者认知/任务卡兑现/代入感），只读、只报告不改写，发现按回执契约落章节质量档案。由写后钩子自动调用，用户一般不直接触发。
 category: 评估
 mode: manual
 author: builtin
@@ -26,12 +26,13 @@ useWhen:
 - **本章计划卡**：`get_chapter_task_card` 对卡核验四件套（钩子/爽点/人设时刻/推进）是否兑现；
 - **涉及台账条目**：仅本章实际涉及的角色/地点/弧线/时间线/读者认知条目（`get_*` 定点读取），不全量翻台账。
 
-## 检查项（check 取值，只报下列五类）
+## 检查项（check 取值，只报下列六类）
 - `continuity`：一致性/连贯——与前章结尾、台账、既定事实的矛盾或衔接断裂；
 - `pacing`：节奏——拖沓、爽点断档、信息密度失衡；
 - `foreshadow`：伏笔 lifecycle——该埋没埋、该收没收、坑越挖越深；
 - `reader_state`：读者认知态——剧透（读者不该知道却写出来）、已知信息被当未知重讲；
-- `task_card`：任务卡兑现——四件套缺失或打折扣。
+- `task_card`：任务卡兑现——四件套缺失或打折扣；
+- `immersion_anchor`：代入感锚点——个人利害是否尽早绑定（主角与事件利害相关、非旁观者）、POV 是否聚焦主角内心、标题/简介卖点是否在开篇实体化。位次数字（主角前 200 字/看点前 500 字/金手指前 800 字）由 L0 确定性检查兜底，本项只报语义级判读（如「主角全程旁观无个人利害」「POV 在三人间漂移」）。
 
 ## 判定纪律
 - **只报告不改写**：绝不调用任何写工具（edit / 台账写 / 派发子 Agent），本技能只读；
@@ -42,7 +43,7 @@ useWhen:
 ## 输出格式
 简短小结后，最终回复末尾**必须**附一个 ```json 代码块上报回执，格式：
 
-`{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"summary":"一句话小结"}`
+`{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"summary":"一句话小结"}`
 
 示例：
 
@@ -50,7 +51,7 @@ useWhen:
 {"findings":[{"id":"L1-1","check":"continuity","desc":"本章说剑已折断，与第11章结尾『剑还在鞘中』矛盾","chapter_ids":[11,12],"ledger_refs":["item.hero.sword"]}],"summary":"发现 1 处与前章衔接矛盾"}
 ```
 
-- `findings` 逐条给出发现：`id` 用 L1 系（L1-1/L1-2/…，不与 C 系/I 系/D 系/T 系/V 系混排）；`check` 只取上述五类枚举；`desc` 一行说清事实与依据；`chapter_ids` 是涉及章节的全局阅读序号（通常含本章）；`ledger_refs` 是影响/涉及的台账条目（无则省略）；
+- `findings` 逐条给出发现：`id` 用 L1 系（L1-1/L1-2/…，不与 C 系/I 系/D 系/T 系/V 系混排）；`check` 只取上述六类枚举；`desc` 一行说清事实与依据；`chapter_ids` 是涉及章节的全局阅读序号（通常含本章）；`ledger_refs` 是影响/涉及的台账条目（无则省略）；
 - `summary` 是一句话小结；
 - 零发现时 `findings` 给空数组 `[]`，`summary` 如实说"未发现增量问题"——不要省略回执块。
 
