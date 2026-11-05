@@ -96,6 +96,15 @@
   判官分与体检分同源展示。
 - `chapter_quality` 已有历史行，补前端趋势视图（逐章分数/发现数曲线、修复前后对比），
   回答「这次重写到底提分了没有」。
+- **状态：已实施**（映射契约单源 `internal/review/score_mapping.go`：ScoreDimToAuditDims
+  六→八映射 + StarsFromScore 换算 + JudgeToAuditScores，contract_test 三方同步守契约；
+  判官分维 append-only 落 `chapter_score_events`（rw_tools 每次评分追加一行，旧章回落
+  chapters.quality_score 快照）；体检 JSON 增 `dims` 结构化星级数组（sanitizeAuditDims
+  裁剪，可选字段不判陈旧，蓝图/巡检不产出）；趋势 API `GetScoreTrend`（全书逐章分数+
+  未修复发现数+映射快照）/`GetChapterScoreHistory`（单章修复前后明细）+ wails 绑定；
+  前端 `ScoreTrendPanel`：SVG 逐章分数曲线+发现数柱（点选章联动 scope）、单章 attempt
+  历史（overall+delta+来源徽章+critique）、6 维↔8 维同源对照+映射图例，DetectionWorkflowView
+  章节区恒挂）
 
 ### P1：反馈闭环（把编辑和读者的话变成系统输入）
 
@@ -133,7 +142,7 @@
 |---|---|
 | P0-1 | 七猫 profile 下：前 500 字爆点/章长/爽点密度三项 L0 可检，不达标出 finding（已验收：TestQimaoProfileL0Acceptance） |
 | P0-2 | 每章落库 tension 曲线；拖沓段/爽点断档可被检测并落工单 |
-| P0-3 | 任一章可看 6 维↔8 维同源分与历史趋势 |
+| P0-3 | 任一章可看 6 维↔8 维同源分与历史趋势（已实施：ScoreTrendPanel，检测工作流章节区） |
 | P1-1 | 一段编辑原话 → 自动产出维度 issue + 约束修订，可走既有修复闭环 |
 | P1-2 | 粘贴完读数据后能输出「流失章 × 低分维」对照诊断 |
 | 终验 | 以七猫口径重跑两篇旧作体检，「综合质量一般」对应的维度应全部出 finding |
