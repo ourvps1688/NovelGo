@@ -51,6 +51,23 @@ type JudgeAuditDimScore struct {
 	Contributed []string `json:"contributed"` // 贡献该维度的判官维度键（规范顺序）
 }
 
+// ScoreDimInfo 是 6 维判官维度的元数据（键+中文名+映射目标），供趋势 API/前端图例消费。
+// 单源 scoringDimensions + ScoreDimToAuditDims，禁止在别处手抄维度键/中文名。
+type ScoreDimInfo struct {
+	Key   string   `json:"key"`
+	Label string   `json:"label"`
+	Audit []string `json:"audit"` // 映射到的体检维度键
+}
+
+// ScoreDimInfos 返回六维判官元数据（scoringDimensions 规范顺序）。
+func ScoreDimInfos() []ScoreDimInfo {
+	out := make([]ScoreDimInfo, 0, len(scoringDimensions))
+	for _, d := range scoringDimensions {
+		out = append(out, ScoreDimInfo{Key: d.Key, Label: d.Label, Audit: ScoreDimToAuditDims[d.Key]})
+	}
+	return out
+}
+
 // StarsFromScore 把 0-100 的判官分归一为 1-5 星（与体检 1-5 同刻度）。
 // 阈值：<40→1，<55→2，<70→3，<85→4，其余 5；越界先裁剪到 0-100。
 func StarsFromScore(score int) int {

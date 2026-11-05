@@ -162,6 +162,8 @@ export function GetChapterPlans(arg1:number):Promise<Array<timeline.ChapterPlan>
 
 export function GetChapterQualityArchive(arg1:number,arg2:number):Promise<pipeline.ChapterQualityArchive>;
 
+export function GetChapterScoreHistory(arg1:number,arg2:number):Promise<Array<pipeline.ScoreEventView>>;
+
 export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;
 
 export function GetCharacterGroupMembers(arg1:app.GetCharacterGroupMembersInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_character_GroupMember_>;
@@ -219,6 +221,8 @@ export function GetRemoteSkillContent(arg1:string):Promise<apperr.Result_string_
 export function GetRetconCase(arg1:number):Promise<retcon.RetconCase>;
 
 export function GetRetconEditDiff(arg1:number):Promise<snapshot.Delta>;
+
+export function GetScoreTrend(arg1:number):Promise<pipeline.ScoreTrend>;
 
 export function GetSession(arg1:string):Promise<app.SessionDetail>;
 

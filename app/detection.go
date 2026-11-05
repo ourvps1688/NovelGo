@@ -65,3 +65,21 @@ func (a *App) GetChapterQualityArchive(novelID int64, chapterID int64) (*pipelin
 	}
 	return a.pipeline.GetChapterQualityArchive(a.ctx, novelID, chapterID)
 }
+
+// GetScoreTrend 返回全书评分趋势数据包（P0-3 双轨评分打通）：逐章最新/上一次判官分、
+// 修复前后变化与发现数曲线，以及 6↔8 映射契约快照（单源 review，前端图例直接消费）。
+func (a *App) GetScoreTrend(novelID int64) (*pipeline.ScoreTrend, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetScoreTrend(a.ctx, novelID)
+}
+
+// GetChapterScoreHistory 返回单章评分历史（修复前后对比，P0-3）：评分明细事件正序，
+// 含 6 维判官分与换算后的 8 维体检同源分；旧数据回落快照回填（source=snapshot）。
+func (a *App) GetChapterScoreHistory(novelID int64, chapterID int64) ([]pipeline.ScoreEventView, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetChapterScoreHistory(a.ctx, novelID, chapterID)
+}

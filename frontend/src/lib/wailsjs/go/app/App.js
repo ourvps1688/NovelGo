@@ -262,6 +262,10 @@ export function GetChapterQualityArchive(arg1, arg2) {
   return window['go']['app']['App']['GetChapterQualityArchive'](arg1, arg2);
 }
 
+export function GetChapterScoreHistory(arg1, arg2) {
+  return window['go']['app']['App']['GetChapterScoreHistory'](arg1, arg2);
+}
+
 export function GetChapters(arg1) {
   return window['go']['app']['App']['GetChapters'](arg1);
 }
@@ -376,6 +380,10 @@ export function GetRetconCase(arg1) {
 
 export function GetRetconEditDiff(arg1) {
   return window['go']['app']['App']['GetRetconEditDiff'](arg1);
+}
+
+export function GetScoreTrend(arg1) {
+  return window['go']['app']['App']['GetScoreTrend'](arg1);
 }
 
 export function GetSession(arg1) {
