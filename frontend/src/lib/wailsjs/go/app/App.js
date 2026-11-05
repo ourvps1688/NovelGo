@@ -162,6 +162,10 @@ export function DeleteNovelSetting(arg1) {
   return window['go']['app']['App']['DeleteNovelSetting'](arg1);
 }
 
+export function DeletePlatformMetrics(arg1) {
+  return window['go']['app']['App']['DeletePlatformMetrics'](arg1);
+}
+
 export function DeletePreference(arg1) {
   return window['go']['app']['App']['DeletePreference'](arg1);
 }
@@ -474,6 +478,10 @@ export function ListIssueTickets(arg1) {
   return window['go']['app']['App']['ListIssueTickets'](arg1);
 }
 
+export function ListPlatformMetricsView(arg1) {
+  return window['go']['app']['App']['ListPlatformMetricsView'](arg1);
+}
+
 export function ListRemoteSkills(arg1) {
   return window['go']['app']['App']['ListRemoteSkills'](arg1);
 }
@@ -520,6 +528,10 @@ export function PlaceChapter(arg1) {
 
 export function PlaceVolume(arg1) {
   return window['go']['app']['App']['PlaceVolume'](arg1);
+}
+
+export function PreviewPlatformMetrics(arg1, arg2) {
+  return window['go']['app']['App']['PreviewPlatformMetrics'](arg1, arg2);
 }
 
 export function RebuildAggregated(arg1) {
@@ -588,6 +600,10 @@ export function SaveLLMConfig(arg1) {
 
 export function SavePersonaSetting(arg1, arg2) {
   return window['go']['app']['App']['SavePersonaSetting'](arg1, arg2);
+}
+
+export function SavePlatformMetricsText(arg1, arg2, arg3) {
+  return window['go']['app']['App']['SavePlatformMetricsText'](arg1, arg2, arg3);
 }
 
 export function SaveSettings(arg1) {

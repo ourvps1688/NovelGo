@@ -112,6 +112,8 @@ export function DeleteNovel(arg1:number):Promise<void>;
 
 export function DeleteNovelSetting(arg1:number):Promise<void>;
 
+export function DeletePlatformMetrics(arg1:number):Promise<void>;
+
 export function DeletePreference(arg1:number):Promise<void>;
 
 export function DeleteReaderPerspective(arg1:number,arg2:number):Promise<void>;
@@ -268,6 +270,8 @@ export function ListDetectionTaskStatuses(arg1:number):Promise<Array<pipeline.De
 
 export function ListIssueTickets(arg1:number):Promise<Array<pipeline.PipelineIssue>>;
 
+export function ListPlatformMetricsView(arg1:number):Promise<Array<pipeline.PlatformMetricView>>;
+
 export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_novelgo_novelgo_internal_storage_PageResult_github_com_novelgo_novelgo_internal_skill_remote_RemoteSkillMeta__>;
 
 export function ListRetconCases(arg1:number):Promise<Array<retcon.RetconCase>>;
@@ -291,6 +295,8 @@ export function PickDirectory():Promise<string>;
 export function PlaceChapter(arg1:chapter.PlaceInput):Promise<chapter.Chapter>;
 
 export function PlaceVolume(arg1:volume.PlaceInput):Promise<volume.Volume>;
+
+export function PreviewPlatformMetrics(arg1:number,arg2:string):Promise<pipeline.PlatformMetricsPreview>;
 
 export function RebuildAggregated(arg1:app.RebuildAggregatedInput):Promise<app.RebuildAggregatedResult>;
 
@@ -325,6 +331,8 @@ export function SaveGitConfig(arg1:string,arg2:string):Promise<void>;
 export function SaveLLMConfig(arg1:llm.LLMConfigView):Promise<void>;
 
 export function SavePersonaSetting(arg1:number,arg2:app.SavePersonaSettingInput):Promise<void>;
+
+export function SavePlatformMetricsText(arg1:number,arg2:string,arg3:string):Promise<pipeline.PlatformMetricsSaveResult>;
 
 export function SaveSettings(arg1:app.SaveSettingsInput):Promise<void>;
 

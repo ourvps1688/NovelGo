@@ -135,6 +135,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&quality.ChapterScoreEvent{},
 		&quality.CheckerConfig{},
 		&quality.EditorFeedback{},
+		&quality.PlatformMetric{},
 		&structure.PinnedInvariant{},
 		&structure.PowerLevel{},
 		&review.QualityAttempt{},
