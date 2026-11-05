@@ -983,10 +983,17 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	if focused {
 		keyChapterBlock = s.keyChapterBlock(ctx, novelID)
 	}
+	// P0-2 情绪账：「情绪曲线摘要」块（dim4 节奏/爽点证据）进非蓝图体检输入与快审输入；
+	// 无曲线=空块零提示。蓝图体检不涉章节曲线，不注入。
+	var tensionBlock string
+	if ctxt.AuditKind != "blueprint" {
+		tensionBlock = s.tensionSummaryBlock(ctx, novelID)
+	}
 	auditPrompt := signabilityPrompt(novelID, auditInput{
 		scope:       s.volumeScopeText(ctx, novelID, run.VolumeID),
 		ledger:      ledgerBlock,
 		structBlock: structBlock,
+		tension:     tensionBlock,
 		keyChapter:  keyChapterBlock,
 		focused:     focused,
 	}, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
@@ -1000,9 +1007,9 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 	var quickCh <-chan quickAuditResult
 	if focused && ledgerBlock != "" {
 		ch := make(chan quickAuditResult, 1)
-		block, sBlock := ledgerBlock, structBlock
+		block, sBlock, tBlock := ledgerBlock, structBlock, tensionBlock
 		go func() {
-			ch <- s.runLedgerQuickAudit(ctx, runID, novelID, block, sBlock)
+			ch <- s.runLedgerQuickAudit(ctx, runID, novelID, block, sBlock, tBlock)
 		}()
 		quickCh = ch
 	}
@@ -2608,6 +2615,9 @@ type auditInput struct {
 	ledger string
 	// structBlock 是「结构告警」块（§8.5 第一层：结构索引全量）；空=不注入（零提示）。
 	structBlock string
+	// tension 是「情绪曲线摘要」块（P0-2 dim4 节奏/爽点证据，structBlock 之后渲染）；
+	// 空=不注入（零提示）。
+	tension string
 	// keyChapter 是「关键章定向深读」块（§8.5 第三层）；空=不注入（零提示）。
 	keyChapter string
 	// genre 是本书题材卡约束块（签约体检全程引用，设计约束：开场抓手/冲突发动机/
@@ -2645,6 +2655,9 @@ func signabilityPrompt(novelID int64, in auditInput, blocks contextasm.ContextBl
 	}
 	if in.structBlock != "" {
 		p += "\n\n" + in.structBlock
+	}
+	if in.tension != "" {
+		p += "\n\n" + in.tension
 	}
 	if in.keyChapter != "" {
 		p += "\n\n" + in.keyChapter

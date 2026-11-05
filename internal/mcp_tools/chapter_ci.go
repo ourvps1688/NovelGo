@@ -32,6 +32,18 @@ var (
 	chapterCITimers = map[string]*time.Timer{}
 )
 
+// TensionTicketLanderFunc 把一章的曲线四查发现落成/刷新 pipeline 情绪账工单
+// （E 系，tension 容器），返回落库条数。
+// 由 app 启动时注入（pipeline.LandTensionTickets）——mcp_tools 不能反向 import pipeline
+// （pipeline→agent→mcp_tools 会成环），与 FeedbackTicketLanderFunc 同一避免循环依赖的纪律。
+type TensionTicketLanderFunc func(ctx context.Context, db *gorm.DB, novelID int64, readingNumber int, findings []quality.Finding) (int, error)
+
+// tensionTicketLander 是情绪账落单回调（nil=未装配，降级不落工单零提示）。
+var tensionTicketLander TensionTicketLanderFunc
+
+// SetTensionTicketLander 装配情绪账落单回调（app 启动时注入 pipeline.LandTensionTickets）。
+func SetTensionTicketLander(fn TensionTicketLanderFunc) { tensionTicketLander = fn }
+
 // chapterCIDebounce 是 L1 派发去抖窗口。比 stateSyncDebounce（6s）长，
 // 让 L1 检查在 statesync 台账回填之后跑（「涉及台账条目」已是本章同步后状态）。
 const chapterCIDebounce = 10 * time.Second
@@ -99,6 +111,13 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 	if terr := quality.NewStore(tc.DB, tc.LoggerOrDefault()).
 		RefreshTensionCurve(ctx, tc.NovelID, chapterID, readingNumber, content); terr != nil {
 		tc.LoggerOrDefault().Warn("章节 CI 张力曲线落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
+	}
+	// P0-2 情绪账：曲线四查发现落工单（E 系，tension 容器；四查过滤在落单侧）。
+	// 按章整批替换：零发现=清该章旧工单；未装配落单钩子=降级不落（零提示零报错）。
+	if tensionTicketLander != nil {
+		if _, terr := tensionTicketLander(ctx, tc.DB, tc.NovelID, readingNumber, findings); terr != nil {
+			tc.LoggerOrDefault().Warn("章节 CI 情绪账工单落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
+		}
 	}
 }
 

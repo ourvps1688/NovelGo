@@ -6,10 +6,11 @@ package quality
 // （验收口径：七猫 profile 下前 500 字爆点/章长/爽点密度三项 L0 可检，不达标出 finding）：
 //   - opening_hook：开篇爆点/悬念信号密度（前 200 字 + 前 500 字双窗口，近似词表口径）；
 //   - chapter_length_fit：黄金三章外全书章长贴合平台区间（黄金三章由 opening_length 覆盖，零重叠）；
-//   - beat_density：爽点标记密度下限（次/章，近似词表口径，P0-2 张力曲线升级前的近似实现）。
+//   - beat_density：爽点密度下限（处/章，张力曲线口径情绪峰计数，P0-2 情绪账升级）。
 //
 // 缺省纪律：profile 未配置=平台三查不跑、密度下限为 0=beat_density 不跑
-// （缺省=现行行为逐字一致）。词表保守高精度（tailHookSignals 同风格）：近似口径漏报无害、
+// （缺省=现行行为逐字一致；未配置下限时由 tension_checks.beatGapFinding 兜底，配对互斥）。
+// 词表保守高精度（tailHookSignals 同风格）：近似口径漏报无害、
 // 误报以粗粒度复验回落兜底（pipeline.coarseHeuristicChecks 含 opening_hook/beat_density）。
 
 import (
@@ -27,17 +28,11 @@ var openingHookSignals = []string{
 	"穿越", "重生", "醒来", "爆炸", "坠落", "失踪", "消失", "异变",
 }
 
-// beatSignals 是爽点标记词（密度近似词表：打脸/逆袭/高光时刻的确定性代理，
-// P0-2 张力曲线数据源落地后升级）。
-var beatSignals = []string{
-	"打脸", "逆袭", "碾压", "秒杀", "完虐", "震惊", "目瞪口呆", "倒吸一口凉气",
-	"不可能", "突破", "觉醒", "获得", "奖励", "越级", "首杀",
-}
-
 // platformFindings 平台三查（P0-1）：opening_hook/chapter_length_fit 由 profile 武装，
-// beat_density 由生效密度下限（L0Input.BeatDensityMin，CheckerConfig.EffectiveBeatDensityMin 口径）武装。
+// beat_density 由生效密度下限（L0Input.BeatDensityMin，CheckerConfig.EffectiveBeatDensityMin 口径）
+// 武装、以张力曲线情绪峰计数为口径（P0-2）。
 // 未配置=对应检查自然跳过零发现（缺省=现行行为逐字一致）。
-func platformFindings(in L0Input, wordCount int) []Finding {
+func platformFindings(in L0Input, wordCount int, curve []TensionPoint) []Finding {
 	if strings.TrimSpace(in.Text) == "" || in.ReadingNumber <= 0 {
 		return nil
 	}
@@ -54,7 +49,7 @@ func platformFindings(in L0Input, wordCount int) []Finding {
 		}
 	}
 	if in.BeatDensityMin > 0 {
-		if f := beatDensityFinding(in.Text, in.BeatDensityMin); f != nil {
+		if f := beatDensityFinding(curve, in.BeatDensityMin); f != nil {
 			out = append(out, *f)
 		}
 	}
@@ -123,16 +118,17 @@ func chapterLengthFitFinding(wordCount int, p *PlatformProfile) *Finding {
 	return nil
 }
 
-// beatDensityFinding 爽点标记密度（每章）：全文爽点标记词命中数 < 下限 → 发现。
-// 近似词表口径（P0-2 张力曲线升级前的代理），漏报无害、误报由粗粒度复验回落兜底。
-func beatDensityFinding(body string, min float64) *Finding {
-	n := countSignals(body, beatSignals)
+// beatDensityFinding 爽点密度（每章）：情绪峰段数（climax，张力曲线口径）< 下限 → 发现。
+// qimao BeatDensityMin=1.0 校准语义 = 每章 ≥1 情绪峰（BeatType==climax）。
+// 与 tension_checks.beatGapFinding 组成配置互斥对（min>0 本检查，未配置 beat_gap 兜底）。
+func beatDensityFinding(curve []TensionPoint, min float64) *Finding {
+	n := climaxBeatCount(curve)
 	if float64(n) >= min {
 		return nil
 	}
 	return &Finding{
 		Check: CheckBeatDensity,
-		Desc: fmt.Sprintf("爽点标记密度不足：本章命中 %d 处爽点标记词，低于下限 %.1f 次/章（近似词表口径）——爽点稀疏易被判平淡/看点不足",
+		Desc: fmt.Sprintf("爽点密度不足：全章情绪峰 %d 处，低于下限 %.1f 处/章（张力曲线口径）——爽点稀疏易被判平淡/看点不足",
 			n, min),
 	}
 }

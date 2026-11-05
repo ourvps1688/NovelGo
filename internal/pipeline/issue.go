@@ -184,6 +184,38 @@ func (s *Store) ReplaceIssues(ctx context.Context, novelID int64, runID string, 
 	})
 }
 
+// ReplaceIssuesByPrefix 按 issue key 前缀整批替换该 run 的一类工单（情绪账 E 系
+// 按章前缀，见 tension_run.go）：先删同前缀旧行再插新清单，空清单=清该前缀全部旧工单
+// （新结果=零发现的回填语义）；跨前缀工单（其它章/其它命名空间）不受影响。
+// round 语义与 ReplaceIssues 同（曲线发现恒 0 轮新单）。prefix 空串显式报错——
+// 防误用成整 run 清除（整批替换请走 ReplaceIssues）。
+func (s *Store) ReplaceIssuesByPrefix(ctx context.Context, novelID int64, runID, prefix string, round int, issues []AuditIssue) error {
+	if prefix == "" {
+		return errors.New("ReplaceIssuesByPrefix：prefix 不可为空（整批替换请走 ReplaceIssues）")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("novel_id = ? AND run_id = ? AND issue_key LIKE ?", novelID, runID, prefix+"%").
+			Delete(&PipelineIssue{}).Error; err != nil {
+			return err
+		}
+		validMax := 0
+		if tx.Migrator().HasTable("chapters") {
+			var chapterCount int64
+			if err := tx.Raw("SELECT COUNT(*) FROM chapters WHERE novel_id = ?", novelID).
+				Scan(&chapterCount).Error; err == nil {
+				validMax = int(chapterCount)
+			}
+		}
+		for _, it := range issues {
+			row := pipelineIssueRow(novelID, runID, round, it, validMax)
+			if err := tx.Create(&row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // UpdateIssueStatus 流转一条工单状态（fixed/skipped/rewrite/retcon/...）；skipReason
 // 非空时一并记录（skipped 即转人工工单的留痕依据）。
 func (s *Store) UpdateIssueStatus(ctx context.Context, novelID int64, runID, issueKey, status, skipReason string) error {

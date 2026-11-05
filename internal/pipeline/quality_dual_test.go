@@ -202,10 +202,13 @@ func TestParseQuickAudit(t *testing.T) {
 }
 
 // TestLedgerQuickAuditPromptContract 快审提示词引用回执契约格式串（契约单源锁定）
-// 且以质量档案汇总块为输入。
+// 且以质量档案汇总块为输入；P0-2 起情绪曲线摘要块同路注入（空块=零 diff）。
 func TestLedgerQuickAuditPromptContract(t *testing.T) {
-	p := ledgerQuickAuditPrompt(9, "【质量档案汇总】…块…", "")
+	p := ledgerQuickAuditPrompt(9, "【质量档案汇总】…块…", "", "")
 	require.Contains(t, p, quickAuditFormatLine(), "快审提示词应引用契约格式串（单源）")
 	require.Contains(t, p, "【质量档案汇总】…块…")
 	require.Contains(t, p, "novel_id=9")
+
+	pt := ledgerQuickAuditPrompt(9, "【质量档案汇总】…块…", "", "【情绪曲线摘要】…块…")
+	require.Contains(t, pt, "【情绪曲线摘要】…块…", "P0-2 情绪曲线摘要块一并进快审输入")
 }

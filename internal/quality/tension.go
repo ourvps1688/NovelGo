@@ -511,3 +511,18 @@ func (s *Store) ListTensionCurve(ctx context.Context, novelID, chapterID int64) 
 	}
 	return rows, nil
 }
+
+// ListTensionCurveByNovel 返回一本书的全部张力曲线行（L0+L1 全源，章升序、
+// 同章 source/seg 升序；消费侧经 EffectiveTensionCurve 按章合并取优先生效源）。
+// 供 dim4「情绪曲线摘要」块（RenderTensionBlock）消费。
+func (s *Store) ListTensionCurveByNovel(ctx context.Context, novelID int64) ([]ChapterTension, error) {
+	var rows []ChapterTension
+	err := s.DB.WithContext(ctx).
+		Where("novel_id = ?", novelID).
+		Order("chapter_id ASC, source ASC, seg ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("quality store: tension list by novel: %w", err)
+	}
+	return rows, nil
+}

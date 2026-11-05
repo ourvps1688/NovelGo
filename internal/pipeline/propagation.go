@@ -343,6 +343,11 @@ func (s *Service) l0RuleSweep(ctx context.Context, novelID int64) string {
 		}); uerr != nil {
 			s.logger.Debug("L0 全书规则扫描：落质量档案失败（不阻断）", "chapter_id", ch.ID, "err", uerr)
 		}
+		// P0-2 情绪账：曲线四查发现逐章落单（回填语义：新结果整批替换本章旧工单、
+		// 零发现=清该章旧工单；零自动流转不变，人工确认→修复→复验闭环）。
+		if _, terr := LandTensionTickets(ctx, s.store.db, novelID, ch.ReadingNumber, fs); terr != nil {
+			s.logger.Debug("L0 全书规则扫描：情绪账工单落库失败（不阻断）", "chapter_id", ch.ID, "err", terr)
+		}
 		checked++
 		findings += len(fs)
 		for _, f := range fs {

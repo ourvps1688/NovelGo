@@ -398,6 +398,7 @@ func (s *Service) executeDetectAudit(runID string, novelID int64) {
 		scope:       s.volumeScopeText(ctx, novelID, run.VolumeID),
 		ledger:      s.qualityLedgerBlock(ctx, novelID),
 		structBlock: s.structureBlock(ctx, novelID),
+		tension:     s.tensionSummaryBlock(ctx, novelID),
 		genre:       s.genreCardBlock(ctx, novelID),
 		focused:     false,
 	}, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))

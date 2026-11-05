@@ -107,6 +107,34 @@ func TestScheduleChapterCIWritesTension(t *testing.T) {
 	assert.Len(t, rows2, len(rows))
 }
 
+// TestScheduleChapterCILandsTensionTickets 写后钩子（P0-2 情绪账）：L0 发现清单经
+// 注入的落单钩子透传（四查过滤在落单侧）；未装配钩子=降级不落不 panic。
+func TestScheduleChapterCILandsTensionTickets(t *testing.T) {
+	db, tc, ctx := setupCIEnv(t)
+	ch := seedCIChapter(t, db, 5)
+
+	type landCall struct {
+		novelID  int64
+		reading  int
+		findings []quality.Finding
+	}
+	var calls []landCall
+	mcp_tools.SetTensionTicketLander(func(_ context.Context, _ *gorm.DB, novelID int64, reading int, findings []quality.Finding) (int, error) {
+		calls = append(calls, landCall{novelID: novelID, reading: reading, findings: findings})
+		return 0, nil
+	})
+	t.Cleanup(func() { mcp_tools.SetTensionTicketLander(nil) })
+
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "他推开门走进院子。")
+	require.Len(t, calls, 1, "写后链路应触发情绪账落单钩子")
+	assert.Equal(t, int64(1), calls[0].novelID)
+	assert.NotEmpty(t, calls[0].findings, "L0 发现清单应透传给落单钩子")
+
+	// 未装配钩子：跳过不 panic 不落。
+	mcp_tools.SetTensionTicketLander(nil)
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "他推开门走进院子。")
+}
+
 // TestRunChapterCIReceiptLanded L1 回执落档案：checked + 发现投影 + 不动 L0 列。
 func TestRunChapterCIReceiptLanded(t *testing.T) {
 	db, tc, ctx := setupCIEnv(t)

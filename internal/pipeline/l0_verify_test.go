@@ -37,6 +37,9 @@ func TestClassifyMechanicalChecks(t *testing.T) {
 		{"开篇爆点不足", "开篇切入点缺乏吸引力", []string{quality.CheckOpeningHook}},
 		{"章长不适配", "章长超出平台区间", []string{quality.CheckChapterLengthFit}},
 		{"爽点密度不足", "爽点稀疏看点不足", []string{quality.CheckBeatDensity}},
+		{"拖沓段", "seg 2–4 连续 3 段张力平坦", []string{quality.CheckPacingDrag}},
+		{"爽点断档", "全章无情绪峰", []string{quality.CheckBeatGap}},
+		{"开篇坡度不足", "前 500 字张力仅上扬 1.0 开篇平缓", []string{quality.CheckOpeningSlope}},
 	}
 	for _, c := range cases {
 		checks, ambiguous := classifyMechanicalChecks(c.area, c.desc, "")
@@ -133,24 +136,41 @@ func TestTryL0VerifyPlatformCheckGating(t *testing.T) {
 	ch := chapter.Chapter{NovelID: 1, SortOrder: 1, Title: "第一章"}
 	require.NoError(t, svc.store.db.Create(&ch).Error)
 
-	withBeat := func(novelID, chapterID int64) (string, bool) {
-		return strings.Repeat("文", 1500) + "打脸", true
+	flatSegs := func(novelID, chapterID int64) (string, bool) {
+		return strings.Repeat(strings.Repeat("文", 100)+"\n", 12), true // 3 平坦段、无情绪峰
 	}
-	// 未配置密度下限 → beat_density 不可判定 → 退回 LLM。
-	decided, _, _ := svc.tryL0Verify(ctx, 1, "r1",
-		PipelineIssue{Area: "爽点密度", Desc: "爽点密度不足", ChapterIDsJSON: "[1]"}, withBeat)
-	require.False(t, decided, "密度下限未配置应退回 LLM")
+	withClimax := func(novelID, chapterID int64) (string, bool) {
+		return strings.Repeat(strings.Repeat("文", 100)+"\n", 12) +
+			"「不可能！！」全场震惊，难以置信，倒吸凉气，瞳孔猛缩！！他大笑：「还有谁！！」", true
+	}
+	// beat 配对（配置互斥对，P0-2）：成对恒 effective（配对判定在 RunL0Checks 内部，
+	// 未配置走 beat_gap 兜底、配置走 beat_density 曲线口径）。
+	// 未配置密度下限 → beat_gap 兜底口径判定：情绪峰在场零命中 → 自动确认通过。
+	decided, verified, note := svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "爽点断档", Desc: "爽点断档：全章无情绪峰", ChapterIDsJSON: "[1]"}, withClimax)
+	require.True(t, decided, "beat 配对成对恒可判定（配对判定在 RunL0Checks 内部）")
+	require.True(t, verified, "情绪峰在场应自动确认通过")
+	require.Contains(t, note, "自动确认通过")
 
-	// 配置密度下限后爽点标记达标 → 自动确认通过（免 LLM）。
+	// 无情绪峰命中 → 粗粒度回落 LLM（不臆测未修复）。
+	decided, _, _ = svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "爽点断档", Desc: "爽点断档：全章无情绪峰", ChapterIDsJSON: "[1]"}, flatSegs)
+	require.False(t, decided, "beat_gap 命中应按粗粒度回落 LLM")
+
+	// 配置密度下限后（beat_density 曲线口径）：情绪峰达标自动通过、不足回落 LLM。
 	qstore := quality.NewStore(svc.store.db, slog.Default())
 	require.NoError(t, qstore.SaveCheckerConfig(ctx, &quality.CheckerConfig{
 		NovelID: 1, BeatDensityMin: 1.0,
 		TabooList: "[]", PremiseList: "[]", CheatList: "[]", ProtagonistList: "[]"}))
-	decided, verified, note := svc.tryL0Verify(ctx, 1, "r1",
-		PipelineIssue{Area: "爽点密度", Desc: "爽点密度不足", ChapterIDsJSON: "[1]"}, withBeat)
+	decided, verified, note = svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "爽点密度", Desc: "爽点密度不足", ChapterIDsJSON: "[1]"}, withClimax)
 	require.True(t, decided)
-	require.True(t, verified, "爽点标记达标应自动确认通过")
+	require.True(t, verified, "情绪峰达标应自动确认通过（曲线口径）")
 	require.Contains(t, note, "自动确认通过")
+
+	decided, _, _ = svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "爽点密度", Desc: "爽点密度不足", ChapterIDsJSON: "[1]"}, flatSegs)
+	require.False(t, decided, "beat_density 命中应按粗粒度回落 LLM")
 
 	// opening_hook：profile 未配置 → 退回 LLM。
 	flat := func(novelID, chapterID int64) (string, bool) {

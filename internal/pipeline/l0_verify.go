@@ -32,6 +32,9 @@ var mechanicalCheckKeywords = map[string][]string{
 	quality.CheckOpeningHook:      {"开篇爆点", "爆点", "切入点", "开篇吸引力", "开头抓人"},
 	quality.CheckChapterLengthFit: {"章长", "平台区间", "字数区间", "章长适配"},
 	quality.CheckBeatDensity:      {"爽点密度", "爽点", "看点密度", "爽点不足"},
+	quality.CheckPacingDrag:       {"拖沓", "节奏拖", "平缓", "张力平坦", "拖节奏"},
+	quality.CheckBeatGap:          {"爽点断档", "无情绪峰", "没有爽点", "无爽点"},
+	quality.CheckOpeningSlope:     {"开篇坡度", "开篇张力", "开头平淡", "开篇平缓"},
 }
 
 // semanticExclusionKeywords 是强语义矛盾信号：命中则视为非机械类，保守走 LLM，避免误判。
@@ -91,13 +94,20 @@ func defaultL0ChapterReader(novelID, chapterID int64) (string, bool) {
 //     修复可能用词表外的写法达成（如以无信号词的强钩子开场/以非标记词的高光时刻拉爽点），
 //     命中不必然=原工单未修复。
 //
+//   - pacing_drag / beat_gap / opening_slope（P0-2 曲线三查）+ beat_density 曲线口径：
+//     L0 确定性曲线近似（对话比/冲突词密度/情绪词密度映射张力），修复可能以曲线外的
+//     写法达成情绪峰/节奏起伏（如强情节低信号段），命中不必然=原工单未修复。
+//
 // 这些命中不应直接判未修复退回（否则修了具体语义问题却因粗粒度类别命中而永远通不过），
 // 应保守回落 LLM 复核原工单具体指向。其余检查项为精确类，命中必为真实未修复，可安全驳回。
 var coarseHeuristicChecks = map[string]bool{
-	quality.CheckNameDrift:   true,
-	quality.CheckTailHook:    true,
-	quality.CheckOpeningHook: true,
-	quality.CheckBeatDensity: true,
+	quality.CheckNameDrift:    true,
+	quality.CheckTailHook:     true,
+	quality.CheckOpeningHook:  true,
+	quality.CheckBeatDensity:  true,
+	quality.CheckPacingDrag:   true,
+	quality.CheckBeatGap:      true,
+	quality.CheckOpeningSlope: true,
 }
 
 // l0Verdict 由 L0 发现清单与有效候选检查项判定复验结论（纯函数、可单测）。
@@ -192,11 +202,11 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 			if cfg.Profile() != nil {
 				effective[c] = true
 			}
-		case quality.CheckBeatDensity:
-			// 爽点密度查依赖生效密度下限（P0-1），0=不检查=不可判定。
-			if cfg.EffectiveBeatDensityMin() > 0 {
-				effective[c] = true
-			}
+		case quality.CheckBeatGap, quality.CheckBeatDensity:
+			// 爽点配对（配置互斥对，P0-1/P0-2）：配对判定在 quality.RunL0Checks 内部完成——
+			// 配置了密度下限走 beat_density（曲线口径）、未配置走 beat_gap 兜底，同缺陷
+			// 对称覆盖；两者成对恒可判定（保住 allVerifiable 快路径，误判由粗粒度回落兜底）。
+			effective[c] = true
 		default: // word_count / tail_hook / ai_flavor 不依赖外部台账/配置，恒可判定
 			effective[c] = true
 		}

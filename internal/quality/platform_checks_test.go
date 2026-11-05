@@ -51,46 +51,52 @@ func TestChapterLengthFitFinding(t *testing.T) {
 	assert.Nil(t, chapterLengthFitFinding(9999, &PlatformProfile{Title: "x"}), "未设区间不查")
 }
 
-// TestBeatDensityFinding 爽点标记密度：命中数 < 下限报、达标不报（近似词表口径）。
+// TestBeatDensityFinding 爽点密度：情绪峰段数（张力曲线口径）< 下限报、达标不报。
 func TestBeatDensityFinding(t *testing.T) {
-	f := beatDensityFinding(cleanBody(10), 1.0)
+	noClimax := []TensionPoint{flatSeg(0), flatSeg(1), flatSeg(2)}
+	f := beatDensityFinding(noClimax, 1.0)
 	require.NotNil(t, f)
 	assert.Equal(t, CheckBeatDensity, f.Check)
-	assert.Contains(t, f.Desc, "爽点标记密度不足")
-	assert.Nil(t, beatDensityFinding(cleanBody(10)+"他一个打脸反击，全场震惊。", 1.0))
-	assert.Nil(t, beatDensityFinding(cleanBody(10), 0), "下限 0=不查")
+	assert.Contains(t, f.Desc, "情绪峰")
+	assert.Contains(t, f.Desc, "张力曲线口径")
+	withClimax := []TensionPoint{flatSeg(0),
+		{Seg: 1, Tension: 80, Emotion: 90, BeatType: BeatTypeClimax}}
+	assert.Nil(t, beatDensityFinding(withClimax, 1.0))
+	assert.Nil(t, beatDensityFinding(noClimax, 0), "下限 0=不查")
 }
 
 // TestPlatformFindingsGating 平台三查武装口径：profile/密度下限未配置=零发现；
 // chapter_length_fit 只作用黄金三章外（与 opening_length 零重叠）。
 func TestPlatformFindingsGating(t *testing.T) {
 	flat := cleanBody(3) // 短平章：三查都不达标
+	flatCurve := BuildTensionCurve(flat)
 
 	// 缺省（无 profile、密度 0）→ 零发现（逐字一致）。
-	assert.Empty(t, platformFindings(L0Input{Text: flat, ReadingNumber: 5}, 100))
+	assert.Empty(t, platformFindings(L0Input{Text: flat, ReadingNumber: 5}, 100, flatCurve))
 
 	// profile 武装 opening_hook + chapter_length_fit（第 5 章）。
 	p := QimaoProfile()
-	fs := platformFindings(L0Input{Text: flat, ReadingNumber: 5, Profile: p}, 100)
+	fs := platformFindings(L0Input{Text: flat, ReadingNumber: 5, Profile: p}, 100, flatCurve)
 	byCheck := findingsByCheck(fs)
 	assert.Len(t, byCheck[CheckOpeningHook], 1)
 	assert.Len(t, byCheck[CheckChapterLengthFit], 1)
 
 	// 黄金三章内（阅读序号 2）：chapter_length_fit 不跑（opening_length 覆盖）。
-	fs2 := platformFindings(L0Input{Text: flat, ReadingNumber: 2, Profile: p}, 100)
+	fs2 := platformFindings(L0Input{Text: flat, ReadingNumber: 2, Profile: p}, 100, flatCurve)
 	assert.Empty(t, findingsByCheck(fs2)[CheckChapterLengthFit], "黄金三章由 opening_length 覆盖，零重叠")
 
-	// beat_density 由生效密度下限武装（无 profile 也可单独武装）。
-	fs3 := platformFindings(L0Input{Text: flat, ReadingNumber: 5, BeatDensityMin: 1.0}, 100)
+	// beat_density 由生效密度下限武装（无 profile 也可单独武装），曲线口径情绪峰计数。
+	fs3 := platformFindings(L0Input{Text: flat, ReadingNumber: 5, BeatDensityMin: 1.0}, 100, flatCurve)
 	assert.Len(t, findingsByCheck(fs3)[CheckBeatDensity], 1)
 
 	// 空正文/序号缺失 → 零发现。
-	assert.Empty(t, platformFindings(L0Input{Text: "  ", ReadingNumber: 1, Profile: p, BeatDensityMin: 1}, 100))
-	assert.Empty(t, platformFindings(L0Input{Text: flat, ReadingNumber: 0, Profile: p, BeatDensityMin: 1}, 100))
+	assert.Empty(t, platformFindings(L0Input{Text: "  ", ReadingNumber: 1, Profile: p, BeatDensityMin: 1}, 100, flatCurve))
+	assert.Empty(t, platformFindings(L0Input{Text: flat, ReadingNumber: 0, Profile: p, BeatDensityMin: 1}, 100, flatCurve))
 }
 
 // TestQimaoProfileL0Acceptance 验收口径（P0-1）：七猫 profile 下前 500 字爆点/章长/
 // 爽点密度三项 L0 可检，不达标出 finding；达标章三项零发现。
+// 曲线三查（拖沓段/开篇坡度）不在本验收范围（tension_checks_test.go 覆盖）。
 func TestQimaoProfileL0Acceptance(t *testing.T) {
 	p := QimaoProfile()
 	in := L0Input{Text: cleanBody(2), ReadingNumber: 5, Profile: p, BeatDensityMin: p.BeatDensityMin}
@@ -100,9 +106,13 @@ func TestQimaoProfileL0Acceptance(t *testing.T) {
 	assert.NotEmpty(t, byCheck[CheckChapterLengthFit], "章长不适配须出 finding")
 	assert.NotEmpty(t, byCheck[CheckBeatDensity], "爽点密度不足须出 finding")
 
-	// 达标章（爆点双窗口达标 + 爽点标记达标 + 章长 1000–1500）三项零发现。
-	good := "忽然，一具尸体从井口浮了上来。他没想到失踪案竟和自己有关。" +
-		cleanBody(21) + "这一记打脸反击，全场震惊。"
+	// 达标章（爆点双窗口达标 + 章内含情绪峰 + 章长 1000–1500）三项零发现。
+	// 情绪峰构造：末段独立成段（段落累积 400 rune 切段，hook+7×54 与后续 8×54 均触发
+	// flush），高唤醒情绪词+感叹密段独立成段 → emotion 满刻度判 climax。
+	hookPara := "忽然，一具尸体从井口浮了上来。他没想到失踪案竟和自己有关。"
+	burst := "「不可能！！」全场震惊，众人难以置信，纷纷倒吸凉气，瞳孔猛缩！！他大笑：「还有谁！！」"
+	good := hookPara + "\n" + cleanBody(23) + burst
+	require.NotZero(t, climaxBeatCount(BuildTensionCurve(good)), "good 章须含情绪峰段（beat_density 曲线口径）")
 	m, fsGood := RunL0Checks(L0Input{Text: good, ReadingNumber: 5, Profile: p, BeatDensityMin: p.BeatDensityMin})
 	require.GreaterOrEqual(t, m.WordCount, 1000)
 	require.LessOrEqual(t, m.WordCount, 1500)
@@ -139,8 +149,8 @@ func TestRunL0ChecksDefaultNoPlatformFindings(t *testing.T) {
 
 // TestCountSignalsAndFirstRunes 近似口径工具函数：子串计数求和、前 n rune 截取。
 func TestCountSignalsAndFirstRunes(t *testing.T) {
-	assert.Equal(t, 3, countSignals("打脸逆袭打脸", beatSignals))
-	assert.Equal(t, 0, countSignals("风平浪静", beatSignals))
+	assert.Equal(t, 3, countSignals("忽然尸体忽然", openingHookSignals))
+	assert.Equal(t, 0, countSignals("风平浪静", openingHookSignals))
 	assert.Equal(t, "", firstRunes("abc", 0))
 	assert.Equal(t, "abc", firstRunes("abc", 10))
 	assert.Equal(t, "忽然", firstRunes("忽然，尸体", 2))

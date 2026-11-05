@@ -510,6 +510,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// issue 经此落成 pipeline 工单（feedback 容器）走既有修复闭环。mcp_tools 不能反向
 	// import pipeline（pipeline→agent→mcp_tools 成环），在此装配（SetEmitter 同款纪律）。
 	mcp_tools.SetFeedbackTicketLander(pipeline.LandFeedbackTickets)
+	// 注入情绪账工单落单器（P0-2 情绪账）：写后链路 runChapterL0 的曲线四查发现经此
+	// 落成 pipeline 工单（E 系，tension 容器）走既有修复闭环。同上装配纪律。
+	mcp_tools.SetTensionTicketLander(pipeline.LandTensionTickets)
 	// 注入 G_freeze 自动冻结执行体（WBS 2.5）：卷过 S4+S5 收口 / 完本收口时由流水线自动
 	// 置冻结并同事务提交 committed snapshot（Freeze 内含 2.4 冻结前台账审计闸门，幂等）。
 	a.pipeline.SetVolumeFreezer(func(ctx context.Context, novelID, volumeID int64) error {

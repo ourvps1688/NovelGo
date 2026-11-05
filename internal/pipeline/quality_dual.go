@@ -55,6 +55,20 @@ func (s *Service) qualityLedgerBlock(ctx context.Context, novelID int64) string 
 	return quality.RenderLedgerBlock(rows)
 }
 
+// tensionSummaryBlock 读取本书张力曲线并渲染「情绪曲线摘要」块（P0-2 dim4 节奏/
+// 爽点证据）。无曲线 / 读取失败 / 渲染为空 → 空串（零提示，提示词与无该块逐字一致）。
+func (s *Service) tensionSummaryBlock(ctx context.Context, novelID int64) string {
+	if s.qualityStore == nil {
+		return ""
+	}
+	rows, err := s.qualityStore.ListTensionCurveByNovel(ctx, novelID)
+	if err != nil {
+		s.logger.Warn("情绪曲线摘要块：读取曲线失败（降级零提示）", "novel_id", novelID, "err", err)
+		return ""
+	}
+	return quality.RenderTensionBlock(rows)
+}
+
 // keyChapterBlock 组装「关键章定向深读」清单块（R2b-9 §8.5 三层输入第三层）。
 // 信号=质量档案有未修复发现的章 + 黄金三章；无档案/读取失败/空清单 → 空串（零提示）。
 func (s *Service) keyChapterBlock(ctx context.Context, novelID int64) string {
@@ -73,12 +87,15 @@ func (s *Service) keyChapterBlock(ctx context.Context, novelID int64) string {
 }
 
 // ledgerQuickAuditPrompt 构造「档案汇总快审」提示词（快审轨的唯一输入=质量档案汇总块，
-// R2b-1 起同路追加「结构告警」块，空块逐字一致）。
+// R2b-1 起同路追加「结构告警」块，P0-2 起同路追加「情绪曲线摘要」块，空块逐字一致）。
 // 快审回执契约由 contract.go 单源生成（quickAuditFormatLine）。
-func ledgerQuickAuditPrompt(novelID int64, ledgerBlock, structBlock string) string {
+func ledgerQuickAuditPrompt(novelID int64, ledgerBlock, structBlock, tensionBlock string) string {
 	input := ledgerBlock
 	if structBlock != "" {
 		input += "\n\n" + structBlock
+	}
+	if tensionBlock != "" {
+		input += "\n\n" + tensionBlock
 	}
 	return fmt.Sprintf("本书 novel_id=%d。这是一次**质量档案汇总快审**（双轨对照的快审轨，只读）："+
 		"**禁止**调用 get_chapter_list / read 等取正文工具，不得通读或抽读章节正文——只依据下方「质量档案汇总」"+
@@ -91,10 +108,10 @@ func ledgerQuickAuditPrompt(novelID int64, ledgerBlock, structBlock string) stri
 
 // runLedgerQuickAudit 跑一次档案汇总快审并归队结果（快审轨，只读）。
 // 任何失败静默归队 ok=false（降级零提示零报错）。
-func (s *Service) runLedgerQuickAudit(ctx context.Context, runID string, novelID int64, ledgerBlock, structBlock string) quickAuditResult {
+func (s *Service) runLedgerQuickAudit(ctx context.Context, runID string, novelID int64, ledgerBlock, structBlock, tensionBlock string) quickAuditResult {
 	out, err := s.dispatchSkill(ctx, "signability-audit", SkillInput{
 		NovelID:   novelID,
-		Prompt:    ledgerQuickAuditPrompt(novelID, ledgerBlock, structBlock),
+		Prompt:    ledgerQuickAuditPrompt(novelID, ledgerBlock, structBlock, tensionBlock),
 		MaxTurns:  quickAuditMaxTurns,
 		SessionID: "pipeline:" + runID + ":audit-quick",
 		RunID:     runID,

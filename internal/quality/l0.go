@@ -8,7 +8,8 @@ package quality
 // 题材卡禁忌（R2b-3）、角色台账称呼混用/死人出镜（R2b-5，§9.2 表）、
 // 战力/境界数值序越级取胜/低阶碾压（R2b-6，§9.2 表）；
 // 开篇体检四查（P0-0，位次三查+章长区间）在 opening.go；平台三查（P0-1，
-// opening_hook/chapter_length_fit/beat_density）在 platform_checks.go。
+// opening_hook/chapter_length_fit/beat_density）在 platform_checks.go；
+// 张力曲线三查（P0-2 情绪账，拖沓段/爽点断档/开篇坡度）在 tension_checks.go。
 // 时间线/冻结事实等需要更多台账输入的 L0 项属后续扩充（提案 §4.2/§9.2）。
 
 import (
@@ -39,7 +40,10 @@ const (
 	CheckOpeningLength    = "opening_length"     // 黄金三章章长偏离区间（P0-0，1000–1500 字）
 	CheckOpeningHook      = "opening_hook"       // 开篇爆点密度不足（P0-1，平台 profile 武装）
 	CheckChapterLengthFit = "chapter_length_fit" // 章长不适配平台区间（P0-1，黄金三章外全书章）
-	CheckBeatDensity      = "beat_density"       // 爽点标记密度不足（P0-1，近似词表口径）
+	CheckBeatDensity      = "beat_density"       // 爽点标记密度不足（P0-1→P0-2：张力曲线口径，情绪峰计数）
+	CheckPacingDrag       = "pacing_drag"        // 拖沓段：连续 ≥N 段张力平坦（P0-2，曲线口径）
+	CheckBeatGap          = "beat_gap"           // 爽点断档：章内无情绪峰（P0-2，曲线口径，未配置密度下限时兜底）
+	CheckOpeningSlope     = "opening_slope"      // 开篇坡度不足：前 500 字张力未上扬（P0-2，曲线口径）
 )
 
 // DefaultTargetWords 是单章默认目标字数（与 identity 写作纪律同一口径：
@@ -200,8 +204,14 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 	raw = append(raw, openingFindings(in, st.WordCount)...)
 
 	// 平台三查（P0-1，platform_checks.go）：opening_hook/chapter_length_fit 由 profile 武装、
-	// beat_density 由生效密度下限武装；未配置=自然跳过零发现（缺省=现行行为逐字一致）。
-	raw = append(raw, platformFindings(in, st.WordCount)...)
+	// beat_density 由生效密度下限武装（P0-2 起张力曲线口径）；未配置=自然跳过零发现。
+	// 张力曲线一次构建，供平台三查（beat_density）与曲线三查（tension_checks.go）共用。
+	curve := BuildTensionCurve(body)
+	raw = append(raw, platformFindings(in, st.WordCount, curve)...)
+
+	// 张力曲线三查（P0-2 情绪账，tension_checks.go）：拖沓段/爽点断档/开篇坡度。
+	// beat 配对纪律：BeatDensityMin>0 走 beat_density（上），否则 beat_gap 兜底，绝不双报。
+	raw = append(raw, tensionFindings(curve, in.BeatDensityMin)...)
 
 	// 角色台账检查（R2b-5，正向命中判定、宁缺勿错）：称呼混用先于死人出镜（固定顺序）。
 	// 无台账输入=两项自然跳过零发现（缺省=现行行为逐字一致）。
