@@ -32,6 +32,8 @@
 - 签约级质量升级计划（2026-11-05, docs/quality-signability-upgrade-plan-2026-11-05.md, a52f6cd1）：核心诊断=系统是「正确性机器」，缺商业可读性度量+真实反馈闭环。路线图 P0-2 情绪账（chapter_tension）→P0-1 平台 profile 机器验收（七猫：章长 1000-1500/前 500 字爆点/先抑后扬 300 字情绪段）→P0-3 评分打通→P1 反馈回流+数据对账→P2 技能路由。待用户补编辑原话/题材/七猫数据。
 - P0-0 开篇体检专项已落地（2026-11-05, 4189a7bb，勿回退）：L0 开篇四查 opening.go（premise_late 前500/cheat_late 前800/protagonist_late 前200，三查仅第1章；opening_length 黄金三章 1000-1500）+ L1 契约 v2 immersion_anchor（语义判读）+ CheckerConfig 三组关键词列（全空=不检查=缺省逐字一致，upsert_checker_config 可配）+ signability-audit dim1/dim2 七猫量化口径。§7.4 修订序：P0-0✅→P1-1 编辑反馈回流→P0-1 平台 profile→P0-3 评分打通。
 
+- P1-1 编辑反馈回流（2026-11-05, 67410ffb）：编辑原话→editorfeedback 子 Agent（零工具）按 editor-feedback.md 拆解→FeedbackReceipt（八维+F 系 issue+约束修订）两段式落 editor_feedbacks（原话先行，失败保留 raw）；F 系 issue 落 detect:feedback 容器工单走修复闭环；约束只建议，apply_editor_feedback_constraints 人工应用（幂等拒绝）。**勿回退**：mcp_tools→pipeline 是 import cycle（pipeline→agent→mcp_tools），落单走 SetFeedbackTicketLander 回调（app 注入）；feedback 测试须外部包 mcp_tools_test。F 命名空间=编辑反馈（I/D/T/V 各有归属）。
+
 ## 架构决策（2026-11-03）
 - 四检测工作流（chapter/volume/book/structure）**否决进程/模块级大拆分**（评估报告 docs/detection-workflow-coupling-report-2026-11-03.md）：code 路径已按 kind 分治，共享的熔断器/队列/SQLite 必须共享；「跑很久没结果」类投诉先查①供应商流式停滞（idle watchdog 日志）②前端 query 失效缺口（旧缓存×新 run_id 过滤必空模式：`["signability-inline-issues"]`/`["detect-inline-issues"]` 无失效是已知坑）③重启 AbandonActive 杀在途任务。
 - P0/P1 已落地（d144ec5e/011b44fa）：P0=检测完成事件失效内联查询+完成 toast；P1=①verifyTicketTimeout 25min+复验失败 note 三档（整轮超时/单工单「复验超时未验证」/执行失败）+巡检卡片 note 明示②DetectionTaskStatus 增 running_since/stall_count（detectRunInfo 登记启动时刻，stall=llm.RecentIdleTimeouts 自启动起算）+DetectRunningHint 三处运行态「已运行 X」+供应商缓慢提示③ResetAllStuckFixing 启动清扫（fixing→pending note 明示中断，RecoverInterruptedRuns 挂钩，零自动派发不变）。P2（确定性+向量预筛等）未动。
