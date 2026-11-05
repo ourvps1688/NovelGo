@@ -12,12 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 // L1SchemaVersion 是 L1 回执契约的版本号。每次给回执增删字段或变更语义时 +1。
 // v2：新增 immersion_anchor 检查项（P0-0 开篇体检，代入感语义级判读）。
-const L1SchemaVersion = 2
+// v3：新增 tension_curve 字段（P0-2 情绪账，段级情绪/张力/beat 标注）。
+const L1SchemaVersion = 3
 
 // L1 检查项枚举（回执 check 字段取值单源；与 Summary.ByCheck 键同域）。
 const (
@@ -55,15 +57,28 @@ type L1Finding struct {
 	LedgerRefs []string `json:"ledger_refs,omitempty"`
 }
 
+// L1TensionPoint 是回执 tension_curve 里的一条段落级情绪/张力标注（LLM 视角）。
+type L1TensionPoint struct {
+	// Seg 是章内段序（0-based，与指令「段号对照」的 L0 分段对齐；可只标部分段）。
+	Seg int `json:"seg"`
+	// Tension/Emotion 是张力/情绪强度（0-100）。
+	Tension float64 `json:"tension"`
+	Emotion float64 `json:"emotion"`
+	// BeatType 是段类型标注（BeatType* 枚举；自由值容错保留，消费侧按 transition 处理）。
+	BeatType string `json:"beat_type"`
+}
+
 // L1Receipt 是 chapter-ci 技能的回执契约形。
 type L1Receipt struct {
 	Findings []L1Finding `json:"findings"`
-	Summary  string      `json:"summary"`
+	// TensionCurve 是段落级情绪/张力标注（可选；空=本次不标注，不覆盖既有 L1 行）。
+	TensionCurve []L1TensionPoint `json:"tension_curve,omitempty"`
+	Summary      string           `json:"summary"`
 }
 
 // L1ReceiptFormatLine 生成 L1 回执 JSON 格式串（skill md 输出格式节原样引用，契约测试锁定）。
 func L1ReceiptFormatLine() string {
-	return `{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"summary":"一句话小结"}`
+	return `{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"tension_curve":[{"seg":0,"tension":62.5,"emotion":48,"beat_type":"climax|conflict|hook|dialogue|flat|transition"}],"summary":"一句话小结"}`
 }
 
 // l1JSONBlockRe 匹配 ```json 或裸 ``` 围栏内的 JSON 块（回执在最终回复末尾）。
@@ -111,4 +126,50 @@ func (r *L1Receipt) ToFindings(readingNumber int) []Finding {
 		out = append(out, it)
 	}
 	return out
+}
+
+// ToTensionPoints 把回执 tension_curve 清洗为可落库曲线点（解析清洗单源）：
+// seg<0 的脏点丢弃；tension/emotion 截断到 [0,100] 并归整一位小数；
+// 同 seg 后写覆盖先写；按 seg 升序稳定输出。BeatType 自由值容错保留
+// （消费侧经 NormalizeBeatType 归一）。空曲线返回 nil（宁缺勿错）。
+func (r *L1Receipt) ToTensionPoints() []TensionPoint {
+	if r == nil || len(r.TensionCurve) == 0 {
+		return nil
+	}
+	bySeg := map[int]TensionPoint{}
+	for _, p := range r.TensionCurve {
+		if p.Seg < 0 {
+			continue
+		}
+		bySeg[p.Seg] = TensionPoint{
+			Seg:      p.Seg,
+			Emotion:  round1(clampScore(p.Emotion)),
+			Tension:  round1(clampScore(p.Tension)),
+			BeatType: strings.TrimSpace(p.BeatType),
+		}
+	}
+	if len(bySeg) == 0 {
+		return nil
+	}
+	segs := make([]int, 0, len(bySeg))
+	for seg := range bySeg {
+		segs = append(segs, seg)
+	}
+	sort.Ints(segs)
+	out := make([]TensionPoint, 0, len(segs))
+	for _, seg := range segs {
+		out = append(out, bySeg[seg])
+	}
+	return out
+}
+
+// clampScore 把分值截断到 [0,100]。
+func clampScore(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
 }

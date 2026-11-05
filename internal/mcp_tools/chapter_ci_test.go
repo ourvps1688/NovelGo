@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,7 @@ func TestRunChapterCIReceiptLanded(t *testing.T) {
 		assert.Equal(t, int64(1), req.NovelID)
 		assert.Contains(t, req.Instruction, quality.L1ReceiptFormatLine(), "指令内联回执契约格式串")
 		assert.Contains(t, req.Instruction, "continuity", "指令含检查项枚举")
+		assert.Contains(t, req.Instruction, "情绪曲线标注", "指令含情绪曲线标注段")
 		return "小结\n```json\n{\"findings\":[{\"id\":\"L1-1\",\"check\":\"continuity\",\"desc\":\"与前章矛盾\",\"chapter_ids\":[4,5]}],\"summary\":\"1 项\"}\n```\n", nil
 	}
 	err := mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 5)
@@ -133,6 +135,68 @@ func TestRunChapterCIReceiptLanded(t *testing.T) {
 	assert.Equal(t, []int64{4, 5}, findings[0].ChapterIDs)
 	assert.Equal(t, quality.FindingStatusPending, findings[0].Status, "只报告不改写，落档即待修")
 	assert.NotEmpty(t, got.L0Metrics, "L1 落档不动 L0 列（分阶段互不覆盖）")
+}
+
+// TestRunChapterCILandsTensionCurve 情绪账 L1 落库（P0-2）：回执 tension_curve 经清洗
+// （脏 seg 丢弃/分值截断/同 seg 后写胜）落 source=l1 行，段区间从 L0 基线回填；
+// 空 tension_curve 的回执不动既有 L1 行。
+func TestRunChapterCILandsTensionCurve(t *testing.T) {
+	db, tc, ctx := setupCIEnv(t)
+	ch := seedCIChapter(t, db, 5)
+	qs := quality.NewStore(db, ciLogger())
+
+	// 写后链路先落多段 L0 基线（供段号对照与区间回填）。
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, strings.Repeat("他推开门走进院子，惊觉院中有人，两人对峙良久。\n", 80))
+
+	runSub := func(_ context.Context, req mcp_tools.SubAgentRequest) (string, error) {
+		assert.Contains(t, req.Instruction, "段号对照", "L0 基线在时指令带段号对照")
+		assert.Contains(t, req.Instruction, "seg 0（字", "段号对照含 seg 区间")
+		return "小结\n```json\n{\"findings\":[],\"tension_curve\":[" +
+			"{\"seg\":-1,\"tension\":90,\"emotion\":90,\"beat_type\":\"climax\"}," +
+			"{\"seg\":1,\"tension\":150,\"emotion\":-20,\"beat_type\":\"conflict\"}," +
+			"{\"seg\":1,\"tension\":60,\"emotion\":50,\"beat_type\":\"climax\"}," +
+			"{\"seg\":0,\"tension\":62.5,\"emotion\":48,\"beat_type\":\"hook\"}" +
+			"],\"summary\":\"标注 2 段\"}\n```\n", nil
+	}
+	err := mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 5)
+	require.NoError(t, err)
+
+	rows, err := qs.ListTensionCurve(ctx, 1, 5)
+	require.NoError(t, err)
+	l0Ranges := map[int][2]int{}
+	var l1 []quality.ChapterTension
+	for _, r := range rows {
+		switch r.Source {
+		case quality.TensionSourceL0:
+			l0Ranges[r.Seg] = [2]int{r.StartRune, r.EndRune}
+		case quality.TensionSourceL1:
+			l1 = append(l1, r)
+		}
+	}
+	require.GreaterOrEqual(t, len(l0Ranges), 2, "L0 基线应有多段")
+	require.Len(t, l1, 2, "清洗后仅 seg 0/1 两行（脏 seg 丢弃、同 seg 去重）")
+	assert.Equal(t, 0, l1[0].Seg)
+	assert.Equal(t, 62.5, l1[0].Tension)
+	assert.Equal(t, "hook", l1[0].BeatType)
+	assert.Equal(t, 1, l1[1].Seg)
+	assert.Equal(t, 60.0, l1[1].Tension, "同 seg 后写覆盖先写")
+	assert.Equal(t, 50.0, l1[1].Emotion)
+	assert.Equal(t, "climax", l1[1].BeatType)
+	for _, r := range l1 {
+		rg := l0Ranges[r.Seg]
+		assert.Equal(t, rg[0], r.StartRune, "段区间从 L0 基线回填")
+		assert.Equal(t, rg[1], r.EndRune)
+	}
+
+	// 空 tension_curve 回执：不动既有 L1 行。
+	runSub2 := func(_ context.Context, _ mcp_tools.SubAgentRequest) (string, error) {
+		return "```json\n{\"findings\":[],\"summary\":\"未发现增量问题\"}\n```\n", nil
+	}
+	err = mcp_tools.RunChapterCIForChapter(ctx, runSub2, nil, db, ciLogger(), "tool-1", 1, 5)
+	require.NoError(t, err)
+	rows2, err := qs.ListTensionCurve(ctx, 1, 5)
+	require.NoError(t, err)
+	assert.Len(t, rows2, len(rows), "空曲线不动既有 L1 行")
 }
 
 // TestRunChapterCIDegradesToSkipped 降级逐字一致：回执坏/派发失败 → skipped，零提示零报错。

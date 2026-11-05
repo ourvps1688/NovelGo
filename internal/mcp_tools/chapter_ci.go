@@ -173,7 +173,8 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 	if runSub == nil {
 		return nil
 	}
-	instruction := buildChapterCIInstruction(skillStore, novelID, chapterID)
+	instruction := buildChapterCIInstruction(skillStore, novelID, chapterID,
+		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID))
 	report, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "chapterci",
 		NovelID:     novelID,
@@ -210,8 +211,70 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 	record.L1Status = quality.L1StatusChecked
 	record.L1Findings = quality.MarshalFindings(receipt.ToFindings(readingNumber))
 	upsertL1(ctx, db, logger, record, novelID, chapterID)
+	landL1TensionCurve(ctx, db, logger, novelID, chapterID, readingNumber, receipt)
 	return nil
 }
+
+// landL1TensionCurve 把回执 tension_curve 清洗后落 L1 曲线行（P0-2 情绪账：
+// source=l1 与 L0 基线并存，消费侧 EffectiveTensionCurve 取 l1 > l0）。
+// 段区间从既有 L0 基线行回填（seg → rune 区间对齐）；空曲线不动既有 L1 行
+// （正文变化时 RefreshTensionCurve 已作废旧标注）；失败仅告警（降级零提示）。
+func landL1TensionCurve(ctx context.Context, db *gorm.DB, logger *slog.Logger,
+	novelID, chapterID int64, readingNumber int, receipt *quality.L1Receipt) {
+	points := receipt.ToTensionPoints()
+	if len(points) == 0 || db == nil {
+		return
+	}
+	qs := quality.NewStore(db, logger)
+	if rows, err := qs.ListTensionCurve(ctx, novelID, chapterID); err == nil {
+		ranges := map[int][2]int{}
+		for _, r := range rows {
+			if r.Source == quality.TensionSourceL0 {
+				ranges[r.Seg] = [2]int{r.StartRune, r.EndRune}
+			}
+		}
+		for i := range points {
+			if rg, ok := ranges[points[i].Seg]; ok {
+				points[i].StartRune, points[i].EndRune = rg[0], rg[1]
+			}
+		}
+	}
+	if err := qs.ReplaceTensionCurve(ctx, novelID, chapterID, readingNumber, quality.TensionSourceL1, points); err != nil && logger != nil {
+		logger.Warn("chapter-ci 情绪曲线落库失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
+	}
+}
+
+// chapterCITensionSegHints 构造情绪曲线「段号对照」提示（seg → rune 区间 + L0 基线
+// 标注），供 L1 标注对齐分段；无 L0 行/取失败返回空（调用方回落通用分段说明）。
+func chapterCITensionSegHints(ctx context.Context, db *gorm.DB, logger *slog.Logger, novelID, chapterID int64) string {
+	if db == nil {
+		return ""
+	}
+	rows, err := quality.NewStore(db, logger).ListTensionCurve(ctx, novelID, chapterID)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range rows {
+		if r.Source != quality.TensionSourceL0 {
+			continue
+		}
+		if n >= chapterCITensionHintMaxSegs {
+			b.WriteString("…（其余段按每约 400 字顺延）")
+			break
+		}
+		if n > 0 {
+			b.WriteString("、")
+		}
+		fmt.Fprintf(&b, "seg %d（字 %d-%d，基线 %s/%.0f）", r.Seg, r.StartRune, r.EndRune, r.BeatType, r.Tension)
+		n++
+	}
+	return b.String()
+}
+
+// chapterCITensionHintMaxSegs 是「段号对照」提示的段数上限（防超长章提示膨胀）。
+const chapterCITensionHintMaxSegs = 60
 
 // upsertL1 落 L1 档案（UpsertL1 只写 L1 列）；失败仅日志（降级零提示）。
 func upsertL1(ctx context.Context, db *gorm.DB, logger *slog.Logger, record *quality.ChapterQuality, novelID, chapterID int64) {
@@ -223,9 +286,10 @@ func upsertL1(ctx context.Context, db *gorm.DB, logger *slog.Logger, record *qua
 	}
 }
 
-// buildChapterCIInstruction 构造 L1 增量检查指令：小上下文范围 + 检查项 + 回执契约，
-// 有 chapter-ci 技能时注入方法论正文（单源），无技能时内联最小指令（降级）。
-func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64) string {
+// buildChapterCIInstruction 构造 L1 增量检查指令：小上下文范围 + 检查项 + 情绪曲线
+// 标注（P0-2，段号对照对齐分段）+ 回执契约，有 chapter-ci 技能时注入方法论正文（单源），
+// 无技能时内联最小指令（降级）。segHints 为空回落通用分段说明。
+func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "章节（chapter_id=%d）正文刚刚修改并落盘。请对该章执行 L1 增量质检。\n", chapterID)
 	b.WriteString("检查范围（小上下文，严禁全书通读）：本章正文（read 路径 chapters/id_" +
@@ -234,6 +298,14 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 	b.WriteString("检查项：continuity 一致性/连贯、pacing 节奏、foreshadow 伏笔 lifecycle、" +
 		"reader_state 读者认知态、task_card 任务卡兑现、immersion_anchor 代入感锚点。\n")
 	b.WriteString("只报告不改写：不调用任何写工具、不评分、不给 verdict；零发现报空清单。\n")
+	if segHints != "" {
+		fmt.Fprintf(&b, "情绪曲线标注：本章按每约 400 字分段，段号对照（seg（字区间，L0 基线标注））：%s。\n", segHints)
+	} else {
+		b.WriteString("情绪曲线标注：本章按每约 400 字自上而下分段（seg 从 0 起）。\n")
+	}
+	b.WriteString("对有把握的段在回执 tension_curve 标注情绪/张力起伏与爽点位置：seg 填段号，" +
+		"tension 张力 0-100、emotion 情绪强度 0-100，beat_type 取 " +
+		"climax|conflict|hook|dialogue|flat|transition（climax=爽点/情绪峰）。可只标部分段，宁缺勿错。\n")
 	if skillStore != nil {
 		if sk, ok := skillStore.Get(0, "chapter-ci"); ok && strings.TrimSpace(sk.Content) != "" {
 			b.WriteString("\n# 本次任务方法论\n")

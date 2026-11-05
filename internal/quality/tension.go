@@ -6,8 +6,9 @@ package quality
 // 零 LLM、毫秒级、纯函数）：按 beat 粒度分段，每段以对话比、冲突词密度、
 // 句长方差、感叹/反问密度四项确定性指标映射 tension（0-100），情绪词密度
 // 映射 emotion（0-100），并启发式标注 beat_type。L1 chapter-ci 回执的
-// tension_curve（LLM 标注）经 source=l1 并存/覆盖（契约见 #91），消费侧
-// 取优先生效源（l1 > l0）。
+// tension_curve（LLM 标注）经 L1Receipt.ToTensionPoints 清洗后落 source=l1
+// 行（契约 v3，与 L0 基线并存）；消费侧经 EffectiveTensionCurve 合并，
+// 同 seg 取优先生效源（l1 > l0）。
 //
 // 契约要点（勿改）：
 //   - 曲线行按 (novel_id, chapter_id, source, seg) 唯一，整章按来源先删后插（幂等）；
@@ -20,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -137,6 +139,56 @@ const (
 // validTensionSource 判断曲线来源枚举值是否合法。
 func validTensionSource(s string) bool {
 	return s == TensionSourceL0 || s == TensionSourceL1
+}
+
+// NormalizeBeatType 把段类型标注归一到 BeatType* 枚举：合法值原样（去首尾空白），
+// 未知/空值按 transition 处理（L1 自由值容错契约，tension.go 头注）。
+func NormalizeBeatType(s string) string {
+	switch strings.TrimSpace(s) {
+	case BeatTypeClimax:
+		return BeatTypeClimax
+	case BeatTypeConflict:
+		return BeatTypeConflict
+	case BeatTypeHook:
+		return BeatTypeHook
+	case BeatTypeDialogue:
+		return BeatTypeDialogue
+	case BeatTypeFlat:
+		return BeatTypeFlat
+	case BeatTypeTransition:
+		return BeatTypeTransition
+	}
+	return BeatTypeTransition
+}
+
+// EffectiveTensionCurve 从全来源曲线行取优先生效曲线（消费侧合并策略单源）：
+// 同 seg 取 l1（LLM 标注）优先、无 l1 取 l0（确定性基线），按 seg 升序；
+// 来源未知行忽略（宁缺勿错）。返回行保留来源，供展示溯源。
+func EffectiveTensionCurve(rows []ChapterTension) []ChapterTension {
+	bySeg := map[int]ChapterTension{}
+	for _, r := range rows {
+		switch r.Source {
+		case TensionSourceL1:
+			bySeg[r.Seg] = r
+		case TensionSourceL0:
+			if _, ok := bySeg[r.Seg]; !ok {
+				bySeg[r.Seg] = r
+			}
+		}
+	}
+	if len(bySeg) == 0 {
+		return nil
+	}
+	segs := make([]int, 0, len(bySeg))
+	for seg := range bySeg {
+		segs = append(segs, seg)
+	}
+	sort.Ints(segs)
+	out := make([]ChapterTension, 0, len(segs))
+	for _, seg := range segs {
+		out = append(out, bySeg[seg])
+	}
+	return out
 }
 
 // BuildTensionCurve 单章正文 → L0 确定性基线张力曲线（纯函数、零 LLM、毫秒级）。

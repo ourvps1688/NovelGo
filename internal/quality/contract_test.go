@@ -51,6 +51,7 @@ func TestSkillMDL1ExampleKeysMatchContract(t *testing.T) {
 	want := map[string]bool{
 		"findings": true, "id": true, "check": true, "desc": true,
 		"chapter_ids": true, "ledger_refs": true, "summary": true,
+		"tension_curve": true, "seg": true, "tension": true, "emotion": true, "beat_type": true,
 	}
 	for k := range want {
 		assert.True(t, mdKeys[k], "skill md 示例缺契约键 %q", k)
@@ -69,6 +70,10 @@ func TestParseL1Receipt(t *testing.T) {
 	assert.Equal(t, "L1-1", r.Findings[0].ID)
 	assert.Equal(t, "continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor", r.Findings[0].Check)
 	assert.Equal(t, []int64{12}, r.Findings[0].ChapterIDs)
+	require.Len(t, r.TensionCurve, 1, "格式串示例含 tension_curve，解析应还原")
+	assert.Equal(t, 0, r.TensionCurve[0].Seg)
+	assert.Equal(t, 62.5, r.TensionCurve[0].Tension)
+	assert.Equal(t, 48.0, r.TensionCurve[0].Emotion)
 
 	// 零发现回执合法（空清单=已查零发现）。
 	r0, err := ParseL1Receipt("```json\n{\"findings\":[],\"summary\":\"未发现增量问题\"}\n```")
@@ -124,11 +129,45 @@ func TestL1CheckEnum(t *testing.T) {
 // 枚举全集必须出现在格式串的 check 取值域里（skill md 同步由下一条测试锁定）。
 func TestL1FormatLineKeysLocked(t *testing.T) {
 	line := L1ReceiptFormatLine()
-	for _, k := range []string{`"findings"`, `"id"`, `"check"`, `"desc"`, `"chapter_ids"`, `"ledger_refs"`, `"summary"`} {
+	for _, k := range []string{`"findings"`, `"id"`, `"check"`, `"desc"`, `"chapter_ids"`, `"ledger_refs"`, `"summary"`,
+		`"tension_curve"`, `"seg"`, `"tension"`, `"emotion"`, `"beat_type"`} {
 		assert.True(t, strings.Contains(line, k), "格式串缺键 %s", k)
 	}
 	for _, c := range []string{L1CheckContinuity, L1CheckPacing, L1CheckForeshadow, L1CheckReaderState, L1CheckTaskCard, L1CheckImmersion} {
 		assert.True(t, strings.Contains(line, c), "格式串 check 取值域缺枚举 %s", c)
 	}
-	assert.Equal(t, 2, L1SchemaVersion)
+	for _, b := range []string{BeatTypeClimax, BeatTypeConflict, BeatTypeHook, BeatTypeDialogue, BeatTypeFlat, BeatTypeTransition} {
+		assert.True(t, strings.Contains(line, b), "格式串 beat_type 取值域缺枚举 %s", b)
+	}
+	assert.Equal(t, 3, L1SchemaVersion)
+}
+
+// TestL1ReceiptToTensionPoints 解析清洗：脏 seg 丢弃、分值截断、同 seg 后写胜、升序稳定、空=nil。
+func TestL1ReceiptToTensionPoints(t *testing.T) {
+	r := &L1Receipt{TensionCurve: []L1TensionPoint{
+		{Seg: -1, Tension: 90, Emotion: 90, BeatType: "climax"},        // 脏 seg 丢弃
+		{Seg: 1, Tension: 150, Emotion: -20, BeatType: " 爽点 "},         // 先写（被后写覆盖）
+		{Seg: 1, Tension: 60, Emotion: 50, BeatType: "climax"},         // 后写胜
+		{Seg: 0, Tension: 62.34, Emotion: 48, BeatType: " conflict  "}, // 升序归位 + trim
+	}}
+	got := r.ToTensionPoints()
+	require.Len(t, got, 2)
+	assert.Equal(t, 0, got[0].Seg)
+	assert.Equal(t, 62.3, got[0].Tension, "归整一位小数")
+	assert.Equal(t, "conflict", got[0].BeatType, "BeatType 去首尾空白")
+	assert.Equal(t, 1, got[1].Seg)
+	assert.Equal(t, 60.0, got[1].Tension, "同 seg 后写覆盖先写")
+	assert.Equal(t, 50.0, got[1].Emotion)
+	assert.Equal(t, "climax", got[1].BeatType)
+
+	// 分值截断到 [0,100]。
+	clamp := (&L1Receipt{TensionCurve: []L1TensionPoint{{Seg: 2, Tension: 150, Emotion: -5}}}).ToTensionPoints()
+	require.Len(t, clamp, 1)
+	assert.Equal(t, 100.0, clamp[0].Tension)
+	assert.Equal(t, 0.0, clamp[0].Emotion)
+
+	// 空/全脏 → nil（宁缺勿错）。
+	assert.Nil(t, (*L1Receipt)(nil).ToTensionPoints())
+	assert.Nil(t, (&L1Receipt{}).ToTensionPoints())
+	assert.Nil(t, (&L1Receipt{TensionCurve: []L1TensionPoint{{Seg: -3}}}).ToTensionPoints())
 }

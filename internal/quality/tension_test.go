@@ -165,3 +165,51 @@ func TestRefreshTensionCurve(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, rows2, len(rows))
 }
+
+// ── L1 合并/归一（消费侧策略）────────────────────────
+
+// TestEffectiveTensionCurve 合并策略：同 seg l1 优先（与输入顺序无关）、
+// 无 l1 段回落 l0、未知来源忽略、按 seg 升序。
+func TestEffectiveTensionCurve(t *testing.T) {
+	l0 := func(seg int) ChapterTension {
+		return ChapterTension{Seg: seg, Source: TensionSourceL0, Tension: 30, BeatType: BeatTypeFlat}
+	}
+	l1 := func(seg int) ChapterTension {
+		return ChapterTension{Seg: seg, Source: TensionSourceL1, Tension: 90, BeatType: BeatTypeClimax}
+	}
+	// 输入顺序 l0 在前/在后两种：l1 都必须胜出。
+	for _, rows := range [][]ChapterTension{
+		{l0(0), l1(0), l0(1), l1(2)},
+		{l1(0), l0(0), l0(1), l1(2)},
+	} {
+		got := EffectiveTensionCurve(rows)
+		require.Len(t, got, 3)
+		assert.Equal(t, 0, got[0].Seg)
+		assert.Equal(t, TensionSourceL1, got[0].Source, "同 seg l1 优先")
+		assert.Equal(t, BeatTypeClimax, got[0].BeatType)
+		assert.Equal(t, 1, got[1].Seg)
+		assert.Equal(t, TensionSourceL0, got[1].Source, "无 l1 段回落 l0")
+		assert.Equal(t, 2, got[2].Seg)
+		assert.Equal(t, TensionSourceL1, got[2].Source)
+	}
+
+	// 未知来源行忽略；全空 → nil。
+	got := EffectiveTensionCurve([]ChapterTension{
+		{Seg: 0, Source: "l2", Tension: 99},
+		l0(1),
+	})
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, got[0].Seg)
+	assert.Nil(t, EffectiveTensionCurve(nil))
+}
+
+// TestNormalizeBeatType 段类型归一：合法值原样、自由值/空按 transition。
+func TestNormalizeBeatType(t *testing.T) {
+	for _, b := range []string{BeatTypeClimax, BeatTypeConflict, BeatTypeHook, BeatTypeDialogue, BeatTypeFlat, BeatTypeTransition} {
+		assert.Equal(t, b, NormalizeBeatType(b))
+	}
+	assert.Equal(t, BeatTypeClimax, NormalizeBeatType(" climax "), "去首尾空白")
+	assert.Equal(t, BeatTypeTransition, NormalizeBeatType("爽点"), "自由值按 transition")
+	assert.Equal(t, BeatTypeTransition, NormalizeBeatType(""))
+	assert.Equal(t, BeatTypeTransition, NormalizeBeatType("   "))
+}

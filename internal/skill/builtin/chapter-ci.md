@@ -1,6 +1,6 @@
 ---
 name: chapter-ci
-description: 章节 CI（R2 L1 增量检查）：每章正文落盘后自动做小上下文定点质检（一致性/节奏/伏笔/读者认知/任务卡兑现/代入感），只读、只报告不改写，发现按回执契约落章节质量档案。由写后钩子自动调用，用户一般不直接触发。
+description: 章节 CI（R2 L1 增量检查）：每章正文落盘后自动做小上下文定点质检（一致性/节奏/伏笔/读者认知/任务卡兑现/代入感）并顺带标注段级情绪曲线，只读、只报告不改写，发现按回执契约落章节质量档案。由写后钩子自动调用，用户一般不直接触发。
 category: 评估
 mode: manual
 author: builtin
@@ -40,18 +40,26 @@ useWhen:
 - **零发现报零发现**：本章没问题就报空清单 `[]`，绝不为了产出而制造问题；
 - **warning 级起步**：如实描述事实与依据，不夸大；拿不准的宁可不报（宁缺勿错）。
 
+## 情绪曲线标注（tension_curve，随回执顺带）
+在回执里顺带标注本章**段级情绪/张力起伏与爽点位置**（供情绪账消费，不是检查项，不为它制造 findings）：
+- **分段对齐**：按指令给出的「段号对照」的 `seg` 标注（每约 400 字一段）；无对照时按每约 400 字自上而下分段（seg 从 0 起）；
+- **只标有把握的段**：可只标部分段（子集合法），宁缺勿错，绝不凑数；
+- `tension` 张力 0-100（冲突/对抗/悬念越强越高）、`emotion` 情绪强度 0-100（爽点/情绪峰/高唤醒越强越高）；
+- `beat_type` 取 `climax`（爽点/情绪峰）|`conflict`（冲突对抗）|`hook`（钩子/悬念）|`dialogue`（对话节奏）|`flat`（平缓）|`transition`（过渡）。
+
 ## 输出格式
 简短小结后，最终回复末尾**必须**附一个 ```json 代码块上报回执，格式：
 
-`{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"summary":"一句话小结"}`
+`{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"tension_curve":[{"seg":0,"tension":62.5,"emotion":48,"beat_type":"climax|conflict|hook|dialogue|flat|transition"}],"summary":"一句话小结"}`
 
 示例：
 
 ```json
-{"findings":[{"id":"L1-1","check":"continuity","desc":"本章说剑已折断，与第11章结尾『剑还在鞘中』矛盾","chapter_ids":[11,12],"ledger_refs":["item.hero.sword"]}],"summary":"发现 1 处与前章衔接矛盾"}
+{"findings":[{"id":"L1-1","check":"continuity","desc":"本章说剑已折断，与第11章结尾『剑还在鞘中』矛盾","chapter_ids":[11,12],"ledger_refs":["item.hero.sword"]}],"tension_curve":[{"seg":0,"tension":32.5,"emotion":28,"beat_type":"conflict"},{"seg":1,"tension":68,"emotion":72,"beat_type":"climax"}],"summary":"发现 1 处与前章衔接矛盾"}
 ```
 
 - `findings` 逐条给出发现：`id` 用 L1 系（L1-1/L1-2/…，不与 C 系/I 系/D 系/T 系/V 系混排）；`check` 只取上述六类枚举；`desc` 一行说清事实与依据；`chapter_ids` 是涉及章节的全局阅读序号（通常含本章）；`ledger_refs` 是影响/涉及的台账条目（无则省略）；
+- `tension_curve` 按 seg 升序给出段级标注（无把握段可省略；整章无把握时给空数组 `[]`）；
 - `summary` 是一句话小结；
 - 零发现时 `findings` 给空数组 `[]`，`summary` 如实说"未发现增量问题"——不要省略回执块。
 
