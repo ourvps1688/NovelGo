@@ -13,7 +13,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&ChapterQuality{}, &ChapterScoreEvent{}, &PlatformMetric{}))
+	require.NoError(t, db.AutoMigrate(&ChapterQuality{}, &ChapterScoreEvent{}, &PlatformMetric{}, &ChapterTension{}))
 	return db
 }
 

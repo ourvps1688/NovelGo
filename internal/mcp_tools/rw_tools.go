@@ -575,7 +575,7 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 			if ref.IsNew {
 				source = quality.ScoreSourceNew
 			}
-			persistChapterScore(ctx, tc, ch, pendingScore, source)
+			persistChapterScore(ctx, tc, ch, proposed, pendingScore, source)
 		}
 	}
 	emitFileChanged(ctx, tc.NovelID, physical)
@@ -1133,7 +1133,9 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 // persistChapterScore 把评分结果写入章节记录（QualityScore / QualityReport / QualityScoredAt），
 // 并追加一行评分明细历史（quality.ChapterScoreEvent，P0-3：6 维判官分全量 + 来源，
 // 供「修复前后对比」与逐章趋势消费）。source 是写入通道（quality.ScoreSource*）。
-func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, scored *review.ScoreResult, source string) {
+// content 是刚评分的正文：同步刷新 L0 基线张力曲线（P0-2 情绪账，评分链路自动落库，
+// 与写后链路同口径幂等；不动 L1 行——L1 作废属写后链路语义）。
+func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, content string, scored *review.ScoreResult, source string) {
 	if ch == nil || scored == nil {
 		return
 	}
@@ -1165,6 +1167,12 @@ func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapte
 	}
 	if err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).AppendScoreEvent(ctx, ev); err != nil {
 		tc.LoggerOrDefault().Warn("追加评分历史失败", "chapter_id", ch.ID, "err", err)
+	}
+	// P0-2 情绪账：评分链路同步刷新 L0 基线张力曲线（纯确定性，失败仅告警不阻断）。
+	points := quality.BuildTensionCurve(content)
+	if err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).
+		ReplaceTensionCurve(ctx, tc.NovelID, ch.ID, readingNumber, quality.TensionSourceL0, points); err != nil {
+		tc.LoggerOrDefault().Warn("评分链路张力曲线落库失败（非阻断）", "chapter_id", ch.ID, "err", err)
 	}
 }
 

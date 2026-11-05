@@ -38,7 +38,7 @@ func setupCIEnv(t *testing.T) (*gorm.DB, mcp_tools.ToolContext, context.Context)
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}, &novel.Novel{}, &voice.Entry{}, &quality.ChapterQuality{}))
+	require.NoError(t, db.AutoMigrate(&chapter.Chapter{}, &volume.Volume{}, &novel.Novel{}, &voice.Entry{}, &quality.ChapterQuality{}, &quality.ChapterTension{}))
 	tc := mcp_tools.ToolContext{DB: db, NovelID: 1}
 	return db, tc, context.Background()
 }
@@ -74,6 +74,36 @@ func TestScheduleChapterCIWritesL0(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got2)
 	assert.Equal(t, got.L0Findings, got2.L0Findings, "nil 输入不得改档")
+}
+
+// TestScheduleChapterCIWritesTension 写后钩子（P0-2 情绪账）：L0 基线张力曲线自动落库，
+// 正文变化后旧 L1 行一并作废（宁缺勿错）。
+func TestScheduleChapterCIWritesTension(t *testing.T) {
+	db, tc, ctx := setupCIEnv(t)
+	ch := seedCIChapter(t, db, 5)
+	qs := quality.NewStore(db, ciLogger())
+
+	// 预置一条 L1 行（模拟历史回执），写后应被作废。
+	require.NoError(t, qs.ReplaceTensionCurve(ctx, 1, 5, 0, quality.TensionSourceL1,
+		[]quality.TensionPoint{{Seg: 0, Tension: 90, Emotion: 80, BeatType: "custom"}}))
+
+	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "「你来了。」他看着她。「我等你很久了。」\n就在这时，门被人从外面推开了。")
+
+	rows, err := qs.ListTensionCurve(ctx, 1, 5)
+	require.NoError(t, err)
+	require.NotEmpty(t, rows, "写后应落 L0 基线曲线")
+	for _, r := range rows {
+		assert.Equal(t, quality.TensionSourceL0, r.Source, "旧 L1 行应随正文变化作废")
+		assert.GreaterOrEqual(t, r.Tension, 0.0)
+		assert.LessOrEqual(t, r.Tension, 100.0)
+		assert.NotEmpty(t, r.BeatType)
+	}
+
+	// nil 入参跳过不 panic；内容不变重放幂等（行数稳定）。
+	mcp_tools.ScheduleChapterCI(ctx, tc, nil, "x")
+	rows2, err := qs.ListTensionCurve(ctx, 1, 5)
+	require.NoError(t, err)
+	assert.Len(t, rows2, len(rows))
 }
 
 // TestRunChapterCIReceiptLanded L1 回执落档案：checked + 发现投影 + 不动 L0 列。

@@ -60,7 +60,8 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 	chapterCIMu.Unlock()
 }
 
-// runChapterL0 跑 L0 确定性检查并同步落档案（UpsertL0 只写 L0 列）。
+// runChapterL0 跑 L0 确定性检查并同步落档案（UpsertL0 只写 L0 列），
+// 并刷新 L0 基线张力曲线（P0-2 情绪账，写后链路自动落库）。
 // 输入缺啥降级啥：无基线零漂移发现、阅读序号取不到发现不带作用域、题材取不到不豁免、
 // 角色台账取不到=称呼/死人检查自然跳过（无台账零发现逐字一致，R2b-5）。
 // 题材卡参数（R2b-3）：章尾钩子必需/禁忌清单取本书检查器配置，未配置/读取失败回落缺省
@@ -92,6 +93,12 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 	})
 	if err != nil {
 		tc.LoggerOrDefault().Warn("章节 CI L0 落档案失败（非阻断）", "err", err, "novelID", tc.NovelID, "chapterID", chapterID)
+	}
+	// P0-2 情绪账：L0 基线张力曲线随写后链路自动落库（纯确定性毫秒级）。
+	// L0 行整体重算、既有 L1 行一并作废（正文已变）；失败仅告警，不阻断写入主链路。
+	if terr := quality.NewStore(tc.DB, tc.LoggerOrDefault()).
+		RefreshTensionCurve(ctx, tc.NovelID, chapterID, readingNumber, content); terr != nil {
+		tc.LoggerOrDefault().Warn("章节 CI 张力曲线落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
 	}
 }
 

@@ -133,6 +133,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&pipeline.GateObject{},
 		&quality.ChapterQuality{},
 		&quality.ChapterScoreEvent{},
+		&quality.ChapterTension{},
 		&quality.CheckerConfig{},
 		&quality.EditorFeedback{},
 		&quality.PlatformMetric{},
