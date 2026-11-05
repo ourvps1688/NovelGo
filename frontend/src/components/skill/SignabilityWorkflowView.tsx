@@ -13,6 +13,7 @@ import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
+import PlatformDataPanel from "./PlatformDataPanel";
 import { VERDICT_KEYS } from "./verdictKeys";
 import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import { toastError, toastSuccess } from "@/utils/toast";
@@ -159,6 +160,10 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
             inlineIssues={inlineIssues}
           />
         ) : null}
+
+        {/* P1-2 真实数据对账：平台数据录入 + 「流失章 × 低分维」诊断（书级质检语义，
+            挂签约体检视图；不依赖书体检 run，可独立录入，诊断按数据完备度降级呈现）。 */}
+        <PlatformDataPanel novelId={novelId} />
       </div>
 
       <div className="px-6 py-4 border-t shrink-0">
