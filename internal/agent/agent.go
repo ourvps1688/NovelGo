@@ -171,6 +171,8 @@ func agentTypeFromString(s string) agentcfg.AgentType {
 		return agentcfg.FixAgent
 	case "chapterci":
 		return agentcfg.ChapterCIAgent
+	case "editorfeedback":
+		return agentcfg.FeedbackAgent
 	default:
 		return agentcfg.MainAgent
 	}

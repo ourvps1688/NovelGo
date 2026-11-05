@@ -179,6 +179,12 @@
    L1 契约 v2 增 `immersion_anchor`；`upsert_checker_config` 工具可配关键词；
    个人利害/POV 聚焦的语义判读在 L1，位次数字由 L0 确定性兜底）。
 2. **P1-1 编辑反馈回流**紧随（本节 7.1 即首批输入样本）。
+   **状态：已实施**（`record_editor_feedback` 两段式落库：原话先行、拆解失败保留 raw；
+   editorfeedback 子 Agent（零工具纯推理）按 editor-feedback 技能拆解为八维归类 +
+   F 系原子 issue + 生成约束修订；F 系 issue 落 pipeline 工单（`detect:feedback` 容器）
+   走既有去修复/复验闭环；约束修订只建议不应用，由 `apply_editor_feedback_constraints`
+   人工显式应用到 CheckerConfig 七参数 / preference（已应用幂等拒绝）；
+   `get_editor_feedbacks` 查样本（含 novel_id=0 平台级样本，如《水下三十六米》未入库））。
 3. 原 P0-2 情绪账（爽点密度/拖沓段）降为 P0-1 之后——两条驳回都没提节奏，
    真实信号显示开篇卖点 >> 中段节奏密度。
 4. P0-1/P0-3/P1-2/P2 维持原内容，顺序后移。

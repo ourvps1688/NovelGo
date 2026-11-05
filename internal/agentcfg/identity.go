@@ -15,6 +15,7 @@ const (
 	ChapterRewriteAgent                     // 章节重写员（回流 S3 重写回路：依据正文级 issue 整章重写，授权 full_replace）
 	ConsistencyPatrolAgent                  // 一致性巡检员（WBS 3.3：全书张力报告，只读，只报告不改写）
 	ChapterCIAgent                          // 章节 CI 检查员（R2 L1：写后小上下文增量质检，只读，只报告不改写）
+	FeedbackAgent                           // 编辑反馈拆解员（P1-1：平台编辑原话→八维 issue+约束修订，零工具单轮拆解）
 )
 
 // ── 工具白名单 ────────────────────────────────────────────
@@ -32,6 +33,7 @@ var mainAgentTools = []string{
 	"upsert_chapter_task_card", "get_chapter_task_card",
 	"upsert_pinned_invariant", "list_pinned_invariants",
 	"upsert_checker_config", "get_checker_config",
+	"record_editor_feedback", "get_editor_feedbacks", "apply_editor_feedback_constraints",
 	"upsert_power_level", "list_power_levels",
 	"upsert_ledger_provenance", "list_ledger_provenance",
 	"get_story_arcs", "create_story_arc", "update_story_arc",
@@ -152,6 +154,11 @@ var blueprintFixAgentTools = []string{
 	"create_volume", // 补卷
 }
 
+// feedbackAgentTools：编辑反馈拆解员白名单——**工具零暴露**（空集非 nil：nil=全放开的
+// 坑见 base.go allow()，必须显式空集）。拆解是「提示词内联原话 → 单轮出回执」的纯推理
+// 任务，不读库不写库（与复验 verify 零暴露同纪律）；原话留痕/工单落库由工具侧完成。
+var feedbackAgentTools = []string{}
+
 var (
 	mainAgentAllowlist         map[string]bool
 	reviewAgentAllowlist       map[string]bool
@@ -161,6 +168,7 @@ var (
 	signabilityAgentAllowlist  map[string]bool
 	fixAgentAllowlist          map[string]bool
 	blueprintFixAgentAllowlist map[string]bool
+	feedbackAgentAllowlist     map[string]bool
 )
 
 func init() {
@@ -172,6 +180,7 @@ func init() {
 	signabilityAgentAllowlist = toSet(signabilityAgentTools)
 	fixAgentAllowlist = toSet(fixAgentTools)
 	blueprintFixAgentAllowlist = toSet(blueprintFixAgentTools)
+	feedbackAgentAllowlist = toSet(feedbackAgentTools)
 }
 
 func toSet(tools []string) map[string]bool {
@@ -207,6 +216,8 @@ func Allowlist(t AgentType) map[string]bool {
 		return signabilityAgentAllowlist // 一致性巡检复用只读白名单（张力报告只报告不改写）
 	case ChapterCIAgent:
 		return reviewAgentAllowlist // 章节 CI 复用审稿只读白名单（含 get_chapter_task_card 对卡；只报告不改写）
+	case FeedbackAgent:
+		return feedbackAgentAllowlist // 编辑反馈拆解零工具（空集=零暴露，纯推理单轮拆解）
 	default:
 		return nil
 	}
@@ -241,10 +252,22 @@ func AgentIdentity(t AgentType) string {
 		return consistencyPatrolAgentSystem1
 	case ChapterCIAgent:
 		return chapterCIAgentSystem1
+	case FeedbackAgent:
+		return feedbackAgentSystem1
 	default:
 		return ""
 	}
 }
+
+// feedbackAgentSystem1 是编辑反馈拆解员（P1-1 反馈回流）身份提示。
+// 拆解方法论/八维口径/回执契约由 editor-feedback 技能注入（方法论单源在 skill md）。
+const feedbackAgentSystem1 = `你是 novelgo 小说创作系统的编辑反馈拆解员（P1-1 反馈回流）：把平台编辑的审稿/驳回原话拆解为结构化回执——八维归类 + F 系原子问题 + 生成约束修订，按回执契约以 JSON 上报，由系统沉淀为反馈样本并把问题落成可修复工单。
+
+纪律（硬性）：
+- 只拆解不改写：绝不调用任何工具（你没有任何工具），不改稿、不动台账、不改配置；
+- 宁缺勿错：原话没说的不编造——拿不准的维度/问题/约束宁可不报，绝不为了产出而制造问题；
+- 原话是唯一依据：desc/reason 必须忠实转写编辑原话的判断，不夸大、不添油加醋；
+- 约束修订只「生成建议」不「应用」：应用由作者人工显式触发，你只给按键可落的建议值。`
 
 // chapterCIAgentSystem1 是章节 CI 检查员（R2 L1 增量检查）身份提示。
 // 具体检查项/范围/回执契约由 chapter-ci 技能注入（方法论单源在 skill md）。

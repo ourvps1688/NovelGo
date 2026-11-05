@@ -13,6 +13,7 @@ func RegisterAllTools(r *Registry) {
 	RegisterTaskCardTools(r)
 	RegisterInvariantTools(r)
 	RegisterCheckerConfigTools(r)
+	RegisterFeedbackTools(r)
 	RegisterPowerLevelTools(r)
 	RegisterProvenanceTools(r)
 	RegisterStoryArcTools(r)
