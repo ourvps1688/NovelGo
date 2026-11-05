@@ -627,7 +627,6 @@ func (s *Service) applyVerifyOutcome(ctx context.Context, summary *IssueVerifySu
 // 绝不静默全过；回执逐 id 拆分，未提及的工单单列未确认。
 func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, batch []PipelineIssue, ledgerNotes []string, propBlock string, src verifyCorpusSource) map[string]verifyOutcome {
 	targets := make([]verifyTarget, 0, len(batch))
-	nums := make([]int64, 0, len(batch))
 	for _, row := range batch {
 		chs := issueChapterIDs(AuditIssue{
 			Area: row.Area, Desc: row.Desc, ChapterIDs: decodeIssueChapterIDs(row.ChapterIDsJSON),
@@ -635,9 +634,10 @@ func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, 
 		targets = append(targets, verifyTarget{
 			ID: row.IssueKey, Level: row.Level, Area: row.Area, Desc: row.Desc, Chapters: chs, FixNote: row.Note,
 		})
-		nums = append(nums, chs...)
 	}
-	corpus := s.buildVerifyCorpus(ctx, novelID, src, nums)
+	// RAG-Verify（verify_retrieval.go）：逐工单向量检索定位证据切片，零命中/无向量库
+	// 回退窗口语料——证据密度高、思维量数量级下降，输入体量与书长无关。
+	corpus := s.buildVerifyEvidenceBatch(ctx, novelID, src, targets)
 	// 单批独立墙钟预算：某批卡住（供应商静默/慢轮）单独超时复位 pending，后续批次继续；
 	// 墙钟预算（15min）宽于 thinking 模型 9 分钟空闲看门狗（真死连接由看门狗先斩断，
 	// 本预算兜「活着但慢」的轮次，见 detect.go）。

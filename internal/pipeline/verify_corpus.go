@@ -34,10 +34,11 @@ const (
 )
 
 // verifyCorpusSource 是一轮复验的共享取数缓存：章节索引（阅读序号→章行）与台账快照
-// 在批间共享（每批只重渲染作用域正文，避免逐批重复查表/读盘）。
+// 在批间共享（每批只重渲染作用域正文，避免逐批重复查表/读盘）。ledger 保留 dumpLedgers
+// 全量（内含 patrolLedgerCap 自帽），RAG-Verify 按引用定点过滤与窗口渲染各自在渲染端截断。
 type verifyCorpusSource struct {
 	byReading map[int64]chapter.Chapter // 阅读序号（工单章号）→ 章节行（含 ID/标题）
-	ledger    string                    // 台账快照（紧凑，已按 verifyLedgerCap 截断）
+	ledger    string                    // 台账快照（dumpLedgers 全量，渲染端各自截断）
 }
 
 // loadVerifyCorpusSource 一次性取本轮复验的共享语料源（本地读，无 LLM 往返）。
@@ -54,33 +55,49 @@ func (s *Service) loadVerifyCorpusSource(ctx context.Context, novelID int64) ver
 			s.logger.Warn("复验语料：列章失败，本批章正文降级为空", "novel_id", novelID, "err", err)
 		}
 	}
-	src.ledger = truncateToBudget(s.dumpLedgers(ctx, novelID), verifyLedgerCap)
+	src.ledger = s.dumpLedgers(ctx, novelID)
 	return src
 }
 
-// buildVerifyCorpus 渲染单批的【本次复验语料】块：作用域章节正文（去重按阅读序）+
+// buildVerifyCorpus 渲染单批的窗口式【本次复验语料】块：作用域章节正文（去重按阅读序）+
 // 台账快照 + 「证据已内联、禁止工具」引导。chapterNums 为工单章号（全局阅读序号，
 // 与 pipeline_issues.chapter_ids 同口径，经 byReading 映射回 chapter_id 读正文）。
+// RAG-Verify（verify_retrieval.go）生效时本函数仅作向量库缺失的整体降级路径。
 func (s *Service) buildVerifyCorpus(ctx context.Context, novelID int64, src verifyCorpusSource, chapterNums []int64) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n【本次复验语料（后端已批量取好，本批所需证据已全部内联）】\n")
 	sb.WriteString("**复验方法：直接通读以下语料逐项核对，禁止调用任何工具（read / get_* / search）；" +
 		"核对完成后直接在最终回复末尾输出复验回执 JSON。**\n")
 
+	if s.appendChapterWindows(&sb, ctx, novelID, src, chapterNums, verifyChapterCap, verifyCorpusCap) {
+		sb.WriteString("\n（因单批语料预算，其余作用域章正文已省略；拿不准的项不要计入 ok=true，留待下轮复核）\n")
+	}
+	if src.ledger != "" {
+		sb.WriteString("\n### 台账快照（紧凑，交叉核对背景）\n")
+		sb.WriteString(truncateToBudget(src.ledger, verifyLedgerCap))
+	}
+	return sb.String()
+}
+
+// appendChapterWindows 渲染作用域章正文窗口（去重按阅读序）：每章 capHeadTail(章帽)，
+// 累计超过 totalCap 的章省略并返回 omitted=true；章缺失/正文不可读只标注不阻断。
+// 窗口渲染共用件：窗口语料主路径与 RAG-Verify 零命中兜底共用。
+func (s *Service) appendChapterWindows(sb *strings.Builder, ctx context.Context, novelID int64, src verifyCorpusSource, chapterNums []int64, chapterCap, totalCap int) bool {
 	seen := map[int64]bool{}
 	omitted := false
+	base := sb.Len()
 	for _, n := range chapterNums {
 		if seen[n] {
 			continue
 		}
 		seen[n] = true
-		if sb.Len() > verifyCorpusCap {
+		if sb.Len()-base > totalCap {
 			omitted = true
 			continue
 		}
 		ch, ok := src.byReading[n]
 		if !ok {
-			fmt.Fprintf(&sb, "\n### 第%d章（章节不存在或列表缺失，无法内联）\n", n)
+			fmt.Fprintf(sb, "\n### 第%d章（章节不存在或列表缺失，无法内联）\n", n)
 			continue
 		}
 		title := ch.Title
@@ -94,19 +111,12 @@ func (s *Service) buildVerifyCorpus(ctx context.Context, novelID int64, src veri
 			}
 		}
 		if strings.TrimSpace(text) == "" {
-			fmt.Fprintf(&sb, "\n### 第%d章《%s》（正文不可读，无法内联）\n", n, title)
+			fmt.Fprintf(sb, "\n### 第%d章《%s》（正文不可读，无法内联）\n", n, title)
 			continue
 		}
-		fmt.Fprintf(&sb, "\n### 第%d章《%s》\n%s\n", n, title, capHeadTail(text, verifyChapterCap))
+		fmt.Fprintf(sb, "\n### 第%d章《%s》\n%s\n", n, title, capHeadTail(text, chapterCap))
 	}
-	if omitted {
-		sb.WriteString("\n（因单批语料预算，其余作用域章正文已省略；拿不准的项不要计入 ok=true，留待下轮复核）\n")
-	}
-	if src.ledger != "" {
-		sb.WriteString("\n### 台账快照（紧凑，交叉核对背景）\n")
-		sb.WriteString(src.ledger)
-	}
-	return sb.String()
+	return omitted
 }
 
 // capHeadTail 超长文本掐头尾保留：头 2/3 + 尾 1/3（保章尾钩子等尾部修复点），中段标注截断。
