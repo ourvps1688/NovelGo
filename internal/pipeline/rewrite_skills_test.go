@@ -5,11 +5,14 @@ package pipeline
 // 低分判定/去重/体量封顶、缺省零注入（通用提示词逐字不变）。
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/stretchr/testify/assert"
@@ -127,4 +130,34 @@ func TestChapterRewritePromptMethodBlock(t *testing.T) {
 	// 块在任务行之后、要求段之后追加（顺序稳定）。
 	assert.Less(t, strings.Index(with, "问题 I2[P1]"), strings.Index(with, "【方法论定向】"))
 	assert.Contains(t, with, "要求：用 edit 工具传 full_replace=true")
+}
+
+// TestJoinRewriteBlocks 可选块拼接：双空=空串、空块跳过、非空间空行分隔。
+func TestJoinRewriteBlocks(t *testing.T) {
+	assert.Empty(t, joinRewriteBlocks("", ""))
+	assert.Equal(t, "A", joinRewriteBlocks("A", ""))
+	assert.Equal(t, "B", joinRewriteBlocks("", "B"))
+	assert.Equal(t, "A\n\nB", joinRewriteBlocks("A", "B"))
+	assert.Equal(t, "A\n\nB", joinRewriteBlocks(" A ", " B "), "TrimSpace 归一")
+}
+
+// TestPlatformRhythmBlock 平台节奏块（P2-2 重写侧消费）：qimao profile 指名模板 →
+// 非空块（scene-beats 提取）；未配 profile → 空串（缺省不模板）。
+func TestPlatformRhythmBlock(t *testing.T) {
+	db := newTestDB(t)
+	require.NoError(t, db.AutoMigrate(&quality.CheckerConfig{}))
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	const novelID int64 = 990
+
+	assert.Empty(t, svc.platformRhythmBlock(ctx, novelID), "未配 profile 应空串")
+
+	qs := quality.NewStore(db, slog.Default())
+	require.NoError(t, qs.SaveCheckerConfig(ctx, &quality.CheckerConfig{
+		NovelID: novelID, PlatformProfile: "qimao",
+	}))
+	block := svc.platformRhythmBlock(ctx, novelID)
+	assert.NotEmpty(t, block)
+	assert.Contains(t, block, "【平台节奏模板】")
+	assert.Contains(t, block, "打脸")
 }

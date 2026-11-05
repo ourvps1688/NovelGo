@@ -117,6 +117,17 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		}
 	}
 
+	// 6.7 平台节奏模板（P2-2）：命中写章意图 + 平台 profile 指名节奏模板时注入
+	// scene-beats 可选节奏模板；未配置/未指名=空串不注入（缺省不模板）。
+	var rhythmInject string
+	if !strings.HasPrefix(input.Message, "/") {
+		if rb, rerr := a.buildRhythmInject(ctx, input.NovelID, input.Message); rerr != nil {
+			a.logger.Warn("平台节奏模板注入降级", "novel_id", input.NovelID, "err", rerr)
+		} else {
+			rhythmInject = rb
+		}
+	}
+
 	// 7. 持久化本轮消息（事务化交由 session.Store.PersistTurnMessages：
 	// System 消息 + slash inject + auto inject + 用户消息在单事务内原子写入）
 	// system 消息在事务外构建（compress 模式），避免事务内读 DB 导致 SQLite 单连接死锁
@@ -142,7 +153,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	if isNew && sysMsgs != nil {
 		sysContents = []string{sysMsgs.Identity, sysMsgs.Always, sysMsgs.Catalog, sysMsgs.Profile, sysMsgs.State, sysMsgs.Persona}
 	}
-	if err := a.session.PersistTurnMessages(ctx, sess.SessionID, turnID, sess.ActiveVersion, sysContents, slashInject, autoInject, preCtxInject, userMsg); err != nil {
+	if err := a.session.PersistTurnMessages(ctx, sess.SessionID, turnID, sess.ActiveVersion, sysContents, slashInject, autoInject, preCtxInject, rhythmInject, userMsg); err != nil {
 		return nil, fmt.Errorf("持久化消息失败: %w", err)
 	}
 	if a.activity != nil {

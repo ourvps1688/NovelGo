@@ -1564,7 +1564,11 @@ func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, ite
 // dims 是本 run 体检的维度星级（P2-1 定向路由输入）：低分维/issue 维度命中方法论技能时
 // 注入「方法论定向」块，否则提示词保持通用口径逐字不变。
 func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter, dims []AuditDimScore) error {
-	prompt := chapterRewritePrompt(novelID, item, ch, rewriteMethodBlock(dims, item.Dimension),
+	// P2-1 方法论定向块 + P2-2 平台节奏模板块（缺省空串零注入，通用口径逐字不变）。
+	methodBlock := joinRewriteBlocks(
+		rewriteMethodBlock(dims, item.Dimension),
+		s.platformRhythmBlock(ctx, novelID))
+	prompt := chapterRewritePrompt(novelID, item, ch, methodBlock,
 		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite))
 	_, err := s.dispatchSkill(ctx, "chapter-rewrite", SkillInput{
 		NovelID:   novelID,

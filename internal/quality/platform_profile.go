@@ -44,6 +44,10 @@ type PlatformProfile struct {
 	BeatDensityMin float64
 	// EmotionSegMax 是单情绪段长度上限（字）：P0-2 情绪账消费（本阶段只入参不检查）。
 	EmotionSegMax int
+	// RhythmTemplate 是平台节奏模板 ID（P2-2，scene-beats「平台节奏模板」### 小节名，
+	// skill.RhythmTemplate* 常量，契约测试锁定两侧一致）：生成/重写侧经 skill.RhythmBlock
+	// 提取正文注入；空=不套模板（缺省不模板）。
+	RhythmTemplate string
 }
 
 // QimaoProfile 返回七猫男频悬疑量化口径 preset（两本真实编辑驳回样本的口径，
@@ -51,7 +55,8 @@ type PlatformProfile struct {
 //   - 黄金三章章长 1000–1500 字；
 //   - 前 500 字爆点（核心看点实体化 500 / 金手指出场 800 / 主角首现 200）；
 //   - 爽点密度下限 1 次/章（近似词表口径，P0-2 张力曲线升级）；
-//   - 情绪段长度上限 300 字（P0-2 消费）。
+//   - 情绪段长度上限 300 字（P0-2 消费）；
+//   - 节奏模板「先抑后扬打脸」（P2-2，scene-beats qimao_face_slap 小节）。
 func QimaoProfile() *PlatformProfile {
 	return &PlatformProfile{
 		Name:                 "qimao",
@@ -68,6 +73,7 @@ func QimaoProfile() *PlatformProfile {
 		OpeningChapterWindow: 3,
 		BeatDensityMin:       1.0,
 		EmotionSegMax:        300,
+		RhythmTemplate:       "qimao_face_slap",
 	}
 }
 

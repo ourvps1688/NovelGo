@@ -15,6 +15,7 @@ package pipeline
 //   - 技能名必须存在于 skill.BuiltinFS（builtin/*.md）。
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -140,6 +141,37 @@ func loadRewriteMethodBody(name string) string {
 		return ""
 	}
 	return strings.TrimSpace(stripFrontmatter(string(raw)))
+}
+
+// platformRhythmBlock 取当前平台节奏模板块（P2-2，重写侧消费）：CheckerConfig
+// 平台 profile 指名节奏模板时经 skill.RhythmBlock 确定性提取（scene-beats 可选模板）；
+// 未配置/未指名/提取失败 → 空串（缺省不模板）。读失败降级空串不阻断。
+func (s *Service) platformRhythmBlock(ctx context.Context, novelID int64) string {
+	if s.qualityStore == nil {
+		return ""
+	}
+	cfg, err := s.qualityStore.GetCheckerConfig(ctx, novelID)
+	if err != nil || cfg == nil {
+		return ""
+	}
+	p := cfg.Profile()
+	if p == nil || p.RhythmTemplate == "" {
+		return ""
+	}
+	return skill.RhythmBlock(p.RhythmTemplate)
+}
+
+// joinRewriteBlocks 顺序拼接两个可选提示词块（双空=空串；空块跳过；非空间空行分隔）。
+func joinRewriteBlocks(a, b string) string {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + "\n\n" + b
+	}
 }
 
 // stripFrontmatter 去掉文档开头的 YAML frontmatter（首行 --- 至下一个 --- 行）。

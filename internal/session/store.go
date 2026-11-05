@@ -52,7 +52,7 @@ func (s *Store) AppendMessage(ctx context.Context, msg *Message) error {
 // PersistTurnMessages 在单事务内持久化一轮的消息：sysContents（新会话预构建 system 段，按序写入）
 // + slash inject + auto inject + preCtx inject（写章前情回顾，见 B4）+ 用户消息。userMsg 为 nil 时仅写入前四者。
 // 系统消息与 inject 均标记为 ToAPI=true/ToFrontend=false（仅用户消息可同时前端可见）。
-func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnID, version int, sysContents []string, slashInject, autoInject, preCtxInject string, userMsg *Message) error {
+func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnID, version int, sysContents []string, slashInject, autoInject, preCtxInject, rhythmInject string, userMsg *Message) error {
 	sysMsg := func(content string) *Message {
 		return &Message{
 			SessionID: sessionID, TurnID: turnID, Role: "system", Content: content,
@@ -86,6 +86,11 @@ func (s *Store) PersistTurnMessages(ctx context.Context, sessionID string, turnI
 		}
 		if preCtxInject != "" {
 			if err := tx.Create(injectMsg(preCtxInject)).Error; err != nil {
+				return err
+			}
+		}
+		if rhythmInject != "" {
+			if err := tx.Create(injectMsg(rhythmInject)).Error; err != nil {
 				return err
 			}
 		}
