@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"github.com/novelgo/novelgo/internal/review"
 )
 
 // ── issue JSON 契约（单源）────────────────────────────────────────────────
@@ -112,6 +114,18 @@ func auditFormatLine(full bool, s issueSample) string {
 		head += fmt.Sprintf(`,"schema_version":%d`, AuditSchemaVersion)
 	}
 	return head + `,"issues":[` + issueSchemaLine(full, s) + `]}`
+}
+
+// auditDimsFormatLine 生成「维度星级」JSON 片段（P0-3 双轨评分打通，全量契约专属可选
+// 字段）：签约体检八维逐维 1-5 星 + 一句话证据，与正文八维星级表同源。键名单源
+// review.AuditDimOrder（8 维体检键），此处按单源生成示例，禁手抄键名。
+// 仅 signabilityPrompt 引用（蓝图/巡检等核心契约产出不带 dims）。
+func auditDimsFormatLine() string {
+	parts := make([]string, 0, len(review.AuditDimOrder))
+	for _, k := range review.AuditDimOrder {
+		parts = append(parts, fmt.Sprintf(`{"key":"%s","score":5,"note":"一句话证据"}`, k))
+	}
+	return `"dims":[` + strings.Join(parts, ",") + `]`
 }
 
 // issueFieldRules 生成提示词内嵌的契约字段必填说明（只含全量契约新增字段）。

@@ -2234,7 +2234,30 @@ func parseAudit(text string) AuditData {
 	if data.Issues == nil {
 		data.Issues = []AuditIssue{}
 	}
+	data.Dims = sanitizeAuditDims(data.Dims)
 	return data
+}
+
+// sanitizeAuditDims 规范化维度星级（宁缺勿错）：key 为空的脏项丢弃；score 裁剪到 1-5
+// （LLM 偶发 0/超界星级按边界归一）；清洗后为空返回 nil（无 dims ≠ 解析失败）。
+func sanitizeAuditDims(dims []AuditDimScore) []AuditDimScore {
+	out := make([]AuditDimScore, 0, len(dims))
+	for _, d := range dims {
+		d.Key = strings.TrimSpace(d.Key)
+		if d.Key == "" {
+			continue
+		}
+		if d.Score < 1 {
+			d.Score = 1
+		} else if d.Score > 5 {
+			d.Score = 5
+		}
+		out = append(out, d)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // extractAuditJSON 从体检输出抽取结构化 JSON：优先 ```json 围栏块；围栏缺失/异常时回退到
@@ -2615,6 +2638,7 @@ func signabilityPrompt(novelID int64, in auditInput, blocks contextasm.ContextBl
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
 		"文风漂移项（如有）走 V 系契约："+auditFormatLine(true, issueSampleStyle)+
 		"（id 从 V1 起编、level 恒 P1、不计入评分与 verdict）；"+
+		"结果 JSON 顶层附 dims 维度星级数组（与正文八维星级表同源：每维一条，key 取八维键、score 1-5 星、note 一句话证据）："+auditDimsFormatLine()+"；"+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID, in.scope)
 	if in.ledger != "" {
 		p += "\n\n" + in.ledger

@@ -218,6 +218,16 @@ type RewriteItem struct {
 	Direction   string  `json:"direction,omitempty"`
 }
 
+// AuditDimScore 是体检的一个维度星级（P0-3 双轨评分打通）：与正文星级表同源的结构化
+// 逐维得分。key=维度键（签约体检八维：opening/fit/character/pacing/world/longArc/
+// compliance/reader，键名单源 review.AuditDimOrder，契约测试锁定）；score=1-5 星；
+// note=一句话证据。仅全量契约（签约体检）产出，蓝图/巡检（核心契约）不带。
+type AuditDimScore struct {
+	Key   string `json:"key"`
+	Score int    `json:"score"`
+	Note  string `json:"note,omitempty"`
+}
+
 // AuditData 是 S4 签约体检的结构化结果，序列化进 GateContext.Audit。
 type AuditData struct {
 	Verdict string `json:"verdict"` // pass | needs_fix
@@ -225,8 +235,11 @@ type AuditData struct {
 	Summary string `json:"summary"` // 一句话结论
 	// SchemaVersion 体检产出时的 issue JSON 契约版本（contract.go 的 AuditSchemaVersion）。
 	// LLM 未标注时为 0（不触发版本门，仅靠字段嗅探兜底）；显式低于当前版本即判陈旧。
-	SchemaVersion int          `json:"schema_version,omitempty"`
-	Issues        []AuditIssue `json:"issues"` // issue 清单
+	SchemaVersion int `json:"schema_version,omitempty"`
+	// Dims 是结构化维度星级（P0-3）：与正文八维星级表同源，供「6 维判官分 ↔ 8 维体检分」
+	// 同源展示与趋势视图消费。可选字段（旧数据/核心契约产出无 dims 不判陈旧）。
+	Dims   []AuditDimScore `json:"dims,omitempty"`
+	Issues []AuditIssue    `json:"issues"` // issue 清单
 }
 
 // Store 封装 pipeline_runs 表的读写。

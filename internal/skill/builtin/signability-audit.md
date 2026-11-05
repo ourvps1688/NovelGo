@@ -105,6 +105,7 @@ useWhen:
     - ✅「第1章已定稿『违约金一天六百万』（既定事实）；第2章 L23『四十分钟折算八万』与之不符（600万/天折算40分钟约16.7万）。前向适配：改第2章 L23 的数字使其与第1章既定费率自洽，不回改第1章」
     - 仅当 `direction="retcon_candidate"` 时，才允许在 desc 写明「需回改前章第 X 章 / 设定」，且须先通过「审计范围」节的判定问句三句、必进人工审批闸门（作者显式拍板、留痕、可回滚），宁前向勿 retcon。
   - 每条 issue **必须**给出 `"chapter_ids"`（问题涉及章节的全局阅读序号数组，与 `get_chapter_list` 一致；「第 6-10 章」展开为 `[6,7,8,9,10]`）——流水线按它做修复作用域分组与章节定位，**不要只把章节写进 desc 文本**；台账/全书级问题（无具体章节）填 `[]`。
+- 维度星级 `dims`（结构化，与正文八维星级表**同源同分**）：八维各一条——`key` 取 `opening` / `fit` / `character` / `pacing` / `world` / `longArc` / `compliance` / `reader`（与星级表行一一对应），`score` 为该维 1-5 星（= 星级表所评星数），`note` 一句话证据（与星级表证据一致即可，勿长篇）。
 - 最终回复末尾**必须**附 JSON 代码块（以 ` ```json ` 开头、以 ` ``` ` 结尾），格式严格如下（顶层 `schema_version` 照抄示例中的契约版本号，流水线据此判定体检数据新旧）：
 
 ```json
@@ -113,6 +114,16 @@ useWhen:
   "score": 0,
   "summary": "一句话结论：能签 / 勉强 / 难签（附主要短板）",
   "schema_version": 3,
+  "dims": [
+    {"key":"opening","score":5,"note":"开篇三段立住人设与冲突"},
+    {"key":"fit","score":4,"note":"题材卖点执行到位"},
+    {"key":"character","score":4,"note":"主角动机清晰、言行一致"},
+    {"key":"pacing","score":3,"note":"第6-10章节奏拖沓"},
+    {"key":"world","score":4,"note":"设定展示自然不堆砌"},
+    {"key":"longArc","score":3,"note":"长线伏笔推进偏少"},
+    {"key":"compliance","score":5,"note":"无禁忌硬伤"},
+    {"key":"reader","score":4,"note":"代入感与爽点基本达标"}
+  ],
   "issues": [
     {"id":"I1","level":"P0","area":"开篇过签力","desc":"前三章未立人设，代入感弱","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[1,2,3]},
     {"id":"I2","level":"P1","area":"节奏爽点","desc":"第6-10章爽点断档","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[6,7,8,9,10]},

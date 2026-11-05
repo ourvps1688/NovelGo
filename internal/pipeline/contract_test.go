@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/novelgo/novelgo/internal/contextasm"
+	"github.com/novelgo/novelgo/internal/review"
 	"github.com/stretchr/testify/require"
 )
 
@@ -326,11 +327,14 @@ func extractMDFirstJSONBlock(t *testing.T, path string) string {
 }
 
 // TestSkillMDExamplesMatchContract 验证 skill md 输出格式示例与契约双向同步：
-// signability-audit.md（全量契约）示例键 = AuditData ∪ 全部 AuditIssue 字段；
-// blueprint-audit.md（核心契约）示例键 = AuditData（除 schema_version）∪ 核心 issue 字段。
-// 示例里的字段名以 struct json tag 为事实源派生，md 改字段而不同步 struct/契约即红。
+// signability-audit.md（全量契约）示例键 = AuditData ∪ 全部 AuditIssue 字段 ∪ 维度星级
+// 明细字段（AuditDimScore，dims 嵌套项键名会被 mdJSONKeyRe 一并提取，必须进期望集）；
+// blueprint-audit.md（核心契约）示例键 = AuditData（除 schema_version 与 dims）∪ 核心
+// issue 字段（核心契约产出不带 dims）。示例里的字段名以 struct json tag 为事实源派生，
+// md 改字段而不同步 struct/契约即红。
 func TestSkillMDExamplesMatchContract(t *testing.T) {
 	dataNames := structJSONNames(t, reflect.TypeOf(AuditData{}))
+	dimNames := structJSONNames(t, reflect.TypeOf(AuditDimScore{}))
 	coreNames := map[string]bool{}
 	fullNames := map[string]bool{}
 	for _, f := range issueContractFields {
@@ -340,12 +344,15 @@ func TestSkillMDExamplesMatchContract(t *testing.T) {
 		}
 	}
 
-	// 全量：signability-audit.md 示例键 = 顶层数据字段 + 全部 issue 字段。
+	// 全量：signability-audit.md 示例键 = 顶层数据字段 + 全部 issue 字段 + dims 明细字段。
 	wantFull := map[string]bool{}
 	for n := range dataNames {
 		wantFull[n] = true
 	}
 	for n := range fullNames {
+		wantFull[n] = true
+	}
+	for n := range dimNames {
 		wantFull[n] = true
 	}
 	gotFull := map[string]bool{}
@@ -354,10 +361,10 @@ func TestSkillMDExamplesMatchContract(t *testing.T) {
 	}
 	require.Equal(t, wantFull, gotFull, "signability-audit.md 示例键与契约/struct 不一致（双向同步）")
 
-	// 核心：blueprint-audit.md 示例键 = 顶层数据字段（除 schema_version）+ 核心 issue 字段。
+	// 核心：blueprint-audit.md 示例键 = 顶层数据字段（除 schema_version 与 dims）+ 核心 issue 字段。
 	wantCore := map[string]bool{}
 	for n := range dataNames {
-		if n != "schema_version" {
+		if n != "schema_version" && n != "dims" {
 			wantCore[n] = true
 		}
 	}
@@ -369,4 +376,47 @@ func TestSkillMDExamplesMatchContract(t *testing.T) {
 		gotCore[k[1]] = true
 	}
 	require.Equal(t, wantCore, gotCore, "blueprint-audit.md 示例键与核心契约/struct 不一致（双向同步）")
+}
+
+// ── P0-3：维度星级（dims）契约 ─────────────────────────────────────────
+
+// TestAuditDimsFormatLineSingleSource 验证 dims 片段键集=review.AuditDimOrder（6↔8 映射
+// 契约的体检侧单源），可解析为 []AuditDimScore，且不含 %（fmt.Sprintf 安全）。
+func TestAuditDimsFormatLineSingleSource(t *testing.T) {
+	frag := auditDimsFormatLine()
+	require.NotContains(t, frag, "%", "契约生成片段不得含 %（会破坏 fmt.Sprintf 提示词拼接）")
+
+	var wrap struct {
+		Dims []AuditDimScore `json:"dims"`
+	}
+	require.NoError(t, json.Unmarshal([]byte("{"+frag+"}"), &wrap), "dims 片段应可解析")
+	require.Len(t, wrap.Dims, len(review.AuditDimOrder), "八维各一条")
+	for i, d := range wrap.Dims {
+		require.Equal(t, review.AuditDimOrder[i], d.Key, "键集与顺序应与映射契约体检侧单源一致")
+		require.NotEmpty(t, d.Note)
+	}
+
+	p := signabilityPrompt(1, auditInput{}, contextasm.ContextBlocks{})
+	require.Contains(t, p, frag, "signabilityPrompt 应引用 dims 片段")
+}
+
+// TestParseAuditDimsSanitize 验证 parseAudit 对 dims 的宁缺勿错清洗：空 key 脏项丢弃、
+// score 裁剪到 1-5、清洗后为空回 nil。
+func TestParseAuditDimsSanitize(t *testing.T) {
+	raw := `{"verdict":"pass","score":32,"summary":"s","dims":[` +
+		`{"key":"opening","score":8,"note":"n"},{"key":"","score":3},{"key":"fit","score":0}],"issues":[]}`
+	a := parseAudit(raw)
+	require.Len(t, a.Dims, 2, "空 key 脏项应丢弃")
+	require.Equal(t, "opening", a.Dims[0].Key)
+	require.Equal(t, 5, a.Dims[0].Score, "超界星级裁剪到 5")
+	require.Equal(t, "fit", a.Dims[1].Key)
+	require.Equal(t, 1, a.Dims[1].Score, "0 星裁剪到 1")
+
+	// 无 dims 的旧数据：不报错、不伪造。
+	plain := parseAudit(`{"verdict":"pass","score":30,"summary":"s","issues":[]}`)
+	require.Empty(t, plain.Dims)
+
+	// 全脏 dims：清洗后 nil（无 dims ≠ 解析失败）。
+	dirty := parseAudit(`{"verdict":"pass","score":30,"summary":"s","dims":[{"key":"","score":3}],"issues":[]}`)
+	require.Empty(t, dirty.Dims)
 }

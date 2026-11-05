@@ -27,13 +27,24 @@ export interface AuditIssue {
   chapter_ids?: number[];
 }
 
+// 体检维度星级（与后端 pipeline.AuditDimScore 对应，P0-3 双轨评分打通）：
+// key=八维键（opening/fit/character/pacing/world/longArc/compliance/reader），
+// score=1-5 星（与正文八维星级表同源），note=一句话证据。
+export interface AuditDimScore {
+  key: string;
+  score: number;
+  note?: string;
+}
+
 // 体检结果（与后端 pipeline.AuditData 对应）：verdict=pass|needs_fix；
-// schema_version=产出时的 issue 契约版本（旧版数据缺省）。
+// schema_version=产出时的 issue 契约版本（旧版数据缺省）；dims=结构化维度星级
+// （全量契约专属可选字段，旧版/核心契约产出缺省）。
 export interface AuditData {
   verdict: string;
   score?: number;
   summary?: string;
   schema_version?: number;
+  dims?: AuditDimScore[];
   issues?: AuditIssue[];
 }
 
