@@ -104,7 +104,7 @@ func TestRewriteVoiceABE2E(t *testing.T) {
 	// —— 确定性部分：双臂提示词组装（先锁死唯一变量是 Voice 块，再烧 LLM 调用）——
 	item := RewriteItem{ID: "I2", Level: "P1", Area: "节奏", Desc: "开场拖沓、缺乏钩子——保留原有情节与信息点的前提下压缩开场、提前抛出金手指暗示"}
 	ch := chapter.Chapter{ID: 9, ReadingNumber: 1, Title: "第一章 废脉少年"}
-	taskBase := chapterRewritePrompt(1, item, ch, contextasm.ContextBlocks{})
+	taskBase := chapterRewritePrompt(1, item, ch, "", contextasm.ContextBlocks{})
 	bodyBlock := "\n\n【待重写章节正文】\n" + abSampleChapter +
 		"\n\n【输出要求】本环境没有任何工具可调用，禁止输出任何工具调用；" +
 		"请直接输出重写后的完整章节正文，只含叙事本身，不含章节号/标题/章末标记，不含任何解释、前后缀或代码块。"

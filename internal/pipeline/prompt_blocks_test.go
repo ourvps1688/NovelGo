@@ -85,7 +85,7 @@ func p0PromptCases() []p0PromptCase {
 			return fixPrompt(1, issues, "摘要", nil, b)
 		}, contextasm.PurposeFix},
 		{"chapter_rw", func(b contextasm.ContextBlocks) string {
-			return chapterRewritePrompt(1, item, ch, b)
+			return chapterRewritePrompt(1, item, ch, "", b)
 		}, contextasm.PurposeRewrite},
 		{"patrol", func(b contextasm.ContextBlocks) string {
 			return patrolPrompt(1, b)

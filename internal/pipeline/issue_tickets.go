@@ -132,7 +132,8 @@ func (s *Service) runIssueFixTickets(runID string, novelID int64) {
 		case r.FixType == FixTypeBody:
 			bodyItems = append(bodyItems, RewriteItem{
 				ID: r.IssueKey, Level: r.Level, Area: r.Area, Desc: r.Desc,
-				Chapters: decodeIssueChapterIDs(r.ChapterIDsJSON),
+				Chapters:    decodeIssueChapterIDs(r.ChapterIDsJSON),
+				TargetScope: r.TargetScope, Dimension: r.Dimension, Direction: r.Direction,
 			})
 		default:
 			ledgerIssues = append(ledgerIssues, AuditIssue{
@@ -144,8 +145,14 @@ func (s *Service) runIssueFixTickets(runID string, novelID int64) {
 	}
 
 	// 台账级修复（串行派发，FixLog 共享，台账变更入账）+ 正文级重定向重写一章一章。
+	// P2-1 定向路由：本 run 体检维度星级透传正文重写（低分维/issue 维度 → 方法论技能）。
+	dimsJSON := ctxt.Audit
+	if ctxt.AuditKind == "blueprint" {
+		dimsJSON = ctxt.BlueprintAudit
+	}
+	rewriteDims := parseAudit(dimsJSON).Dims
 	fixedLedger, skippedLedger := s.runLedgerFixTickets(ctx, runID, novelID, &ctxt, ledgerIssues)
-	fixedBody, skippedBody := s.runBodyRewriteTickets(ctx, runID, novelID, bodyItems)
+	fixedBody, skippedBody := s.runBodyRewriteTickets(ctx, runID, novelID, bodyItems, rewriteDims)
 
 	// 收口：修复轮数 +1（工单轮次统计与增量复验分轮，R5-2 起只由工单修复收口递增），
 	// 蓝图漂移巡检（G3，非阻断）结论写入 DriftReport 持久化，广播修复完成。
@@ -270,8 +277,9 @@ func (s *Service) runLedgerFixTickets(ctx context.Context, runID string, novelID
 
 // runBodyRewriteTickets 执行本 run 正文级工单的定向章节重写（#240）：resolveRewriteChapters
 // 定位真实章节，对每章派发 chapter-rewrite（整章重写）；成功→fixed，失败→skipped 留原因。
+// dims 透传给重写提示词做 P2-1 方法论定向路由（空=通用口径）。
 // 返回已修复数/已跳过数。
-func (s *Service) runBodyRewriteTickets(ctx context.Context, runID string, novelID int64, items []RewriteItem) (int, int) {
+func (s *Service) runBodyRewriteTickets(ctx context.Context, runID string, novelID int64, items []RewriteItem, dims []AuditDimScore) (int, int) {
 	if len(items) == 0 {
 		return 0, 0
 	}
@@ -293,7 +301,7 @@ func (s *Service) runBodyRewriteTickets(ctx context.Context, runID string, novel
 		}
 		ok := true
 		for _, ch := range chapters {
-			if rerr := s.executeChapterRewrite(ctx, runID, novelID, it, ch); rerr != nil {
+			if rerr := s.executeChapterRewrite(ctx, runID, novelID, it, ch, dims); rerr != nil {
 				s.logger.Warn("工单修复：章节重写失败", "run_id", runID, "issue", it.ID, "chapter_id", ch.ID, "err", rerr)
 				s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusSkipped, "章节重写失败："+rerr.Error())
 				ok = false

@@ -92,7 +92,7 @@ func TestFixAndRewritePromptsCarryEstablishedFacts(t *testing.T) {
 	require.Contains(t, fixPrompt(1, issues, "摘要", nil, contextasm.ContextBlocks{}), "待修复的 issue 清单", "空注入应保持旧文案")
 
 	rp := chapterRewritePrompt(1, RewriteItem{ID: "I2", Level: "P1", Area: "节奏", Desc: "拖沓"},
-		chapter.Chapter{ID: 9, ReadingNumber: 3, Title: "第三章"}, contextasm.ContextBlocks{Facts: bibleMarker})
+		chapter.Chapter{ID: 9, ReadingNumber: 3, Title: "第三章"}, "", contextasm.ContextBlocks{Facts: bibleMarker})
 	require.Contains(t, rp, "【已冻结卷既定事实（系列圣经快照）】")
 	require.Contains(t, rp, bibleMarker)
 

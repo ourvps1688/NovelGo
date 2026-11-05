@@ -325,7 +325,7 @@ func TestServiceExecuteChapterRewriteTripGuarded(t *testing.T) {
 	forceProviderTrip(t)
 	calls := countSkillCalls(svc)
 
-	err := svc.executeChapterRewrite(ctx, "run-x", novelID, RewriteItem{ID: "I1"}, chapter.Chapter{ID: 1})
+	err := svc.executeChapterRewrite(ctx, "run-x", novelID, RewriteItem{ID: "I1"}, chapter.Chapter{ID: 1}, nil)
 	require.ErrorIs(t, err, errProviderTripped, "熔断下章节重写应返回哨兵错误（整循环中断语义）")
 	require.Zero(t, *calls, "熔断触发必须零 agent 派发（含章节重写）")
 }

@@ -1561,8 +1561,10 @@ func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, ite
 }
 
 // executeChapterRewrite 对单章派发章节重写 agent（chapter-rewrite 技能），按 body issue 整章重写。
-func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter) error {
-	prompt := chapterRewritePrompt(novelID, item, ch,
+// dims 是本 run 体检的维度星级（P2-1 定向路由输入）：低分维/issue 维度命中方法论技能时
+// 注入「方法论定向」块，否则提示词保持通用口径逐字不变。
+func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter, dims []AuditDimScore) error {
+	prompt := chapterRewritePrompt(novelID, item, ch, rewriteMethodBlock(dims, item.Dimension),
 		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite))
 	_, err := s.dispatchSkill(ctx, "chapter-rewrite", SkillInput{
 		NovelID:   novelID,
@@ -1578,17 +1580,22 @@ func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novel
 }
 
 // chapterRewritePrompt 构造单章重写的任务提示：注入章节定位信息与要解决的正文级 issue。
-// blocks 按 Facts→Voice→Intent 顺序尾部装配（P0 §0.5 rewrite 三块全注）；
+// methodBlock 是「方法论定向」块（P2-1，低分维/issue 维度命中技能时非空；空串=通用口径
+// 逐字不变，缺省不模板）；blocks 按 Facts→Voice→Intent 顺序尾部装配（P0 §0.5 rewrite 三块全注）；
 // 冻结快照非空时重写须在既定事实上展开，不得写回冻结卷。
-func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, blocks contextasm.ContextBlocks) string {
-	return fmt.Sprintf(
+func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, methodBlock string, blocks contextasm.ContextBlocks) string {
+	prompt := fmt.Sprintf(
 		"本书 novel_id=%d。请整章重写以下章节以解决正文级签约体检问题：\n"+
 			"- 第 %d 章（chapter_id=%d，标题：%s）— 问题 %s[%s] %s：%s\n\n"+
 			"要求：用 edit 工具传 full_replace=true 把该章**整章正文**替换为重写后的版本，真正解决上述问题"+
 			"（如立人设 / 补爽点 / 修节奏 / 兑现伏笔），保持与前后章节及台账（角色/弧线/时间线/读者认知）一致；"+
 			"正文格式遵守规范：无破折号「——」、无序号段落分隔符、无 AI 味硬伤，正文只含叙事不含章节号/标题/章末标记。",
 		novelID, ch.ReadingNumber, ch.ID, ch.Title, item.ID, item.Level, item.Area, item.Desc,
-	) + blocks.Render(contextasm.PurposeRewrite)
+	)
+	if methodBlock != "" {
+		prompt += "\n\n" + methodBlock
+	}
+	return prompt + blocks.Render(contextasm.PurposeRewrite)
 }
 
 // runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：
