@@ -2737,13 +2737,10 @@ func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string,
 	b, _ := json.Marshal(targets)
 	text := fmt.Sprintf("本书 novel_id=%d。本轮为修复后的**增量复验**（L1，只验已修复项，不重审全书）："+
 		"以下是刚修复的问题清单（JSON，共 %d 条，含修过的作用域章节与修复摘要），请逐项定点复验修复是否真正生效：\n%s\n\n"+
-		"复验方法：只对清单内问题核对其**修过的作用域**（按 chapters 读相关章节段落 / 用 get_* 读对应台账条目，"+
-		"有 fix_note 时按它指引的改动点核对）；ok=true 仅当问题确已解决且没引入新矛盾，修歪了/只改了一半 → ok=false 并在 note 一行说明。"+
-		"**不要**全书通读、**不要**评分、**不要**报告清单外的新问题（新问题由后续全量体检/深审兜底）、**不要**做任何写操作。"+
-		"最终回复末尾**必须**附一个 ```json 代码块上报复验回执，格式："+
-		verifyReceiptFormatLine()+"——"+
-		"verified 逐条给出清单内问题的复验判定（id 对应清单 issue id，ok 为 true/false，note 为一行复验结论）；"+
-		"summary 为一句话复验小结；未列入回执的项视为未复验，将在后续复验轮次再次核对，请如实上报。",
+		"复验方法：本提示词已内联【本次复验语料】（相关章正文+台账快照，见下）——**直接通读语料**逐项核对修过的作用域"+
+		"（有 fix_note 时按它指引的改动点核对），**不要调用任何工具**（read / get_* / search 均不可用，也无需使用）；"+
+		"ok=true 仅当问题确已解决且没引入新矛盾，修歪了/只改了一半 → ok=false 并在 note 一行说明。"+
+		"**不要**全书通读、**不要**评分、**不要**报告清单外的新问题（新问题由后续全量体检/深审兜底）、**不要**做任何写操作。",
 		novelID, len(targets), b)
 	if len(ledgerChanges) > 0 {
 		text += ledgerChangeVerifyBlock(ledgerChanges)
@@ -2751,15 +2748,23 @@ func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string,
 	if propagation != "" {
 		text += propagation
 	}
+	// 输出从简约束放在末尾（紧邻回执格式要求，降低思维块膨胀）：回执是小 JSON，
+	// 推理长篇无收益，输出 token 有硬顶（verifyMaxTokens），从简写才不会被截断。
+	text += "\n**输出从简**：直接给结论，正文说明不超过 3 句，每条 note 一行、summary 一句，不要长篇推理。" +
+		"最终回复末尾**必须**附一个 ```json 代码块上报复验回执，格式：" +
+		verifyReceiptFormatLine() + "——" +
+		"verified 逐条给出清单内问题的复验判定（id 对应清单 issue id，ok 为 true/false，note 为一行复验结论）；" +
+		"summary 为一句话复验小结；未列入回执的项视为未复验，将在后续复验轮次再次核对，请如实上报。"
 	return text + blocks.Render(contextasm.PurposeAudit)
 }
 
 // ledgerChangeVerifyBlock 渲染「台账修改下游影响核对」块（R2b-7 §8.3-3）：复验除逐项
 // 定点外，同步核对本轮台账修改是否破坏下游既有事实（改 A 处台账导致 B 处不自洽）。
+// 证据同样在【本次复验语料】台账快照内，核对只读语料、不取工具（2026-11-05 二次提速）。
 func ledgerChangeVerifyBlock(notes []string) string {
 	var b strings.Builder
 	b.WriteString("\n\n【本轮台账变更清单（修复动过台账）】除逐项定点复验外，请同步核对这些台账修改的" +
-		"下游影响：用 get_* 读被改台账条目及其涉及的章节/关联条目，确认修改没有破坏下游既有事实；" +
+		"下游影响：对照【本次复验语料】的台账快照与相关章正文，确认修改没有破坏下游既有事实；" +
 		"若发现某条台账修改导致下游不自洽，将其最相关的已修复问题标 ok=false 并在 note 一行说明：\n")
 	for _, n := range notes {
 		b.WriteString("- " + n + "\n")

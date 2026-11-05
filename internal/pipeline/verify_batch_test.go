@@ -114,6 +114,46 @@ func TestVerifyBatchInlinesCorpus(t *testing.T) {
 	require.Contains(t, got, verifyReceiptFormatLine(), "复验回执契约格式串照常在提示词内")
 }
 
+// TestVerifyBatchZeroToolsAndLeanPrompt 验收复验二次提速（2026-11-05）的三个收紧点：
+// ① 工具零暴露（Whitelist 空集——schema 不给工具，调用结构性不可能，单轮必出回执）；
+// ② 提示词不再教工具取数（旧「用 get_* 读台账」与语料块禁令自相矛盾，曾诱导首轮调工具
+//
+//	烧轮）；③ 预算与任务体量同级（轮数 ≤2、输出 ≤10k token，防思维膨胀拖满单批预算）。
+func TestVerifyBatchZeroToolsAndLeanPrompt(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	var mu sync.Mutex
+	var gotIn SkillInput
+	svc.skillRunner = func(_ context.Context, _ string, input SkillInput) (SkillOutput, error) {
+		mu.Lock()
+		gotIn = input
+		mu.Unlock()
+		return SkillOutput{Text: "```json\n" +
+			`{"verified":[{"id":"I1","ok":true,"note":"已修复"}],"summary":"1 项确认"}` +
+			"\n```"}, nil
+	}
+
+	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-d", 0, []AuditIssue{
+		{ID: "I1", Level: "P1", Area: "情节", Desc: "前后矛盾", FixType: FixTypeLedger},
+	}))
+	_, err := svc.VerifyIssueTickets(ctx, 7, []IssueTicketRef{{RunID: "run-d", IssueKey: "I1"}})
+	require.NoError(t, err)
+
+	mu.Lock()
+	in := gotIn
+	mu.Unlock()
+	require.NotNil(t, in.Whitelist, "Whitelist 非 nil 才会覆盖默认白名单")
+	require.Empty(t, in.Whitelist, "证据内联 → 工具零暴露（空集）")
+	require.LessOrEqual(t, in.MaxTurns, 2, "预算与任务体量同级：单批轮数 ≤2")
+	require.LessOrEqual(t, in.MaxTokens, 10000, "预算与任务体量同级：单轮输出 ≤10k token")
+	require.NotContains(t, in.Prompt, "用 get_*", "提示词不得再教工具取数（与禁令自相矛盾）")
+	require.NotContains(t, in.Prompt, "按 chapters 读", "提示词不得再教工具取数")
+	require.Contains(t, in.Prompt, "不要调用任何工具", "方法论明示禁工具")
+	require.Contains(t, in.Prompt, "输出从简", "输出从简约束（压思维块膨胀）")
+}
+
 // TestChunkIssuesAndCapHeadTail 切批与长文掐头尾的纯函数边界。
 func TestChunkIssuesAndCapHeadTail(t *testing.T) {
 	rows := []PipelineIssue{{IssueKey: "I1"}, {IssueKey: "I2"}, {IssueKey: "I3"}, {IssueKey: "I4"}, {IssueKey: "I5"}}

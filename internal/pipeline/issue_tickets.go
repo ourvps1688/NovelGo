@@ -639,7 +639,7 @@ func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, 
 	}
 	corpus := s.buildVerifyCorpus(ctx, novelID, src, nums)
 	// 单批独立墙钟预算：某批卡住（供应商静默/慢轮）单独超时复位 pending，后续批次继续；
-	// 墙钟预算（25min）宽于 thinking 模型 9 分钟空闲看门狗（真死连接由看门狗先斩断，
+	// 墙钟预算（15min）宽于 thinking 模型 9 分钟空闲看门狗（真死连接由看门狗先斩断，
 	// 本预算兜「活着但慢」的轮次，见 detect.go）。
 	tctx, tcancel := context.WithTimeout(ctx, verifyTicketTimeout)
 	defer tcancel()
@@ -648,6 +648,10 @@ func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, 
 		Prompt:    verifyPrompt(novelID, targets, ledgerNotes, propBlock, contextasm.ContextBlocks{}) + corpus,
 		MaxTurns:  verifyMaxTurns,
 		MaxTokens: verifyMaxTokens,
+		// 证据已全部内联（corpus）→ 工具零暴露：不给模型任何工具 schema，调用结构性
+		// 不可能，单轮必出回执（杜绝「提示词禁工具、schema 又给工具」的空转，2026-11-05
+		// 复验二次提速）。
+		Whitelist: []string{},
 		SessionID: "pipeline:issue-tickets:verify:" + uuid.NewString(),
 		RunID:     runID,
 	})

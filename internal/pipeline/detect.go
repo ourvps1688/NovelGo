@@ -205,29 +205,28 @@ var verifyCallTimeout = 120 * time.Minute
 // 此处给每批单独的预算，超时的批单独复位 pending 并让后续批次继续，避免「一批卡死、
 // 整轮无进展」。
 //
-// 取值纪律（关键）：必须 > thinkingIdleTimeout（9min，见 internal/llm/stream.go）。原因：
-// 思考模型在「活跃产出推理 token」时相邻 chunk 间隔可能远小于 9min，但单轮墙钟可累计超过
-// 9min 才出回执——此时空闲看门狗不会触发（它只在「整段静默」时斩断，专杀死连接），真正
-// 需要的是给这种「活着但慢」的轮次足够的墙钟；若此处 ≤ 9min，思考模型复验常被墙钟提前斩断
-// 而报 context deadline exceeded（如 #13 设料自洽复验）。
-// 15min 实测仍不够（P1-C，2026-11-03 签约卡死复盘）：供应商一次 9min 空闲超时（gotBytes
-// 可重试）后再次思考输出，累计即可突破 15min，正常慢轮被墙钟误伤。放宽到 25min 可容纳
-// 「9min 空闲超时 + 退避重试 + 再一轮思考」的叠加情形，同时仍由 9min 空闲看门狗兜底真死
-// 连接、由 verifyCallTimeout(120min) 兜住整轮失控。超时的工单单独标「超时未验证」复位
-// pending（note 明示，见 verifyOneTicket），后续工单继续。
-var verifyTicketTimeout = 25 * time.Minute
+// 取值纪律（关键）：必须 > thinkingIdleTimeout（9min，见 internal/llm/stream.go），保住
+// 「真死连接由 9min 空闲看门狗先斩断、本预算只兜活着但慢的轮次」的分工不变式。
+// 2026-11-05 复验二次提速后重新对齐算术：健康调用 = verifyMaxTurns(2) × verifyMaxTokens(10k)
+// ≈ ≤7min（50 token/s 思维）+ prefill/调度余量；15min 兜「9min 空闲超时 + 可重试重发 +
+// 一轮慢思考」的叠加（保留 P1-C 复盘要求的容忍），异常批比旧 25min 提前 40% 收口并给
+// 清晰 note。旧值 25min 是工具时代 3 轮×24k（最坏 24min 思维）的产物——实测真有批次
+// 烧满 25min 未出回执（2026-11-05 I7），预算必须与任务体量同级。
+var verifyTicketTimeout = 15 * time.Minute
 
 // verifyMaxTurns 是单批复验 LLM 调用的轮数上限：2026-11-05 复验终极提速（语料内联）后，
-// 证据已在提示词内联、禁止工具往返（verify_corpus.go），一轮推理即可出多目标复验回执——
-// 3 轮=1 次出回执 + 2 轮余量（防偶发工具冲动/单轮重试）。旧值 12 服务于「agent 逐章
-// read 取数」的多轮取数设计（多章节工单 6 轮不够的历史教训），随取数与推理分离一并退役。
-const verifyMaxTurns = 3
+// 证据已在提示词内联、工具零暴露（verify_corpus.go + SkillInput.Whitelist 空集），
+// 一轮推理即可出多目标复验回执——2 轮=1 次出回执 + 1 轮格式容错。旧值 12 服务于
+// 「agent 逐章 read 取数」的多轮取数设计（多章节工单 6 轮不够的历史教训），随取数与
+// 推理分离一并退役；3 轮（工具时代余量）曾让「调工具+长思考」连烧 3 轮拖满 25min。
+const verifyMaxTurns = 2
 
-// verifyMaxTokens 是单次复验 LLM 调用的输出 token 上限（0=模型默认）：复验回执很短，
-// 但思考模型思维块可膨胀（巡检实测单次 ~35k output_tokens 空转）；24k 上限压住思维膨胀
-// （SkillInput.MaxTokens→MiMo max_completion_tokens=思考+回答总量），防「活着但慢」
-// 空转拖满单批预算。
-const verifyMaxTokens = 24000
+// verifyMaxTokens 是单次复验 LLM 调用的输出 token 上限（0=模型默认）：复验回执很短
+// （多目标回执 ~300 token），但思考模型思维块可膨胀（巡检实测单次 ~35k output_tokens
+// 空转）；10k 上限 ≈20 倍回执余量，把单轮思维硬顶在 ~3.5min（50 token/s）
+// （SkillInput.MaxTokens→MiMo max_completion_tokens=思考+回答总量）。旧值 24k 允许
+// 单轮 8min 思维、3 轮 24min 空转（I7 烧满预算实况），与回执任务体量严重失配。
+const verifyMaxTokens = 10000
 
 // verifyBatchSize 是同批合验的工单数上限：verifyPrompt/复验回执契约原生支持多目标
 // （[]verifyTarget + 逐 id 回执），同批合验把 N 次调用压到 ⌈N/verifyBatchSize⌉ 次。

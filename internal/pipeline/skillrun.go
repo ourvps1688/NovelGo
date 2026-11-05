@@ -89,9 +89,12 @@ func skillAgentTypeString(name string) string {
 
 // SkillInput 是 RunSkill 的输入：编排给该 skill 的具体任务 + 轮数上限 + 落库 session。
 type SkillInput struct {
-	NovelID   int64
-	Prompt    string
-	Whitelist []string // 预留：RunSkill 内部统一使用 agentcfg.BlueprintAgent 白名单
+	NovelID int64
+	Prompt  string
+	// Whitelist 非 nil 时覆盖默认工具白名单：传空集 = 工具零暴露（不给模型任何工具
+	// schema，调用结构性不可能）。signability-verify 等「证据已内联」的调用传空集，
+	// 单轮必出回执；nil 保持默认（skillAgentType 对应白名单）。
+	Whitelist []string
 	MaxTurns  int
 	// MaxTokens 单次 LLM 调用输出 token 上限（0 = 模型默认）。巡检等单调用重任务用它
 	// 压住思考模型的思维块膨胀，保证按时收口（详见 agent.RunOptions.MaxTokens）。
@@ -146,12 +149,20 @@ func RunSkill(ctx context.Context, ag *agent.Agent, skillStore *skill.Store, llm
 		sessionID = "pipeline:" + uuid.NewString()
 	}
 
+	allowed := agentcfg.Allowlist(at)
+	if input.Whitelist != nil {
+		allowed = make(map[string]bool, len(input.Whitelist))
+		for _, t := range input.Whitelist {
+			allowed[t] = true
+		}
+	}
+
 	opts := agent.RunOptions{
 		TurnID:       1,
 		SessionID:    sessionID,
 		NovelID:      input.NovelID,
 		Messages:     msgs,
-		AllowedTools: agentcfg.Allowlist(at),
+		AllowedTools: allowed,
 		Model:        model,
 		ProviderName: providerName,
 		AgentType:    skillAgentTypeString(name),
