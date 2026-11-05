@@ -67,3 +67,9 @@
 - fail-fast（5775990b）：classifyPatrolFailure 区分 idle_timeout/DeadlineExceeded 给清晰「供应商无响应/半死连接」提示；agent idle EOF/重置分支计入 idleTimeouts 堵 idleRetryCap 漏检。
 - 张力项落工单（2026-11-03, 23d6e19f/58d275e2）：成功路径 ReplaceIssues 按 run 整批落 pipeline_issues（round=0，pending）；失败/拒绝路径不落不清。前端巡检卡片带**单条**「去修复/复验」（复用工单闭环，人工触发；去修复=单条清理内容发 chat+标修复中，无工单退化纯聊天）。「只报告不改写」保持 = 零自动流转/零修复派发。旧「巡检零工单」契约已废（三处测试断言改落 2 条 pending）。
 - 验证铁律：pipeline 包四道闸（gofmt/build/vet/golangci-lint webkit2_41）/ 全量 go test 全绿；新功能必带单测（parseChunkOutput/partial-sink/prescreen 共 11 个）。
+
+## P0-3 评分打通（勿回退，2026-11-05）
+- 6↔8 映射契约单源 `internal/review/score_mapping.go`（ScoreDimToAuditDims/StarsFromScore/JudgeToAuditScores/ScoreDimInfos）；前端零硬编码映射，全走 GetScoreTrend 的 judge_dims/audit_dim_order 快照。
+- 评分明细 append-only 表 chapter_score_events（source=new/full_replace/snapshot）；趋势数据双轨=事件主轨+chapters.quality_score 快照回填（attempts=1）。体检 JSON `dims` 数组为全量契约专属可选字段（蓝图/巡检不产出；AuditSchemaVersion 不 bump）；contract_test 三方同步时 wantFull 须含 AuditDimScore tags、blueprint wantCore 显式排除 dims。
+- P0 golden 基线有意演进：`go test ./internal/pipeline/ -run TestP0BaselineRegen -p0-update` 重定格后 git diff 复核只含预期句。
+- 趋势 API GetScoreTrend/GetChapterScoreHistory（internal/pipeline/score_trend.go，scoreTrendStores 从 s.store.db 兜底构造）；前端 ScoreTrendPanel 挂 DetectionWorkflowView 章节区恒挂（评分不依赖检测 run），queryKey=["score-trend"/"score-history", novelId(, chapterId)]。
