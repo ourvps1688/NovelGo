@@ -2134,6 +2134,34 @@
           "pending": "待检查",
           "skipped": "已跳过",
           "error": "检测失败"
+        },
+        "scoreTrend": {
+          "title": "评分趋势",
+          "desc": "6 维判官分与 8 维体检星同源对照，回答「这次重写到底提分了没有」。",
+          "empty": "暂无评分数据：全书尚无判官评分记录。",
+          "legendTitle": "判官六维 → 体检八维映射",
+          "chartScore": "曲线＝判官总分",
+          "chartFindings": "柱＝未修复发现",
+          "chartHint": "点击曲线节点切换章节，查看该章修复前后历史",
+          "historyTitle": "修复前后对比",
+          "historyEmpty": "本章暂无评分历史",
+          "attempt": "第 {{n}} 次",
+          "judgeTitle": "6 维判官分",
+          "auditTitle": "8 维体检星",
+          "contributed": "来自 {{dims}}",
+          "sources": {
+            "new": "新写评分",
+            "full_replace": "全文重写",
+            "snapshot": "历史快照"
+          },
+          "judgeDims": {
+            "word_count": "字数达标度",
+            "plot_advance": "情节推进",
+            "emotion_hook": "情绪流与爽点",
+            "consistency": "人设与一致性",
+            "deai": "去AI味",
+            "taboo": "禁忌合规"
+          }
         }
       },
       "writingConfig": "写作评分配置",

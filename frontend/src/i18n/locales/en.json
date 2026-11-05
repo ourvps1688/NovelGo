@@ -2174,6 +2174,34 @@
           "pending": "Pending",
           "skipped": "Skipped",
           "error": "Detection failed"
+        },
+        "scoreTrend": {
+          "title": "Score Trend",
+          "desc": "6-dim judge scores vs 8-dim audit stars from the same source — did this rewrite actually raise the score?",
+          "empty": "No score data yet: no judge score records in this book.",
+          "legendTitle": "Judge 6-dim → Audit 8-dim mapping",
+          "chartScore": "Line = judge overall",
+          "chartFindings": "Bars = open findings",
+          "chartHint": "Click a chart point to switch chapter and view its before/after fix history",
+          "historyTitle": "Before/after fix comparison",
+          "historyEmpty": "No score history for this chapter",
+          "attempt": "Attempt {{n}}",
+          "judgeTitle": "6-dim judge scores",
+          "auditTitle": "8-dim audit stars",
+          "contributed": "from {{dims}}",
+          "sources": {
+            "new": "New chapter",
+            "full_replace": "Full rewrite",
+            "snapshot": "Historical snapshot"
+          },
+          "judgeDims": {
+            "word_count": "Word count",
+            "plot_advance": "Plot advance",
+            "emotion_hook": "Emotion & hooks",
+            "consistency": "Consistency",
+            "deai": "De-AI-ness",
+            "taboo": "Taboo compliance"
+          }
         }
       },
       "writingConfig": "Writing score config",

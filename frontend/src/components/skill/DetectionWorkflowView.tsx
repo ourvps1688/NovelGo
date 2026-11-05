@@ -35,6 +35,7 @@ import type { AuditData } from "@/types/pipeline";
 import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
 import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
+import ScoreTrendPanel from "./ScoreTrendPanel";
 import { VERDICT_KEYS } from "./verdictKeys";
 
 type DetectKind = "chapter" | "volume" | "structure";
@@ -393,6 +394,16 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               </div>
             </div>
           )
+        ) : null}
+
+        {/* P0-3 评分打通：章节区恒挂趋势面板（评分来自判官评分明细，不依赖检测 run），
+            曲线点选章联动上方 scope 选择器，单章修复前后历史回答「提分了没有」。 */}
+        {kind === "chapter" && chapterOpts.length > 0 ? (
+          <ScoreTrendPanel
+            novelId={novelId}
+            chapterId={effChapterId}
+            onSelectChapter={setScopeId}
+          />
         ) : null}
       </div>
 
