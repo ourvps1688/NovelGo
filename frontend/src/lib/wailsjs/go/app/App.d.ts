@@ -50,6 +50,8 @@ export function CancelExtract(arg1:string):Promise<void>;
 
 export function CancelExtractPattern(arg1:number):Promise<void>;
 
+export function CancelIssueVerify(arg1:number,arg2:string):Promise<boolean>;
+
 export function CancelQuit():Promise<void>;
 
 export function Chat(arg1:app.ChatInput):Promise<app.ChatResult>;
@@ -389,5 +391,3 @@ export function UpdateVolume(arg1:number,arg2:number,arg3:string):Promise<void>;
 export function UpsertVoiceDimension(arg1:app.UpsertVoiceDimensionInput):Promise<voice.Entry>;
 
 export function VerifyIssueTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<pipeline.IssueVerifySummary>;
-
-export function CancelIssueVerify(arg1:number,arg2:string):Promise<boolean>;
