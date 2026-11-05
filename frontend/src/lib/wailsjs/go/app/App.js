@@ -370,6 +370,10 @@ export function GetPlatform() {
   return window['go']['app']['App']['GetPlatform']();
 }
 
+export function GetPlatformReconciliation(arg1) {
+  return window['go']['app']['App']['GetPlatformReconciliation'](arg1);
+}
+
 export function GetPreferences(arg1) {
   return window['go']['app']['App']['GetPreferences'](arg1);
 }

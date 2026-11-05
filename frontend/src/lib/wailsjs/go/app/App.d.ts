@@ -216,6 +216,8 @@ export function GetPipelineState(arg1:number):Promise<pipeline.PipelineRun>;
 
 export function GetPlatform():Promise<Record<string, any>>;
 
+export function GetPlatformReconciliation(arg1:number):Promise<pipeline.PlatformReconciliation>;
+
 export function GetPreferences(arg1:number):Promise<app.PreferenceResult>;
 
 export function GetReaderPerspectives(arg1:number):Promise<Array<reader.ReaderPerspective>>;

@@ -104,3 +104,32 @@ func TestJudgeToAuditScores(t *testing.T) {
 		}
 	}
 }
+
+// TestAuditDimJudgeSources 反查映射：来源判官维按 scoringDimensions 规范顺序，
+// fit 无源返回空切片。
+func TestAuditDimJudgeSources(t *testing.T) {
+	got := AuditDimJudgeSources(AuditDimPacing)
+	want := []string{"word_count", "plot_advance"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AuditDimJudgeSources(pacing) = %v, want %v", got, want)
+	}
+	if got := AuditDimJudgeSources(AuditDimFit); len(got) != 0 {
+		t.Fatalf("fit 应无判官来源，got %v", got)
+	}
+	if got := AuditDimJudgeSources("nope"); len(got) != 0 {
+		t.Fatalf("未知维应空，got %v", got)
+	}
+}
+
+// TestAuditDimLabelsCoversAllDims 标签表全覆盖八维且非空。
+func TestAuditDimLabelsCoversAllDims(t *testing.T) {
+	labels := AuditDimLabels()
+	for _, k := range AuditDimOrder {
+		if v, ok := labels[k]; !ok || v == "" {
+			t.Fatalf("体检维 %s 缺中文标签", k)
+		}
+	}
+	if len(labels) != len(AuditDimOrder) {
+		t.Fatalf("标签数 %d ≠ 维数 %d", len(labels), len(AuditDimOrder))
+	}
+}

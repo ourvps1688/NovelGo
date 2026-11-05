@@ -2729,6 +2729,22 @@ export namespace personasetting {
 
 export namespace pipeline {
 	
+	export class AuditDimScore {
+	    key: string;
+	    score: number;
+	    note?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuditDimScore(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.key = source["key"];
+	        this.score = source["score"];
+	        this.note = source["note"];
+	    }
+	}
 	export class ChapterQualityArchive {
 	    chapter_id: number;
 	    reading_number: number;
@@ -3050,6 +3066,66 @@ export namespace pipeline {
 		    return a;
 		}
 	}
+	export class PlatformChapterDiag {
+	    chapter_id: number;
+	    reading_number: number;
+	    title: string;
+	    completion_rate?: number;
+	    retention_rate?: number;
+	    completion_drop: number;
+	    retention_drop: number;
+	    churn: boolean;
+	    scored: boolean;
+	    score: number;
+	    low_judge_dims: string[];
+	    low_audit_dims: string[];
+	    open_findings: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlatformChapterDiag(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chapter_id = source["chapter_id"];
+	        this.reading_number = source["reading_number"];
+	        this.title = source["title"];
+	        this.completion_rate = source["completion_rate"];
+	        this.retention_rate = source["retention_rate"];
+	        this.completion_drop = source["completion_drop"];
+	        this.retention_drop = source["retention_drop"];
+	        this.churn = source["churn"];
+	        this.scored = source["scored"];
+	        this.score = source["score"];
+	        this.low_judge_dims = source["low_judge_dims"];
+	        this.low_audit_dims = source["low_audit_dims"];
+	        this.open_findings = source["open_findings"];
+	    }
+	}
+	export class PlatformDimStat {
+	    dim: string;
+	    churn_low: number;
+	    churn_total: number;
+	    stable_low: number;
+	    stable_total: number;
+	    lift: number;
+	    judge_sources: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PlatformDimStat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dim = source["dim"];
+	        this.churn_low = source["churn_low"];
+	        this.churn_total = source["churn_total"];
+	        this.stable_low = source["stable_low"];
+	        this.stable_total = source["stable_total"];
+	        this.lift = source["lift"];
+	        this.judge_sources = source["judge_sources"];
+	    }
+	}
 	export class PlatformMetricRowView {
 	    reading_number: number;
 	    title: string;
@@ -3142,6 +3218,46 @@ export namespace pipeline {
 	        this.saved = this.convertValues(source["saved"], PlatformMetricView);
 	        this.skipped_lines = source["skipped_lines"];
 	        this.unmatched_numbers = source["unmatched_numbers"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PlatformReconciliation {
+	    chapters: PlatformChapterDiag[];
+	    dim_stats: PlatformDimStat[];
+	    book_audit_dims: AuditDimScore[];
+	    judge_dims: review.ScoreDimInfo[];
+	    audit_dim_order: string[];
+	    summary: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PlatformReconciliation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chapters = this.convertValues(source["chapters"], PlatformChapterDiag);
+	        this.dim_stats = this.convertValues(source["dim_stats"], PlatformDimStat);
+	        this.book_audit_dims = this.convertValues(source["book_audit_dims"], AuditDimScore);
+	        this.judge_dims = this.convertValues(source["judge_dims"], review.ScoreDimInfo);
+	        this.audit_dim_order = source["audit_dim_order"];
+	        this.summary = source["summary"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

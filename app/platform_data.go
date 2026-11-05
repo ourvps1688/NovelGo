@@ -40,3 +40,11 @@ func (a *App) DeletePlatformMetrics(novelID int64) error {
 	}
 	return a.pipeline.DeletePlatformMetrics(a.ctx, novelID)
 }
+
+// GetPlatformReconciliation 返回「流失章 × 低分维」交叉诊断数据包（P1-2）。
+func (a *App) GetPlatformReconciliation(novelID int64) (*pipeline.PlatformReconciliation, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetPlatformReconciliation(a.ctx, novelID)
+}

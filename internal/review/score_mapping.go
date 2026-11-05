@@ -68,6 +68,36 @@ func ScoreDimInfos() []ScoreDimInfo {
 	return out
 }
 
+// AuditDimLabels 返回 8 维体检维度键 → 中文名（服务端摘要文案用，与
+// signability-audit.md 八维名对齐；前端展示标签仍以 i18n 为准，本表只落摘要）。
+func AuditDimLabels() map[string]string {
+	return map[string]string{
+		AuditDimOpening:    "开篇过签力",
+		AuditDimFit:        "题材契合与差异化",
+		AuditDimCharacter:  "人设卖点",
+		AuditDimPacing:     "节奏与爽点密度",
+		AuditDimWorld:      "世界/设定自洽与卖点",
+		AuditDimLongArc:    "长线牵引",
+		AuditDimCompliance: "平台调性合规",
+		AuditDimReader:     "读者视角",
+	}
+}
+
+// AuditDimJudgeSources 返回投影到指定体检维的判官维键（scoringDimensions 规范顺序）；
+// 无源维度（如 fit）返回空切片。
+func AuditDimJudgeSources(auditKey string) []string {
+	out := []string{}
+	for _, d := range scoringDimensions {
+		for _, ad := range ScoreDimToAuditDims[d.Key] {
+			if ad == auditKey {
+				out = append(out, d.Key)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // StarsFromScore 把 0-100 的判官分归一为 1-5 星（与体检 1-5 同刻度）。
 // 阈值：<40→1，<55→2，<70→3，<85→4，其余 5；越界先裁剪到 0-100。
 func StarsFromScore(score int) int {
