@@ -19,6 +19,13 @@ export interface PlatformTemplate {
   labelEn: string;
   /** 偏好 content 全文（紧凑参数表） */
   content: string;
+  /**
+   * CheckerConfig 平台 profile 注册名（P0-1 一键配置，如 "qimao"）：
+   * 选中/切换/清除模板时同步写入 CheckerConfig.platform_profile，
+   * 武装 L0 平台三查（前 500 字爆点 opening_hook / 章长适配 chapter_length_fit /
+   * 爽点密度 beat_density）。无量化口径的平台不给（仅文案参考）。
+   */
+  checkerProfile?: string;
 }
 
 /** 平台约束偏好的固定分类名（与 LLM upsert_preference 的人类习惯对齐） */
@@ -79,8 +86,8 @@ const JJWXC = `【平台约束·晋江】
 const QIMAO = `【平台约束·七猫】
 签约模型：免费畅读 + 激励/广告，过签与推量逻辑类似番茄，以「完读率 / 留存」为先；节奏快、钩子密。
 节奏参数（覆盖 opening-chapters / pacing-control 默认）：
-- 首个冲突钩子窗口 hook_window_open = 400 字（前 400 字内出第一个钩子，极少铺垫）
-- 单章目标字数 = 1000–1800 字（短章高密度）
+- 首个冲突钩子窗口 hook_window_open = 500 字（前 500 字内出第一个钩子，极少铺垫）
+- 单章目标字数 = 1000–1500 字（短章高密度）
 - 章内微钩子间隔 micro_hook_interval = 800 字（每约 800 字一个悬念/进展点）
 - 允许纯铺垫章 allow_setup_chapters = 否（每章必须推进或给甜头，零容忍慢章）
 - 付费墙 aware = 否（无付费墙）
@@ -124,6 +131,7 @@ export const PLATFORM_TEMPLATES: PlatformTemplate[] = [
     label: "七猫",
     labelEn: "Qimao",
     content: QIMAO,
+    checkerProfile: "qimao",
   },
 ];
 

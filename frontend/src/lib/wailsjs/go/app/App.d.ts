@@ -32,6 +32,8 @@ import {skill} from '../models';
 import {search} from '../models';
 import {voice} from '../models';
 
+export function ApplyPlatformProfile(arg1:number,arg2:string):Promise<void>;
+
 export function ApproveRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
 
 export function ApproveTool(arg1:string,arg2:boolean,arg3:string):Promise<void>;

@@ -34,6 +34,9 @@ func TestClassifyMechanicalChecks(t *testing.T) {
 		{"死人出镜", "已死角色复活出镜", []string{quality.CheckDeadAppearance}},
 		{"战力越级", "境界碾压低阶越阶", []string{quality.CheckPowerUpset, quality.CheckPowerCrush}},
 		{"文风漂移", "语感笔调语调漂移", []string{quality.CheckStyleDrift}},
+		{"开篇爆点不足", "开篇切入点缺乏吸引力", []string{quality.CheckOpeningHook}},
+		{"章长不适配", "章长超出平台区间", []string{quality.CheckChapterLengthFit}},
+		{"爽点密度不足", "爽点稀疏看点不足", []string{quality.CheckBeatDensity}},
 	}
 	for _, c := range cases {
 		checks, ambiguous := classifyMechanicalChecks(c.area, c.desc, "")
@@ -107,6 +110,73 @@ func TestL0VerdictCoarseHitFallsBackToLLM(t *testing.T) {
 	require.True(t, decided)
 	require.False(t, verified)
 	require.Equal(t, []string{quality.CheckWordCount}, hit, "仅精确命中应入回执，粗粒度项不计")
+}
+
+// TestL0VerdictCoarsePlatformChecksHitFallsBackToLLM P0-1 粗粒度项（opening_hook/beat_density，
+// 近似词表口径）命中不臆测未修复，回落 LLM 复核原具体指向。
+func TestL0VerdictCoarsePlatformChecksHitFallsBackToLLM(t *testing.T) {
+	for _, check := range []string{quality.CheckOpeningHook, quality.CheckBeatDensity} {
+		eff := map[string]bool{check: true}
+		decided, verified, _ := l0Verdict([]quality.Finding{{Check: check}}, eff, true)
+		require.False(t, decided, "%s 命中应回落 LLM，不应判未修复", check)
+		require.False(t, verified)
+	}
+}
+
+// TestTryL0VerifyPlatformCheckGating 平台检查（P0-1）依赖齐备性门控：
+// 配置缺失→退回 LLM（不臆测修复状态）；配置齐备且达标→自动确认通过；
+// opening_hook 命中按粗粒度回落 LLM。
+func TestTryL0VerifyPlatformCheckGating(t *testing.T) {
+	svc := l0TestService(t)
+	ctx := context.Background()
+	require.NoError(t, svc.store.db.AutoMigrate(&quality.CheckerConfig{}))
+	ch := chapter.Chapter{NovelID: 1, SortOrder: 1, Title: "第一章"}
+	require.NoError(t, svc.store.db.Create(&ch).Error)
+
+	withBeat := func(novelID, chapterID int64) (string, bool) {
+		return strings.Repeat("文", 1500) + "打脸", true
+	}
+	// 未配置密度下限 → beat_density 不可判定 → 退回 LLM。
+	decided, _, _ := svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "爽点密度", Desc: "爽点密度不足", ChapterIDsJSON: "[1]"}, withBeat)
+	require.False(t, decided, "密度下限未配置应退回 LLM")
+
+	// 配置密度下限后爽点标记达标 → 自动确认通过（免 LLM）。
+	qstore := quality.NewStore(svc.store.db, slog.Default())
+	require.NoError(t, qstore.SaveCheckerConfig(ctx, &quality.CheckerConfig{
+		NovelID: 1, BeatDensityMin: 1.0,
+		TabooList: "[]", PremiseList: "[]", CheatList: "[]", ProtagonistList: "[]"}))
+	decided, verified, note := svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "爽点密度", Desc: "爽点密度不足", ChapterIDsJSON: "[1]"}, withBeat)
+	require.True(t, decided)
+	require.True(t, verified, "爽点标记达标应自动确认通过")
+	require.Contains(t, note, "自动确认通过")
+
+	// opening_hook：profile 未配置 → 退回 LLM。
+	flat := func(novelID, chapterID int64) (string, bool) {
+		return strings.Repeat("文", 1500), true
+	}
+	decided, _, _ = svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "开篇爆点", Desc: "开篇切入点缺乏吸引力", ChapterIDsJSON: "[1]"}, flat)
+	require.False(t, decided, "profile 未配置应退回 LLM")
+
+	// 配置七猫 profile 后：爆点不足命中 → 粗粒度回落 LLM（不臆测未修复）。
+	require.NoError(t, qstore.SaveCheckerConfig(ctx, &quality.CheckerConfig{
+		NovelID: 1, PlatformProfile: "qimao", BeatDensityMin: 1.0,
+		TabooList: "[]", PremiseList: "[]", CheatList: "[]", ProtagonistList: "[]"}))
+	decided, _, _ = svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "开篇爆点", Desc: "开篇切入点缺乏吸引力", ChapterIDsJSON: "[1]"}, flat)
+	require.False(t, decided, "opening_hook 命中应按粗粒度回落 LLM")
+
+	// 爆点达标章 → 自动确认通过。
+	withHook := func(novelID, chapterID int64) (string, bool) {
+		return "忽然，一具尸体浮了上来。没想到井底还有血。" + strings.Repeat("文", 1500) + "打脸", true
+	}
+	decided, verified, note = svc.tryL0Verify(ctx, 1, "r1",
+		PipelineIssue{Area: "开篇爆点", Desc: "开篇切入点缺乏吸引力", ChapterIDsJSON: "[1]"}, withHook)
+	require.True(t, decided)
+	require.True(t, verified, "爆点双窗口达标应自动确认通过")
+	require.Contains(t, note, "自动确认通过")
 }
 
 // TestTryL0VerifyRouting 验证各类「走原 LLM 复验路径」的守卫分支（decided=false）。

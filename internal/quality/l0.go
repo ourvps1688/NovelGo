@@ -7,7 +7,8 @@ package quality
 // 本文件落八项确定性检查：字数门槛、章尾钩子、AI 味套话、文风八键漂移、
 // 题材卡禁忌（R2b-3）、角色台账称呼混用/死人出镜（R2b-5，§9.2 表）、
 // 战力/境界数值序越级取胜/低阶碾压（R2b-6，§9.2 表）；
-// 开篇体检四查（P0-0，位次三查+章长区间）在 opening.go。
+// 开篇体检四查（P0-0，位次三查+章长区间）在 opening.go；平台三查（P0-1，
+// opening_hook/chapter_length_fit/beat_density）在 platform_checks.go。
 // 时间线/冻结事实等需要更多台账输入的 L0 项属后续扩充（提案 §4.2/§9.2）。
 
 import (
@@ -22,20 +23,23 @@ import (
 
 // L0 检查项标识单源（Summary.ByCheck 键与发现 Check 字段都取自此，禁两处各写一份）。
 const (
-	CheckEmptyChapter    = "empty_chapter"    // 空章
-	CheckWordCount       = "word_count"       // 字数偏短
-	CheckTailHook        = "tail_hook"        // 章尾钩子存在性
-	CheckAIFlavor        = "ai_flavor"        // AI 味套话（词表单源 internal/text/deslop.go）
-	CheckStyleDrift      = "style_drift"      // 文风八键漂移（P2 口径复用）
-	CheckTaboo           = "taboo"            // 题材卡禁忌清单命中（R2b-3，novel 级配置）
-	CheckNameDrift       = "name_drift"       // 称呼混用：同一角色 ≥2 种称呼形式同章出现（R2b-5）
-	CheckDeadAppearance  = "dead_appearance"  // 死人出镜：已死角色名/别名在正文出现（R2b-5）
-	CheckPowerUpset      = "power_upset"      // 越级取胜未见代价（R2b-6，战力/境界数值序）
-	CheckPowerCrush      = "power_crush"      // 低境界碾压高境界（R2b-6，战力/境界数值序）
-	CheckPremiseLate     = "premise_late"     // 开篇核心看点迟到/缺失（P0-0，前 500 字实体化）
-	CheckCheatLate       = "cheat_late"       // 金手指迟到/缺失（P0-0，前 800 字出场）
-	CheckProtagonistLate = "protagonist_late" // 主角首现过晚/缺失（P0-0，前 200 字入戏）
-	CheckOpeningLength   = "opening_length"   // 黄金三章章长偏离区间（P0-0，1000–1500 字）
+	CheckEmptyChapter     = "empty_chapter"      // 空章
+	CheckWordCount        = "word_count"         // 字数偏短
+	CheckTailHook         = "tail_hook"          // 章尾钩子存在性
+	CheckAIFlavor         = "ai_flavor"          // AI 味套话（词表单源 internal/text/deslop.go）
+	CheckStyleDrift       = "style_drift"        // 文风八键漂移（P2 口径复用）
+	CheckTaboo            = "taboo"              // 题材卡禁忌清单命中（R2b-3，novel 级配置）
+	CheckNameDrift        = "name_drift"         // 称呼混用：同一角色 ≥2 种称呼形式同章出现（R2b-5）
+	CheckDeadAppearance   = "dead_appearance"    // 死人出镜：已死角色名/别名在正文出现（R2b-5）
+	CheckPowerUpset       = "power_upset"        // 越级取胜未见代价（R2b-6，战力/境界数值序）
+	CheckPowerCrush       = "power_crush"        // 低境界碾压高境界（R2b-6，战力/境界数值序）
+	CheckPremiseLate      = "premise_late"       // 开篇核心看点迟到/缺失（P0-0，前 500 字实体化）
+	CheckCheatLate        = "cheat_late"         // 金手指迟到/缺失（P0-0，前 800 字出场）
+	CheckProtagonistLate  = "protagonist_late"   // 主角首现过晚/缺失（P0-0，前 200 字入戏）
+	CheckOpeningLength    = "opening_length"     // 黄金三章章长偏离区间（P0-0，1000–1500 字）
+	CheckOpeningHook      = "opening_hook"       // 开篇爆点密度不足（P0-1，平台 profile 武装）
+	CheckChapterLengthFit = "chapter_length_fit" // 章长不适配平台区间（P0-1，黄金三章外全书章）
+	CheckBeatDensity      = "beat_density"       // 爽点标记密度不足（P0-1，近似词表口径）
 )
 
 // DefaultTargetWords 是单章默认目标字数（与 identity 写作纪律同一口径：
@@ -128,6 +132,12 @@ type L0Input struct {
 	// Opening 是开篇体检规则（P0-0，CheckerConfig.Opening 投影）：
 	// nil 或三组关键词全空=整专项不检查（缺省=现行行为逐字一致）。
 	Opening *L0Opening
+	// Profile 是平台风格 profile（P0-1，CheckerConfig.Profile 投影）：nil=未配置=
+	// 平台三查不跑、开篇窗口/区间回落缺省常量（缺省=现行行为逐字一致）。
+	Profile *PlatformProfile
+	// BeatDensityMin 是生效爽点密度下限（次/章，CheckerConfig.EffectiveBeatDensityMin 口径）：
+	// 0=不检查（缺省=现行行为逐字一致）。
+	BeatDensityMin float64
 }
 
 // RunL0Checks 对单章跑 L0 全套确定性检查，返回指标全集与 C 系发现清单。
@@ -186,8 +196,12 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 	}
 
 	// 开篇体检（P0-0，opening.go）：位次三查仅第 1 章 + 黄金三章章长区间；
-	// 三组关键词未配置=整专项跳过零发现（缺省=现行行为逐字一致）。
+	// 三组关键词未配置且无平台 profile=整专项跳过零发现（缺省=现行行为逐字一致）。
 	raw = append(raw, openingFindings(in, st.WordCount)...)
+
+	// 平台三查（P0-1，platform_checks.go）：opening_hook/chapter_length_fit 由 profile 武装、
+	// beat_density 由生效密度下限武装；未配置=自然跳过零发现（缺省=现行行为逐字一致）。
+	raw = append(raw, platformFindings(in, st.WordCount)...)
 
 	// 角色台账检查（R2b-5，正向命中判定、宁缺勿错）：称呼混用先于死人出镜（固定顺序）。
 	// 无台账输入=两项自然跳过零发现（缺省=现行行为逐字一致）。

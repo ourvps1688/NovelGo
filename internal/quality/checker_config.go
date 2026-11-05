@@ -41,7 +41,12 @@ type CheckerConfig struct {
 	CheatList string `gorm:"column:cheat_list;type:text" json:"cheat_list"`
 	// ProtagonistList 是主角称呼（正名+常用别名，JSON 字符串数组）：第 1 章前 200 字内
 	// 主角须首现入戏（P0-0 开篇体检）；空清单=不检查（现行行为）。
-	ProtagonistList string    `gorm:"column:protagonist_list;type:text" json:"protagonist_list"`
+	ProtagonistList string `gorm:"column:protagonist_list;type:text" json:"protagonist_list"`
+	// PlatformProfile 是平台风格 profile 注册名（P0-1，如 "qimao"）：命名平台量化口径
+	// （窗口/区间/密度下限，platform_profile.go 注册表）武装 L0 平台三查（opening_hook/
+	// chapter_length_fit/beat_density）并参数化开篇体检窗口。空=未配置=不武装（缺省=
+	// 现行行为逐字一致）；未注册名 Validate 拒收。
+	PlatformProfile string    `gorm:"column:platform_profile;type:text" json:"platform_profile"`
 	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
@@ -60,6 +65,7 @@ func DefaultCheckerConfig(novelID int64) *CheckerConfig {
 		PremiseList:      "[]",
 		CheatList:        "[]",
 		ProtagonistList:  "[]",
+		PlatformProfile:  "",
 	}
 }
 
@@ -102,6 +108,24 @@ func (c *CheckerConfig) Opening() *L0Opening {
 	return o
 }
 
+// Profile 投影平台风格 profile（P0-1）：空/未注册名 → nil=平台三查不武装
+// （宁缺勿错，未知 profile 不改变任何检查口径）。
+func (c *CheckerConfig) Profile() *PlatformProfile {
+	return PlatformProfileByName(c.PlatformProfile)
+}
+
+// EffectiveBeatDensityMin 返回生效爽点密度下限（次/章）：显式列值 >0 优先，
+// 否则回落 profile 值（P0-1），皆无=0（不限=现行行为）。
+func (c *CheckerConfig) EffectiveBeatDensityMin() float64 {
+	if c.BeatDensityMin > 0 {
+		return c.BeatDensityMin
+	}
+	if p := c.Profile(); p != nil {
+		return p.BeatDensityMin
+	}
+	return 0
+}
+
 // parseStringList 解析 JSON 字符串数组（坏数据按空清单，宁缺勿错）。
 func parseStringList(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
@@ -141,13 +165,23 @@ func normalizeStringList(raw string) (string, error) {
 	return string(b), nil
 }
 
-// Validate 校验并归一化配置：负数拒绝；四组清单须为 JSON 字符串数组（TrimSpace 去空去重）。
+// Validate 校验并归一化配置：负数拒绝；四组清单须为 JSON 字符串数组（TrimSpace 去空去重）；
+// platform_profile 非空须为注册名（归一为注册名，别名如 "七猫" 归 "qimao"），未注册名拒收（P0-1）。
 func (c *CheckerConfig) Validate() error {
 	if c.BeatDensityMin < 0 {
 		return fmt.Errorf("检查器配置爽点密度下限不得为负（beat_density_min=%.2f）", c.BeatDensityMin)
 	}
 	if c.WindowN < 0 {
 		return fmt.Errorf("检查器配置窗口 N 不得为负（window_n=%d）", c.WindowN)
+	}
+	if name := normalizeProfileName(c.PlatformProfile); name != "" {
+		p := PlatformProfileByName(name)
+		if p == nil {
+			return fmt.Errorf("检查器配置平台 profile 未注册（platform_profile=%q）；当前仅支持：qimao（七猫）", c.PlatformProfile)
+		}
+		c.PlatformProfile = p.Name // 别名归一为注册名（"七猫"→"qimao"）
+	} else {
+		c.PlatformProfile = "" // 空白归一为空（=未配置=清除）
 	}
 	lists := []struct {
 		name string
@@ -187,6 +221,6 @@ func (s *Store) SaveCheckerConfig(ctx context.Context, cfg *CheckerConfig) error
 	}
 	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "novel_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"beat_density_min", "tail_hook_required", "window_n", "taboo_list", "premise_list", "cheat_list", "protagonist_list", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"beat_density_min", "tail_hook_required", "window_n", "taboo_list", "premise_list", "cheat_list", "protagonist_list", "platform_profile", "updated_at"}),
 	}).Create(cfg).Error
 }

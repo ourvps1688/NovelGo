@@ -69,6 +69,18 @@
   `chapter_length_fit`（章长 vs 平台区间）、`beat_density`（爽点标记密度，
   数据源依赖 P0-2）。
 - 前端 preference 平台模板从「文案参考」升格为「写入 CheckerConfig 的一键配置」。
+- **状态：已实施**（`quality/platform_profile.go`：PlatformProfile + 七猫 preset `qimao`
+  （章长 1000–1500、HookEarly 200/1、Hook 500/2、爽点密度下限 1 次/章、情绪段上限 300）
+  + 注册表（只发实证口径，未注册名 Validate 拒收）；CheckerConfig 增 `platform_profile` 列，
+  `Profile()`/`EffectiveBeatDensityMin()` 投影（显式列值>0 优先，否则回落 profile 值）；
+  L0 新增三查 `opening_hook`/`chapter_length_fit`/`beat_density`（platform_checks.go
+  近似词表，profile/密度下限武装，缺省不跑逐字一致；黄金三章外章长与 opening_length 零重叠）；
+  opening.go 窗口/区间 profile 化（profile 单独武装黄金三章硬查，关键词门控扩为
+  「任一关键词已配 || profile!=nil」）；三处 L0Input 构造点统一传投影（pipeline 两处顺带补
+  Opening 一致性修复）；复验 L0 快路径增三查分类/依赖门控，opening_hook/beat_density
+  按粗粒度命中回落 LLM；`upsert_checker_config` 增 `platform_profile`（nil=保持/空=清除/
+  未注册拒收），app 新增 `ApplyPlatformProfile` 绑定；前端七猫模板升格一键配置
+  （选中/切换/清除对称写 CheckerConfig，文案对齐 1000–1500/500 口径））。
 
 **P0-2 情绪账/节奏账落库（P0-1 的数据源，也是 dim4 的度量基础）**
 - 新表 `chapter_tension`（章→段落/beat 粒度的情绪值、张力值、爽点类型）：
@@ -119,7 +131,7 @@
 
 | 项 | 验收 |
 |---|---|
-| P0-1 | 七猫 profile 下：前 500 字爆点/章长/爽点密度三项 L0 可检，不达标出 finding |
+| P0-1 | 七猫 profile 下：前 500 字爆点/章长/爽点密度三项 L0 可检，不达标出 finding（已验收：TestQimaoProfileL0Acceptance） |
 | P0-2 | 每章落库 tension 曲线；拖沓段/爽点断档可被检测并落工单 |
 | P0-3 | 任一章可看 6 维↔8 维同源分与历史趋势 |
 | P1-1 | 一段编辑原话 → 自动产出维度 issue + 约束修订，可走既有修复闭环 |

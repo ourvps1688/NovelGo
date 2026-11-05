@@ -108,5 +108,50 @@ func TestCheckerConfigToolsIsolated(t *testing.T) {
 	require.Equal(t, 0, res.Data["window_n"], "跨书隔离")
 }
 
+// TestCheckerConfigToolsPlatformProfile platform_profile 语义（P0-1）：
+// nil=保持、空串=清除、别名归一落库、未注册名业务拒收不落库、get 回显。
+func TestCheckerConfigToolsPlatformProfile(t *testing.T) {
+	db := openCheckerConfigToolDB(t)
+	tc := checkerConfigTc(db)
+	ctx := context.Background()
+	up := &UpsertCheckerConfigTool{}
+	get := &GetCheckerConfigTool{}
+
+	// 缺省：未配置为空。
+	res, err := get.Execute(ctx, &GetCheckerConfigArgs{}, tc)
+	require.NoError(t, err)
+	require.Equal(t, "", res.Data["platform_profile"])
+
+	// 设置（别名 "七猫" 归一 "qimao" 落库）。
+	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{PlatformProfile: ptrStr("七猫")}, tc)
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.Equal(t, "qimao", res.Data["platform_profile"], "别名归一为注册名")
+	require.Equal(t, 1.0, res.Data["beat_density_effective"], "profile 密度下限经 EffectiveBeatDensityMin 回显")
+
+	// nil=保持现值。
+	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{WindowN: ptrInt(2)}, tc)
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.Equal(t, "qimao", res.Data["platform_profile"], "未给字段保持现值")
+	require.Equal(t, 2, res.Data["window_n"])
+
+	// 未注册名：业务拒收（Success=false），不落库。
+	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{PlatformProfile: ptrStr("fanqie")}, tc)
+	require.NoError(t, err)
+	require.False(t, res.Success)
+	res, err = get.Execute(ctx, &GetCheckerConfigArgs{}, tc)
+	require.NoError(t, err)
+	require.Equal(t, "qimao", res.Data["platform_profile"], "拒收后保持原值")
+
+	// 空串=清除（平台三查回到不武装）。
+	res, err = up.Execute(ctx, &UpsertCheckerConfigArgs{PlatformProfile: ptrStr("")}, tc)
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.Equal(t, "", res.Data["platform_profile"])
+	require.Equal(t, 0.0, res.Data["beat_density_effective"], "清除后密度下限回落 0（不限）")
+}
+
 func ptrFloat(v float64) *float64 { return &v }
 func ptrInt(v int) *int           { return &v }
+func ptrStr(v string) *string     { return &v }

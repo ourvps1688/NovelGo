@@ -27,6 +27,7 @@ type UpsertCheckerConfigArgs struct {
 	PremiseKeywords  []string `json:"premise_keywords" jsonschema:"description=开篇核心看点关键词（标题/简介卖点词，字符串数组）：第 1 章前 500 字内须实体化，迟到/缺失落 L0 发现 premise_late（P0-0 开篇体检）。给空数组=清空；不给=保持现值"`
 	CheatKeywords    []string `json:"cheat_keywords" jsonschema:"description=金手指/核心机制关键词（字符串数组）：第 1 章前 800 字内须出场，迟到/缺失落 L0 发现 cheat_late（P0-0 开篇体检）。给空数组=清空；不给=保持现值"`
 	ProtagonistNames []string `json:"protagonist_names" jsonschema:"description=主角称呼（正名+常用别名，字符串数组）：第 1 章前 200 字内主角须首现入戏，过晚/缺失落 L0 发现 protagonist_late（P0-0 开篇体检）。给空数组=清空；不给=保持现值"`
+	PlatformProfile  *string  `json:"platform_profile" jsonschema:"description=平台风格 profile 注册名（P0-1，如 \"qimao\"/\"七猫\"）：武装 L0 平台三查（前 500 字爆点 opening_hook/章长适配 chapter_length_fit/爽点密度 beat_density）并参数化开篇体检窗口。给空字符串=清除；不给=保持现值；未注册名拒收"`
 }
 
 // UpsertCheckerConfigTool 配置本书检查器参数（题材卡机制化）。
@@ -42,6 +43,7 @@ func (t *UpsertCheckerConfigTool) Description() string {
 		"- premise_keywords：开篇核心看点关键词（第 1 章前 500 字内须实体化，P0-0 开篇体检）\n" +
 		"- cheat_keywords：金手指/核心机制关键词（第 1 章前 800 字内须出场）\n" +
 		"- protagonist_names：主角称呼（第 1 章前 200 字内须首现入戏）\n" +
+		"- platform_profile：平台风格 profile 注册名（如 qimao=七猫口径：前 500 字爆点/章长 1000–1500/爽点密度下限；给空字符串=清除）\n" +
 		"局部覆盖：未给的字段保持现值。缺省=现行默认行为。"
 }
 func (t *UpsertCheckerConfigTool) Category() ToolCategory { return CategoryWritingAssistant }
@@ -69,6 +71,10 @@ func (t *UpsertCheckerConfigTool) Execute(ctx context.Context, args any, tc Tool
 	}
 	if a.WindowN != nil {
 		cfg.WindowN = *a.WindowN
+	}
+	// platform_profile（P0-1）：nil=保持现值、空串=清除、未注册名由 Validate 拒收。
+	if a.PlatformProfile != nil {
+		cfg.PlatformProfile = *a.PlatformProfile
 	}
 	// 四组清单同一语义：nil=保持现值、空数组=清空（序列化后落库，Validate 归一）。
 	for _, item := range []struct {
@@ -111,7 +117,7 @@ type GetCheckerConfigTool struct{}
 func (t *GetCheckerConfigTool) Name() string { return "get_checker_config" }
 func (t *GetCheckerConfigTool) Description() string {
 	return "查看本书检查器配置（题材卡机制化参数）：爽点密度下限/章尾钩子必需/窗口 N/禁忌清单/" +
-		"开篇体检关键词（核心看点/金手指/主角）。未配置时返回缺省（=现行默认行为）。"
+		"开篇体检关键词（核心看点/金手指/主角）/平台风格 profile（P0-1）。未配置时返回缺省（=现行默认行为）。"
 }
 func (t *GetCheckerConfigTool) Category() ToolCategory { return CategoryMemoryRetrieval }
 func (t *GetCheckerConfigTool) JSONSchema() json.RawMessage {
@@ -132,13 +138,15 @@ func (t *GetCheckerConfigTool) Execute(ctx context.Context, _ any, tc ToolContex
 // 各清单给解析后数组）。消费侧单源。
 func checkerConfigData(cfg *quality.CheckerConfig) map[string]any {
 	return map[string]any{
-		"beat_density_min":   cfg.BeatDensityMin,
-		"tail_hook_required": cfg.HookRequired(),
-		"window_n":           cfg.OverdueGrace(),
-		"taboo_list":         cfg.Taboos(),
-		"premise_keywords":   cfg.Premises(),
-		"cheat_keywords":     cfg.Cheats(),
-		"protagonist_names":  cfg.Protagonists(),
+		"beat_density_min":       cfg.BeatDensityMin,
+		"tail_hook_required":     cfg.HookRequired(),
+		"window_n":               cfg.OverdueGrace(),
+		"taboo_list":             cfg.Taboos(),
+		"premise_keywords":       cfg.Premises(),
+		"cheat_keywords":         cfg.Cheats(),
+		"protagonist_names":      cfg.Protagonists(),
+		"platform_profile":       cfg.PlatformProfile,
+		"beat_density_effective": cfg.EffectiveBeatDensityMin(),
 	}
 }
 

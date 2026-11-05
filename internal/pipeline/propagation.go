@@ -329,6 +329,9 @@ func (s *Service) l0RuleSweep(ctx context.Context, novelID int64) string {
 			TabooList:        cfg.Taboos(),
 			Characters:       chars,
 			PowerLevels:      levels,
+			Opening:          cfg.Opening(),
+			Profile:          cfg.Profile(),
+			BeatDensityMin:   cfg.EffectiveBeatDensityMin(),
 		})
 		if uerr := s.qualityStore.UpsertL0(ctx, &quality.ChapterQuality{
 			NovelID:       novelID,

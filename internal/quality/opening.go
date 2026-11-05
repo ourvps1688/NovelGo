@@ -13,8 +13,8 @@ package quality
 // 语义级部分（个人利害绑定/POV 聚焦/标题卖点实体化判读）由 L1 immersion_anchor
 // 检查项承接（quality/contract.go + chapter-ci）。
 //
-// 缺省纪律：三组关键词未配置=整专项不跑（现行行为逐字一致，CheckerConfig.Opening 投影）；
-// 阈值取七猫签约量化口径常量（平台 profile 机制化后可迁配置，P0-1）。
+// 缺省纪律：三组关键词未配置且无平台 profile=整专项不跑（现行行为逐字一致，CheckerConfig.Opening 投影）；
+// 阈值缺省取七猫签约量化口径常量，平台 profile（P0-1，CheckerConfig.Profile 投影）已配时取 profile 窗口/区间。
 
 import (
 	"fmt"
@@ -46,51 +46,79 @@ type L0Opening struct {
 }
 
 // openingFindings 开篇体检（P0-0）：位次三查仅作用于第 1 章（开篇章），
-// 章长区间查作用于黄金三章（阅读序号 1..openingChapterWindow）。
-// 未配置/序号缺失（ReadingNumber<=0）/空正文自然跳过（宁缺勿错）。
+// 章长区间查作用于黄金三章（阅读序号 1..chapterWindow）。
+// 门控：任一关键词已配 || profile 已配（P0-1：profile 单独武装黄金三章硬查）；
+// 序号缺失（ReadingNumber<=0）/空正文自然跳过（宁缺勿错）。
+// 窗口/区间：profile 已配且字段>0 取 profile 值，否则回落 P0-0 七猫常量（缺省逐字一致）。
 func openingFindings(in L0Input, wordCount int) []Finding {
-	if in.Opening == nil || in.ReadingNumber <= 0 {
+	if in.ReadingNumber <= 0 {
 		return nil
 	}
-	o := in.Opening
-	premises := dedupeTerms(o.PremiseKeywords)
-	cheats := dedupeTerms(o.CheatKeywords)
-	protagonists := dedupeTerms(o.ProtagonistNames)
-	if len(premises)+len(cheats)+len(protagonists) == 0 {
+	var premises, cheats, protagonists []string
+	if in.Opening != nil {
+		premises = dedupeTerms(in.Opening.PremiseKeywords)
+		cheats = dedupeTerms(in.Opening.CheatKeywords)
+		protagonists = dedupeTerms(in.Opening.ProtagonistNames)
+	}
+	keywordsArmed := len(premises)+len(cheats)+len(protagonists) > 0
+	if !keywordsArmed && in.Profile == nil {
 		return nil
 	}
 	body := in.Text
 	if strings.TrimSpace(body) == "" {
 		return nil
 	}
+	// 窗口/区间 profile 化（P0-1）：profile 字段>0 取 profile，未设回落缺省常量。
+	premiseWindow, cheatWindow, protagonistWindow := premiseWindowRunes, cheatWindowRunes, protagonistWindowRunes
+	chapterWindow, lenMin, lenMax := openingChapterWindow, openingLenMin, openingLenMax
+	if p := in.Profile; p != nil {
+		if p.PremiseWindow > 0 {
+			premiseWindow = p.PremiseWindow
+		}
+		if p.CheatWindow > 0 {
+			cheatWindow = p.CheatWindow
+		}
+		if p.ProtagonistWindow > 0 {
+			protagonistWindow = p.ProtagonistWindow
+		}
+		if p.OpeningChapterWindow > 0 {
+			chapterWindow = p.OpeningChapterWindow
+		}
+		if p.ChapterLenMin > 0 {
+			lenMin = p.ChapterLenMin
+		}
+		if p.ChapterLenMax > 0 {
+			lenMax = p.ChapterLenMax
+		}
+	}
 	var out []Finding
-	if in.ReadingNumber == 1 {
-		if f := windowPositionFinding(CheckPremiseLate, body, premises, premiseWindowRunes,
-			"核心看点", "七猫口径：标题/简介卖点须在前 500 字内实体化，卖点迟到是签约驳回高频签名"); f != nil {
+	if in.ReadingNumber == 1 && keywordsArmed {
+		if f := windowPositionFinding(CheckPremiseLate, body, premises, premiseWindow,
+			"核心看点", fmt.Sprintf("七猫口径：标题/简介卖点须在前 %d 字内实体化，卖点迟到是签约驳回高频签名", premiseWindow)); f != nil {
 			out = append(out, *f)
 		}
-		if f := windowPositionFinding(CheckCheatLate, body, cheats, cheatWindowRunes,
-			"金手指/核心机制", "七猫口径：前 800 字内须亮出金手指/核心机制"); f != nil {
+		if f := windowPositionFinding(CheckCheatLate, body, cheats, cheatWindow,
+			"金手指/核心机制", fmt.Sprintf("七猫口径：前 %d 字内须亮出金手指/核心机制", cheatWindow)); f != nil {
 			out = append(out, *f)
 		}
-		if f := windowPositionFinding(CheckProtagonistLate, body, protagonists, protagonistWindowRunes,
-			"主角", "七猫口径：前 200 字主角须与事件产生利害绑定入戏"); f != nil {
+		if f := windowPositionFinding(CheckProtagonistLate, body, protagonists, protagonistWindow,
+			"主角", fmt.Sprintf("七猫口径：前 %d 字主角须与事件产生利害绑定入戏", protagonistWindow)); f != nil {
 			out = append(out, *f)
 		}
 	}
-	if in.ReadingNumber <= openingChapterWindow {
+	if in.ReadingNumber <= chapterWindow {
 		switch {
-		case wordCount < openingLenMin:
+		case wordCount < lenMin:
 			out = append(out, Finding{
 				Check: CheckOpeningLength,
 				Desc: fmt.Sprintf("黄金三章章长不适配：本章 %d 字，低于七猫区间 %d–%d 字（开篇过短易被判信息量不足/代入感弱）",
-					wordCount, openingLenMin, openingLenMax),
+					wordCount, lenMin, lenMax),
 			})
-		case wordCount > openingLenMax:
+		case wordCount > lenMax:
 			out = append(out, Finding{
 				Check: CheckOpeningLength,
 				Desc: fmt.Sprintf("黄金三章章长不适配：本章 %d 字，超出七猫区间 %d–%d 字（开篇过长易被判节奏拖、卖点迟到）",
-					wordCount, openingLenMin, openingLenMax),
+					wordCount, lenMin, lenMax),
 			})
 		}
 	}

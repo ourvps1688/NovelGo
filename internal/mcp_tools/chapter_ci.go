@@ -79,6 +79,8 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 		Characters:       chapterCICharacters(ctx, tc),
 		PowerLevels:      chapterCIPowerLevels(ctx, tc),
 		Opening:          cfg.Opening(),
+		Profile:          cfg.Profile(),
+		BeatDensityMin:   cfg.EffectiveBeatDensityMin(),
 	})
 	err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).UpsertL0(ctx, &quality.ChapterQuality{
 		NovelID:       tc.NovelID,

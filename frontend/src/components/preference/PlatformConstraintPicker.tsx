@@ -6,6 +6,7 @@ import { toErrorMessage } from "@/utils/error";
 import { usePreferences } from "./usePreferences";
 import { useCreatePreference } from "./useCreatePreference";
 import { useDeletePreference } from "./useDeletePreference";
+import { ApplyPlatformProfile } from "@/lib/wailsjs/go/app/App";
 import {
   PLATFORM_TEMPLATES,
   PLATFORM_CONSTRAINT_CATEGORY,
@@ -59,6 +60,13 @@ export default function PlatformConstraintPicker({ novelId }: Props) {
         if (templateId !== null && ref.templateId === templateId) continue;
         await deleteMutation.mutateAsync(ref.id);
       }
+      // 同步写 CheckerConfig 平台 profile（P0-1 一键配置）：选中=写入、
+      // 切换/清除=对称写入（无 profile 的模板与清除都写 ""=撤销平台三查）。
+      const tpl =
+        templateId !== null
+          ? (PLATFORM_TEMPLATES.find((x) => x.id === templateId) ?? null)
+          : null;
+      await ApplyPlatformProfile(novelId, tpl?.checkerProfile ?? "");
     } catch (err) {
       toastError(
         t("preference.platformApplyFailed") + ": " + toErrorMessage(err),
@@ -102,6 +110,11 @@ export default function PlatformConstraintPicker({ novelId }: Props) {
             {activeLabel && (
               <span className="text-[10px] text-muted-foreground truncate">
                 {t("preference.platformApplied", { name: activeLabel })}
+              </span>
+            )}
+            {activeTemplate?.checkerProfile && (
+              <span className="text-[10px] text-primary/80 truncate">
+                {t("preference.platformCheckerArmed")}
               </span>
             )}
           </div>

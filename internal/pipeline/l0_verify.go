@@ -21,14 +21,17 @@ import (
 // mechanicalCheckKeywords 把机械类问题关键词映射到 L0 检查项（quality 的 Check 常量，单源）。
 // 战力数值序对应 power_upset/power_crush 两个检查项，共用同一组关键词。
 var mechanicalCheckKeywords = map[string][]string{
-	quality.CheckWordCount:      {"字数", "偏短", "篇幅", "太短", "字数不足", "字数不够", "字数不达标", "字数未达标"},
-	quality.CheckTailHook:       {"章尾", "钩子", "悬念", "结尾", "收尾", "章末"},
-	quality.CheckAIFlavor:       {"ai味", "ai 味", "套话", "油腻", "口水", "机翻"},
-	quality.CheckNameDrift:      {"称呼", "叫法", "名字混乱", "同人异称", "别名", "称谓", "称呼混用"},
-	quality.CheckDeadAppearance: {"死人", "已死", "去世", "亡故", "复活", "死亡"},
-	quality.CheckPowerUpset:     {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
-	quality.CheckPowerCrush:     {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
-	quality.CheckStyleDrift:     {"文风", "风格", "语感", "漂移", "笔调", "文笔", "语调", "文风漂移"},
+	quality.CheckWordCount:        {"字数", "偏短", "篇幅", "太短", "字数不足", "字数不够", "字数不达标", "字数未达标"},
+	quality.CheckTailHook:         {"章尾", "钩子", "悬念", "结尾", "收尾", "章末"},
+	quality.CheckAIFlavor:         {"ai味", "ai 味", "套话", "油腻", "口水", "机翻"},
+	quality.CheckNameDrift:        {"称呼", "叫法", "名字混乱", "同人异称", "别名", "称谓", "称呼混用"},
+	quality.CheckDeadAppearance:   {"死人", "已死", "去世", "亡故", "复活", "死亡"},
+	quality.CheckPowerUpset:       {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
+	quality.CheckPowerCrush:       {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
+	quality.CheckStyleDrift:       {"文风", "风格", "语感", "漂移", "笔调", "文笔", "语调", "文风漂移"},
+	quality.CheckOpeningHook:      {"开篇爆点", "爆点", "切入点", "开篇吸引力", "开头抓人"},
+	quality.CheckChapterLengthFit: {"章长", "平台区间", "字数区间", "章长适配"},
+	quality.CheckBeatDensity:      {"爽点密度", "爽点", "看点密度", "爽点不足"},
 }
 
 // semanticExclusionKeywords 是强语义矛盾信号：命中则视为非机械类，保守走 LLM，避免误判。
@@ -76,17 +79,25 @@ func defaultL0ChapterReader(novelID, chapterID int64) (string, bool) {
 }
 
 // coarseHeuristicChecks 是「精确性不足、命中可能源于与原工单无关的原因」的 L0 检查项：
+//
 //   - name_drift：同章出现角色正名+别名即命中，而角色在章节内自报别名（如自介「我姓苏/苏阿水/
 //     外头人叫我水鬼苏」）天然让正名+别名共存 → 必然命中，与原工单常描述的「报名前就叫全名」
 //     等叙事时序问题无关；
+//
 //   - tail_hook：仅判章末 120 字有无悬念信号词，与原工单常描述的「跨章钩子连贯/去向断裂」等
 //     语义问题无关。
 //
-// 这两类命中不应直接判未修复退回（否则修了具体语义问题却因粗粒度类别命中而永远通不过），
+//   - opening_hook / beat_density（P0-1）：近似词表口径（信号词密度代理爆点/爽点），
+//     修复可能用词表外的写法达成（如以无信号词的强钩子开场/以非标记词的高光时刻拉爽点），
+//     命中不必然=原工单未修复。
+//
+// 这些命中不应直接判未修复退回（否则修了具体语义问题却因粗粒度类别命中而永远通不过），
 // 应保守回落 LLM 复核原工单具体指向。其余检查项为精确类，命中必为真实未修复，可安全驳回。
 var coarseHeuristicChecks = map[string]bool{
-	quality.CheckNameDrift: true,
-	quality.CheckTailHook:  true,
+	quality.CheckNameDrift:   true,
+	quality.CheckTailHook:    true,
+	quality.CheckOpeningHook: true,
+	quality.CheckBeatDensity: true,
 }
 
 // l0Verdict 由 L0 发现清单与有效候选检查项判定复验结论（纯函数、可单测）。
@@ -166,7 +177,27 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 			if len(powers) > 0 {
 				effective[c] = true
 			}
-		default: // word_count / tail_hook / ai_flavor 不依赖外部台账，恒可判定
+		case quality.CheckPremiseLate, quality.CheckCheatLate, quality.CheckProtagonistLate:
+			// 开篇位次三查依赖关键词配置（cfg.Opening），缺失=不可判定（配置门控，宁缺勿错）。
+			if cfg.Opening() != nil {
+				effective[c] = true
+			}
+		case quality.CheckOpeningLength:
+			// 黄金三章章长查：关键词或平台 profile 任一武装才可判定。
+			if cfg.Opening() != nil || cfg.Profile() != nil {
+				effective[c] = true
+			}
+		case quality.CheckOpeningHook, quality.CheckChapterLengthFit:
+			// 平台三查之二依赖平台 profile（P0-1），缺失=不可判定。
+			if cfg.Profile() != nil {
+				effective[c] = true
+			}
+		case quality.CheckBeatDensity:
+			// 爽点密度查依赖生效密度下限（P0-1），0=不检查=不可判定。
+			if cfg.EffectiveBeatDensityMin() > 0 {
+				effective[c] = true
+			}
+		default: // word_count / tail_hook / ai_flavor 不依赖外部台账/配置，恒可判定
 			effective[c] = true
 		}
 	}
@@ -204,6 +235,9 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 			TabooList:        cfg.Taboos(),
 			Characters:       chars,
 			PowerLevels:      powers,
+			Opening:          cfg.Opening(),
+			Profile:          cfg.Profile(),
+			BeatDensityMin:   cfg.EffectiveBeatDensityMin(),
 		})
 		allFindings = append(allFindings, fs...)
 	}
