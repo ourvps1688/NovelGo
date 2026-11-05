@@ -21,6 +21,7 @@ import (
 	"github.com/novelgo/novelgo/internal/config"
 	"github.com/novelgo/novelgo/internal/event"
 	"github.com/novelgo/novelgo/internal/git"
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/rag"
 	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/skill"
@@ -570,7 +571,11 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 		ScheduleChapterCI(ctx, tc, ch, proposed)
 		// 落库评分结果（评分门禁判分后在此写入章节记录；nil 表示未评分或评分被跳过）
 		if pendingScore != nil {
-			persistChapterScore(ctx, tc, ch, pendingScore)
+			source := quality.ScoreSourceFullReplace
+			if ref.IsNew {
+				source = quality.ScoreSourceNew
+			}
+			persistChapterScore(ctx, tc, ch, pendingScore, source)
 		}
 	}
 	emitFileChanged(ctx, tc.NovelID, physical)
@@ -1125,8 +1130,10 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 	return &score, nil
 }
 
-// persistChapterScore 把评分结果写入章节记录（QualityScore / QualityReport / QualityScoredAt）。
-func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, scored *review.ScoreResult) {
+// persistChapterScore 把评分结果写入章节记录（QualityScore / QualityReport / QualityScoredAt），
+// 并追加一行评分明细历史（quality.ChapterScoreEvent，P0-3：6 维判官分全量 + 来源，
+// 供「修复前后对比」与逐章趋势消费）。source 是写入通道（quality.ScoreSource*）。
+func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, scored *review.ScoreResult, source string) {
 	if ch == nil || scored == nil {
 		return
 	}
@@ -1139,6 +1146,25 @@ func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapte
 			"quality_scored_at": now,
 		}).Error; err != nil {
 		tc.LoggerOrDefault().Warn("落库章节评分失败", "chapter_id", ch.ID, "err", err)
+	}
+	// 追加评分明细历史（append-only，只追加不更新）：失败仅告警，不阻断写作主流程。
+	readingNumber := 0
+	if n, rerr := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).GetReadingNumberByID(ctx, nil, tc.NovelID, ch.ID); rerr == nil {
+		readingNumber = n
+	}
+	ev := &quality.ChapterScoreEvent{
+		NovelID:       tc.NovelID,
+		ChapterID:     ch.ID,
+		ReadingNumber: readingNumber,
+		Overall:       scored.Overall,
+		Dimensions:    quality.MarshalScoreDims(scored.Dimensions),
+		Verdict:       scored.Verdict,
+		Critique:      scored.Critique,
+		Source:        source,
+		CreatedAt:     now,
+	}
+	if err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).AppendScoreEvent(ctx, ev); err != nil {
+		tc.LoggerOrDefault().Warn("追加评分历史失败", "chapter_id", ch.ID, "err", err)
 	}
 }
 

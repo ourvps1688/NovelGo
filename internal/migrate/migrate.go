@@ -132,6 +132,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&pipeline.PipelineIssue{},
 		&pipeline.GateObject{},
 		&quality.ChapterQuality{},
+		&quality.ChapterScoreEvent{},
 		&quality.CheckerConfig{},
 		&quality.EditorFeedback{},
 		&structure.PinnedInvariant{},
