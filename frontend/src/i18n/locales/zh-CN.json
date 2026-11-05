@@ -2162,6 +2162,20 @@
             "deai": "去AI味",
             "taboo": "禁忌合规"
           }
+        },
+        "tensionCurve": {
+          "title": "情绪曲线",
+          "desc": "单章张力/情绪的段落粒度曲线（0–100，同段 L1 标注优先于 L0 基线），标注情绪峰、拖沓段与开篇窗口。",
+          "empty": "暂无曲线数据：检测或写作后自动生成。",
+          "legendTension": "曲线＝张力",
+          "legendEmotion": "虚线＝情绪",
+          "axisCaption": "段序（段落粒度）",
+          "chartHint": "标记与曲线三查判定同源；点击拖沓段标记可跳转到该章原文。",
+          "jumpHint": "跳转到该章原文",
+          "dragChip": "拖沓段 seg {{range}}",
+          "climaxSome": "情绪峰 {{count}} 处",
+          "climaxNone": "无情绪峰",
+          "openingChip": "开篇窗口"
         }
       },
       "platformData": {

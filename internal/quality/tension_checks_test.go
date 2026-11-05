@@ -135,3 +135,31 @@ func TestLongestFlatRun(t *testing.T) {
 	_, _, n2 := longestFlatRun([]TensionPoint{hotSeg(0), hotSeg(1)})
 	assert.Equal(t, 0, n2)
 }
+
+// TestMarkTensionCurve 图表标记位：拖沓区间/情绪峰 segs/开篇窗口段，
+// 与三查判定同源（未命中拖沓 = -1/-1；空曲线零发现）。
+func TestMarkTensionCurve(t *testing.T) {
+	climax := TensionPoint{Seg: 4, StartRune: 1600, EndRune: 1990, Tension: 90, Emotion: 95, BeatType: BeatTypeClimax}
+	// 平坦 run 0–2 + climax seg 4；开篇窗口（StartRune<500）= seg 0/1。
+	curve := []TensionPoint{flatSeg(0), flatSeg(1), flatSeg(2), hotSeg(3), climax}
+	m := MarkTensionCurve(curve)
+	assert.Equal(t, 0, m.DragStartSeg)
+	assert.Equal(t, 2, m.DragEndSeg)
+	assert.Equal(t, []int{4}, m.ClimaxSegs)
+	assert.Equal(t, []int{0, 1}, m.OpeningSegs)
+
+	// 无拖沓（平坦 run < 3）= -1/-1；climax 自由值归一口径。
+	curve2 := []TensionPoint{flatSeg(0), hotSeg(1), hotSeg(2)}
+	curve2[2].BeatType = "  climax " // L1 自由值 trim 后合法
+	m2 := MarkTensionCurve(curve2)
+	assert.Equal(t, -1, m2.DragStartSeg)
+	assert.Equal(t, -1, m2.DragEndSeg)
+	assert.Equal(t, []int{2}, m2.ClimaxSegs)
+
+	// 空曲线零发现标记。
+	m3 := MarkTensionCurve(nil)
+	assert.Equal(t, -1, m3.DragStartSeg)
+	assert.Equal(t, -1, m3.DragEndSeg)
+	assert.Empty(t, m3.ClimaxSegs)
+	assert.Empty(t, m3.OpeningSegs)
+}

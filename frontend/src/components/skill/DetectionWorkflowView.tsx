@@ -36,6 +36,7 @@ import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
 import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
 import ScoreTrendPanel from "./ScoreTrendPanel";
+import TensionCurveCard from "./TensionCurveCard";
 import { VERDICT_KEYS } from "./verdictKeys";
 
 type DetectKind = "chapter" | "volume" | "structure";
@@ -219,6 +220,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     prevRunningRef.current = running;
     if (wasRunning && !running) {
       queryClient.invalidateQueries({ queryKey: ["chapter-quality-archive"] });
+      queryClient.invalidateQueries({ queryKey: ["chapter-tension-curve"] });
     }
   }, [kind, running, queryClient]);
 
@@ -394,6 +396,12 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               </div>
             </div>
           )
+        ) : null}
+
+        {/* P0-2 情绪账：选中章张力曲线（段落粒度 + 发现标记），数据经写后链路/
+            L1 回执落库，不依赖检测 run，故与趋势面板同区恒挂。 */}
+        {kind === "chapter" && effChapterId != null ? (
+          <TensionCurveCard novelId={novelId} chapterId={effChapterId} />
         ) : null}
 
         {/* P0-3 评分打通：章节区恒挂趋势面板（评分来自判官评分明细，不依赖检测 run），

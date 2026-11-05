@@ -80,13 +80,7 @@ func RenderTensionBlock(rows []ChapterTension) string {
 // tensionChapterLine 渲染单章摘要行：tension 值串/情绪峰 segs/拖沓/开篇坡度。
 // rows 为该章合并后的有效曲线（EffectiveTensionCurve 语义，seg 升序）。
 func tensionChapterLine(reading int, rows []ChapterTension) string {
-	pts := make([]TensionPoint, 0, len(rows))
-	for _, r := range rows {
-		pts = append(pts, TensionPoint{
-			Seg: r.Seg, StartRune: r.StartRune, EndRune: r.EndRune,
-			Emotion: r.Emotion, Tension: r.Tension, BeatType: r.BeatType,
-		})
-	}
+	pts := TensionPointsFromRows(rows)
 	// tension 值串（每章 tensionBlockMaxSegs 段封顶）。
 	vals := make([]string, 0, len(pts))
 	for i, pt := range pts {

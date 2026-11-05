@@ -2202,6 +2202,20 @@
             "deai": "De-AI-ness",
             "taboo": "Taboo compliance"
           }
+        },
+        "tensionCurve": {
+          "title": "Emotion Curve",
+          "desc": "Per-chapter tension/emotion at segment granularity (0-100; L1 labels override the L0 baseline per segment), marking climax beats, flat runs, and the opening window.",
+          "empty": "No curve data yet: generated after detection or writing.",
+          "legendTension": "Line = tension",
+          "legendEmotion": "Dashed = emotion",
+          "axisCaption": "Segments",
+          "chartHint": "Markers are derived from the same curve checks as tickets; click the flat-run marker to jump to the chapter.",
+          "jumpHint": "Jump to this chapter",
+          "dragChip": "Flat run seg {{range}}",
+          "climaxSome": "{{count}} climax beats",
+          "climaxNone": "No climax beats",
+          "openingChip": "Opening window"
         }
       },
       "platformData": {

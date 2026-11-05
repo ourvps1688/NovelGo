@@ -274,6 +274,10 @@ export function GetChapterScoreHistory(arg1, arg2) {
   return window['go']['app']['App']['GetChapterScoreHistory'](arg1, arg2);
 }
 
+export function GetChapterTensionCurve(arg1, arg2) {
+  return window['go']['app']['App']['GetChapterTensionCurve'](arg1, arg2);
+}
+
 export function GetChapters(arg1) {
   return window['go']['app']['App']['GetChapters'](arg1);
 }

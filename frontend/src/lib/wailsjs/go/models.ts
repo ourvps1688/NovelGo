@@ -2790,6 +2790,44 @@ export namespace pipeline {
 		    return a;
 		}
 	}
+	export class ChapterTensionView {
+	    chapter_id: number;
+	    reading_number: number;
+	    points: quality.TensionPoint[];
+	    markers: quality.TensionMarkers;
+	    exists: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChapterTensionView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.chapter_id = source["chapter_id"];
+	        this.reading_number = source["reading_number"];
+	        this.points = this.convertValues(source["points"], quality.TensionPoint);
+	        this.markers = this.convertValues(source["markers"], quality.TensionMarkers);
+	        this.exists = source["exists"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DetectionTaskResult {
 	    kind: string;
 	    novel_id: number;
@@ -3480,6 +3518,48 @@ export namespace quality {
 	        this.word_count = source["word_count"];
 	        this.has_tail_hook = source["has_tail_hook"];
 	        this.style_metrics = source["style_metrics"];
+	    }
+	}
+	export class TensionMarkers {
+	    drag_start_seg: number;
+	    drag_end_seg: number;
+	    climax_segs: number[];
+	    opening_segs: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new TensionMarkers(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.drag_start_seg = source["drag_start_seg"];
+	        this.drag_end_seg = source["drag_end_seg"];
+	        this.climax_segs = source["climax_segs"];
+	        this.opening_segs = source["opening_segs"];
+	    }
+	}
+	export class TensionPoint {
+	    seg: number;
+	    start_rune: number;
+	    end_rune: number;
+	    emotion: number;
+	    tension: number;
+	    beat_type: string;
+	    metrics?: Record<string, number>;
+	
+	    static createFrom(source: any = {}) {
+	        return new TensionPoint(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.seg = source["seg"];
+	        this.start_rune = source["start_rune"];
+	        this.end_rune = source["end_rune"];
+	        this.emotion = source["emotion"];
+	        this.tension = source["tension"];
+	        this.beat_type = source["beat_type"];
+	        this.metrics = source["metrics"];
 	    }
 	}
 

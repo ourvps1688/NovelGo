@@ -191,6 +191,20 @@ func EffectiveTensionCurve(rows []ChapterTension) []ChapterTension {
 	return out
 }
 
+// TensionPointsFromRows 把张力曲线行转为图表点（seg 升序输入 → 同序输出；
+// 消费侧取 EffectiveTensionCurve 合并结果时逐行直转即可）。Metrics 经解析随行带出。
+func TensionPointsFromRows(rows []ChapterTension) []TensionPoint {
+	pts := make([]TensionPoint, 0, len(rows))
+	for _, r := range rows {
+		pts = append(pts, TensionPoint{
+			Seg: r.Seg, StartRune: r.StartRune, EndRune: r.EndRune,
+			Emotion: r.Emotion, Tension: r.Tension, BeatType: r.BeatType,
+			Metrics: ParseTensionMetrics(r.Metrics),
+		})
+	}
+	return pts
+}
+
 // BuildTensionCurve 单章正文 → L0 确定性基线张力曲线（纯函数、零 LLM、毫秒级）。
 // 分段：段落累积到 tensionSegTargetRunes 切一段（beat 粒度，末段可短）；
 // 空正文/纯空白返回空曲线（宁缺勿错）。同输入输出逐字一致。

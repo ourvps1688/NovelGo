@@ -168,6 +168,8 @@ export function GetChapterQualityArchive(arg1:number,arg2:number):Promise<pipeli
 
 export function GetChapterScoreHistory(arg1:number,arg2:number):Promise<Array<pipeline.ScoreEventView>>;
 
+export function GetChapterTensionCurve(arg1:number,arg2:number):Promise<pipeline.ChapterTensionView>;
+
 export function GetChapters(arg1:number):Promise<Array<chapter.Chapter>>;
 
 export function GetCharacterGroupMembers(arg1:app.GetCharacterGroupMembersInput):Promise<storage.PageResult_github_com_novelgo_novelgo_internal_character_GroupMember_>;

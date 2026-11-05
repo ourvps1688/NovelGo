@@ -130,3 +130,38 @@ func openingSlopeSegs(curve []TensionPoint) []TensionPoint {
 	}
 	return out
 }
+
+// TensionMarkers 是张力曲线的图表标记位（前端可视化消费）：与曲线三查判定
+// 同源（复用 longestFlatRun/climaxBeatCount 口径/openingSlopeSegs），阈值一致，
+// 保证图上标记与工单发现不漂移。仅携带位置语义，不携带文案。
+type TensionMarkers struct {
+	// DragStartSeg/DragEndSeg 是拖沓段段序区间（仅当命中 pacing_drag 判定
+	// （最长平坦 run ≥ pacingDragMinRun）时有效；未命中 = -1/-1）。
+	DragStartSeg int `json:"drag_start_seg"`
+	DragEndSeg   int `json:"drag_end_seg"`
+	// ClimaxSegs 是情绪峰段序（BeatType==climax，NormalizeBeatType 归一口径）。
+	ClimaxSegs []int `json:"climax_segs"`
+	// OpeningSegs 是开篇坡度窗口内段序（StartRune < openingSlopeWindowRunes）。
+	OpeningSegs []int `json:"opening_segs"`
+}
+
+// MarkTensionCurve 计算曲线图表标记位（与 tensionFindings 判定同源复用私有助手）。
+// 空曲线返回零发现标记（拖沓 -1/-1）。
+func MarkTensionCurve(curve []TensionPoint) TensionMarkers {
+	m := TensionMarkers{DragStartSeg: -1, DragEndSeg: -1}
+	if len(curve) == 0 {
+		return m
+	}
+	if start, end, run := longestFlatRun(curve); run >= pacingDragMinRun {
+		m.DragStartSeg, m.DragEndSeg = start, end
+	}
+	for _, pt := range curve {
+		if NormalizeBeatType(pt.BeatType) == BeatTypeClimax {
+			m.ClimaxSegs = append(m.ClimaxSegs, pt.Seg)
+		}
+	}
+	for _, pt := range openingSlopeSegs(curve) {
+		m.OpeningSegs = append(m.OpeningSegs, pt.Seg)
+	}
+	return m
+}

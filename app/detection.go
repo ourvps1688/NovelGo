@@ -83,3 +83,13 @@ func (a *App) GetChapterScoreHistory(novelID int64, chapterID int64) ([]pipeline
 	}
 	return a.pipeline.GetChapterScoreHistory(a.ctx, novelID, chapterID)
 }
+
+// GetChapterTensionCurve 返回单章张力曲线视图（P0-2 情绪账）：生效曲线段
+// （L1 标注优先于 L0 基线）+ 图表标记位（拖沓段/情绪峰/开篇窗口，与曲线三查同源），
+// 供前端情绪曲线 SVG 可视化消费。
+func (a *App) GetChapterTensionCurve(novelID int64, chapterID int64) (*pipeline.ChapterTensionView, error) {
+	if a.pipeline == nil {
+		return nil, fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.GetChapterTensionCurve(a.ctx, novelID, chapterID)
+}
