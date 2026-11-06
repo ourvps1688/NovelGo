@@ -2745,6 +2745,96 @@ export namespace pipeline {
 	        this.note = source["note"];
 	    }
 	}
+	export class BenchmarkBookView {
+	    id: number;
+	    title: string;
+	    hook_type: string;
+	    pleasure_type: string;
+	    rhythm_shape: string;
+	    track: string;
+	    notes: string;
+	    updated_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BenchmarkBookView(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.title = source["title"];
+	        this.hook_type = source["hook_type"];
+	        this.pleasure_type = source["pleasure_type"];
+	        this.rhythm_shape = source["rhythm_shape"];
+	        this.track = source["track"];
+	        this.notes = source["notes"];
+	        this.updated_at = source["updated_at"];
+	    }
+	}
+	export class BenchmarkBooksPreview {
+	    rows: BenchmarkBookView[];
+	    skipped_lines: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BenchmarkBooksPreview(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rows = this.convertValues(source["rows"], BenchmarkBookView);
+	        this.skipped_lines = source["skipped_lines"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class BenchmarkBooksSaveResult {
+	    saved: BenchmarkBookView[];
+	    skipped_lines: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new BenchmarkBooksSaveResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.saved = this.convertValues(source["saved"], BenchmarkBookView);
+	        this.skipped_lines = source["skipped_lines"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class ChapterQualityArchive {
 	    chapter_id: number;
 	    reading_number: number;

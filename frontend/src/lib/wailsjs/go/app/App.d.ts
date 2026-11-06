@@ -98,6 +98,10 @@ export function CreateTimelineEntry(arg1:number,arg2:app.CreateTimelineEntryInpu
 
 export function DeleteArcNode(arg1:number,arg2:number):Promise<void>;
 
+export function DeleteBenchmarkBook(arg1:number,arg2:number):Promise<void>;
+
+export function DeleteBenchmarkBooks(arg1:number):Promise<void>;
+
 export function DeleteChapter(arg1:number,arg2:number):Promise<chapter.DeleteResult>;
 
 export function DeleteCharacter(arg1:number,arg2:number):Promise<void>;
@@ -270,6 +274,8 @@ export function InstallRemoteSkill(arg1:app.InstallRemoteSkillInput):Promise<app
 
 export function IsInitialized():Promise<boolean>;
 
+export function ListBenchmarkBooksView(arg1:number):Promise<Array<pipeline.BenchmarkBookView>>;
+
 export function ListDetectionTaskStatuses(arg1:number):Promise<Array<pipeline.DetectionTaskStatus>>;
 
 export function ListIssueTickets(arg1:number):Promise<Array<pipeline.PipelineIssue>>;
@@ -300,6 +306,8 @@ export function PlaceChapter(arg1:chapter.PlaceInput):Promise<chapter.Chapter>;
 
 export function PlaceVolume(arg1:volume.PlaceInput):Promise<volume.Volume>;
 
+export function PreviewBenchmarkBooks(arg1:number,arg2:string):Promise<pipeline.BenchmarkBooksPreview>;
+
 export function PreviewPlatformMetrics(arg1:number,arg2:string):Promise<pipeline.PlatformMetricsPreview>;
 
 export function RebuildAggregated(arg1:app.RebuildAggregatedInput):Promise<app.RebuildAggregatedResult>;
@@ -325,6 +333,8 @@ export function RunDetectionTask(arg1:number,arg2:string,arg3:any):Promise<pipel
 export function SaveAuthorAliases(arg1:app.SaveAuthorAliasesInput):Promise<void>;
 
 export function SaveAvatar(arg1:Array<number>):Promise<void>;
+
+export function SaveBenchmarkBooksText(arg1:number,arg2:string):Promise<pipeline.BenchmarkBooksSaveResult>;
 
 export function SaveContent(arg1:app.SaveContentInput):Promise<void>;
 

@@ -134,6 +134,14 @@ export function DeleteArcNode(arg1, arg2) {
   return window['go']['app']['App']['DeleteArcNode'](arg1, arg2);
 }
 
+export function DeleteBenchmarkBook(arg1, arg2) {
+  return window['go']['app']['App']['DeleteBenchmarkBook'](arg1, arg2);
+}
+
+export function DeleteBenchmarkBooks(arg1) {
+  return window['go']['app']['App']['DeleteBenchmarkBooks'](arg1);
+}
+
 export function DeleteChapter(arg1, arg2) {
   return window['go']['app']['App']['DeleteChapter'](arg1, arg2);
 }
@@ -478,6 +486,10 @@ export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
 }
 
+export function ListBenchmarkBooksView(arg1) {
+  return window['go']['app']['App']['ListBenchmarkBooksView'](arg1);
+}
+
 export function ListDetectionTaskStatuses(arg1) {
   return window['go']['app']['App']['ListDetectionTaskStatuses'](arg1);
 }
@@ -538,6 +550,10 @@ export function PlaceVolume(arg1) {
   return window['go']['app']['App']['PlaceVolume'](arg1);
 }
 
+export function PreviewBenchmarkBooks(arg1, arg2) {
+  return window['go']['app']['App']['PreviewBenchmarkBooks'](arg1, arg2);
+}
+
 export function PreviewPlatformMetrics(arg1, arg2) {
   return window['go']['app']['App']['PreviewPlatformMetrics'](arg1, arg2);
 }
@@ -588,6 +604,10 @@ export function SaveAuthorAliases(arg1) {
 
 export function SaveAvatar(arg1) {
   return window['go']['app']['App']['SaveAvatar'](arg1);
+}
+
+export function SaveBenchmarkBooksText(arg1, arg2) {
+  return window['go']['app']['App']['SaveBenchmarkBooksText'](arg1, arg2);
 }
 
 export function SaveContent(arg1) {

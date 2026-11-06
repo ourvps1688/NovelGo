@@ -995,6 +995,7 @@ func (s *Service) executeAudit(runID string, novelID int64) {
 		structBlock: structBlock,
 		tension:     tensionBlock,
 		keyChapter:  keyChapterBlock,
+		benchmark:   s.benchmarkBooksBlock(ctx, novelID),
 		focused:     focused,
 	}, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
 	if ctxt.AuditKind == "blueprint" {
@@ -2634,6 +2635,9 @@ type auditInput struct {
 	// genre 是本书题材卡约束块（签约体检全程引用，设计约束：开场抓手/冲突发动机/
 	// 章尾钩子/禁止漂移/爽点密度/情绪曲线/字数门槛 由题材卡参数化驱动）；空=不注入。
 	genre string
+	// benchmark 是「对标书库摘要」块（P2-3 dim2 题材契合证据，genre 之后渲染）；
+	// 空=不注入（零提示）。
+	benchmark string
 	// focused 是三层输入模式（milestone 中途复检=降频后的常规 L2）：发现层=档案+结构
 	// 告警，验证层=关键章定向深读（抽样只验证不发现），不逐章通读全书。
 	// false=编辑部通读（卷收口/完本/黄金三章首检/用户主动：全书逐章通读，逐字同旧文）。
@@ -2675,6 +2679,9 @@ func signabilityPrompt(novelID int64, in auditInput, blocks contextasm.ContextBl
 	}
 	if in.genre != "" {
 		p += "\n\n" + in.genre
+	}
+	if in.benchmark != "" {
+		p += "\n\n" + in.benchmark
 	}
 	return p + blocks.Render(contextasm.PurposeAudit)
 }

@@ -704,28 +704,10 @@
     "typePalace": "Building",
     "typeWater": "Water",
     "typeKeywords": {
-      "nature": [
-        "Forest",
-        "Cave",
-        "Mountain",
-        "Swamp"
-      ],
-      "settlement": [
-        "City",
-        "Town",
-        "Village",
-        "Market"
-      ],
-      "palace": [
-        "Palace",
-        "Castle",
-        "Temple"
-      ],
-      "water": [
-        "Ocean",
-        "River",
-        "Lake"
-      ]
+      "nature": ["Forest", "Cave", "Mountain", "Swamp"],
+      "settlement": ["City", "Town", "Village", "Market"],
+      "palace": ["Palace", "Castle", "Temple"],
+      "water": ["Ocean", "River", "Lake"]
     }
   },
   "storyarc": {
@@ -2217,6 +2199,41 @@
           "climaxNone": "No climax beats",
           "openingChip": "Opening window"
         }
+      },
+      "benchmarkBooks": {
+        "title": "Benchmark library",
+        "desc": "Record structural feature samples of track-leading benchmark books (hook type / payoff type / rhythm shape). They are injected into the signability audit prompt so the genre-fit (dim2) score is evidence-based instead of relying on impressionistic \"like book X\" claims.",
+        "pasteTitle": "Paste benchmark samples",
+        "pasteHint": "One book per line: title | hook type | payoff type | rhythm shape | track | notes (pipe or tab separated). Title required, at least one of hook/payoff/rhythm; track/notes optional, extra columns are rejected. Re-pasting a title overwrites it.",
+        "pastePlaceholder": "My Househusband | regression + cheat awakening | face-slap payoffs | fast-paced beats | urban action | finished hit\nBig Detective | mystery hook | deduction + court intrigue | slow-burn foreshadowing | historical mystery",
+        "previewBtn": "Preview",
+        "previewTitle": "Parse preview",
+        "previewCount": "{{count}} rows ready to save",
+        "previewSkipped": "{{count}} rows skipped (header/bad line/missing feature)",
+        "previewEmpty": "Nothing to save: check the format (one per line: title | hook | payoff | rhythm).",
+        "saveBtn": "Confirm save",
+        "savedToast": "Benchmark samples saved, {{count}} books total",
+        "saveFailed": "Failed to save benchmark samples",
+        "previewFailed": "Failed to parse benchmark samples",
+        "listTitle": "Recorded samples",
+        "listEmpty": "No benchmark samples yet: once recorded, the genre-fit score will cite these structural features as evidence.",
+        "colTitle": "Title",
+        "colHook": "Hook type",
+        "colPleasure": "Payoff type",
+        "colRhythm": "Rhythm shape",
+        "colTrack": "Track",
+        "colNotes": "Notes",
+        "colUpdatedAt": "Updated",
+        "colActions": "Actions",
+        "deleteBtn": "Delete this sample",
+        "deleteConfirmTitle": "Delete benchmark sample",
+        "deleteConfirmMessage": "Delete the sample for \"{{title}}\"? This cannot be undone.",
+        "deletedToast": "Benchmark sample deleted",
+        "deleteFailed": "Failed to delete benchmark sample",
+        "clearBtn": "Clear all",
+        "clearConfirmTitle": "Clear benchmark library",
+        "clearConfirmMessage": "Delete all benchmark samples for this book? This cannot be undone.",
+        "clearedToast": "Benchmark library cleared"
       },
       "platformData": {
         "title": "Platform data reconciliation",

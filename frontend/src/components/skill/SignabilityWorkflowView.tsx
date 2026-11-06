@@ -14,6 +14,7 @@ import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
 import PlatformDataPanel from "./PlatformDataPanel";
+import BenchmarkBooksPanel from "./BenchmarkBooksPanel";
 import { VERDICT_KEYS } from "./verdictKeys";
 import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import { toastError, toastSuccess } from "@/utils/toast";
@@ -160,6 +161,10 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
             inlineIssues={inlineIssues}
           />
         ) : null}
+
+        {/* P2-3 对标书库：赛道标杆书结构特征样本录入（钩子/爽点/节奏），样本摘要
+            随签约体检提示词注入，dim2 题材契合评分有据可依（不依赖书体检 run）。 */}
+        <BenchmarkBooksPanel novelId={novelId} />
 
         {/* P1-2 真实数据对账：平台数据录入 + 「流失章 × 低分维」诊断（书级质检语义，
             挂签约体检视图；不依赖书体检 run，可独立录入，诊断按数据完备度降级呈现）。 */}

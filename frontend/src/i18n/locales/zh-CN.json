@@ -685,28 +685,10 @@
     "typePalace": "建筑",
     "typeWater": "水域",
     "typeKeywords": {
-      "nature": [
-        "森林",
-        "洞穴",
-        "山脉",
-        "沼泽"
-      ],
-      "settlement": [
-        "城市",
-        "城镇",
-        "村庄",
-        "市场"
-      ],
-      "palace": [
-        "王宫",
-        "城堡",
-        "神殿"
-      ],
-      "water": [
-        "海洋",
-        "河流",
-        "湖泊"
-      ]
+      "nature": ["森林", "洞穴", "山脉", "沼泽"],
+      "settlement": ["城市", "城镇", "村庄", "市场"],
+      "palace": ["王宫", "城堡", "神殿"],
+      "water": ["海洋", "河流", "湖泊"]
     }
   },
   "storyarc": {
@@ -2177,6 +2159,41 @@
           "climaxNone": "无情绪峰",
           "openingChip": "开篇窗口"
         }
+      },
+      "benchmarkBooks": {
+        "title": "对标书库",
+        "desc": "录入赛道标杆书的结构特征样本（钩子类型/爽点类型/节奏形态），签约体检时随提示词注入——题材契合（dim2）评分以样本举证，不再只凭印象写「对标 XX 书」。",
+        "pasteTitle": "粘贴对标书样本",
+        "pasteHint": "每行一本：书名｜钩子类型｜爽点类型｜节奏形态｜赛道｜备注（竖线或 Tab 分隔）。书名必填，钩子/爽点/节奏至少填一项；赛道/备注可选，多余列不认。同书名重贴＝最新覆盖。",
+        "pastePlaceholder": "全球高武｜重生回归+金手指觉醒｜打脸逆袭｜快节奏连续爆点｜都市高武｜完本标杆\n大奉打更人｜悬案开局｜探案解谜｜长线伏笔慢热｜历史悬疑",
+        "previewBtn": "解析预览",
+        "previewTitle": "解析预览",
+        "previewCount": "可入库 {{count}} 行",
+        "previewSkipped": "跳过 {{count}} 行（表头/坏行/缺特征）",
+        "previewEmpty": "没有可入库的行：请检查格式（每行：书名｜钩子｜爽点｜节奏）。",
+        "saveBtn": "确认入库",
+        "savedToast": "已保存对标书样本，现有 {{count}} 本",
+        "saveFailed": "对标书样本入库失败",
+        "previewFailed": "对标书样本解析失败",
+        "listTitle": "已录入样本",
+        "listEmpty": "尚未录入对标书样本：录入后签约体检的题材契合评分将以这些结构特征举证。",
+        "colTitle": "书名",
+        "colHook": "钩子类型",
+        "colPleasure": "爽点类型",
+        "colRhythm": "节奏形态",
+        "colTrack": "赛道",
+        "colNotes": "备注",
+        "colUpdatedAt": "更新时间",
+        "colActions": "操作",
+        "deleteBtn": "删除该样本",
+        "deleteConfirmTitle": "删除对标书样本",
+        "deleteConfirmMessage": "确认删除《{{title}}》的样本？此操作不可撤销。",
+        "deletedToast": "已删除对标书样本",
+        "deleteFailed": "删除对标书样本失败",
+        "clearBtn": "清空",
+        "clearConfirmTitle": "清空对标书库",
+        "clearConfirmMessage": "确认清空本书全部对标书样本？此操作不可撤销。",
+        "clearedToast": "已清空对标书库"
       },
       "platformData": {
         "title": "平台数据对账",

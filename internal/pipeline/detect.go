@@ -400,6 +400,7 @@ func (s *Service) executeDetectAudit(runID string, novelID int64) {
 		structBlock: s.structureBlock(ctx, novelID),
 		tension:     s.tensionSummaryBlock(ctx, novelID),
 		genre:       s.genreCardBlock(ctx, novelID),
+		benchmark:   s.benchmarkBooksBlock(ctx, novelID),
 		focused:     false,
 	}, s.buildBlocks(ctx, novelID, contextasm.PurposeAudit))
 	outcome, derr := s.runDetection(ctx, detectRequest{
