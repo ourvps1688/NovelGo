@@ -90,6 +90,11 @@
   开篇坡度（前 500 字张力是否上扬）。
 - 消费侧落地 `BeatDensityMin`（配置终于有数据喂），体检 dim4 的证据从主观星级
   变成曲线截图式证据。
+- **状态：已实施**（情绪账，d659911b/da9caa7e/0ca52cb6/64724239）：L0 基线张力曲线
+  （chapter_tension 表+确定性近似）+ L1 回执 tension_curve 契约；曲线三查
+  （pacing_drag 连续平坦/beat_gap 兜底/opening_slope 开篇坡度）+ beat_density 曲线口径
+  （情绪峰计数）+ E 系工单 ReplaceIssuesByPrefix 落单；dim4「情绪曲线摘要」块注入
+  体检提示词；前端 TensionCurveCard 段粒度曲线（tension/emotion 双线+三查标记同源）。
 
 **P0-3 双轨评分打通 + 趋势视图**
 - 6 维判官 ↔ 8 维体检映射表（plot_advance/emotion_hook → dim4/dim1 等），
@@ -115,36 +120,55 @@
 - 两次已发布作品的编辑反馈（哪怕只有「综合质量一般」+ 题材）是第一批输入。
 - 复用既有架构：approval 的 feedback 注入、GateDecision feedback 落库都已存在，
   本项只是把「非结构化文本 → 结构化规则」补上。
+- **状态：已实施**（67410ffb）：editorfeedback 子 Agent（零工具）拆解 → FeedbackReceipt
+  两段式落 editor_feedbacks（原话先行）；F 系 issue 落 detect:feedback 工单走修复闭环；
+  约束修订只建议，apply_editor_feedback_constraints 人工应用。
 
 **P1-2 真实数据对账（校准判官松紧度）**
 - 「平台数据」面板：人工粘贴七猫后台逐章完读率/追读率 → 按章与 tension 曲线、
   八维评分对照 → 输出「流失点章节 × 低分维」交叉诊断。
 - 这是唯一能让 LLM 判官从「模拟网文常识」进化到「贴合七猫口味」的信号源；
   不需要 API，人工粘贴即可起步。
+- **状态：已实施**（50313c43/5f65c00e/90321512）：platform_metrics 表+粘贴解析录入链路
+  （ParsePlatformMetrics 单源，同章最新粘贴胜）；GetPlatformReconciliation「流失章 ×
+  低分维」交叉诊断（流失=相邻有数据章率降 ≥5pp、lift=流失章低分率−稳定章低分率）；
+  前端 PlatformDataPanel 挂签约体检视图（录入+预览确认+诊断呈现）。
 
 ### P2：生成侧强化（在度量和反馈就位后做，避免盲调）
 
 **P2-1 低分维 → 生成技能定向路由**
 - 体检低分维自动加载对应方法论技能进重写提示词（dim1→opening-chapters、
   dim4→pacing-control/scene-beats、dim3→character-design），替代通用 chapterRewritePrompt。
+- **状态：已实施**（28be757b）：auditDimSkillRoutes/issueDimSkillRoutes 映射单源
+  （rewrite_skills.go，八维键+台账维两源合并），低分维（≤3 星）+工单维度→技能正文
+  注入 chapterRewritePrompt/工单修复重写，单技能 4000 rune/整块 12000 rune 封顶，
+  空块=通用口径逐字不变。
 
 **P2-2 平台化写作模板**
 - 七猫偏好的「先抑后扬打脸节奏」（300 字/情绪段）、短章快节奏等做成 scene-beats
   的可选节奏模板，生成时按平台 profile 选用。
+- **状态：已实施**（892ca04d）：scene-beats.md「平台节奏模板」节（qimao_face_slap
+  打脸节奏）；skill.RhythmBlock 按 `### <模板 ID>` 确定性提取；PlatformProfile.
+  RhythmTemplate 选用；写章生成（system-reminder 注入）与章节重写（joinRewriteBlocks
+  与 P2-1 方法块合成）双路消费，缺省不模板。
 
 **P2-3 对标书库（dim2 题材契合的数据源）**
 - 赛道标杆书的结构特征样本库（钩子类型/爽点类型/节奏形态），题材契合评分有据可依，
   不再纯靠模型记忆「对标 XX 书」。
+- **状态：已实施**（449adf6d）：benchmark_books 表（同 (novel_id,书名) upsert 最新胜）+
+  粘贴录入（ParseBenchmarkBooks 单源，位置语义列）；「对标书库摘要」块注入
+  signabilityPrompt（genre 之后、空=零提示），signability-audit.md dim2 证据纪律=
+  与标杆异同须以样本钩子/爽点/节奏特征举证；前端 BenchmarkBooksPanel 挂签约体检视图。
 
 ## 四、验收标准
 
 | 项 | 验收 |
 |---|---|
 | P0-1 | 七猫 profile 下：前 500 字爆点/章长/爽点密度三项 L0 可检，不达标出 finding（已验收：TestQimaoProfileL0Acceptance） |
-| P0-2 | 每章落库 tension 曲线；拖沓段/爽点断档可被检测并落工单 |
+| P0-2 | 每章落库 tension 曲线；拖沓段/爽点断档可被检测并落工单（已实施：0ca52cb6，曲线三查落 E 系工单） |
 | P0-3 | 任一章可看 6 维↔8 维同源分与历史趋势（已实施：ScoreTrendPanel，检测工作流章节区） |
-| P1-1 | 一段编辑原话 → 自动产出维度 issue + 约束修订，可走既有修复闭环 |
-| P1-2 | 粘贴完读数据后能输出「流失章 × 低分维」对照诊断 |
+| P1-1 | 一段编辑原话 → 自动产出维度 issue + 约束修订，可走既有修复闭环（已实施：67410ffb） |
+| P1-2 | 粘贴完读数据后能输出「流失章 × 低分维」对照诊断（已实施：90321512，PlatformDataPanel） |
 | 终验 | 以七猫口径重跑两篇旧作体检，「综合质量一般」对应的维度应全部出 finding |
 
 ## 五、假设与待确认
