@@ -290,6 +290,22 @@ func (s *Service) runLedgerFixTickets(ctx context.Context, runID string, novelID
 		go func() {
 			defer wg.Done()
 			for _, batch := range planFixBatches(group) {
+				// 字段可达性前置（#102）：巡检/复验把结构化列当事实源读，但台账写工具未必
+				// 开放该列。命中不可写列的 issue 直接落 skipped 转人工，一次 LLM 调用都不派发
+				// （旧路径会派发修复→只在自由文本里做等效标注→复验判只改一半→再空转一轮）。
+				reachable, unreachable := filterUnreachableFixIssues(batch)
+				batch = reachable
+				if len(unreachable) > 0 {
+					mu.Lock()
+					for id, reason := range unreachable {
+						s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
+						skipped++
+					}
+					mu.Unlock()
+				}
+				if len(batch) == 0 {
+					continue
+				}
 				// 提示词构建读取修复日志——先快照再释放锁，避免 dispatchSkill 被锁串行化
 				// （并行派发依赖 dispatchSkill 不被锁挡住）。
 				mu.Lock()
@@ -306,6 +322,9 @@ func (s *Service) runLedgerFixTickets(ctx context.Context, runID string, novelID
 				} else {
 					prompt = fixPrompt(novelID, batch, summary, logSnapshot, blocks)
 				}
+				// 字段可达性护栏在派发层注入，不写进 fixPrompt 契约单源（其全文被
+				// testdata/p0_baseline_*.txt 逐字锁定，演进需 -p0-update 重定格）。
+				prompt += fixReachabilityGuard()
 				out, derr := s.dispatchSkill(ctx, skill, SkillInput{
 					NovelID:   novelID,
 					Prompt:    prompt,

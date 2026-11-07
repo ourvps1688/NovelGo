@@ -347,7 +347,8 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
         .join("\n\n");
       const content =
         `${t("pipeline.tickets.fixPromptTitle")}\n\n${items}\n\n` +
-        t("pipeline.tickets.fixPromptFooter");
+        t("pipeline.tickets.fixPromptFooter") +
+        t("pipeline.tickets.fixPromptReachability");
       // 先发聊天（最重要的下一步），再标记状态，避免状态标记失败吞掉下一步。
       useChatLaunchStore.getState().send?.(content);
       await StartIssueFixTickets(

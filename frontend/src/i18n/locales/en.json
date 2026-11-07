@@ -1954,6 +1954,7 @@
       "fixPromptTitle": "Please help fix the following detected findings (already marked as fixing):",
       "fixPromptDesc": "Description: ",
       "fixPromptFooter": "Give actionable edit suggestions one by one; when a direct rewrite is needed, cite the chapter and paragraph.",
+      "fixPromptReachability": "\n\nLedger write boundary: for the characters table only name / description / personality / abilities / alive are writable (alive only allows alive to deceased; resurrection requires manual retcon approval). Structured columns such as is_current / sealed / volume_id / changed_at are not in any tool whitelist. If a finding targets one of those columns, say explicitly that it needs a platform-side or manual fix instead of reporting success after only adding an equivalent note in free-text fields.",
       "fixPromptReceipt": "Verification receipt ({{at}}): ",
       "tripTitle": "Provider appears unresponsive",
       "tripHint": "The LLM provider has hit too many hard failures recently (connection refused / 5xx / header timeout) and was auto-circuit-broken, pausing dispatch; it will auto-probe in half-open after cooldown. Retry later, or switch model/provider and retry.",

@@ -1914,6 +1914,7 @@
       "fixPromptTitle": "请协助修复以下检测发现的问题（已标记为「修复中」）：",
       "fixPromptDesc": "描述：",
       "fixPromptFooter": "请逐个给出可落地的修改建议；需要直接改稿时请指明章节与段落。",
+      "fixPromptReachability": "\n\n台账写入边界：characters 表仅 name/description/personality/abilities/alive 可写（alive 只允许在世→已死，复活须人工审批）；is_current/sealed/volume_id/changed_at 等结构化列不在工具白名单内。若问题落在不可写列上，请直接说明需平台侧或人工修复，不要只在描述文本里做等效标注就报完成。",
       "fixPromptReceipt": "复验回执（{{at}}）：",
       "tripTitle": "供应商疑似挂起",
       "tripHint": "LLM 供应商近期多次硬失败（连接拒绝 / 5xx / 首字节超时），已自动熔断暂停派发，冷却后将自动半开探针恢复。可稍后重试，或切换模型/供应商后重试。",

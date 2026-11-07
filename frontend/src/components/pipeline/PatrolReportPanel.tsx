@@ -224,7 +224,7 @@ export default function PatrolReportPanel({
         )} ${it.desc ?? ""}${chText}`;
         const content = `${t("pipeline.patrol.fixPromptTitle")}\n\n${item}\n\n${t(
           "pipeline.tickets.fixPromptFooter",
-        )}`;
+        )}${t("pipeline.tickets.fixPromptReachability")}`;
         useChatLaunchStore.getState().send?.(content);
         const ref = { run_id: runId, issue_key: it.id };
         const rows = (await ListIssueTickets(novelId)) ?? [];

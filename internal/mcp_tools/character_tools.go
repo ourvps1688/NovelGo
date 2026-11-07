@@ -209,6 +209,9 @@ type CreateCharacterItem struct {
 	Description string `json:"description"  jsonschema:"description=角色自然语言描述，如外貌、身份、背景故事等"`
 	Personality string `json:"personality" jsonschema:"description=自由JSON对象，描述角色性格/定位/背景等，如{\"traits\":[\"勇敢\"]，\"brief\":\"热血青年\"}。可直接传 JSON 对象，也可传字符串形式的 JSON 文本"`
 	Abilities   string `json:"abilities"   jsonschema:"description=JSON数组，角色能力/技能列表，如[\"剑术\"，\"隐身\"]。可直接传 JSON 数组，也可传字符串形式的 JSON 文本"`
+	// Alive 用指针三态：nil=沿用 DB 缺省（在世），false=正文已写明该角色死亡时显式标死。
+	// 不能用 bool——GORM 零值跳写会把显式 false 写成 default true（见 character/types.go）。
+	Alive *bool `json:"alive" jsonschema:"description=生死态：true=在世（缺省），false=已死。仅当正文明写该角色死亡时传 false"`
 }
 
 // CreateCharacterArgs 是 create_character 的参数。
@@ -253,6 +256,7 @@ func (t *CreateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 				Description: item.Description,
 				Personality: item.Personality,
 				Abilities:   item.Abilities,
+				Alive:       item.Alive,
 			}
 			if err := tx.Create(&ch).Error; err != nil {
 				failedName = item.Name
@@ -287,6 +291,11 @@ type UpdateCharacterArgs struct {
 	Description string `json:"description"  jsonschema:"description=新的自然语言描述（完全替换旧的）"`
 	Personality string `json:"personality"  jsonschema:"description=新的性格/设定（JSON 对象或字符串形式 JSON 文本均可，完全替换旧的）"`
 	Abilities   string `json:"abilities"    jsonschema:"description=新的能力列表（JSON 数组或字符串形式 JSON 文本均可，完全替换旧的）"`
+	// Alive 是角色生死态的受控写入口（#102）：巡检/复验把 characters.alive 当结构化事实源读，
+	// 但旧工具只开放 4 个自由文本列，导致「正文明写已死、alive 永远为 1」的漂移无法通过
+	// 台账修复闭环修复，只能转人工。指针三态区分「未传（不改）」与「显式 false（标死）」。
+	// 安全约束：只允许 在世→已死 单向；复活属 retcon，须走人工审批（见 Execute）。
+	Alive *bool `json:"alive" jsonschema:"description=生死态：true=在世，false=已死。仅允许由在世改为已死（复活须走 retcon 人工审批）；不传则保持原值"`
 }
 
 // UpdateCharacterTool 更新角色字段。
@@ -295,7 +304,8 @@ type UpdateCharacterTool struct{}
 func (t *UpdateCharacterTool) Name() string { return "update_character" }
 func (t *UpdateCharacterTool) Description() string {
 	return "更新已有角色的设定。只需传入要修改的字段，未传入的保持不变。" +
-		"personality 和 abilities 会完全替换旧值，不是合并。"
+		"personality 和 abilities 会完全替换旧值，不是合并。" +
+		"alive=false 可把角色标为已死（仅允许在世→已死单向；复活须走 retcon 人工审批）。"
 }
 func (t *UpdateCharacterTool) Category() ToolCategory { return CategoryNovelManagement }
 
@@ -306,7 +316,7 @@ func (t *UpdateCharacterTool) NewArgs() any                { return &UpdateChara
 func (t *UpdateCharacterTool) Execute(ctx context.Context, args any, tc ToolContext) (*ToolResult, error) {
 	a := args.(*UpdateCharacterArgs)
 
-	if a.Name == "" && a.Description == "" && a.Personality == "" && a.Abilities == "" {
+	if a.Name == "" && a.Description == "" && a.Personality == "" && a.Abilities == "" && a.Alive == nil {
 		return &ToolResult{Success: false, Error: "至少需要提供一个要修改的字段"}, nil
 	}
 
@@ -316,6 +326,16 @@ func (t *UpdateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 			return &ToolResult{Success: false, Error: fmt.Sprintf("角色 %d 不存在", a.CharacterID)}, nil
 		}
 		return nil, fmt.Errorf("query character: %w", err)
+	}
+
+	// 「已死不复活」是机器校验的结构化规则：台账写工具只允许单向标死，复活（含 retcon
+	// 回改前卷）必须经作者人工审批，避免 LLM 为消解一条张力项就把已定稿的死亡事实改回去。
+	wasDead := ch.Alive != nil && !*ch.Alive
+	if wasDead && a.Alive != nil && *a.Alive {
+		return &ToolResult{
+			Success: false,
+			Error:   "角色已标记为已死，不能经台账写工具复活；复活属 retcon，请走人工审批或转人工工单",
+		}, nil
 	}
 
 	if err := json.Unmarshal(tc.RawArgs, &ch); err != nil {
@@ -328,7 +348,7 @@ func (t *UpdateCharacterTool) Execute(ctx context.Context, args any, tc ToolCont
 
 	return &ToolResult{
 		Success: true,
-		Data:    map[string]any{"id": ch.ID},
+		Data:    map[string]any{"id": ch.ID, "alive": ch.Alive},
 	}, nil
 }
 
