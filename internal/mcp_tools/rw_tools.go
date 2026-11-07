@@ -1012,8 +1012,9 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 
 // RunStateSyncForChapter 对指定章节执行后台状态同步（statesync 子 Agent）。
 // runSub 为实际派发子 Agent 的函数（调用方决定用 ToolContext.RunSubAgent 还是 agent.RunSubAgent）；
+// db 用于写前本地派生 characters.alive（#103，nil 时优雅降级跳过派生，不阻断同步）；
 // logger 用于失败日志；toolID 标识调用来源（用于 statesync 进度事件）。返回派发错误（非阻断调用方可忽略）。
-func RunStateSyncForChapter(ctx context.Context, runSub func(ctx context.Context, req SubAgentRequest) (string, error), logger *slog.Logger, toolID string, novelID, chapterID int64) error {
+func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, runSub func(ctx context.Context, req SubAgentRequest) (string, error), logger *slog.Logger, toolID string, novelID, chapterID int64) error {
 	eventBus.Emit(ctx, "statesync:progress", map[string]any{
 		"novel_id":   novelID,
 		"chapter_id": chapterID,
@@ -1021,12 +1022,14 @@ func RunStateSyncForChapter(ctx context.Context, runSub func(ctx context.Context
 	})
 	instruction := fmt.Sprintf(
 		"刚刚完成了章节（chapter_id=%d）的修改并已落盘。请读取该章正文（read 路径 chapters/id_%d.md），"+
-			"将其涉及的角色、地点、弧线节点、时间线（伏笔/章节计划）、读者认知变化，对照现有台账做**增量**同步："+
+			"将其涉及的角色（含生死态）、地点、弧线节点、时间线（伏笔/章节计划）、读者认知变化，对照现有台账做**增量**同步："+
 			"新增首次出场者、更新已变化者、推进/回收伏笔与弧线节点、记录读者已知/误知变化。"+
 			"只调用台账类工具（角色/关系/地点/弧线/时间线/读者视角 的 create_*/update_*），"+
 			"严禁编辑章节文件或 novelgo.md，严禁再派发子 Agent。完成后输出一份简短同步摘要（改了哪些台账）。",
 		chapterID, chapterID,
 	)
+	// 本地派生在派发前完成：LLM 读到的台账已是最新，指令里给出派生名单供复核/补漏。
+	instruction += aliveDerivationNote(ctx, db, logger, novelID, chapterID)
 	if _, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "statesync",
 		NovelID:     novelID,
@@ -1057,7 +1060,7 @@ func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 	if tc.RunSubAgent == nil {
 		return
 	}
-	_ = RunStateSyncForChapter(ctx, tc.RunSubAgent, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
+	_ = RunStateSyncForChapter(ctx, tc.DB, tc.RunSubAgent, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {

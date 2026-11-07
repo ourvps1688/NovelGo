@@ -495,7 +495,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	pipeline.SetEventBus(wailsEmitter{})
 	// 注入 S0 对齐所需的 statesync 子 Agent 执行器：经由 agent.RunSubAgent 派发（mcp_tools 提供指令构造）。
 	a.pipeline.SetStateSyncRunner(func(ctx context.Context, novelID, chapterID int64) error {
-		return mcp_tools.RunStateSyncForChapter(ctx, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
+		return mcp_tools.RunStateSyncForChapter(ctx, a.db, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
 		}, a.logger, "pipeline-s0-align", novelID, chapterID)
 	})

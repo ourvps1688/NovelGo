@@ -95,6 +95,58 @@ func TestUpdateCharacter(t *testing.T) {
 	assert.Equal(t, "新描述", chars[0].Description)
 }
 
+// #103 第三层：alive 的人工审批入口。mcp_tools 的 update_character 只允许
+// 在世→已死单向；作者纠正派生误标 / retcon 复活只能经 app 这条 PUT 通道。
+func TestCreateCharacter_AliveFalse(t *testing.T) {
+	app := setupTestApp(t)
+	novel := createTestNovel(t, app)
+	dead := false
+
+	char, err := app.CreateCharacter(novel.ID, CreateCharacterInput{
+		Name:  "已故者",
+		Alive: &dead,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, char.Alive)
+	assert.False(t, *char.Alive, "显式 false 不得被 DB 缺省 true 覆盖")
+}
+
+func TestUpdateCharacter_AlivePUTSemantics(t *testing.T) {
+	app := setupTestApp(t)
+	novel := createTestNovel(t, app)
+	dead, alive := false, true
+
+	char, err := app.CreateCharacter(novel.ID, CreateCharacterInput{Name: "赵彦"})
+	require.NoError(t, err)
+
+	// ① 显式标死。
+	require.NoError(t, app.UpdateCharacter(novel.ID, char.ID, UpdateCharacterInput{
+		Name: "赵彦", Alive: &dead,
+	}))
+	chars, err := app.GetCharacters(novel.ID)
+	require.NoError(t, err)
+	require.Len(t, chars, 1)
+	require.NotNil(t, chars[0].Alive)
+	assert.False(t, *chars[0].Alive)
+
+	// ② 普通文本编辑不传 alive：绝不能把已标死状态写回缺省 true（lost update）。
+	require.NoError(t, app.UpdateCharacter(novel.ID, char.ID, UpdateCharacterInput{
+		Name: "赵彦", Description: "补一段描述",
+	}))
+	chars, err = app.GetCharacters(novel.ID)
+	require.NoError(t, err)
+	assert.False(t, *chars[0].Alive)
+	assert.Equal(t, "补一段描述", chars[0].Description)
+
+	// ③ 人工通道允许 retcon 复活（工具侧会拒绝，作者侧是审批动作）。
+	require.NoError(t, app.UpdateCharacter(novel.ID, char.ID, UpdateCharacterInput{
+		Name: "赵彦", Description: "补一段描述", Alive: &alive,
+	}))
+	chars, err = app.GetCharacters(novel.ID)
+	require.NoError(t, err)
+	assert.True(t, *chars[0].Alive)
+}
+
 func TestDeleteCharacter(t *testing.T) {
 	app := setupTestApp(t)
 	novel := createTestNovel(t, app)

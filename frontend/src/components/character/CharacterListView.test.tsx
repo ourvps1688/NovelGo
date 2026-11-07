@@ -225,6 +225,7 @@ describe("CharacterListView create", () => {
         name: "Bob",
         description: "",
         abilities: "[]",
+        alive: true,
       });
     });
   });
@@ -287,7 +288,52 @@ describe("CharacterListView update", () => {
     await waitFor(() => {
       expect(mockUpdateMutateAsync).toHaveBeenCalledWith({
         id: 1,
-        input: { name: "Alice2", description: "old desc", abilities: "[]" },
+        input: {
+          name: "Alice2",
+          description: "old desc",
+          abilities: "[]",
+          alive: true,
+        },
+      });
+    });
+  });
+
+  it("lets the author retcon a deceased character back to alive (#103)", async () => {
+    mockUseCharacters.mockReturnValue({
+      data: [
+        {
+          id: 1,
+          name: "Alice",
+          description: "old desc",
+          abilities: "[]",
+          alive: false,
+        },
+      ],
+      isLoading: false,
+      isError: false,
+    });
+    render(<CharacterListView novelId={1} />);
+    // 已故徽标在列表卡片上可见。
+    expect(await screen.findByText("character.deceased")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("common.edit"));
+    const select = screen.getByLabelText(
+      "character.aliveStatus",
+    ) as HTMLSelectElement;
+    expect(select.value).toBe("deceased");
+    fireEvent.change(select, { target: { value: "alive" } });
+    expect(screen.getByText("character.retconWarning")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("common.save"));
+
+    await waitFor(() => {
+      expect(mockUpdateMutateAsync).toHaveBeenCalledWith({
+        id: 1,
+        input: {
+          name: "Alice",
+          description: "old desc",
+          abilities: "[]",
+          alive: true,
+        },
       });
     });
   });

@@ -279,6 +279,7 @@ export namespace app {
 	    description?: string;
 	    personality?: string;
 	    abilities?: string;
+	    alive?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CreateCharacterInput(source);
@@ -290,6 +291,7 @@ export namespace app {
 	        this.description = source["description"];
 	        this.personality = source["personality"];
 	        this.abilities = source["abilities"];
+	        this.alive = source["alive"];
 	    }
 	}
 	export class CreateLocationInput {
@@ -1148,6 +1150,7 @@ export namespace app {
 	    name: string;
 	    description: string;
 	    abilities: string;
+	    alive?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateCharacterInput(source);
@@ -1158,6 +1161,7 @@ export namespace app {
 	        this.name = source["name"];
 	        this.description = source["description"];
 	        this.abilities = source["abilities"];
+	        this.alive = source["alive"];
 	    }
 	}
 	export class UpdateLocationInput {

@@ -30,11 +30,13 @@ func (a *App) GetCharacterRelations(novelID int64) ([]character.CharacterRelatio
 // ── Character CRUD ──────────────────────────────────────
 
 // CreateCharacterInput 是 CreateCharacter 的参数。
+// Alive 用指针三态：nil=沿用 DB 缺省（在世），false=作者新建时就已知该角色已故。
 type CreateCharacterInput struct {
 	Name        string `json:"name"`                  // 角色名称，必填
 	Description string `json:"description,omitempty"` // 自然语言描述
 	Personality string `json:"personality,omitempty"` // JSON 自由格式，如 {"traits":["勇敢","冲动"]}
 	Abilities   string `json:"abilities,omitempty"`   // JSON 数组，如 ["剑术","隐身"]
+	Alive       *bool  `json:"alive,omitempty"`       // 生死态：false=已故；nil/true=在世
 }
 
 // CreateCharacter 创建一个角色。按 (novel_id, name) 幂等：同名已存在则复用已有记录、
@@ -54,6 +56,7 @@ func (a *App) CreateCharacter(novelID int64, input CreateCharacterInput) (*chara
 		Description: input.Description,
 		Personality: input.Personality,
 		Abilities:   input.Abilities,
+		Alive:       input.Alive,
 	}
 	if err := a.character.DB.WithContext(a.ctx).Create(&char).Error; err != nil {
 		return nil, fmt.Errorf("create character: %w", err)
@@ -66,10 +69,15 @@ func (a *App) CreateCharacter(novelID int64, input CreateCharacterInput) (*chara
 
 // UpdateCharacterInput 采用 PUT 语义：前端全量传，后端全量覆盖。
 // Personality 是 AI 写入字段，不在 input 里，后端 First 加载原值保留。
+// Alive 是**人工审批通道**（#103 第三层）：mcp_tools 的 update_character 只允许
+// 在世→已死单向，作者改回在世（retcon / 纠正自动派生误标）只能经此入口。
+// 指针三态：nil=完全不碰该列（避免旧前端/纯文本编辑把已标死状态写脏）；
+// 非 nil=显式设置（含 true 复活）。写走 GORM Save，自动记 ledger_change_history。
 type UpdateCharacterInput struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Abilities   string `json:"abilities"`
+	Alive       *bool  `json:"alive,omitempty"`
 }
 
 // UpdateCharacter 更新角色。PUT 全量覆盖用户可编辑字段。
@@ -85,6 +93,11 @@ func (a *App) UpdateCharacter(novelID int64, charID int64, input UpdateCharacter
 	ch.Name = input.Name
 	ch.Description = input.Description
 	ch.Abilities = input.Abilities
+	// 人工审批通道：仅显式传 alive 才改该列；nil 时连「已死」也不动，且不会因
+	// PUT 全量覆盖把 statesync 刚派生的生死态误重置为缺省 true。
+	if input.Alive != nil {
+		ch.Alive = input.Alive
+	}
 	if err := a.character.DB.WithContext(a.ctx).Save(&ch).Error; err != nil {
 		return fmt.Errorf("update character: %w", err)
 	}

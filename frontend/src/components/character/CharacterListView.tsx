@@ -44,9 +44,16 @@ type CharForm = {
   name: string;
   description: string;
   abilities: string[];
+  // #103 第三层：生死态人工审批入口。系统每章写后从正文派生，作者在此纠正误标/retcon。
+  alive: boolean;
 };
 
-const EMPTY_FORM: CharForm = { name: "", description: "", abilities: [] };
+const EMPTY_FORM: CharForm = {
+  name: "",
+  description: "",
+  abilities: [],
+  alive: true,
+};
 
 function safeJson<T>(json: string, fallback: T): T {
   try {
@@ -139,6 +146,7 @@ function CharacterListViewContent({ novelId }: Props) {
       name: c.name,
       description: c.description || "",
       abilities: safeJson<string[]>(c.abilities, []),
+      alive: c.alive ?? true,
     });
     setEditMode({ type: "edit", item: c });
   }
@@ -147,11 +155,13 @@ function CharacterListViewContent({ novelId }: Props) {
     name: string;
     description: string;
     abilities: string;
+    alive: boolean;
   } {
     return {
       name: form.name,
       description: form.description,
       abilities: JSON.stringify(form.abilities),
+      alive: form.alive,
     };
   }
 
@@ -287,6 +297,32 @@ function CharacterListViewContent({ novelId }: Props) {
             onChange={(abilities) => setForm((f) => ({ ...f, abilities }))}
             placeholder={t("character.abilityPlaceholder")}
           />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">
+            {t("character.aliveStatus")}
+          </label>
+          <select
+            aria-label={t("character.aliveStatus")}
+            value={form.alive ? "alive" : "deceased"}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, alive: e.target.value === "alive" }))
+            }
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="alive">{t("character.alive")}</option>
+            <option value="deceased">{t("character.deceased")}</option>
+          </select>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t("character.aliveHint")}
+          </p>
+          {editMode?.type === "edit" &&
+            editMode.item.alive === false &&
+            form.alive && (
+              <p className="mt-1 text-[11px] text-destructive">
+                {t("character.retconWarning")}
+              </p>
+            )}
         </div>
       </div>
     );
@@ -561,6 +597,11 @@ function CharacterListViewContent({ novelId }: Props) {
                             <span className="text-sm font-medium text-foreground">
                               {c.name}
                             </span>
+                            {c.alive === false && (
+                              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                {t("character.deceased")}
+                              </span>
+                            )}
                           </div>
                           {desc && (
                             <p className="mt-1 text-xs text-muted-foreground leading-relaxed line-clamp-2">

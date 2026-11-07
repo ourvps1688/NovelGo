@@ -107,6 +107,11 @@ export default function CharacterList({ novelId }: Props) {
             {(c.name ?? "").charAt(0) || "?"}
           </span>
           <span className="min-w-0 flex-1 text-sm truncate">{c.name}</span>
+          {c.alive === false && (
+            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+              {t("character.deceased")}
+            </span>
+          )}
         </button>
         <button
           type="button"
