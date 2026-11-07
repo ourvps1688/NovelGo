@@ -51,33 +51,117 @@ func (s *Service) ConfirmIssueTickets(ctx context.Context, novelID int64, refs [
 
 // StartIssueFixTickets 「去修复」：工单进入（人工）修复中（状态机：→修复中），并异步派发
 // 修复执行体（#240 R5-2 工单接执行：修复动作由人显式触发，执行体按 run 聚合全部 fixing
-// 态工单被动处理，幂等去重——重复点击不双跑）。
+// 态工单被动处理）。幂等容忍：已在 fixing 态的工单不报错（重复点击/跨批重试直接并入，
+// 由在跑执行体排空拾起）；逐条独立、部分失败不整体放弃——成功的照常派发，失败的逐条
+// 报错（#100 帮凶修复：旧实现任一条流转失败即整批放弃派发，同批工单全部陪葬）。
+// 「置 fixing + 派发决策」在 issueFixMu 互斥锁内完成，与执行体的「排空扫描 + 摘标记」
+// 同锁互斥：每张翻为 fixing 的工单必被执行体排空拾起或触发新执行体，彻底闭合
+// 「派发被任务队列去重合并 → 工单永卡修复中」的孤儿化路径（#100 帮凶修复）。
 func (s *Service) StartIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
-	if err := s.transitionIssueTickets(ctx, novelID, refs, IssueStatusFixing, ""); err != nil {
-		return err
+	if s.store == nil {
+		return errors.New("issue 工单表未初始化")
 	}
-	// 按 run 分组派发（一个 run 一个执行体聚合本 run 全部 fixing 态工单）。队列不可用
-	// 时 dispatchExecutor 降级直接执行（与迁移前逐字一致）。
+	if len(refs) == 0 {
+		return errors.New("未选择工单")
+	}
+	s.issueFixMu.Lock()
+	if s.issueFixActive == nil {
+		s.issueFixActive = map[string]bool{}
+	}
+	var errs []error
 	runIDs := map[string]bool{}
 	for _, ref := range refs {
-		if ref.RunID != "" {
-			runIDs[ref.RunID] = true
+		row, err := s.store.getIssueRow(ctx, novelID, ref.RunID, ref.IssueKey)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
+			continue
 		}
+		if row.Status == IssueStatusFixing {
+			runIDs[ref.RunID] = true // 已在修复中：幂等容忍（在跑执行体排空会拾起）
+			continue
+		}
+		if err := s.store.TransitionIssueTicket(ctx, novelID, ref.RunID, ref.IssueKey, IssueStatusFixing, ""); err != nil {
+			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
+			continue
+		}
+		runIDs[ref.RunID] = true
 	}
+	need := make([]string, 0, len(runIDs))
 	for runID := range runIDs {
-		s.dispatchExecutor(taskKindIssueFix, runID, novelID, func() {
+		if s.issueFixActive[runID] {
+			continue // 在跑执行体排空收尾会拾起这批工单，不重复派发
+		}
+		s.issueFixActive[runID] = true
+		need = append(need, runID)
+	}
+	s.issueFixMu.Unlock()
+	// 按 run 分组派发（一个 run 一个执行体聚合本 run 全部 fixing 态工单）。派发用唯一
+	// dedup 键（dispatchExecutorUnique）：应用层互斥已保证同 run 单执行体，任务队列侧
+	// 不再合并——合并会把互斥窗口内新翻 fixing 的工单孤儿化。队列不可用时降级直派。
+	for _, runID := range need {
+		runID := runID
+		s.dispatchExecutorUnique(taskKindIssueFix, runID, novelID, func() {
 			s.runIssueFixTickets(runID, novelID)
 		})
 	}
-	return nil
+	return errors.Join(errs...)
 }
+
+// releaseIssueFix 修复执行体收口摘标记（任何退出路径，defer 调用）。
+func (s *Service) releaseIssueFix(runID string) {
+	s.issueFixMu.Lock()
+	delete(s.issueFixActive, runID)
+	s.issueFixMu.Unlock()
+}
+
+// issueFixDrainPasses 是修复执行体排空循环的最多批次数（保险丝；正常由 seen 集合
+// 自然终止——只有 StartIssueFixTickets 会新增 fixing 态工单）。
+const issueFixDrainPasses = 32
 
 // runIssueFixTickets 是工单「去修复」的执行体（#240，R5-2 工单接执行）：处理本 run 全部
 // 处于 fixing 态的发现项工单，按问题类型分流到既有修复执行能力（台账级 signability-fix /
 // blueprint-fix、正文级 chapter-rewrite），不派发任何自动回路、不自动回复评。V 系文风漂移
 // 与冻结卷写保护项绝不派发，退回原状态留 note（只报告不改写 / 人工裁决）。
-// 幂等重入：已不在 fixing 态的工单直接跳过；重复派发由队列 kind:run_id 去重合并。
+//
+// 收尾排空（#100 帮凶修复）：单批处理完后重扫 fixing 态工单——执行期间被用户点「去修复」
+// 翻为 fixing 的新工单（其派发在去重窗口内被合并）在此拾起继续处理，直至无新单，
+// 杜绝「执行体快照后到达的工单永卡修复中」的孤儿化。seen 集合保证每张工单至多处理一遍
+// （落库失败卡 fixing 的行不无限重试，留待下次显式派发/启动清扫）。
+// 幂等重入：已不在 fixing 态的工单直接跳过；互斥由 issueFixActive 标记保证（见 StartIssueFixTickets）。
 func (s *Service) runIssueFixTickets(runID string, novelID int64) {
+	defer s.releaseIssueFix(runID)
+	seen := map[string]bool{}
+	for pass := 0; pass < issueFixDrainPasses; pass++ {
+		// 扫描与摘标记/派发决策同锁（StartIssueFixTickets 的互斥协议）：要么本轮扫到
+		// 新翻的工单，要么其派发会拉起新执行体，二选一必达。
+		s.issueFixMu.Lock()
+		rows, err := s.store.ListFixingTickets(s.appCtx, novelID, runID)
+		s.issueFixMu.Unlock()
+		if err != nil {
+			s.logger.Error("工单修复：加载 fixing 工单失败", "run_id", runID, "err", err)
+			return
+		}
+		fresh := make([]PipelineIssue, 0, len(rows))
+		for _, r := range rows {
+			if !seen[r.IssueKey] {
+				seen[r.IssueKey] = true
+				fresh = append(fresh, r)
+			}
+		}
+		if len(fresh) == 0 {
+			if pass == 0 {
+				s.logger.Info("工单修复：本 run 无 fixing 态工单，跳过", "run_id", runID)
+			}
+			return
+		}
+		s.runIssueFixPass(runID, novelID, fresh)
+	}
+}
+
+// runIssueFixPass 执行一批 fixing 态工单的修复（原 runIssueFixTickets 单遍逻辑）：
+// 分流 → 台账级并行小批修复 / 正文级逐章重写 → 逐条落回执（fixed/skipped），
+// 收口递增 FixRounds + 蓝图漂移巡检 + 广播修复完成。
+func (s *Service) runIssueFixPass(runID string, novelID int64, rows []PipelineIssue) {
 	ctx := s.appCtx
 	run, err := s.store.GetByRunID(ctx, runID)
 	if err != nil || run == nil {
@@ -88,16 +172,6 @@ func (s *Service) runIssueFixTickets(runID string, novelID int64) {
 	var ctxt GateContext
 	if run.ContextJSON != "" {
 		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-	}
-
-	rows, err := s.store.ListFixingTickets(ctx, novelID, runID)
-	if err != nil {
-		s.logger.Error("工单修复：加载 fixing 工单失败", "run_id", runID, "err", err)
-		return
-	}
-	if len(rows) == 0 {
-		s.logger.Info("工单修复：本 run 无 fixing 态工单，跳过", "run_id", runID)
-		return
 	}
 
 	// 显式修复执行开始（R5-2：由用户「去修复」触发，替代旧 S5 自动派发修复的 emitFixStart
@@ -552,8 +626,9 @@ func (s *Service) runVerifyTickets(runID string, novelID int64, keys []string) {
 			s.applyVerifyOutcome(ctx, summary, novelID, runID, r, oc, total, done)
 		}
 	}
-	// 收口：任何残留 verifying 态（超时/取消中断）→ 复位 pending，避免永久卡死。
-	if v, lerr := s.store.ResetStuckVerifying(ctx, novelID); lerr == nil && v > 0 {
+	// 收口：任何残留 verifying 态（超时/取消中断）→ 复位（恢复进复验前快照，见
+	// verifyRestoreStatus），按 run 收窄避免误伤其它 run 并行复验，避免永久卡死。
+	if v, lerr := s.store.ResetStuckVerifying(ctx, novelID, runID); lerr == nil && v > 0 {
 		s.logger.Warn("复验：收口复位残留 verifying 工单", "run_id", runID, "count", v)
 	}
 
@@ -589,14 +664,16 @@ type verifyOutcome struct {
 }
 
 // applyVerifyOutcome 落库单张工单的复验结论并推进计数/进度（L0 与 LLM 批量共用同一收口）。
-// 语义与旧逐工单循环逐字一致：verified→verified；rejected→pending 计 verify_attempts
-// （3 次自动转人工）；未确认→pending 留待下轮且不计 attempts（防供应商抖动误转人工）。
+// 语义：verified→verified；rejected→pending 计 verify_attempts（3 次自动转人工）；
+// 未确认→恢复进复验前快照（verifyRestoreStatus，已修复的保留「已修复（待复验）」不被打回
+// 待确认，#100）留待下轮且不计 attempts（防供应商抖动误转人工）。
 func (s *Service) applyVerifyOutcome(ctx context.Context, summary *IssueVerifySummary, novelID int64, runID string, r PipelineIssue, oc verifyOutcome, total, done int) {
 	switch {
 	case oc.verified:
 		if _, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, true, oc.note); err != nil {
 			s.logger.Warn("复验：落库 verified 失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
-			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验通过落库失败，已复位待复验")
+			// 回退走 RecordIssueVerifyUnverified：恢复进复验前快照（不打回待确认）+ note 可见。
+			_ = s.store.RecordIssueVerifyUnverified(ctx, novelID, runID, r.IssueKey, "复验通过落库失败，已复位待复验")
 			summary.Unverified++
 		} else {
 			summary.Confirmed++
@@ -605,7 +682,7 @@ func (s *Service) applyVerifyOutcome(ctx context.Context, summary *IssueVerifySu
 		escalated, err := s.store.RecordIssueVerify(ctx, novelID, runID, r.IssueKey, false, oc.note)
 		if err != nil {
 			s.logger.Warn("复验：落库未通过失败（非阻断，留待下轮）", "issue", r.IssueKey, "err", err)
-			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusPending, "复验未通过落库失败，已复位待复验")
+			_ = s.store.RecordIssueVerifyUnverified(ctx, novelID, runID, r.IssueKey, "复验未通过落库失败，已复位待复验")
 			summary.Unverified++
 		} else {
 			summary.Rejected++

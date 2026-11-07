@@ -129,6 +129,45 @@ func TestLandTensionTicketsNoContainerNoFindings(t *testing.T) {
 	assert.Equal(t, 0, n)
 }
 
+// TestLandTensionTicketsKeepsFixedAcrossReland 报障回归（#100）：修复下一题触发章保存 →
+// 情绪账回填把已修工单打回「待确认」。换血必须保留用户流转状态——同章同发现重落时
+// E9-1 保持 fixed，E9-2 保持 pending；零发现清章语义不变。
+func TestLandTensionTicketsKeepsFixedAcrossReland(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	s := NewStore(db)
+
+	findings := []quality.Finding{
+		tensionFinding(quality.CheckPacingDrag), tensionFinding(quality.CheckBeatGap)}
+	_, err := LandTensionTickets(ctx, db, 7, 9, findings)
+	require.NoError(t, err)
+	run, err := s.GetDetectRun(ctx, 7, TensionKind, nil)
+	require.NoError(t, err)
+
+	// 用户修完 E9-1（拖沓段）落 fixed。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, run.RunID, "E9-1", IssueStatusFixed, ""))
+
+	// 修复 E9-2 触发章保存 → 同章同发现重落（模拟写后链路回填）。
+	_, err = LandTensionTickets(ctx, db, 7, 9, findings)
+	require.NoError(t, err)
+	rows, err := s.ListIssues(ctx, 7, run.RunID)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixed, byKey["E9-1"].Status,
+		"已修工单不得被章保存回填打回待确认（#100 报障）")
+	require.Equal(t, IssueStatusPending, byKey["E9-2"].Status, "未流转工单保持 pending")
+
+	// 零发现清章：回填语义不变（用户流转状态随工单删除一并消失，符合「发现消失」语义）。
+	_, err = LandTensionTickets(ctx, db, 7, 9, nil)
+	require.NoError(t, err)
+	rows, _ = s.ListIssues(ctx, 7, run.RunID)
+	assert.Empty(t, rows)
+}
+
 // TestReplaceIssuesByPrefixEmptyPrefixRejected 空前缀显式报错（防误用成整 run 清除）。
 func TestReplaceIssuesByPrefixEmptyPrefixRejected(t *testing.T) {
 	db := newTestDB(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -81,6 +82,105 @@ func TestStoreReplaceIssuesAndStatus(t *testing.T) {
 	require.Equal(t, IssueStatusPending, rows[0].Status)
 	require.Empty(t, rows[0].SkipReason)
 	require.Equal(t, 2, rows[0].Round)
+}
+
+// TestReplaceIssuesByPrefixKeepsWorkflowState 验证 E 系换血保留用户流转状态（#100 主修复）：
+// 章保存写后链路反复刷新本章发现时，已修/已驳回等状态与复验/备注留痕不得被冲回 pending——
+// 同键同 Area（同一发现）整组继承；键平移（位次键随发现集变化）走 Area 兜底继承；
+// 真正的新发现才落 pending；消失的发现照删；跨前缀工单不受影响。
+func TestReplaceIssuesByPrefixKeepsWorkflowState(t *testing.T) {
+	db := newTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+
+	// 首落：E9-* 两条 + 另一章 E10-* 一条（跨前缀隔离对照）。
+	seed := []AuditIssue{
+		{ID: "E9-1", Level: "P1", Area: "拖沓段", Desc: "9-12 章拖沓"},
+		{ID: "E9-2", Level: "P1", Area: "爽点断档", Desc: "13-16 章无爽点"},
+	}
+	require.NoError(t, s.ReplaceIssuesByPrefix(ctx, 7, "run-a", "E9-", 0, seed))
+	require.NoError(t, s.ReplaceIssuesByPrefix(ctx, 7, "run-a", "E10-", 0, []AuditIssue{
+		{ID: "E10-1", Level: "P1", Area: "拖沓段", Desc: "17 章拖沓"},
+	}))
+
+	// 用户流转：E9-1 修复落 fixed（工单修复回执态）；E9-2 修复派发失败退回待修后复验
+	// 「明确未通过」（留 verify_receipt/attempts），随后驳回（留 note）。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "E9-1", IssueStatusFixed, ""))
+	require.NoError(t, s.TransitionIssueTicket(ctx, 7, "run-a", "E9-2", IssueStatusFixing, ""))
+	_, err := s.RecordIssueVerify(ctx, 7, "run-a", "E9-2", false, "只改了一半")
+	require.NoError(t, err)
+	require.NoError(t, s.TransitionIssueTicket(ctx, 7, "run-a", "E9-2", IssueStatusDismissed, "误报，主观差异"))
+	oldRows, err := s.ListIssues(ctx, 7, "run-a")
+	require.NoError(t, err)
+	require.Len(t, oldRows, 3)
+	created91 := oldRows[0].CreatedAt
+
+	// 同发现重落（键+Area 不变，desc/level 换新——发现内容字段走刷新语义）。
+	require.NoError(t, s.ReplaceIssuesByPrefix(ctx, 7, "run-a", "E9-", 0, []AuditIssue{
+		{ID: "E9-1", Level: "P0", Area: "拖沓段", Desc: "9-12 章拖沓（区间漂移）"},
+		{ID: "E9-2", Level: "P1", Area: "爽点断档", Desc: "13-16 章无爽点（区间漂移）"},
+	}))
+	rows, err := s.ListIssues(ctx, 7, "run-a")
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixed, byKey["E9-1"].Status, "已修工单不得被换血打回待确认（#100）")
+	require.Equal(t, "P0", byKey["E9-1"].Level, "发现内容字段走刷新语义")
+	require.Equal(t, "9-12 章拖沓（区间漂移）", byKey["E9-1"].Desc)
+	require.WithinDuration(t, created91, byKey["E9-1"].CreatedAt, 2*time.Second, "创建时间保留（同一发现）")
+	require.Equal(t, IssueStatusDismissed, byKey["E9-2"].Status, "已驳回状态保留")
+	require.Equal(t, "误报，主观差异", byKey["E9-2"].Note, "人工备注留痕保留")
+	require.Equal(t, "只改了一半", byKey["E9-2"].VerifyReceipt, "复验回执留痕保留")
+	require.Equal(t, 1, byKey["E9-2"].VerifyAttempts, "复验次数留痕保留")
+	require.Equal(t, IssueStatusPending, byKey["E10-1"].Status, "跨前缀工单不受影响")
+
+	// 键平移（位次键随发现集变化）：Area 兜底继承——检查项才是发现的语义身份。
+	require.NoError(t, s.ReplaceIssuesByPrefix(ctx, 7, "run-a", "E9-", 0, []AuditIssue{
+		{ID: "E9-1", Level: "P1", Area: "爽点断档", Desc: "位次平移"},
+		{ID: "E9-2", Level: "P1", Area: "拖沓段", Desc: "位次平移"},
+	}))
+	rows, _ = s.ListIssues(ctx, 7, "run-a")
+	byKey = map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusDismissed, byKey["E9-1"].Status, "Area 兜底：继承旧「爽点断档」的驳回态")
+	require.Equal(t, IssueStatusFixed, byKey["E9-2"].Status, "Area 兜底：继承旧「拖沓段」的已修态")
+
+	// 新检查项 = 真正的新发现 → 落 pending。
+	require.NoError(t, s.ReplaceIssuesByPrefix(ctx, 7, "run-a", "E9-", 0, []AuditIssue{
+		{ID: "E9-1", Level: "P1", Area: "拖沓段", Desc: "d"},
+		{ID: "E9-2", Level: "P1", Area: "爽点断档", Desc: "d"},
+		{ID: "E9-3", Level: "P1", Area: "开篇坡度", Desc: "新发现"},
+	}))
+	rows, _ = s.ListIssues(ctx, 7, "run-a")
+	byKey = map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixed, byKey["E9-1"].Status)
+	require.Equal(t, IssueStatusDismissed, byKey["E9-2"].Status)
+	require.Equal(t, IssueStatusPending, byKey["E9-3"].Status, "新发现落 pending")
+
+	// 消失的发现照删（回填语义不变）；跨前缀照旧不受影响。
+	require.NoError(t, s.ReplaceIssuesByPrefix(ctx, 7, "run-a", "E9-", 0, []AuditIssue{
+		{ID: "E9-1", Level: "P1", Area: "拖沓段", Desc: "d"},
+	}))
+	rows, _ = s.ListIssues(ctx, 7, "run-a")
+	byKey = map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Len(t, rows, 2)
+	require.Equal(t, IssueStatusFixed, byKey["E9-1"].Status)
+	_, hasE92 := byKey["E9-2"]
+	require.False(t, hasE92, "消失的发现照删")
+	_, hasE93 := byKey["E9-3"]
+	require.False(t, hasE93, "消失的发现照删")
+	require.Equal(t, IssueStatusPending, byKey["E10-1"].Status, "跨前缀工单始终不受影响")
 }
 
 // TestStoreReplaceIssuesIsolatedByRun 验证工单按 run 隔离：其它 run / 其它书不受影响。

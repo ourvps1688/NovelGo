@@ -136,6 +136,12 @@ type Service struct {
 	// CancelIssueVerify 按 key 取出并调用 cancel，使本轮复验 ctx 立即 Done；逐工单
 	// 复验循环感知后安全退出（未复验工单复位 pending）。与 detectCancelFns 同口径。
 	verifyCancelFns sync.Map
+	// issueFixMu/issueFixActive 是工单「去修复」执行体的进程内互斥（#100 帮凶修复）：
+	// key=runID。StartIssueFixTickets 在锁内完成「置 fixing + 派发决策」，执行体在锁内
+	// 「扫描 fixing 工单 + 收口摘标记」——二选一必达（每张翻为 fixing 的工单必被执行体
+	// 排空拾起或触发新执行体），杜绝任务队列去重合并导致的工单孤儿化（永卡修复中）。
+	issueFixMu     sync.Mutex
+	issueFixActive map[string]bool
 }
 
 // NewService 构造流水线服务。

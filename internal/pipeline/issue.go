@@ -91,6 +91,10 @@ type PipelineIssue struct {
 	VerifyAttempts int `gorm:"column:verify_attempts;not null;default:0" json:"verify_attempts"`
 	// Note 是工单面板流转时的人工备注（驳回理由/交接说明）。
 	Note string `gorm:"column:note;type:text" json:"note,omitempty"`
+	// PreVerifyStatus 是进入 verifying 瞬态前的状态快照（UpdateIssueStatus 置 verifying 时
+	// 原子捕获）：复验「未确认/中断」回退时恢复原状态而非一律 pending——已修复（待复验）
+	// 的工单不得被一次供应商超时/回执未解析打回「待确认」（#100 状态回退）。
+	PreVerifyStatus string `gorm:"column:pre_verify_status" json:"pre_verify_status,omitempty"`
 	// Round 是记录/流转时的修复轮数（GateContext.FixRounds），供轮次统计与增量复验分轮。
 	Round     int       `gorm:"column:round;not null;default:0" json:"round"`
 	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
@@ -184,9 +188,64 @@ func (s *Store) ReplaceIssues(ctx context.Context, novelID int64, runID string, 
 	})
 }
 
+// matchCarryRows 把旧工单按「键+Area 精确 → Area 兜底」两遍匹配给新发现清单，
+// 返回新清单每条 ID 对应的旧工单（nil=全新单）。E 系键是按发现顺序的位次键
+// （E{章}-{seq}），章节重落后发现集合变化会平移序号，故键匹配必须验 Area
+// （同键不同检查项=不同发现，不得继承）；键变了但 Area 相同（同章同检查项位次平移）
+// 走 Area 兜底继承——检查项（Area）才是发现的语义身份。旧单每条只消费一次。
+func matchCarryRows(old []PipelineIssue, issues []AuditIssue) map[string]*PipelineIssue {
+	out := make(map[string]*PipelineIssue, len(issues))
+	used := make([]bool, len(old))
+	find := func(pred func(PipelineIssue) bool) *PipelineIssue {
+		for i := range old {
+			if !used[i] && pred(old[i]) {
+				used[i] = true
+				return &old[i]
+			}
+		}
+		return nil
+	}
+	for _, it := range issues {
+		if out[it.ID] != nil {
+			continue
+		}
+		out[it.ID] = find(func(r PipelineIssue) bool {
+			return r.IssueKey == it.ID && r.Area == it.Area
+		})
+	}
+	for _, it := range issues {
+		if out[it.ID] != nil {
+			continue
+		}
+		out[it.ID] = find(func(r PipelineIssue) bool { return r.Area == it.Area })
+	}
+	return out
+}
+
+// carryIssueWorkflow 把旧工单的用户流转状态整组继承给换血重落的新行（#100 主修复）：
+// 状态/驳回理由/复验回执与次数/人工备注/轮次/进复验前快照/创建时间全保留——
+// 写后链路的发现刷新绝不回退用户已推进的工单状态（fixed/verified/dismissed 等
+// 不得因「修复下一个问题触发章保存」被冲成待确认）。发现内容字段（level/area/desc/
+// 修复路由/作用域）由新行自带（刷新语义）。
+func carryIssueWorkflow(row *PipelineIssue, prev *PipelineIssue) {
+	row.Status = prev.Status
+	row.SkipReason = prev.SkipReason
+	row.VerifyReceipt = prev.VerifyReceipt
+	row.VerifyAt = prev.VerifyAt
+	row.VerifyAttempts = prev.VerifyAttempts
+	row.Note = prev.Note
+	row.PreVerifyStatus = prev.PreVerifyStatus
+	row.Round = prev.Round
+	row.CreatedAt = prev.CreatedAt
+}
+
 // ReplaceIssuesByPrefix 按 issue key 前缀整批替换该 run 的一类工单（情绪账 E 系
 // 按章前缀，见 tension_run.go）：先删同前缀旧行再插新清单，空清单=清该前缀全部旧工单
 // （新结果=零发现的回填语义）；跨前缀工单（其它章/其它命名空间）不受影响。
+// 换血保留用户流转状态（#100 主修复）：新清单里与旧工单同一发现（键+Area 匹配、
+// Area 兜底）的行继承旧工单状态与复验/备注留痕（carryIssueWorkflow）——章保存写后
+// 链路反复刷新本章发现时，用户已修/已确认/已驳回的状态不被冲回 pending；
+// 真正的新发现才落 pending，消失的发现照删（回填语义不变）。
 // round 语义与 ReplaceIssues 同（曲线发现恒 0 轮新单）。prefix 空串显式报错——
 // 防误用成整 run 清除（整批替换请走 ReplaceIssues）。
 func (s *Store) ReplaceIssuesByPrefix(ctx context.Context, novelID int64, runID, prefix string, round int, issues []AuditIssue) error {
@@ -194,6 +253,12 @@ func (s *Store) ReplaceIssuesByPrefix(ctx context.Context, novelID int64, runID,
 		return errors.New("ReplaceIssuesByPrefix：prefix 不可为空（整批替换请走 ReplaceIssues）")
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var old []PipelineIssue
+		if err := tx.Where("novel_id = ? AND run_id = ? AND issue_key LIKE ?", novelID, runID, prefix+"%").
+			Find(&old).Error; err != nil {
+			return err
+		}
+		carry := matchCarryRows(old, issues)
 		if err := tx.Where("novel_id = ? AND run_id = ? AND issue_key LIKE ?", novelID, runID, prefix+"%").
 			Delete(&PipelineIssue{}).Error; err != nil {
 			return err
@@ -208,6 +273,9 @@ func (s *Store) ReplaceIssuesByPrefix(ctx context.Context, novelID int64, runID,
 		}
 		for _, it := range issues {
 			row := pipelineIssueRow(novelID, runID, round, it, validMax)
+			if prev := carry[it.ID]; prev != nil {
+				carryIssueWorkflow(&row, prev)
+			}
 			if err := tx.Create(&row).Error; err != nil {
 				return err
 			}
@@ -227,6 +295,26 @@ func (s *Store) UpdateIssueStatus(ctx context.Context, novelID int64, runID, iss
 		// 重新进入复验态：清除此前「启动清扫/中断」残留备注，避免与「复验中」状态并排显示造成
 		// 「卡在复验中」的误导错觉（UI 仅 VerifyIssueTickets 会把状态置为 verifying，此处收窄安全）。
 		updates["note"] = ""
+		// 进复验瞬态前原子快照原状态（pre_verify_status）：复验「未确认/中断」回退时恢复
+		// 原状态而非一律 pending（#100——已修复（待复验）的工单不得被一次复验超时打回
+		// 「待确认」）。已在 verifying 的行保留原快照（重复复验不覆盖，仍回最初的状态）。
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var row PipelineIssue
+			err := tx.Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+				First(&row).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil // 行不存在：与旧口径一致（条件更新 0 行、无错误）
+			}
+			if err != nil {
+				return err
+			}
+			if row.Status != IssueStatusVerifying {
+				updates["pre_verify_status"] = row.Status
+			}
+			return tx.Model(&PipelineIssue{}).
+				Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+				Updates(updates).Error
+		})
 	}
 	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
 		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
@@ -271,26 +359,63 @@ func (s *Store) ListVerifyingTickets(ctx context.Context, novelID int64, runID s
 	return rows, nil
 }
 
-// ResetStuckVerifying 将残留的 verifying 态工单复位为 pending（进程崩溃/中断残留清扫，
-// 与 RecoverInterruptedRuns 同口径：执行体随进程退出而消亡，DB 状态需人工/启动期复位）。
-func (s *Store) ResetStuckVerifying(ctx context.Context, novelID int64) (int64, error) {
-	res := s.db.WithContext(ctx).
-		Model(&PipelineIssue{}).
-		Where("novel_id = ? AND status = ?", novelID, IssueStatusVerifying).
-		Updates(map[string]any{"status": IssueStatusPending, "note": "复验执行中断，已复位待复验"})
-	return res.RowsAffected, res.Error
+// verifyRestoreStatus 决定复验「未确认/中断」后的回退状态：优先进复验前快照
+// （pre_verify_status，UpdateIssueStatus 置 verifying 时捕获）——已修复（待复验）的
+// 工单被一次供应商超时/回执未解析后停在「已修复（待复验）」，可直接再点复验，
+// 不打回「待确认」（#100 状态回退）。快照为空（旧数据）/瞬态/修复中等不可直回的
+// 状态回退 pending（退回待修，兼容旧口径）。
+func verifyRestoreStatus(pre string) string {
+	switch pre {
+	case IssueStatusFixed, IssueStatusConfirmed, IssueStatusPending, IssueStatusRewrite, IssueStatusSkipped, IssueStatusRetcon:
+		return pre
+	default:
+		return IssueStatusPending
+	}
+}
+
+// resetVerifyingRows 把满足 scope 的 verifying 态工单逐行复位为 verifyRestoreStatus
+// （恢复进复验前快照）并写 note；逐行条件更新（id+status=verifying）防止读改写间隙
+// 被其它路径收口的行遭二次改写。
+func (s *Store) resetVerifyingRows(ctx context.Context, note string, scope func(*gorm.DB) *gorm.DB) (int64, error) {
+	var rows []PipelineIssue
+	if err := scope(s.db.WithContext(ctx).Model(&PipelineIssue{})).Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, r := range rows {
+		res := s.db.WithContext(ctx).Model(&PipelineIssue{}).
+			Where("id = ? AND status = ?", r.ID, IssueStatusVerifying).
+			Updates(map[string]any{
+				"status":     verifyRestoreStatus(r.PreVerifyStatus),
+				"note":       note,
+				"updated_at": time.Now(),
+			})
+		if res.Error != nil {
+			return n, res.Error
+		}
+		n += res.RowsAffected
+	}
+	return n, nil
+}
+
+// ResetStuckVerifying 将本 run 残留的 verifying 态工单收口复位（复验中断/超时残留清扫，
+// 与 RecoverInterruptedRuns 同口径：执行体消亡后 DB 状态需收口复位）。按 run 收窄作用域，
+// 不误伤其它 run 并行复验中的工单。回退目标走 verifyRestoreStatus（恢复进复验前快照）。
+func (s *Store) ResetStuckVerifying(ctx context.Context, novelID int64, runID string) (int64, error) {
+	return s.resetVerifyingRows(ctx, "复验执行中断，已复位待复验", func(q *gorm.DB) *gorm.DB {
+		return q.Where("novel_id = ? AND run_id = ? AND status = ?", novelID, runID, IssueStatusVerifying)
+	})
 }
 
 // ResetAllStuckVerifying 启动期（RecoverInterruptedRuns）全局清扫：把所有 novel 残留的
-// verifying 态工单一次性复位为 pending。复验执行体随进程退出而消亡，若崩溃/重启发生在
+// verifying 态工单一次性复位。复验执行体随进程退出而消亡，若崩溃/重启发生在
 // 复验中途，执行体收口逻辑不再运行，这些工单会永久停在 verifying；此处兜底复位，避免
 // 永久卡死（issue.go:35 注释承诺的「启动期清扫复位」此前未真正实现，本次补齐）。
+// 回退目标走 verifyRestoreStatus（恢复进复验前快照，已修复的不打回待确认）。
 func (s *Store) ResetAllStuckVerifying(ctx context.Context) (int64, error) {
-	res := s.db.WithContext(ctx).
-		Model(&PipelineIssue{}).
-		Where("status = ?", IssueStatusVerifying).
-		Updates(map[string]any{"status": IssueStatusPending, "note": "应用重启导致复验中断，已复位待复验"})
-	return res.RowsAffected, res.Error
+	return s.resetVerifyingRows(ctx, "应用重启导致复验中断，已复位待复验", func(q *gorm.DB) *gorm.DB {
+		return q.Where("status = ?", IssueStatusVerifying)
+	})
 }
 
 // ResetAllStuckFixing 启动期（RecoverInterruptedRuns）全局清扫：把所有 novel 残留的
@@ -428,19 +553,42 @@ func (s *Store) RecordIssueVerify(ctx context.Context, novelID int64, runID, iss
 }
 
 // RecordIssueVerifyUnverified 记录复验「未确认」（LLM 调用失败 / 供应商熔断 / 回执未解析 /
-// 回执未含本工单）：退回 pending 留待下轮，原因写入 note（前端可见），不计 verify_attempts
+// 回执未含本工单）：回退到进复验前的状态（verifyRestoreStatus——已修复（待复验）的工单
+// 保留「已修复（待复验）」可直接再点复验，不被一次供应商超时打回「待确认」，#100），
+// 原因写入 note（前端可见），不计 verify_attempts
 // （与 rejected 区分，避免供应商抖动把尝试次数吃光而误转人工工单 skipped）。
+// 已离开 verifying 瞬态的行只补写 note、不动状态（防把其它路径收口的状态回退成待确认）。
 // 注意：此处必须写 note 而非 skip_reason——UpdateIssueStatus 的 skipReason 参数落的是 skip_reason
 // 列，而工单面板从不渲染 skip_reason，会导致复验失败原因对用户完全不可见（静默翻回待确认）。
 func (s *Store) RecordIssueVerifyUnverified(ctx context.Context, novelID int64, runID, issueKey, note string) error {
-	updates := map[string]any{
-		"status":     IssueStatusPending,
-		"note":       noteOrDefault(note, "复验未确认，已复位待复验"),
-		"updated_at": time.Now(),
-	}
-	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
-		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
-		Updates(updates).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row PipelineIssue
+		err := tx.Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+			First(&row).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil // 行已消失（如换血清单删除）：无处可写，与旧口径一致（0 行、无错误）
+		}
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		if row.Status != IssueStatusVerifying {
+			// 已离开复验瞬态（换血继承/其它路径收口）：只补写 note 留痕，绝不回退状态。
+			return tx.Model(&PipelineIssue{}).
+				Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+				Updates(map[string]any{
+					"note":       noteOrDefault(note, "复验未确认（工单已离开复验态，状态未改动）"),
+					"updated_at": now,
+				}).Error
+		}
+		return tx.Model(&PipelineIssue{}).
+			Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+			Updates(map[string]any{
+				"status":     verifyRestoreStatus(row.PreVerifyStatus),
+				"note":       noteOrDefault(note, "复验未确认，已复位待复验"),
+				"updated_at": now,
+			}).Error
+	})
 }
 
 // ListIssueTicketsByNovel 列出一本书的全部发现项工单（工单面板列表，跨 run，新单在前）。

@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/novelgo/novelgo/internal/task"
 )
 
@@ -101,6 +103,23 @@ var legacyGuard sync.Map
 // issueKeys 仅复验执行体使用：显式携带待复验工单键，经 task payload 透传给消费侧，
 // 避免消费侧回扫 verifying 态（读己写竞态根因）。其余执行体不传（空）。
 func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy func(), issueKeys ...string) {
+	s.dispatchExecutorKey(kind, fmt.Sprintf("%s:%s", kind, runID), runID, novelID, legacy, issueKeys...)
+}
+
+// dispatchExecutorUnique 与 dispatchExecutor 同，但 dedup_key 带唯一后缀：派发必入队，
+// 不与同 kind:run_id 的既有任务合并。供带应用层互斥的执行体使用（工单修复，
+// StartIssueFixTickets 的 issueFixActive 标记）——队列侧的去重合并会把互斥窗口内
+// 新翻 fixing 的工单孤儿化（#100 帮凶：合并丢弃后永卡修复中），同 run 单执行体
+// 由应用层互斥保证，队列侧不再合并。
+func (s *Service) dispatchExecutorUnique(kind, runID string, novelID int64, legacy func()) {
+	s.dispatchExecutorKey(kind, fmt.Sprintf("%s:%s:%s", kind, runID, uuid.NewString()),
+		runID, novelID, legacy)
+}
+
+// dispatchExecutorKey 是 dispatchExecutor 的 dedup_key 可定制版本（见上方两个入口）。
+// issueKeys 仅复验执行体使用：显式携带待复验工单键，经 task payload 透传给消费侧，
+// 避免消费侧回扫 verifying 态（读己写竞态根因）。其余执行体不传（空）。
+func (s *Service) dispatchExecutorKey(kind, dedupKey, runID string, novelID int64, legacy func(), issueKeys ...string) {
 	if s.taskStore == nil || s.taskRunner == nil || !s.taskRunner.Started() {
 		// 队列完全不可用（测试桩 / 降级路径）：同步直派，迁移前行为逐字保留。
 		// 生产环境队列恒启动，此分支不命中；故保持同步语义，不影响 UI 调用方。
@@ -114,7 +133,7 @@ func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy fun
 	}
 	tk := task.Task{
 		Kind:     kind,
-		DedupKey: fmt.Sprintf("%s:%s", kind, runID),
+		DedupKey: dedupKey,
 		Payload:  string(payload),
 		RunID:    runID,
 		NovelID:  novelID,

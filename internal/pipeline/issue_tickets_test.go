@@ -467,3 +467,232 @@ func TestServiceVerifyIssueTicketsSkillError(t *testing.T) {
 	require.Equal(t, IssueStatusPending, rows[0].Status, "复验失败不改工单状态（未确认留待下轮）")
 	require.Contains(t, rows[0].Note, "复验执行失败", "未确认原因须写入可见 note 列，否则前端静默无回执")
 }
+
+// ── #100 状态回退 / 派发孤儿化修复回归 ────────────────────────────────────────
+
+// TestStartIssueFixTicketsToleratesFixingAndPartialFail 验收「去修复」批量入口的容错语义
+// （#100 帮凶修复）：单条流转失败（终态工单）逐条报错不拖垮整批——成功的照常置 fixing
+// 并派发；已在 fixing 态的工单幂等容忍（重复点击不报错）。本测试无 run 行：执行体在
+// 加载流水线处确定性早退，工单保持 fixing（与 TestServiceIssueTicketPanelActions 同口径）。
+func TestStartIssueFixTicketsToleratesFixingAndPartialFail(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇", Desc: "前三章未立人设"},
+		{ID: "I2", Level: "P1", Area: "节奏", Desc: "拖沓"},
+		{ID: "I3", Level: "P1", Area: "人设", Desc: "误报"},
+	}))
+	// I3 已驳回（终态）：→fixing 非法迁移，单条失败不得拖垮整批。
+	require.NoError(t, svc.store.TransitionIssueTicket(ctx, 7, "run-a", "I3", IssueStatusDismissed, "误报"))
+
+	refs := []IssueTicketRef{
+		{RunID: "run-a", IssueKey: "I1"},
+		{RunID: "run-a", IssueKey: "I2"},
+		{RunID: "run-a", IssueKey: "I3"},
+	}
+	err := svc.StartIssueFixTickets(ctx, 7, refs)
+	require.Error(t, err, "终态 I3 流转失败应逐条报错（部分失败不整体放弃）")
+	require.Contains(t, err.Error(), "I3", "错误应定位到失败工单")
+
+	rows, lerr := svc.store.ListIssues(ctx, 7, "run-a")
+	require.NoError(t, lerr)
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixing, byKey["I1"].Status, "失败的不拖垮成功的：I1 照常置修复中并派发")
+	require.Equal(t, IssueStatusFixing, byKey["I2"].Status, "失败的不拖垮成功的：I2 照常置修复中并派发")
+	require.Equal(t, IssueStatusDismissed, byKey["I3"].Status, "终态工单不动")
+
+	// 二次点击「去修复」：已在修复中的工单幂等容忍，不报错（重复点击/跨批重试并入在跑执行体）。
+	require.NoError(t, svc.StartIssueFixTickets(ctx, 7, refs[:2]))
+	rows, _ = svc.store.ListIssues(ctx, 7, "run-a")
+	byKey = map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixing, byKey["I1"].Status)
+	require.Equal(t, IssueStatusFixing, byKey["I2"].Status)
+}
+
+// TestRunIssueFixTicketsDrainsNewFixingTickets 验收修复执行体的收尾排空（#100 帮凶修复）：
+// 执行期间用户对新工单点「去修复」（其派发因执行体在跑被互斥去重），该工单必须被执行体
+// 排空拾起继续处理，绝不孤儿化为「永卡修复中」。skillRunner 桩在 I1 修复派发中途把 V2
+// 翻为 fixing（模拟真实并发点击，走 StartIssueFixTickets 全量语义）后返回失败：
+// I1 → skipped（修复派发失败），V2 → rewrite（V 系退回，排空拾起实证）。
+func TestRunIssueFixTicketsDrainsNewFixingTickets(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+	novelID := int64(707)
+
+	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
+		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
+		`{"id":"V2","level":"P1","area":"文风漂移","desc":"第2章文风偏离","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
+	runID := startS5Run(t, svc, novelID, auditJSON)
+
+	// 桩在 runLedgerFixTickets 的分组 goroutine 里执行，失败/断言经变量回收（require 不可跨 goroutine）。
+	var mu sync.Mutex
+	var innerErr error
+	var innerCalls int
+	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
+		switch name {
+		case "signability-fix":
+			// 执行期间用户对 V2 点「去修复」：走真实入口（置 fixing + 派发决策）。
+			ierr := svc.StartIssueFixTickets(ctx, novelID, []IssueTicketRef{{RunID: runID, IssueKey: "V2"}})
+			mu.Lock()
+			innerCalls++
+			innerErr = ierr
+			mu.Unlock()
+			return SkillOutput{}, assert.AnError // 本批修复失败 → I1 标 skipped
+		default:
+			return SkillOutput{Text: "ok"}, nil
+		}
+	}
+
+	outerErr := svc.StartIssueFixTickets(ctx, novelID, []IssueTicketRef{{RunID: runID, IssueKey: "I1"}})
+	mu.Lock()
+	gotInnerErr, gotCalls := innerErr, innerCalls
+	mu.Unlock()
+	require.NoError(t, outerErr)
+	require.NoError(t, gotInnerErr, "执行期间的「去修复」应成功置 fixing（在跑执行体排空拾起，不重复派发）")
+	require.Equal(t, 1, gotCalls)
+
+	rows, lerr := svc.store.ListIssues(ctx, novelID, runID)
+	require.NoError(t, lerr)
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusSkipped, byKey["I1"].Status, "修复派发失败 → skipped 留原因")
+	require.Contains(t, byKey["I1"].SkipReason, "修复派发失败")
+	require.Equal(t, IssueStatusRewrite, byKey["V2"].Status,
+		"排空拾起实证：执行期间新翻 fixing 的 V2 被后续批次处理（V 系退回 rewrite），不得永卡修复中")
+	require.Contains(t, byKey["V2"].SkipReason, "只报告不改写", "V 系退回留 note（skip_reason 列）")
+}
+
+// TestRecordIssueVerifyUnverifiedRestoresPreStatus 验收复验「未确认」回退语义（#100）：
+// 恢复进复验前快照而非一律 pending——已修复（待复验）的工单不被一次供应商超时/回执
+// 未解析打回「待确认」；快照为不可直回状态（fixing/空/瞬态）回退 pending（兼容口径）；
+// 已离开 verifying 的行只写 note 不动状态；行不存在无错误；不计 verify_attempts。
+func TestRecordIssueVerifyUnverifiedRestoresPreStatus(t *testing.T) {
+	db := newTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	require.NoError(t, s.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇", Desc: "x"},
+		{ID: "I2", Level: "P1", Area: "节奏", Desc: "x"},
+		{ID: "I3", Level: "P1", Area: "人设", Desc: "x"},
+		{ID: "I4", Level: "P1", Area: "逻辑", Desc: "x"},
+	}))
+
+	// I1：已修复（待复验）→ verifying（快照 fixed）→ 未确认后保留 fixed（#100 核心）。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I1", IssueStatusFixed, ""))
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I1", IssueStatusVerifying, ""))
+	// 重复进 verifying 不覆盖最初快照（仍回 fixed）。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I1", IssueStatusVerifying, ""))
+	// I2：原生 pending → verifying（快照 pending）→ 回 pending。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I2", IssueStatusVerifying, ""))
+	// I3：fixing → verifying（快照 fixing 不可直回）→ 回 pending（兼容旧口径）。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I3", IssueStatusFixing, ""))
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I3", IssueStatusVerifying, ""))
+
+	require.NoError(t, s.RecordIssueVerifyUnverified(ctx, 7, "run-a", "I1", "复验超时未验证"))
+	require.NoError(t, s.RecordIssueVerifyUnverified(ctx, 7, "run-a", "I2", ""))
+	require.NoError(t, s.RecordIssueVerifyUnverified(ctx, 7, "run-a", "I3", "回执未解析"))
+
+	rows, err := s.ListIssues(ctx, 7, "run-a")
+	require.NoError(t, err)
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixed, byKey["I1"].Status, "已修复（待复验）不得被未确认打回待确认（#100）")
+	require.Equal(t, "复验超时未验证", byKey["I1"].Note, "原因写可见 note 列")
+	require.Equal(t, 0, byKey["I1"].VerifyAttempts, "未确认不计尝试次数（防供应商抖动误转人工）")
+	require.Equal(t, IssueStatusPending, byKey["I2"].Status, "快照 pending 回 pending")
+	require.Contains(t, byKey["I2"].Note, "复验未确认", "空 note 回退默认文案")
+	require.Equal(t, IssueStatusPending, byKey["I3"].Status, "快照 fixing 不可直回，回退 pending")
+
+	// I4 已离开 verifying（fixed）：只写 note 不动状态（防回退其它路径收口的状态）。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I4", IssueStatusFixed, ""))
+	require.NoError(t, s.RecordIssueVerifyUnverified(ctx, 7, "run-a", "I4", "late note"))
+	rows, _ = s.ListIssues(ctx, 7, "run-a")
+	byKey = map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixed, byKey["I4"].Status, "已离开复验态的行状态不动")
+	require.Equal(t, "late note", byKey["I4"].Note)
+
+	// 行不存在：与旧口径一致（0 行、无错误）。
+	require.NoError(t, s.RecordIssueVerifyUnverified(ctx, 7, "run-a", "IX", "n"))
+
+	// verifyRestoreStatus 纯函数口径：可直回状态原样恢复，其余回 pending。
+	require.Equal(t, IssueStatusFixed, verifyRestoreStatus(IssueStatusFixed))
+	require.Equal(t, IssueStatusConfirmed, verifyRestoreStatus(IssueStatusConfirmed))
+	require.Equal(t, IssueStatusRewrite, verifyRestoreStatus(IssueStatusRewrite))
+	require.Equal(t, IssueStatusSkipped, verifyRestoreStatus(IssueStatusSkipped))
+	require.Equal(t, IssueStatusRetcon, verifyRestoreStatus(IssueStatusRetcon))
+	require.Equal(t, IssueStatusPending, verifyRestoreStatus(IssueStatusPending))
+	require.Equal(t, IssueStatusPending, verifyRestoreStatus(""))
+	require.Equal(t, IssueStatusPending, verifyRestoreStatus(IssueStatusFixing))
+	require.Equal(t, IssueStatusPending, verifyRestoreStatus(IssueStatusVerifying))
+	require.Equal(t, IssueStatusPending, verifyRestoreStatus(IssueStatusVerified))
+}
+
+// TestResetStuckVerifyingRestoresPreStatus 验收 verifying 残留清扫（#100）：
+// 逐行恢复进复验前快照（已修复的不被打回待确认）；ResetStuckVerifying 按 run 收窄
+// 作用域不误伤其它 run 并行复验；ResetAllStuckVerifying 全局清扫同样恢复快照；幂等。
+func TestResetStuckVerifyingRestoresPreStatus(t *testing.T) {
+	db := newTestDB(t)
+	s := NewStore(db)
+	ctx := context.Background()
+	require.NoError(t, s.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇", Desc: "x"},
+		{ID: "I2", Level: "P1", Area: "节奏", Desc: "x"},
+	}))
+	require.NoError(t, s.ReplaceIssues(ctx, 7, "run-b", 0, []AuditIssue{
+		{ID: "I1", Level: "P0", Area: "开篇", Desc: "x"},
+	}))
+
+	// run-a I1：fixed → verifying（快照 fixed）；重复进 verifying 不覆盖快照。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I1", IssueStatusFixed, ""))
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I1", IssueStatusVerifying, ""))
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I1", IssueStatusVerifying, ""))
+	// run-a I2：pending → verifying（快照 pending）。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-a", "I2", IssueStatusVerifying, ""))
+	// run-b I1：fixed → verifying（快照 fixed）——不被 run-a 清扫误伤。
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-b", "I1", IssueStatusFixed, ""))
+	require.NoError(t, s.UpdateIssueStatus(ctx, 7, "run-b", "I1", IssueStatusVerifying, ""))
+
+	// 按 run 收窄清扫：只动 run-a。
+	n, err := s.ResetStuckVerifying(ctx, 7, "run-a")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+
+	rows, _ := s.ListIssues(ctx, 7, "run-a")
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusFixed, byKey["I1"].Status, "清扫恢复快照：已修复的不被打回待确认（#100）")
+	require.Contains(t, byKey["I1"].Note, "复验执行中断", "note 明示中断原因")
+	require.Equal(t, IssueStatusPending, byKey["I2"].Status, "快照 pending 回 pending")
+
+	rowsB, _ := s.ListIssues(ctx, 7, "run-b")
+	require.Equal(t, IssueStatusVerifying, rowsB[0].Status, "runID 收窄：其它 run 并行复验不被误伤")
+
+	// 全局清扫：run-b 残留恢复快照（fixed）。
+	n, err = s.ResetAllStuckVerifying(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n)
+	rowsB, _ = s.ListIssues(ctx, 7, "run-b")
+	require.Equal(t, IssueStatusFixed, rowsB[0].Status, "全局清扫同样恢复进复验前快照")
+
+	// 幂等：无残留时二次清扫 0 行。
+	n, err = s.ResetAllStuckVerifying(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), n)
+}

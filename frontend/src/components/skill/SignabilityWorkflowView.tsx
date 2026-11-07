@@ -105,6 +105,30 @@ export default function SignabilityWorkflowView({ novelId }: Props) {
     };
   }, [novelId, queryClient, t]);
 
+  // #100 状态陈旧修复：工单修复/复验会改工单状态（fixing→fixed→verified、
+  // 未确认回退快照等），这些事件到达即失效重拉内联工单——此前内联查询只在
+  // detect_done 失效，修复/复验后体检卡状态徽章长期停留在旧值（staleTime 30s
+  // + refetchOnWindowFocus:false，30 秒内点看必陈旧）。fix/verify 事件载荷均带
+  // novel_id，不符静默忽略。
+  useEffect(() => {
+    if (!novelId) return;
+    const invalidate = (p: { novel_id?: number }) => {
+      if (p.novel_id !== novelId) return;
+      queryClient.invalidateQueries({
+        queryKey: ["signability-inline-issues", novelId],
+      });
+    };
+    const offs = [
+      EventsOn("pipeline:fix_start", invalidate),
+      EventsOn("pipeline:fix_done", invalidate),
+      EventsOn("pipeline:verify_done", invalidate),
+      EventsOn("pipeline:verify_cancelled", invalidate),
+    ];
+    return () => {
+      offs.forEach((off) => off?.());
+    };
+  }, [novelId, queryClient]);
+
   const handleStart = useCallback(async () => {
     if (!novelId) {
       toastError(t("signability.selectNovelFirst"));
