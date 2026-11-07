@@ -50,11 +50,28 @@ var patrolLedgerTables = []string{
 	"chapter_task_cards",
 }
 
+// patrolUnit 是巡检语料的最小可定位单元（一章正文或一条台账行），与拼入提示词的
+// 文本同源同截断——安全审核定位（localizeSafetyTriggers）只探测真正发给过上游的
+// 内容，绝不误报「未发送的条目」。Label 为面向用户的人读定位，Content 为探测文本。
+type patrolUnit struct {
+	Kind    string // "chapter" | "ledger"
+	Label   string // 「第 7 章《夜色》」「台账 characters 第 3 行」
+	Content string // 与拼入语料一致的文本（受同一预算截断）
+}
+
 // buildPatrolCorpus 批量取全书正文 + 台账快照，拼成可注入提示词的语料块。
 // 任何单步失败都只记日志并降级（跳过该块），绝不阻断巡检；chapterTextReader 为 nil 时
 // 整段章正文降级为空（沿用既有降级契约，保证测试与降级路径零行为变化）。
 func (s *Service) buildPatrolCorpus(ctx context.Context, novelID int64, runID string) string {
+	corpus, _ := s.buildPatrolCorpusWithUnits(ctx, novelID, runID)
+	return corpus
+}
+
+// buildPatrolCorpusWithUnits 与 buildPatrolCorpus 同源渲染语料，并同步回收可定位
+// 语料单元（章/台账行）供安全审核定位用。渲染文本与单元 Content 出自同一截断结果。
+func (s *Service) buildPatrolCorpusWithUnits(ctx context.Context, novelID int64, runID string) (string, []patrolUnit) {
 	var sb strings.Builder
+	var units []patrolUnit
 	sb.WriteString("\n\n【本书语料（后端已批量取，直接通读分析即可，无需再用 read 逐章读取）】\n")
 
 	// ── 章正文（按阅读顺序）──
@@ -89,6 +106,11 @@ func (s *Service) buildPatrolCorpus(ctx context.Context, novelID int64, runID st
 					title = fmt.Sprintf("第%d章", rn)
 				}
 				fmt.Fprintf(&sb, "\n### 第%d章《%s》\n%s\n", rn, title, text)
+				units = append(units, patrolUnit{
+					Kind:    "chapter",
+					Label:   fmt.Sprintf("第%d章《%s》", rn, title),
+					Content: text,
+				})
 				emitPatrolProgress(ctx, map[string]any{
 					"novel_id": novelID, "run_id": runID, "phase": "reading", "total": total, "done": i + 1,
 				})
@@ -106,19 +128,22 @@ func (s *Service) buildPatrolCorpus(ctx context.Context, novelID int64, runID st
 	}
 
 	// ── 台账快照 ──
-	if ledger := s.dumpLedgers(ctx, novelID); ledger != "" {
+	if ledger, ledgerUnits := s.dumpLedgers(ctx, novelID); ledger != "" {
 		sb.WriteString("\n### 台账快照（角色/关系/地点/时间线/弧线/读者视角/不变量/任务卡）\n")
 		sb.WriteString(ledger)
+		units = append(units, ledgerUnits...)
 	}
 
-	return sb.String()
+	return sb.String(), units
 }
 
-// dumpLedgers 把各台账表按小说导出为可读文本（含 novel_id 的表）。单表行数、总字符均受预算约束；
-// 单表查询失败仅跳过该表（不阻断）；store.db 为 nil 时整段降级为空。
-func (s *Service) dumpLedgers(ctx context.Context, novelID int64) string {
+// dumpLedgers 把各台账表按小说导出为可读文本（含 novel_id 的表），并同步回收逐行
+// 可定位单元。单表行数、总字符均受预算约束；单表查询失败仅跳过该表（不阻断）；
+// store.db 为 nil 时整段降级为空。
+func (s *Service) dumpLedgers(ctx context.Context, novelID int64) (string, []patrolUnit) {
+	var units []patrolUnit
 	if s.store == nil || s.store.db == nil {
-		return ""
+		return "", units
 	}
 	db := s.store.db
 	var sb strings.Builder
@@ -134,33 +159,70 @@ func (s *Service) dumpLedgers(ctx context.Context, novelID int64) string {
 		if len(rows) == 0 {
 			continue
 		}
-		section := formatLedgerRows(tbl, rows)
+		section, sectionUnits := formatLedgerRows(tbl, rows)
 		if sb.Len()+len(section) > patrolLedgerCap {
-			section = truncateToBudget(section, patrolLedgerCap-sb.Len())
+			// 预算截断时逐行重建本节：只写完整行，且回收的单元恰好就是写进去的那些行。
+			// 不能用「按字节估算 kept + truncateToBudget 按 rune 截断」的组合——中文台账下
+			// 两者单位不一致，会把实际已发送、可能正是触犯内容的行排除在定位范围之外（#101 漏报）。
+			header := fmt.Sprintf("\n#### %s（%d 条）\n", tbl, len(rows))
+			budget := patrolLedgerCap - sb.Len()
+			remain := budget - len(header)
+			var keptSection strings.Builder
+			if remain > 0 {
+				keptSection.WriteString(header)
+			}
+			kept := 0
+			for _, u := range sectionUnits {
+				line := u.Content + "\n"
+				if remain-len(line) < 0 {
+					break
+				}
+				keptSection.WriteString(line)
+				remain -= len(line)
+				kept++
+			}
+			// keptSection 的字节数已 ≤ budget，故 rune 数必然 ≤ budget，此处不会二次截断；
+			// 保留调用以维持「超预算加截断标记」的既有语义。
+			section = truncateToBudget(keptSection.String(), budget)
 			sb.WriteString(section)
 			sb.WriteString("\n（台账快照因预算已截断）\n")
+			units = append(units, sectionUnits[:kept]...)
 			break
 		}
 		sb.WriteString(section)
+		units = append(units, sectionUnits...)
 	}
-	return sb.String()
+	return sb.String(), units
 }
 
 // formatLedgerRows 把一张表的行渲染为紧凑可读文本：每行「字段=值」以分号分隔。
-func formatLedgerRows(table string, rows []map[string]any) string {
+// 同步回收逐行单元（Label 含表名与行号，供安全审核定位报出「哪张台账哪一行」）。
+func formatLedgerRows(table string, rows []map[string]any) (string, []patrolUnit) {
 	var sb strings.Builder
+	var units []patrolUnit
 	fmt.Fprintf(&sb, "\n#### %s（%d 条）\n", table, len(rows))
-	for _, row := range rows {
-		var parts []string
-		for k, v := range row {
-			if k == "created_at" || k == "updated_at" || k == "changed_at" || strings.HasSuffix(k, "_at") {
-				continue // 跳过时间戳噪声
-			}
-			parts = append(parts, fmt.Sprintf("%s=%s", k, flattenValue(v)))
-		}
-		sb.WriteString("- " + strings.Join(parts, "; ") + "\n")
+	for i, row := range rows {
+		line := formatLedgerRow(row)
+		sb.WriteString(line + "\n")
+		units = append(units, patrolUnit{
+			Kind:    "ledger",
+			Label:   fmt.Sprintf("台账 %s 第 %d 行", table, i+1),
+			Content: line,
+		})
 	}
-	return sb.String()
+	return sb.String(), units
+}
+
+// formatLedgerRow 渲染单行台账为「- 字段=值; …」（跳过时间戳噪声列）。
+func formatLedgerRow(row map[string]any) string {
+	var parts []string
+	for k, v := range row {
+		if k == "created_at" || k == "updated_at" || k == "changed_at" || strings.HasSuffix(k, "_at") {
+			continue // 跳过时间戳噪声
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", k, flattenValue(v)))
+	}
+	return "- " + strings.Join(parts, "; ")
 }
 
 // flattenValue 把 DB 值规整为可读字符串（[]byte 视为文本，nil 显式标注）。

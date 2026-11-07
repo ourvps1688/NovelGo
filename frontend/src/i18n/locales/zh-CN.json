@@ -1948,7 +1948,8 @@
       "verifyNoTicket": "该报告暂无对应工单留痕，无法复验；重新运行巡检会自动沉淀工单",
       "progress": {
         "reading": "读取正文 {{done}}/{{total}}…",
-        "analyzing": "语料已就绪，LLM 分析中…"
+        "analyzing": "语料已就绪，LLM 分析中…",
+        "locating": "上游内容审核拦截，正在逐段定位是哪一章/哪条台账触发…"
       },
       "verdict": {
         "pass": "无张力",

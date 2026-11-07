@@ -1988,7 +1988,8 @@
       "verifyNoTicket": "This report has no matching ticket record, so it cannot be verified; running the patrol again will file tickets automatically",
       "progress": {
         "reading": "Reading chapters {{done}}/{{total}}…",
-        "analyzing": "Corpus ready, LLM analyzing…"
+        "analyzing": "Corpus ready, LLM analyzing…",
+        "locating": "Content moderation blocked the request; locating which chapter or ledger row triggered it…"
       },
       "verdict": {
         "pass": "No tension",

@@ -90,13 +90,21 @@ func (s *Service) runDetection(ctx context.Context, req detectRequest, ctxt *Gat
 	if refused, reason := isLLMRefusal(out.Text); refused {
 		s.logger.Warn(req.label+"：模型拒绝/安全审核拦截（落地失败态，非阻断）",
 			"run_id", req.runID, "skill", req.skill, "reason", reason, "snippet", firstN(out.Text, 120))
+		// 与巡检一致：回显模型/网关原始拒绝语（#101）。上游常在拒绝语里点名具体章节或
+		// 内容描写，丢掉它作者就只剩一句通用「high risk」，无从判断该改哪段。
+		summary := "检测未能完成：模型拒绝了本次请求（" + reason + "）。" +
+			"通常是因为发送给模型的章节/台账内容触发了上游模型的安全审核。"
+		if detail := refusalExcerpt(out.Text, 1200); detail != "" {
+			summary += "\n原始拒绝语（模型/网关原话，已截断）：" + detail +
+				"\n若其中点名了具体章节或内容，请对该处做局部脱敏/改写后重跑。\n"
+		}
+		summary += "建议：①更换内容审核更宽松的模型或供应商；" +
+			"②确认当前模型支持长上下文；③如确为内容命中，可先对该卷做局部脱敏后再检测。" +
+			"本次原始返回未作为体检结果使用，未生成任何工单。"
 		failed := AuditData{
 			Verdict: "error",
-			Summary: "检测未能完成：模型拒绝了本次请求（" + reason + "）。" +
-				"通常是因为发送给模型的章节/台账内容触发了上游模型的安全审核。建议：①更换内容审核更宽松的模型或供应商；" +
-				"②确认当前模型支持长上下文；③如确为内容命中，可先对该卷做局部脱敏后再检测。" +
-				"本次原始返回已忽略，未生成任何工单。",
-			Issues: []AuditIssue{},
+			Summary: summary,
+			Issues:  []AuditIssue{},
 		}
 		failedJSON, _ := json.Marshal(failed)
 		if req.kind == "blueprint" {

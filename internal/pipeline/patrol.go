@@ -127,8 +127,10 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 
 	// 全书语料（章正文 + 台账快照）后端批量预取、本地读取秒级完成，拼成【本书语料】注入提示词——
 	// 本巡检唯一完整证据源，替代「让 agent 逐章 read」（旧设计 50+ 次工具往返、易卡死）。
-	// 语料缺失（无章正文）时归并步仍可用台账快照分析；buildPatrolCorpus 自带容错降级。
-	corpus := s.buildPatrolCorpus(runCtx, novelID, runID)
+	// 语料缺失（无章正文）时归并步仍可用台账快照分析；buildPatrolCorpusWithUnits 自带容错降级。
+	// units 与拼入提示词的文本同源同截断：一旦上游触发内容审核，可据此逐段定位触犯的是
+	// 哪一章/哪张台账哪一行（#101），绝不出现「书里内容没发送过却被报成命中」的误定位。
+	corpus, units := s.buildPatrolCorpusWithUnits(runCtx, novelID, runID)
 	emitPatrolProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "phase": "synthesizing", "total": total, "done": total,
 	})
@@ -148,9 +150,11 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 
 	if rerr == nil {
 		if refused, reason := isLLMRefusal(out.Text); refused {
-			// 归并步被模型拒绝（安全审核拦截）：复用既有拒绝失败态处理——回显原始拒绝语，
-			// 保留「哪段内容被判高风险」这一唯一可定位线索（原实现「原始返回已忽略」已修复）。
-			s.storeRefusalFailure(bg, runID, out.Text, reason)
+			// 归并步被模型拒绝（安全审核拦截）：回显原始拒绝语 + 逐段定位触犯内容（#101）。
+			// 上游常只给一句通用「high risk」，光回显这句话作者仍不知道改哪里，故必须再跑
+			// 二分探测，把「哪一章 / 哪张台账哪一行」写进失败态。
+			loc := s.locatePatrolSafety(ctx, runCtx, novelID, runID, units)
+			s.storeRefusalFailure(bg, runID, out.Text, reason, loc, nil)
 			emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
 			return
 		}
@@ -169,6 +173,16 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 		}
 	}
 
+	// 以 error 形式返回的上游内容审核拦截（HTTP 4xx content_filter / moderation / 策略违规）：
+	// 旧实现把它截成 200 字并归因为「供应商可能无响应」，既丢了网关原文也误导排查方向。
+	// 这里与软拒绝同路径处理：完整回显错误原文 + 逐段定位，绝不误报成供应商超时。
+	if blocked, reason := isLLMSafetyError(rerr); blocked {
+		loc := s.locatePatrolSafety(ctx, runCtx, novelID, runID, units)
+		s.storeRefusalFailure(bg, runID, "", reason, loc, rerr)
+		emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
+		return
+	}
+
 	// 单次调用失败：落地清晰失败态（沿用既有分类文案），绝不静默卡死或丢成空报告。
 	verdict, summary := s.classifyPatrolFailure(rerr)
 	if serr := s.storePatrolReport(bg, runID, AuditData{Verdict: verdict, Summary: summary, Issues: []AuditIssue{}}); serr != nil {
@@ -177,21 +191,27 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	emitConsistencyPatrol(ctx, map[string]any{"novel_id": novelID, "run_id": runID})
 }
 
-// storeRefusalFailure 把模型拒绝/安全审核拦截落地为清晰的 verdict=error 失败态，并回显模型/
-// 网关的原始拒绝语（这是系统能拿到的、最接近「哪段内容被判高风险」的信号），避免污染界面为
-// 假张力报告（verdict=needs_fix 的垃圾项）。只报告不改写：绝不进修复路由。
-func (s *Service) storeRefusalFailure(ctx context.Context, runID, text, reason string) {
-	detail := refusalExcerpt(text, 800)
-	summary := "一致性巡检未能完成：模型拒绝了本次请求（" + reason + "）。\n" +
-		"触发来源：发送给模型的章节/台账内容触发了上游模型或网关的安全审核。" +
-		"由于巡检会拼入本书内容，系统无法自动定位是哪一章命中，需由你定位。\n"
-	if detail != "" {
-		summary += "\n原始拒绝语（模型/网关原话，已脱敏截断）：\n" + detail +
-			"\n若其中点名了具体章节或内容（如「第 N 章的某描写」），请对该处做局部脱敏/改写后重跑；" +
-			"若只是通用拦截（未点名），可换内容审核更宽松的模型/供应商，或分块巡检以隔离命中章节。\n"
+// storeRefusalFailure 把模型拒绝/安全审核拦截落地为清晰的 verdict=error 失败态：
+// 回显模型/网关原始拒绝语（或 API 错误原文），并附上 loc 给出的「哪一章 / 哪张台账哪一行」
+// 逐段定位结果——作者据此可直接去修改对应内容，而不是面对一句通用「high risk」无从下手。
+// 只报告不改写：绝不进修复路由。loc 为定位不可用时的降级结果（词面提示 + 说明），
+// 任何情况下都不会再出现「系统无法自动定位，需由你定位」这种把排查成本全甩给作者的文案。
+func (s *Service) storeRefusalFailure(ctx context.Context, runID, text, reason string, loc safetyLocateResult, rawErr error) {
+	detail := refusalExcerpt(text, 1200)
+	detailLabel := "原始拒绝语"
+	if detail == "" && rawErr != nil {
+		detail = refusalExcerpt(rawErr.Error(), 1200)
+		detailLabel = "网关/API 错误原文"
 	}
-	summary += "建议：①更换内容审核更宽松的模型或供应商；②确认当前模型支持长上下文（巡检会拼入本书内容）；" +
-		"③如确为内容命中，可先对该处做局部脱敏后再巡检。本次未写入张力清单。"
+	summary := "一致性巡检未能完成：模型拒绝了本次请求（" + reason + "）。\n" +
+		"触发来源：发送给模型的章节正文/台账内容命中了上游模型或网关的内容审核。"
+	summary += loc.render()
+	if detail != "" {
+		summary += "\n" + detailLabel + "（模型/网关原话，已截断）：\n" + detail + "\n" +
+			"若其中点名了具体章节或内容，请与上面的定位结果一并参考。\n"
+	}
+	summary += "建议：①优先修改/脱敏上面列出的片段后重跑；②若为通用拦截或组合触发，可更换内容审核更宽松的模型/供应商；" +
+		"③确认当前模型支持长上下文（巡检会拼入本书内容）。本次未写入张力清单。"
 	if serr := s.storePatrolReport(ctx, runID, AuditData{
 		Verdict: "error",
 		Summary: summary,
@@ -217,6 +237,13 @@ func (s *Service) classifyPatrolFailure(err error) (string, string) {
 			"可能因为供应商无响应、流式连接中断（吐出部分内容后掉线），或模型对该体量请求处理过慢。\n" +
 			"建议：①更换更稳定的模型或供应商；②确认当前模型支持长上下文；③稍后重试。本次未写入张力清单。"
 		return "error", summary
+	}
+	// 安全审核类错误即便从其他失败通道漏到这里，也绝不归因成「供应商无响应」，且原文
+	// 保留更长（网关常在 body 里点名命中的策略/内容，200 字截断会把唯一线索切掉）。
+	if blocked, why := isLLMSafetyError(err); blocked {
+		return "error", "一致性巡检未能完成：上游内容审核拦截（" + why + "）。\n" +
+			"网关/模型错误原文：\n" + firstN(err.Error(), 600) + "\n" +
+			"建议：核查本书章节与台账中触发审核的内容并做局部脱敏，或更换内容审核更宽松的模型/供应商。本次未写入张力清单。"
 	}
 	reason := firstN(err.Error(), 200)
 	summary := "一致性巡检未能完成：" + reason + "\n" +

@@ -343,7 +343,9 @@ export default function PatrolReportPanel({
               })
             : progress && progress.phase === "analyzing"
               ? t("pipeline.patrol.progress.analyzing")
-              : t("pipeline.patrol.running")}
+              : progress && progress.phase === "locating"
+                ? t("pipeline.patrol.progress.locating")
+                : t("pipeline.patrol.running")}
         </p>
       ) : null}
 

@@ -55,7 +55,8 @@ func (s *Service) loadVerifyCorpusSource(ctx context.Context, novelID int64) ver
 			s.logger.Warn("复验语料：列章失败，本批章正文降级为空", "novel_id", novelID, "err", err)
 		}
 	}
-	src.ledger = s.dumpLedgers(ctx, novelID)
+	// 台账快照与巡检共用渲染源；逐行可定位单元仅供巡检安全审核定位（#101），复验侧忽略。
+	src.ledger, _ = s.dumpLedgers(ctx, novelID)
 	return src
 }
 
