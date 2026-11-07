@@ -32,7 +32,8 @@
 - 工单状态回退（298d779c，#100）：ReplaceIssuesByPrefix 换血按「键+Area→Area 兜底」继承流转状态（carryIssueWorkflow）；StartIssueFixTickets 幂等容忍+issueFixMu 互斥排空循环+dispatchExecutorUnique 防孤儿化；pre_verify_status 快照+verifyRestoreStatus 恢复；前端两视图补订 fix/verify 事件失效内联查询。
 - 写章误入最后一卷（8c919913，#99）：多卷书裸 new.md 一律拒绝并列卷清单（0 卷→未分卷/1 卷→该卷兜底），废弃 LastByNovel 静默默认（rw_tools 审批前解析）；新增 move_chapter 移章工具（chapter.Store.Place 封装，target 0=未分卷、before 缺省推断目标组、metadata_only 事件刷前端目录）。
 - 安全审核定位（1f670de5，#101）：巡检语料单元同源回收（章/台账行，截断逐行重建）；patrol_safety.go 二分探针（control 先行+64 探针/8min 帽+三态）与词面提示降级；软拒绝、APIError 审核错误双路径回显原文+定位结果；探测走 llmClient.GenerateText 非 skillRunner。
-- 台账 alive 写入面（#102）：create/update_character 开放 `Alive *bool`（指针三态、仅 在世→已死 单向、DisallowUnknownFields 保护不回退）；fix_reachability.go 派发前字段可达性预检+护栏**只注入派发层 prompt**（fixPrompt 全文被 p0 golden 基线锁定，勿改单源）；statesync 派生与存量 alive 数据修正未做。
+- 台账 alive 写入面（#102）：create/update_character 开放 `Alive *bool`（指针三态、仅 在世→已死 单向、DisallowUnknownFields 保护不回退）；fix_reachability.go 派发前字段可达性预检+护栏**只注入派发层 prompt**（fixPrompt 全文被 p0 golden 基线锁定，勿改单源）。
+- 生死态派生（#103）：statesync 派发前 `character.DeriveAliveFromChapter` 从本章正文高精度单向标死（宁漏勿误、LLM 复核补漏、名单+摘录注入 instruction；人工裁决 source!=auto 优先不再覆盖）；`RunStateSyncForChapter` 增 db 参数（rw_tools 与 app/handler 两处调用点）；app `Create/UpdateCharacterInput.Alive *bool` 是唯一人工复活通道（MCP 工具仍单向）。存量 alive 数据 SQL 修正仍未获授权执行。
 
 ## 其他契约
 - 章节寻址：chapter_id≠阅读序号；前端用 reading_number；工单 chapter_ids=全局阅读序号。
