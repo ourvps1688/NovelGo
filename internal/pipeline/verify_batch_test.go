@@ -152,6 +152,7 @@ func TestVerifyBatchZeroToolsAndLeanPrompt(t *testing.T) {
 	require.NotContains(t, in.Prompt, "按 chapters 读", "提示词不得再教工具取数")
 	require.Contains(t, in.Prompt, "不要调用任何工具", "方法论明示禁工具")
 	require.Contains(t, in.Prompt, "输出从简", "输出从简约束（压思维块膨胀）")
+	require.Contains(t, in.Prompt, "回答第一段", "回执前置到回答第一段（截断只切尾部闲笔，2026-11-06 事故防线）")
 }
 
 // TestChunkIssuesAndCapHeadTail 切批与长文掐头尾的纯函数边界。

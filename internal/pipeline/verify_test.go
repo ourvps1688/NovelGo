@@ -24,24 +24,62 @@ import (
 func TestParseVerifyReceipt(t *testing.T) {
 	text := "复验完成。\n```json\n{\"verified\":[{\"id\":\"I1\",\"ok\":true,\"note\":\"钩子已补\"}," +
 		"{\"id\":\"I2\",\"ok\":false,\"note\":\"只改了一半\"}],\"summary\":\"1 项确认\"}\n```"
-	results, summary, found := parseVerifyReceipt(text)
+	results, summary, found, partial := parseVerifyReceipt(text)
 	require.True(t, found)
+	require.False(t, partial, "完整回执不属截断")
 	require.True(t, results["I1"].OK)
 	require.Equal(t, "钩子已补", results["I1"].Note)
 	require.False(t, results["I2"].OK)
 	require.Equal(t, "1 项确认", summary)
 
 	// 无围栏纯文本 + 旧回执无 summary 字段照常解析。
-	results2, _, found2 := parseVerifyReceipt(`概况 {"verified":[{"id":"I9","ok":false,"note":"x"}]}`)
+	results2, _, found2, _ := parseVerifyReceipt(`概况 {"verified":[{"id":"I9","ok":false,"note":"x"}]}`)
 	require.True(t, found2)
 	require.False(t, results2["I9"].OK)
 
 	// 体检形状输出（verdict/issues）不得误认成复验回执。
-	_, _, found3 := parseVerifyReceipt(`{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`)
+	_, _, found3, _ := parseVerifyReceipt(`{"verdict":"pass","score":30,"summary":"修复后通过","issues":[]}`)
 	require.False(t, found3)
 
 	// 完全缺失回执：found=false，调用方走「已修复确认」兼容回退。
-	_, _, found4 := parseVerifyReceipt("我复验过了，没有 JSON。")
+	_, _, found4, _ := parseVerifyReceipt("我复验过了，没有 JSON。")
+	require.False(t, found4)
+}
+
+// TestParseVerifyReceiptTruncatedSalvage 验证截断回执抢救（2026-11-06 I9-I12 事故形状）：
+// thinking 吃满 token 预算致回执被硬切在半条 JSON——完整条目照用（宁缺勿错），残缺条目
+// 及其后不取；partial=true 区分「截断缺失」与「未提及」。
+func TestParseVerifyReceiptTruncatedSalvage(t *testing.T) {
+	// 真实事故形状：3 条完整 + 第 4 条断在 note 中途，外层数组不闭合。
+	text := "逐项定点核验完成。\n```json\n" +
+		`{"verified":[{"id":"I12","ok":true,"note":"第10章已就近补交代"},` +
+		`{"id":"I11","ok":true,"note":"第7章首次出现处已补命名"},` +
+		`{"id":"I10","ok":true,"note":"第5章棚中议论已改为单数"},` +
+		`{"id":"I9","ok":true,"note":"第8章`
+	results, summary, found, partial := parseVerifyReceipt(text)
+	require.True(t, found, "截断回执的完整条目应被抢救")
+	require.True(t, partial, "回执被截断须如实标注")
+	require.Empty(t, summary, "外层 summary 随截断丢失")
+	require.True(t, results["I12"].OK)
+	require.Equal(t, "第10章已就近补交代", results["I12"].Note)
+	require.True(t, results["I11"].OK)
+	require.True(t, results["I10"].OK)
+	_, hasI9 := results["I9"]
+	require.False(t, hasI9, "残缺条目不取（宁缺勿错）")
+
+	// 外层 summary 损坏但 verified 数组完整：条目齐全、partial=false。
+	text2 := `{"verified":[{"id":"I1","ok":false,"note":"修歪"}],"summary":"他说 "oops""}`
+	results2, _, found2, partial2 := parseVerifyReceipt(text2)
+	require.True(t, found2)
+	require.False(t, partial2, "数组完整仅 summary 损坏不算截断")
+	require.False(t, results2["I1"].OK)
+
+	// 只有半条：抢救不出任何完整条目 → found=false 走整批未确认。
+	_, _, found3, _ := parseVerifyReceipt(`{"verified":[{"id":"I1","ok":true,"note":"断`)
+	require.False(t, found3)
+
+	// 条目对象（无 verified 键）不触发抢救、不误认回执。
+	_, _, found4, _ := parseVerifyReceipt(`{"id":"I1","ok":true,"note":"断`)
 	require.False(t, found4)
 }
 
@@ -147,6 +185,50 @@ func TestServiceVerifyIssueTicketsNoReceiptCompat(t *testing.T) {
 	require.NoError(t, lerr)
 	require.Equal(t, IssueStatusPending, rows[0].Status, "P2：回执未解析不再静默全过，工单复位 pending 留待下轮")
 	require.Contains(t, rows[0].Note, "复验回执未解析", "未确认原因须写入可见 note 列，否则前端静默无回执")
+}
+
+// TestServiceVerifyIssueTicketsTruncatedReceipt 验收截断回执的批量层行为（2026-11-06
+// I9-I12 事故回归）：回执被 token 上限硬切时，完整条目照常落 verified，残缺条目复位
+// pending 并以「截断」口径措辞（区分未提及），绝不整批丢判定。
+func TestServiceVerifyIssueTicketsTruncatedReceipt(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	ctx := context.Background()
+
+	// 真实事故形状：I1 完整、I2 断在 note 中途。
+	svc.skillRunner = func(_ context.Context, _ string, _ SkillInput) (SkillOutput, error) {
+		return SkillOutput{Text: "```json\n" +
+			`{"verified":[{"id":"I1","ok":true,"note":"已修复"},` +
+			`{"id":"I2","ok":true,"note":"断在半` + "\n```"}, nil
+	}
+
+	run, err := svc.StartPipeline(ctx, 410, "new", nil, false)
+	require.NoError(t, err)
+	ctxt := GateContext{AuditStage: StageS4}
+	ctxtJSON, merr := json.Marshal(ctxt)
+	require.NoError(t, merr)
+	require.NoError(t, svc.store.SetStageStatus(ctx, run.RunID, StageS4, StatusRunning, string(ctxtJSON)))
+	require.NoError(t, svc.store.ReplaceIssues(ctx, 410, run.RunID, 0, []AuditIssue{
+		{ID: "I1", Level: "P1", Area: "节奏爽点", Desc: "第3章拖沓", FixType: FixTypeLedger},
+		{ID: "I2", Level: "P1", Area: "人设", Desc: "动机缺失", FixType: FixTypeLedger},
+	}))
+	require.NoError(t, svc.store.TransitionIssueTicket(ctx, 410, run.RunID, "I1", IssueStatusFixing, ""))
+	require.NoError(t, svc.store.TransitionIssueTicket(ctx, 410, run.RunID, "I2", IssueStatusFixing, ""))
+
+	_, err = svc.VerifyIssueTickets(ctx, 410, []IssueTicketRef{
+		{RunID: run.RunID, IssueKey: "I1"}, {RunID: run.RunID, IssueKey: "I2"},
+	})
+	require.NoError(t, err)
+
+	rows, lerr := svc.store.ListIssues(ctx, 410, run.RunID)
+	require.NoError(t, lerr)
+	byKey := map[string]PipelineIssue{}
+	for _, r := range rows {
+		byKey[r.IssueKey] = r
+	}
+	require.Equal(t, IssueStatusVerified, byKey["I1"].Status, "截断回执中的完整条目照常落已复验")
+	require.Equal(t, IssueStatusPending, byKey["I2"].Status, "残缺条目复位 pending 留待下轮")
+	require.Contains(t, byKey["I2"].Note, "截断", "残缺条目按截断口径措辞（区别于未提及）")
 }
 
 // TestManualBacklogSummary 验证人工工单摘要渲染（列表截断 + 原因）。

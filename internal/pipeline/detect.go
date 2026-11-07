@@ -207,11 +207,10 @@ var verifyCallTimeout = 120 * time.Minute
 //
 // 取值纪律（关键）：必须 > thinkingIdleTimeout（9min，见 internal/llm/stream.go），保住
 // 「真死连接由 9min 空闲看门狗先斩断、本预算只兜活着但慢的轮次」的分工不变式。
-// 2026-11-05 复验二次提速后重新对齐算术：健康调用 = verifyMaxTurns(2) × verifyMaxTokens(6k)
-// ≈ ≤5min（25 token/s 慢速思维）+ prefill/调度余量；15min 兜「9min 空闲超时 + 可重试重发 +
-// 一轮慢思考」的叠加（保留 P1-C 复盘要求的容忍），异常批比旧 25min 提前 40% 收口并给
-// 清晰 note。旧值 25min 是工具时代 3 轮×24k（最坏 24min 思维）的产物——实测真有批次
-// 烧满 25min 未出回执（2026-11-05 I7），预算必须与任务体量同级。
+// 2026-11-06 截断事故后（verifyMaxTokens 6k→10k，思维+回执共享预算）：健康调用单轮
+// ~6k token ≈ 3~4min（25 token/s 慢速思维）；病态双轮烧满 2×10k ≈ 13min 仍由本预算兜底
+// （超时批单独复位 pending 留待下轮，不拖整轮）。旧值 25min 是工具时代 3 轮×24k 的产物，
+// 保留 15min（P1-C 复盘要求的容忍）。
 var verifyTicketTimeout = 15 * time.Minute
 
 // verifyMaxTurns 是单批复验 LLM 调用的轮数上限：2026-11-05 复验终极提速（语料内联）后，
@@ -221,13 +220,16 @@ var verifyTicketTimeout = 15 * time.Minute
 // 推理分离一并退役；3 轮（工具时代余量）曾让「调工具+长思考」连烧 3 轮拖满 25min。
 const verifyMaxTurns = 2
 
-// verifyMaxTokens 是单次复验 LLM 调用的输出 token 上限（0=模型默认）：复验回执很短
-// （多目标回执 ~200 token/条），RAG-Verify（verify_retrieval.go）证据切片化后思维量
-// 数量级下降（读 3k 相关切片 vs 扫 40k 整章原文）；6k ≈ 3~6 倍回执+思维余量，把单轮
-// 思维硬顶在 ~2.5min（40 token/s 慢速供应商）（SkillInput.MaxTokens→MiMo
-// max_completion_tokens=思考+回答总量）。旧值 10k 仍实测烧满 15min（2026-11-05 I7
-// 二次实据）——大语料逼出的长思维不是靠预算帽能救的，必须减语料（RAG-Verify）。
-const verifyMaxTokens = 6000
+// verifyMaxTokens 是单次复验 LLM 调用的输出 token 上限（0=模型默认；SkillInput.MaxTokens→
+// MiMo max_completion_tokens=思考+回答总量）：回执很短（多目标回执 ~200 token/条），但
+// thinking 模型的思维与回答**共享本预算**——2026-11-06 I9-I12 事故实据：4 单合验思维吃掉
+// ~5.5k token（thinking 7.5k 字符），6k 帽把回执硬切在半条 JSON（截断回执解析不出→整批
+// 未确认「复验回执未解析」）。故预算必须同时容纳「逐单定点核验思维（实测 5~6k）+ 完整
+// 回执（≤1k）」，取 10k，并配两道截断防线：回执前置（verifyPrompt 要求回执放回答第一段，
+// 截断只切尾部闲笔）+ 截断抢救（parseVerifyReceipt 抢救完整条目）。旧值 6k 服务「思维硬顶
+// 2.5min」的提速目标，但 4 单合验的逐单核验思维并不随 RAG 切片化下降；预算帽救不了长
+// 思维（2026-11-05 I7 教训），墙钟由 verifyTicketTimeout 兜、输入体量仍受语料硬帽约束。
+const verifyMaxTokens = 10000
 
 // verifyBatchSize 是同批合验的工单数上限：verifyPrompt/复验回执契约原生支持多目标
 // （[]verifyTarget + 逐 id 回执），同批合验把 N 次调用压到 ⌈N/verifyBatchSize⌉ 次。

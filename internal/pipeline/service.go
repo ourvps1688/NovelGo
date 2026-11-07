@@ -2180,15 +2180,18 @@ func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string
 	return nil, nil, nil, false
 }
 
-// verifyReceipt 是增量复验 agent 在输出末尾上报的复验回执契约（由 verifyPrompt 要求，
-// 契约单源见 contract.go verifyReceiptFormatLine）。
+// verifyReceiptEntry 复验回执 verified 数组的一条判定（截断抢救按条目流式解码复用）。
+type verifyReceiptEntry struct {
+	ID   string `json:"id"`
+	OK   bool   `json:"ok"`
+	Note string `json:"note"`
+}
+
+// verifyReceipt 是增量复验 agent 在回答第一段上报的复验回执契约（由 verifyPrompt 要求，
+// 契约单源见 contract.go verifyReceiptFormatLine；回执前置防输出截断，2026-11-06）。
 type verifyReceipt struct {
-	Verified []struct {
-		ID   string `json:"id"`
-		OK   bool   `json:"ok"`
-		Note string `json:"note"`
-	} `json:"verified"`
-	Summary string `json:"summary"`
+	Verified []verifyReceiptEntry `json:"verified"`
+	Summary  string               `json:"summary"`
 }
 
 // verifyResult 是一条复验结论：是否确认修复生效 + 一行复验结论。
@@ -2212,24 +2215,96 @@ type verifyTarget struct {
 // 解析策略与 parseFixReceipt 同构（回执可能在 ```json 围栏或纯文本中，verified 含嵌套
 // 对象——从每个 '{' 起流式解码取最后一个合法回执）。found=false 表示输出中没有回执，
 // 调用方按「已修复确认」兼容回退（与修复回执缺省口径一致，不卡死闭环）。
-func parseVerifyReceipt(text string) (results map[string]verifyResult, summary string, found bool) {
+//
+// 截断抢救（2026-11-06 I9-I12 事故）：thinking 模型的 max_tokens 是思维+正文共享预算，
+// 思维吃满预算时回执被硬切在半条 JSON 上（外层不闭合→旧逻辑整批 found=false 丢全部判定）。
+// 外层解码失败但候选是回执形状时，按数组顺序抢救已完整的条目——宁缺勿错：完整显式条目
+// 照用、残缺条目及其后一律不取；partial=true 表示回执被截断（缺失条目≠未提及，调用方
+// 按截断口径单独措辞留待下轮）。
+func parseVerifyReceipt(text string) (results map[string]verifyResult, summary string, found bool, partial bool) {
 	for i := strings.LastIndex(text, "{"); i >= 0; i = strings.LastIndex(text[:i], "{") {
+		cand := text[i:]
 		var r verifyReceipt
-		if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&r); err != nil {
-			continue
+		if err := json.NewDecoder(strings.NewReader(cand)).Decode(&r); err != nil {
+			if !looksLikeVerifyReceipt(cand) {
+				continue
+			}
+			entries, p := salvageVerifyEntries(cand)
+			if len(entries) == 0 {
+				continue
+			}
+			return receiptResults(entries), "", true, p
 		}
 		if len(r.Verified) == 0 {
 			continue
 		}
-		results = make(map[string]verifyResult, len(r.Verified))
-		for _, v := range r.Verified {
-			if v.ID != "" {
-				results[v.ID] = verifyResult{OK: v.OK, Note: v.Note}
-			}
-		}
-		return results, r.Summary, true
+		return receiptResults(r.Verified), r.Summary, true, false
 	}
-	return nil, "", false
+	return nil, "", false, false
+}
+
+// looksLikeVerifyReceipt 判定候选串是否回执形状（"verified" 键近打头），避免对条目
+// 对象/无关 JSON 误触发截断抢救。
+func looksLikeVerifyReceipt(cand string) bool {
+	head := cand
+	if len(head) > 64 {
+		head = head[:64]
+	}
+	return strings.Contains(head, `"verified"`)
+}
+
+// salvageVerifyEntries 从截断/畸形的回执 JSON 抢救 verified 数组中已完整的条目：
+// 锚定 "verified": [ 后按数组顺序逐个流式解码条目对象，遇首个解码失败（截断点/脏字符）
+// 即停——宁缺勿错，只采纳完整显式条目。到达数组 ']' 收尾时 partial=false（条目齐全，
+// 仅外层 summary 等损坏）；中途而止 partial=true（回执被截断）。
+func salvageVerifyEntries(s string) (entries []verifyReceiptEntry, partial bool) {
+	k := strings.Index(s, `"verified"`)
+	if k < 0 {
+		return nil, false
+	}
+	rest := s[k+len(`"verified"`):]
+	// "verified" 与数组 '[' 之间只允许空白与冒号（精确锚定，note 里的同名字样不算）。
+	j := 0
+	for j < len(rest) && (rest[j] == ' ' || rest[j] == '\t' || rest[j] == '\r' || rest[j] == '\n' || rest[j] == ':') {
+		j++
+	}
+	if j >= len(rest) || rest[j] != '[' {
+		return nil, true
+	}
+	pos := j + 1
+	for pos < len(rest) {
+		for pos < len(rest) && (rest[pos] == ' ' || rest[pos] == '\t' || rest[pos] == '\r' || rest[pos] == '\n' || rest[pos] == ',') {
+			pos++
+		}
+		if pos >= len(rest) {
+			return entries, true
+		}
+		if rest[pos] == ']' {
+			return entries, false
+		}
+		if rest[pos] != '{' {
+			return entries, true
+		}
+		var e verifyReceiptEntry
+		dec := json.NewDecoder(strings.NewReader(rest[pos:]))
+		if err := dec.Decode(&e); err != nil {
+			return entries, true
+		}
+		entries = append(entries, e)
+		pos += int(dec.InputOffset())
+	}
+	return entries, true
+}
+
+// receiptResults 把回执条目映射成逐工单结论（空 id 条目丢弃）。
+func receiptResults(entries []verifyReceiptEntry) map[string]verifyResult {
+	results := make(map[string]verifyResult, len(entries))
+	for _, v := range entries {
+		if v.ID != "" {
+			results[v.ID] = verifyResult{OK: v.OK, Note: v.Note}
+		}
+	}
+	return results
 }
 
 // parseAudit 把 signability-audit 的 LLM 输出解析为结构化 AuditData。
@@ -2805,8 +2880,10 @@ func verifyPrompt(novelID int64, targets []verifyTarget, ledgerChanges []string,
 	}
 	// 输出从简约束放在末尾（紧邻回执格式要求，降低思维块膨胀）：回执是小 JSON，
 	// 推理长篇无收益，输出 token 有硬顶（verifyMaxTokens），从简写才不会被截断。
+	// 回执前置（2026-11-06 I9-I12 截断事故）：thinking 模型 max_tokens 是思维+正文共享
+	// 预算，思维吃满时输出会被硬切——回执放回答第一段才能活过截断（截断只切尾部闲笔）。
 	text += "\n**输出从简**：直接给结论，正文说明不超过 3 句，每条 note 一行、summary 一句，不要长篇推理。" +
-		"最终回复末尾**必须**附一个 ```json 代码块上报复验回执，格式：" +
+		"**回答第一段必须是** ```json 代码块的复验回执（回执在前、说明在后——输出可能被截断，回执放最前才能保证送达），格式：" +
 		verifyReceiptFormatLine() + "——" +
 		"verified 逐条给出清单内问题的复验判定（id 对应清单 issue id，ok 为 true/false，note 为一行复验结论）；" +
 		"summary 为一句话复验小结；未列入回执的项视为未复验，将在后续复验轮次再次核对，请如实上报。"

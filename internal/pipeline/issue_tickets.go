@@ -684,7 +684,7 @@ func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, 
 		}
 		return outcomes
 	}
-	results, _, found := parseVerifyReceipt(out.Text)
+	results, _, found, partial := parseVerifyReceipt(out.Text)
 	if !found {
 		// 审计 P2：回执未解析 → 不再静默全过，整批标未确认留待下轮。
 		s.logger.Warn("复验：回执未解析，本批工单状态未改动（复位 pending 留待下轮）", "run_id", runID, "batch", len(batch))
@@ -693,10 +693,18 @@ func (s *Service) verifyBatch(ctx context.Context, novelID int64, runID string, 
 		}
 		return outcomes
 	}
+	if partial {
+		// 截断抢救出部分条目：显式条目照落，残缺条目按截断口径留待下轮（见 parseVerifyReceipt）。
+		s.logger.Warn("复验：回执被截断，已抢救完整条目（残缺条目留待下轮）", "run_id", runID, "salvaged", len(results), "batch", len(batch))
+	}
 	for _, row := range batch {
 		res, ok := results[row.IssueKey]
 		if !ok {
-			outcomes[row.IssueKey] = verifyOutcome{note: "复验回执未包含本工单，留待下轮"}
+			note := "复验回执未包含本工单，留待下轮"
+			if partial {
+				note = "复验回执被截断未含本工单，留待下轮"
+			}
+			outcomes[row.IssueKey] = verifyOutcome{note: note}
 			continue
 		}
 		if res.OK {
