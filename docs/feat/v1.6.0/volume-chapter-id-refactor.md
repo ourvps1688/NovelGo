@@ -392,6 +392,8 @@ AI 后续: edit(path="chapters/id_{id}.md", ...)  // 用响应返回的真实 pa
 
 `chapters.volume_id` 在数据库中只有 `NULL` 才表示未分卷；不使用 `0` 作为未分卷值。Go 的 `chapter.Store.Create` 使用 `*int64`：非 nil 为显式目标卷，nil 为明确的未分卷目标。rw_tools 遇到未指定卷的 `chapters/new.md` 时，先选择最后一卷再调用 Store；整本书无卷才传 nil，使记录写为 SQL NULL。
 
+> 2026-11-07 修订：上一段的「未指定卷默认最后一卷」已废止——多卷书下该默认会把按卷写作的章节误塞进末卷（报障「写章误入最后一卷」）。现行为：裸 `new.md` 仅在无卷书（→未分卷）/单卷书（→该卷）兜底，多卷书拒绝并列出卷清单，要求显式 `chapters/{卷ID}/new.md`；建错卷用 `move_chapter` 工具移动（对应前端 PlaceChapter）。
+
 ### 11.3 rw_tools upsert 逻辑删除
 
 现状 [rw_tools.go:142-176](../../../internal/mcp_tools/rw_tools.go#L142-L176) 的"查 chapter_number 不存在则 Create"逻辑**整段删除**。读写时 chapter 记录必须已存在，不存在则报错"章节不存在，请先用 chapters/new.md 创建"。唯一例外是 path == "chapters/new.md" 走新建分支。

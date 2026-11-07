@@ -49,7 +49,7 @@ func SetEmitter(e event.Emitter) {
 
 // EditArgs 是 edit 工具的参数。
 type EditArgs struct {
-	Path       string `json:"path" jsonschema:"required,description=要编辑的文件路径。推荐按阅读序号（第N章）定位以避免找错章：chapters/no_{N}.md（正文第N章）、outlines/no_{N}.md（大纲第N章）；也可按稳定 ID 定位：chapters/id_{章节id}.md（主格式）或 chapters/{卷id}/id_{章节id}.md（等价容错写法）、outlines/id_{章节id}.md 或 outlines/{卷id}/id_{章节id}.md。注意：chapter_id 是数据库主键（稳定），不等于阅读序号；换卷/重排后两者对应关系会变，因此精修「第N章」务必用 no_{N} 而非自行用序号推算 id。新建章节：chapters/{卷id}/new.md 或 chapters/new.md（不带卷时默认分进最后一卷，整本书未建卷则创建未分卷章节）；新建大纲：outlines/{卷id}/new.md 或 outlines/new.md（规则同章节，只能 full_replace）；卷纲：volumes/id_{卷id}.md（卷 ID 请先用 list_volumes 获取，不要猜测序号）；故事状态 novelgo.md；小说级技能 skills/<name>.md；用户级技能 ~/.novelgo/skills/<name>.md" validate:"required"`
+	Path       string `json:"path" jsonschema:"required,description=要编辑的文件路径。推荐按阅读序号（第N章）定位以避免找错章：chapters/no_{N}.md（正文第N章）、outlines/no_{N}.md（大纲第N章）；也可按稳定 ID 定位：chapters/id_{章节id}.md（主格式）或 chapters/{卷id}/id_{章节id}.md（等价容错写法）、outlines/id_{章节id}.md 或 outlines/{卷id}/id_{章节id}.md。注意：chapter_id 是数据库主键（稳定），不等于阅读序号；换卷/重排后两者对应关系会变，因此精修「第N章」务必用 no_{N} 而非自行用序号推算 id。新建章节：chapters/{卷id}/new.md（多卷书必须带卷显式指定归属）或 chapters/new.md（仅无卷书/单卷书可用：无卷书建未分卷章节、单卷书自动入该卷，多卷书会被拒绝并列出卷清单）；新建大纲：outlines/{卷id}/new.md 或 outlines/new.md（规则同章节，只能 full_replace）；卷纲：volumes/id_{卷id}.md（卷 ID 请先用 list_volumes 获取，不要猜测序号）；故事状态 novelgo.md；小说级技能 skills/<name>.md；用户级技能 ~/.novelgo/skills/<name>.md" validate:"required"`
 	ChangeType string `json:"change_type" jsonschema:"required,enum=full_replace,enum=search_replace,enum=line_range_replace,description=编辑方式。full_replace：全文替换；search_replace：查找并替换指定文本；line_range_replace：替换指定行范围" validate:"required,oneof=full_replace search_replace line_range_replace"`
 	SearchText string `json:"search_text" jsonschema:"description=要查找的原文片段（search_replace 时必填）。请从文件中精确复制" validate:"omitempty"`
 	NewContent string `json:"new_content" jsonschema:"description=新内容。full_replace 时为完整全文（必填，传空会报错；若要清空整个文件请改用 line_range_replace(1, total_lines, \"\")，total_lines 从 read 返回获取）；search_replace 时为替换后的文本（传空则删除匹配到的文本）；line_range_replace 时为替换该行范围的新内容（传空则删除该范围行）" validate:"omitempty"`
@@ -95,7 +95,7 @@ func (t *EditTool) Execute(ctx context.Context, args any, tc ToolContext) (*Tool
 }
 
 // invalidPathHint 是 edit/read 共用的非法路径提示。
-const invalidPathHint = "无效文件路径。按稳定 ID 定位：章节正文 chapters/id_{id}.md、大纲 outlines/id_{id}.md；按实时阅读序号（第N章）定位：chapters/no_{N}.md、outlines/no_{N}.md（推荐，避免用序号推算错误）；卷纲 volumes/id_{卷ID}.md；新建 chapters/{卷ID}/new.md 或 chapters/new.md、outlines/{卷ID}/new.md 或 outlines/new.md；novelgo.md、skills/<name>.md、~/.novelgo/skills/<name>.md"
+const invalidPathHint = "无效文件路径。按稳定 ID 定位：章节正文 chapters/id_{id}.md、大纲 outlines/id_{id}.md；按实时阅读序号（第N章）定位：chapters/no_{N}.md、outlines/no_{N}.md（推荐，避免用序号推算错误）；卷纲 volumes/id_{卷ID}.md；新建 chapters/{卷ID}/new.md 或 chapters/new.md（多卷书必须带卷）、outlines/{卷ID}/new.md 或 outlines/new.md；novelgo.md、skills/<name>.md、~/.novelgo/skills/<name>.md"
 
 // readFileForEdit 读取待编辑文件的当前内容。
 // 文件不存在时 full_replace 视为从空文件创建，其余模式返回 os.ErrNotExist。
@@ -289,6 +289,23 @@ func countNonBlank(s string) int {
 	return n
 }
 
+// ambiguousNewVolumeError 多卷书裸 new.md 的拒绝消息：列出卷清单并指引显式指定
+// 目标卷；建错位置时用 move_chapter 纠正。
+func ambiguousNewVolumeError(isOutline bool, vols []volume.Volume) string {
+	kind, kindPath := "章节", "chapters"
+	if isOutline {
+		kind, kindPath = "大纲", "outlines"
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "本书有 %d 个卷，新建%s必须显式指定目标卷：请改用 %s/{卷ID}/new.md"+
+		"（不带卷的 %s/new.md 无法判断该进哪一卷，会被拒绝）。可用卷：", len(vols), kind, kindPath, kindPath)
+	for _, v := range vols {
+		fmt.Fprintf(&sb, "\n- [id:%d] %s", v.ID, v.Name)
+	}
+	sb.WriteString("\n（卷 ID 也可用 list_volumes 查询；若已建进错误的卷，用 move_chapter 移动到目标卷）")
+	return sb.String()
+}
+
 // editPlainFile 编辑通用文件（novelgo.md、技能文件），无章节记录联动。
 func (t *EditTool) editPlainFile(ctx context.Context, a *EditArgs, tc ToolContext) (*ToolResult, error) {
 	current, err := readFileForEdit(tc.NovelID, a.Path, a.ChangeType)
@@ -392,8 +409,10 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 		volumeID *int64
 	)
 	if ref.IsNew {
-		// 新建通道：只能 full_replace；卷可选——带卷校验归属，
-		// 不带卷时默认最后一卷；无卷则归入未分卷组。
+		// 新建通道：只能 full_replace。卷归属必须无歧义——带卷（chapters/{卷id}/new.md）
+		// 校验归属；不带卷时仅在无歧义时兜底（无卷书→未分卷组、单卷书→该卷）。
+		// 多卷书的裸 new.md 一律拒绝并列出卷清单：旧版默认「最后一卷」会把按卷写作的
+		// 章节全部误塞进末卷（报障：写章误入最后一卷），必须显式指定目标卷。
 		if a.ChangeType != "full_replace" {
 			return &ToolResult{Success: false, Error: "new.md 仅支持 full_replace（新建文件无原文可查改）"}, nil
 		}
@@ -406,6 +425,19 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 				return nil, fmt.Errorf("query volume: %w", err)
 			}
 			volumeID = &v.ID
+		} else {
+			vols, lerr := volume.NewStore(tc.DB, tc.LoggerOrDefault()).ListByNovel(ctx, nil, tc.NovelID)
+			if lerr != nil {
+				return nil, fmt.Errorf("list volumes: %w", lerr)
+			}
+			switch len(vols) {
+			case 0:
+				// 无卷书：创建未分卷章节（volumeID 留 nil）
+			case 1:
+				volumeID = &vols[0].ID
+			default:
+				return &ToolResult{Success: false, Error: ambiguousNewVolumeError(ref.IsOutline, vols)}, nil
+			}
 		}
 	} else {
 		// 已有章节：记录必须存在，新建走 new.md 通道
@@ -507,16 +539,7 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	// 新建在外层事务中取得 id 并写入首个文件；文件失败时回滚记录与排序调整。
 	// 已有章节的标题更新仍延后到正文落盘之后，见下。
 	if ref.IsNew {
-		// 未指定卷：默认最后一卷；整本书无卷则创建未分卷章节。
-		if volumeID == nil {
-			last, err := volume.NewStore(tc.DB, tc.LoggerOrDefault()).LastByNovel(ctx, nil, tc.NovelID)
-			if err != nil {
-				return nil, fmt.Errorf("resolve last volume: %w", err)
-			}
-			if last != nil {
-				volumeID = &last.ID
-			}
-		}
+		// 卷归属已在审批前解析（见上）：volumeID 为 nil 即创建未分卷章节。
 		var created *chapter.Chapter
 		if err := tc.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var err error
@@ -1187,7 +1210,7 @@ const editDescription = `编辑小说文件（章节正文、大纲、卷纲、�
 
 大纲写前门禁（系统硬规则）：若本书已存在任意大纲，则正文必须走「先 outlines/new.md 建纲 → 再写 chapters/id_{chapter_id}.md 正文」流程；严禁用 chapters/new.md 直接建正文（会被拒绝）。已有章节若大纲文件存在但实质为空（不足 30 字有效内容），写正文也会被拒绝，需先补细纲。无大纲的本书按即兴写作放行。
 
-新建章节或大纲：path 使用 new.md 形式（格式见 path 参数说明），且只能 full_replace；成功后返回值携带分配的 chapter_id、volume_id 与物理路径，后续编辑一律使用返回的物理路径。
+新建章节或大纲：path 使用 new.md 形式（格式见 path 参数说明），且只能 full_replace；成功后返回值携带分配的 chapter_id、volume_id 与物理路径，后续编辑一律使用返回的物理路径。多卷书必须用 chapters/{卷ID}/new.md 显式指定目标卷（不带卷的 chapters/new.md 只在无卷/单卷书可用）；建错卷可随时用 move_chapter 移动。
 重要——大纲与正文属于同一章节（共用 chapter_id）：通过 outlines/new.md 创建大纲后，该章节的正文必须写入返回值 body_path 指定的 chapters/id_{chapter_id}.md，严禁再用 chapters/new.md 新建（否则会产生两个重复章节）；反之通过 chapters/new.md 创建正文后，其大纲写入返回值 outline_path 指定的 outlines/id_{chapter_id}.md。只有当目标章节确实不存在时才使用 new.md。
 卷纲：path 使用 volumes/id_{卷ID}.md；卷必须存在，full_replace 可首次创建对应卷纲文件。
 

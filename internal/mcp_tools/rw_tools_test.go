@@ -261,29 +261,61 @@ func TestEditNewChannel_CreatesRecordAndFile(t *testing.T) {
 	}
 }
 
-// 不带卷的 new.md：小说有卷时默认分进最后一卷（贴卷尾）。
-func TestEditNewChannel_DefaultLastVolume(t *testing.T) {
+// 不带卷的 new.md：多卷书无法判断归属，拒绝并列出卷清单（不再默认最后一卷——
+// 旧默认会把按卷写作的章节误塞进末卷，即报障「写章误入最后一卷」）。
+func TestEditNewChannel_BareNew_MultiVolumeRejected(t *testing.T) {
 	db, tc, ctx := setupRWEnv(t)
 	v1 := seedVolume(t, db, 1, "第一卷", 1)
 	v2 := seedVolume(t, db, 1, "第二卷", 2)
 	seedChapter(t, db, 1, &v1, 1, 1) // 第一卷 1 章
-	seedChapter(t, db, 1, &v2, 2, 2) // 第二卷 2 章（最后一卷）
+	seedChapter(t, db, 1, &v2, 2, 2) // 第二卷 2 章
 
 	res := execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "新章内容。"))
+	if res.Success {
+		t.Fatal("expected rejection for bare new.md on multi-volume book")
+	}
+	if !contains(res.Error, "必须显式指定目标卷") {
+		t.Errorf("error = %s", res.Error)
+	}
+	if !contains(res.Error, fmt.Sprintf("[id:%d] 第一卷", v1)) || !contains(res.Error, fmt.Sprintf("[id:%d] 第二卷", v2)) {
+		t.Errorf("error should list volumes, got: %s", res.Error)
+	}
+	if !contains(res.Error, "move_chapter") {
+		t.Errorf("error should hint move_chapter, got: %s", res.Error)
+	}
+	if got := chapterCount(t, db, 1); got != 2 {
+		t.Errorf("chapter count = %d, want 2 (拒绝时不得建记录)", got)
+	}
+
+	// 大纲对称：outlines/new.md 同样拒绝并指引 outlines/{卷ID}/new.md
+	res = execEdit(t, ctx, tc, editArgs("outlines/new.md", "full_replace", "# 大纲"))
+	if res.Success {
+		t.Fatal("expected rejection for bare outlines/new.md on multi-volume book")
+	}
+	if !contains(res.Error, "outlines/{卷ID}/new.md") {
+		t.Errorf("error = %s", res.Error)
+	}
+}
+
+// 不带卷的 new.md：单卷书无歧义，自动入该卷。
+func TestEditNewChannel_BareNew_SingleVolume_DefaultsToIt(t *testing.T) {
+	db, tc, ctx := setupRWEnv(t)
+	v1 := seedVolume(t, db, 1, "唯一卷", 1)
+
+	res := execEdit(t, ctx, tc, editArgs("chapters/new.md", "full_replace", "单卷新章。"))
 	if !res.Success {
 		t.Fatalf("expected success, got: %s", res.Error)
 	}
 	newID := res.Data["chapter_id"].(int64)
-	if got := res.Data["volume_id"].(int64); got != v2 {
-		t.Errorf("volume_id = %v, want last volume %d", got, v2)
+	if got := res.Data["volume_id"].(int64); got != v1 {
+		t.Errorf("volume_id = %v, want %d", got, v1)
 	}
-
 	ch := fetchChapter(t, db, newID)
-	if ch.VolumeID == nil || *ch.VolumeID != v2 {
-		t.Errorf("volume_id = %v, want %d", ch.VolumeID, v2)
+	if ch.VolumeID == nil || *ch.VolumeID != v1 {
+		t.Errorf("volume_id = %v, want %d", ch.VolumeID, v1)
 	}
-	if ch.SortOrder != 3 { // 贴最后一卷尾：max(1,2)+1
-		t.Errorf("sort_order = %d, want 3", ch.SortOrder)
+	if ch.SortOrder != 1 {
+		t.Errorf("sort_order = %d, want 1", ch.SortOrder)
 	}
 }
 

@@ -18,6 +18,7 @@ func RegisterAllTools(r *Registry) {
 	RegisterProvenanceTools(r)
 	RegisterStoryArcTools(r)
 	RegisterVolumeTools(r)
+	RegisterChapterTools(r)
 	RegisterRWTools(r)
 	RegisterMemoryTools(r)
 	RegisterSubagentTools(r)
