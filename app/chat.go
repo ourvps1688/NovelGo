@@ -102,8 +102,12 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	// 6.5 确定性意图预路由 + LLM 兜底：非斜杠消息按 useWhen 线索自动注入命中的 auto 技能
 	// （复用 slash 同款 <system-reminder> 注入，逐轮写入；always 已常驻、manual 走建议）
 	var autoInject string
+	activeSkills := make([]string, 0, 4)
 	if !strings.HasPrefix(input.Message, "/") {
-		autoInject = a.buildAutoSkillInject(ctx, input.NovelID, input.Message, input.ProviderName, input.ModelID)
+		autoInject, activeSkills = a.buildAutoSkillInjectWithNames(ctx, input.NovelID, input.Message, input.ProviderName, input.ModelID)
+	}
+	if injectName != "" {
+		activeSkills = append([]string{injectName}, activeSkills...)
 	}
 
 	// 6.6 写章前情回顾（B4）：命中写章/续写意图时，注入最新一章正文作为前情，保持连贯。
@@ -180,6 +184,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	wails.EventsEmit(ctx, "chat:started", map[string]any{
 		"session_id": sess.SessionID,
 		"turn_id":    turnID,
+		"skills":     activeSkills,
 	})
 
 	result, runErr := a.runTurnWithRetry(ctx, agent.RunOptions{

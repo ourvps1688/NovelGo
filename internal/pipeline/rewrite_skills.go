@@ -174,15 +174,8 @@ func joinRewriteBlocks(a, b string) string {
 	}
 }
 
-// stripFrontmatter 去掉文档开头的 YAML frontmatter（首行 --- 至下一个 --- 行）。
-// 无 frontmatter 原样返回。
+// stripFrontmatter 委托 skill.Body：统一支持 LF/CRLF，避免内置技能（CRLF）的
+// YAML 头被当成方法论正文注入重写提示词。保留本函数名供既有单测与调用点使用。
 func stripFrontmatter(s string) string {
-	if !strings.HasPrefix(s, "---\n") {
-		return s
-	}
-	rest := s[4:]
-	if i := strings.Index(rest, "\n---"); i >= 0 {
-		rest = rest[i+4:]
-	}
-	return strings.TrimLeft(rest, "\n")
+	return skill.Body(s)
 }

@@ -37,6 +37,7 @@ type Skill struct {
 	Kind         string         `json:"kind" yaml:"kind"`         // 提取类型：留空/struct=套路模板，mental=创作心智
 	Mode         string         `json:"mode" yaml:"mode"`
 	UseWhen      []UseWhenEntry `json:"use_when,omitempty" yaml:"useWhen,omitempty"` // 结构化「何时使用」意图线索，供 LLM 预路由与用户侧提示
+	NotWhen      []string       `json:"not_when,omitempty" yaml:"notWhen,omitempty"` // 负向线索：消息命中任一即整体不路由到本技能（守住 cue 边界，如「动笔前」）
 	Author       string         `json:"author" yaml:"author"`
 	SourceAuthor string         `json:"source_author" yaml:"source_author"` // 仅 mental 有意义：被蒸馏心智所属的作者（V3 跨书聚合归并键）
 	Version      int            `json:"version" yaml:"version"`
@@ -64,6 +65,7 @@ type SkillMeta struct {
 	Kind         string         `json:"kind"`
 	Mode         string         `json:"mode"`
 	UseWhen      []UseWhenEntry `json:"use_when,omitempty"` // 结构化「何时使用」意图线索（来自技能 frontmatter）
+	NotWhen      []string       `json:"not_when,omitempty"` // 负向线索（来自 frontmatter notWhen），命中即不路由
 	Author       string         `json:"author"`
 	SourceAuthor string         `json:"source_author"`
 	Version      int            `json:"version"`
@@ -86,6 +88,7 @@ func (s *Skill) Meta(source string) SkillMeta {
 		Kind:         s.Kind,
 		Mode:         s.Mode,
 		UseWhen:      s.UseWhen,
+		NotWhen:      s.NotWhen,
 		Author:       s.Author,
 		SourceAuthor: s.SourceAuthor,
 		Version:      s.Version,

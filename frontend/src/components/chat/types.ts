@@ -145,6 +145,7 @@ export interface Turn {
   id: string;
   turnId: number;
   userMessage: string;
+  skills?: string[]; // 本轮由意图路由实际注入的技能名（chat:started 事件回传，含写章技法包）
   segments: TurnSegment[];
   status: "streaming" | "done" | "failed" | "interrupted" | "stopped";
   errorMessage?: string;

@@ -85,6 +85,7 @@ interface EventQueue {
 interface ChatStartedEvent {
   session_id?: string;
   turn_id: number;
+  skills?: string[];
 }
 
 export default function ChatPanel({
@@ -1218,10 +1219,12 @@ export default function ChatPanel({
               );
           }
 
-          // 更新 turn 的 turnId 为后端分配的真实值
+          // 更新 turn 的 turnId 为后端分配的真实值，并带上本轮实际注入的技能
           setTurns((prev) =>
             prev.map((t) =>
-              t.id === turnId ? { ...t, turnId: data.turn_id } : t,
+              t.id === turnId
+                ? { ...t, turnId: data.turn_id, skills: data.skills ?? [] }
+                : t,
             ),
           );
 
@@ -1483,6 +1486,26 @@ export default function ChatPanel({
                   <div key={turn.id} className="space-y-2">
                     {turn.userMessage && (
                       <MessageBubble role="user" content={turn.userMessage} />
+                    )}
+
+                    {turn.skills && turn.skills.length > 0 && (
+                      <div
+                        className="flex flex-wrap items-center justify-end gap-1.5"
+                        data-testid="active-skills"
+                      >
+                        <span className="text-xs text-muted-foreground">
+                          {t("chat.activeSkills")}
+                        </span>
+                        {turn.skills.map((name) => (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground"
+                          >
+                            <Sparkles className="h-3 w-3" />
+                            {name}
+                          </span>
+                        ))}
+                      </div>
                     )}
 
                     {turn.segments.map((seg) => {

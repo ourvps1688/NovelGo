@@ -61,22 +61,36 @@ func (a *App) resolveSlashCommand(novelID int64, name string) (inject string, lo
 		content := "用户启用了快捷指令「" + sk.Name + "」。请根据该指令的内容和用户需求进行工作。\n\n---\n" + sk.Content + "\n---"
 		return "<system-reminder>\n" + content + "\n</system-reminder>", sk.Name
 	default: // auto
-		content := "用户启用了技能「" + sk.Name + "」。请根据该技能的定义和用户需求进行工作。\n\n---\n" + sk.RawContent + "\n---"
+		content := "用户启用了技能「" + sk.Name + "」。请根据该技能的定义和用户需求进行工作。\n\n---\n" + sk.Content + "\n---"
 		return "<system-reminder>\n" + content + "\n</system-reminder>", sk.Name
 	}
 }
+
+// writingBundleSkills 是写章总调度命中时一并注入的技法技能（确定性单源）。
+// 取 next 阶段 2 里最直接影响本章正文的三项；节奏模板/前情回顾由 chat.go 独立
+// 通道注入，不在此重复。数量受单技能/整块双封顶约束，避免稀释上下文注意力。
+var writingBundleSkills = []string{"reader-immersion", "scene-beats", "plot-hook"}
+
+const (
+	writingBundleSkillCap = 1500 // 单技能注入上限（rune）
+	writingBundleBlockCap = 5000 // 写章技法整块上限（rune）
+)
 
 // buildAutoSkillInject 依据用户消息的意图匹配，自动构建应注入的技能正文。
 // 仅对 auto 技能注入完整内容（确定性预路由，让 LLM 不再靠猜目录）；
 // 对 manual 技能（如总调度 next）注入为「建议类」reminder，触发其执行；
 // always 技能已常驻，跳过。每轮最多各注入 1 条，防止过度注入稀释注意力。
-//
-// 路由采用「确定性 cue 优先 + LLM 兜底」混合策略：cue 命中零开销直接注入；
-// cue 未命中且消息非寒暄时，用 providerName/modelID 指定的模型做一次轻量意图分类，
-// 把模糊意图映射到最合适的技能（避免误注入）。无 LLM/未指定模型时退化为纯确定性路由。
+// 命中写章总调度 next 时额外注入 writingBundleSkills 的技法正文。
 func (a *App) buildAutoSkillInject(ctx context.Context, novelID int64, message, providerName, modelID string) string {
+	inject, _ := a.buildAutoSkillInjectWithNames(ctx, novelID, message, providerName, modelID)
+	return inject
+}
+
+// buildAutoSkillInjectWithNames 与 buildAutoSkillInject 同义，额外返回本轮实际注入的
+// 技能名（含写章技法包），供 chat:started 事件回传前端做可见徽标。
+func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, message, providerName, modelID string) (string, []string) {
 	if a.skill == nil {
-		return ""
+		return "", nil
 	}
 	all := a.skill.ListMeta(novelID)
 	exclude := explicitSkillNames(message, all)
@@ -92,15 +106,18 @@ func (a *App) buildAutoSkillInject(ctx context.Context, novelID int64, message, 
 	route := skill.RouteUserMessageSmart(ctx, all, message, 1, 1, exclude, classifier)
 
 	var b strings.Builder
+	names := make([]string, 0, 4)
 	for _, m := range route.Auto {
 		sk, ok := a.skill.Get(novelID, m.Name)
 		if !ok {
 			continue
 		}
 		b.WriteString("<system-reminder>\n")
-		fmt.Fprintf(&b, "用户消息触发了技能「%s」的自动加载（意图匹配）。请依据该技能定义与用户需求工作。\n\n---\n%s\n---\n", m.Name, sk.RawContent)
+		fmt.Fprintf(&b, "用户消息触发了技能「%s」的自动加载（意图匹配）。请依据该技能定义与用户需求工作。\n\n---\n%s\n---\n", m.Name, sk.Content)
 		b.WriteString("</system-reminder>\n")
+		names = append(names, m.Name)
 	}
+	writingTurn := false
 	for _, m := range route.Manual {
 		sk, ok := a.skill.Get(novelID, m.Name)
 		if !ok {
@@ -108,20 +125,67 @@ func (a *App) buildAutoSkillInject(ctx context.Context, novelID int64, message, 
 		}
 		intent := skill.FirstIntent(m)
 		b.WriteString("<system-reminder>\n")
-		fmt.Fprintf(&b, "检测到用户意图匹配技能「%s」（%s）。请启用该总调度/技能，按其对用户需求开展工作：\n\n---\n%s\n---\n", m.Name, intent, sk.RawContent)
+		fmt.Fprintf(&b, "检测到用户意图匹配技能「%s」（%s）。请启用该总调度/技能，按其对用户需求开展工作：\n\n---\n%s\n---\n", m.Name, intent, sk.Content)
 		b.WriteString("</system-reminder>\n")
+		names = append(names, m.Name)
+		if m.Name == "next" {
+			writingTurn = true
+		}
+	}
+	if writingTurn {
+		if block, bundle := a.buildWritingSkillBundle(novelID, names); block != "" {
+			b.WriteString(block)
+			names = append(names, bundle...)
+		}
 	}
 	if b.Len() > 0 {
-		names := make([]string, 0, len(route.Auto)+len(route.Manual))
-		for _, m := range route.Auto {
-			names = append(names, m.Name)
-		}
-		for _, m := range route.Manual {
-			names = append(names, m.Name)
-		}
 		a.logger.Debug("意图预路由命中", "source", string(route.Source), "skills", strings.Join(names, ","))
 	}
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(b.String()), names
+}
+
+// buildWritingSkillBundle 把写章技法正文按确定性顺序注入（去重、双封顶、如实标注节选）。
+// 明确声明为「本轮必须落实的硬约束」，避免模型把总调度提醒读成可选建议后跳过编排。
+func (a *App) buildWritingSkillBundle(novelID int64, already []string) (string, []string) {
+	seen := make(map[string]bool, len(already))
+	for _, n := range already {
+		seen[n] = true
+	}
+	var b strings.Builder
+	var names []string
+	total := 0
+	for _, name := range writingBundleSkills {
+		if seen[name] {
+			continue
+		}
+		sk, ok := a.skill.Get(novelID, name)
+		if !ok || strings.TrimSpace(sk.Content) == "" {
+			continue
+		}
+		runes := []rune(sk.Content)
+		truncated := false
+		if len(runes) > writingBundleSkillCap {
+			runes = runes[:writingBundleSkillCap]
+			truncated = true
+		}
+		if total+len(runes) > writingBundleBlockCap {
+			break
+		}
+		if len(names) > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "【写章技法·%s】\n%s", name, string(runes))
+		if truncated {
+			b.WriteString("\n（技法节选，完整以技能原文为准）")
+		}
+		total += len(runes)
+		names = append(names, name)
+		seen[name] = true
+	}
+	if len(names) == 0 {
+		return "", nil
+	}
+	return "\n<system-reminder>\n写下一章时，以下技法是本轮**必须逐条落实**的硬约束（不是可选建议）；按列出顺序对照本章正文应用，不得跳过：\n\n" + b.String() + "\n</system-reminder>\n", names
 }
 
 // classifyMinConfidence 是分类器输出置信度低于此值时判定为无匹配（与 skill 包阈值保持一致）。
@@ -210,11 +274,21 @@ func parseClassifierJSON(out string, cands []skill.IntentCandidate) (string, flo
 }
 
 // explicitSkillNames 返回消息中已显式出现的技能名集合，避免与 / 命令或口头提及重复注入。
+// 例外：消息整体就是某个技能名时（如用户按 next.md 声明直接发「next」），那是触发词
+// 而非「在句子里点名技能」；若照常排除，该技能会被自己排除而永不触发。
 func explicitSkillNames(message string, all []skill.SkillMeta) map[string]bool {
 	msg := strings.ToLower(message)
+	trimmed := strings.TrimSpace(msg)
 	set := make(map[string]bool)
 	for _, m := range all {
-		if m.Name != "" && strings.Contains(msg, strings.ToLower(m.Name)) {
+		if m.Name == "" {
+			continue
+		}
+		name := strings.ToLower(m.Name)
+		if trimmed == name {
+			continue
+		}
+		if strings.Contains(msg, name) {
 			set[m.Name] = true
 		}
 	}

@@ -10,12 +10,15 @@ mode: manual
 author: builtin
 
 version: 3
+notWhen:
+  - "动笔前"
 useWhen:
   - intent: "写下一章 / 继续创作 / 开始动笔"
     cues:
       - "写下一章"
       - "继续"
       - "next"
+      - "动笔"
       - "动笔写"
       - "开始创作"
       - "开始写"

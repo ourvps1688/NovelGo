@@ -61,7 +61,14 @@ func RouteUserMessage(
 }
 
 // skillMatches 判断技能 useWhen 线索是否命中消息（任一 cue 子串出现即命中）。
+// notWhen 是负向边界：消息命中任一排除词时整体不路由，防止宽泛 cue 误伤
+// （如「动笔」命中但「动笔前我想先拢一遍线索」不该被写章总调度抢走）。
 func skillMatches(m SkillMeta, msg string) bool {
+	for _, ex := range m.NotWhen {
+		if ex != "" && strings.Contains(msg, strings.ToLower(ex)) {
+			return false
+		}
+	}
 	for _, e := range m.UseWhen {
 		for _, c := range e.Cues {
 			if c == "" {

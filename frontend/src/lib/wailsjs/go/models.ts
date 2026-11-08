@@ -4093,6 +4093,7 @@ export namespace skill {
 	    kind: string;
 	    mode: string;
 	    use_when?: UseWhenEntry[];
+	    not_when?: string[];
 	    author: string;
 	    source_author: string;
 	    version: number;
@@ -4118,6 +4119,7 @@ export namespace skill {
 	        this.kind = source["kind"];
 	        this.mode = source["mode"];
 	        this.use_when = this.convertValues(source["use_when"], UseWhenEntry);
+	        this.not_when = source["not_when"];
 	        this.author = source["author"];
 	        this.source_author = source["source_author"];
 	        this.version = source["version"];
@@ -4157,6 +4159,7 @@ export namespace skill {
 	    kind: string;
 	    mode: string;
 	    use_when?: UseWhenEntry[];
+	    not_when?: string[];
 	    author: string;
 	    source_author: string;
 	    version: number;
@@ -4179,6 +4182,7 @@ export namespace skill {
 	        this.kind = source["kind"];
 	        this.mode = source["mode"];
 	        this.use_when = this.convertValues(source["use_when"], UseWhenEntry);
+	        this.not_when = source["not_when"];
 	        this.author = source["author"];
 	        this.source_author = source["source_author"];
 	        this.version = source["version"];

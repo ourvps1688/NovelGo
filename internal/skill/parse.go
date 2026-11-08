@@ -63,6 +63,17 @@ func ParseBytes(data []byte, defaultAuthor string) (*Skill, error) {
 	return sk, nil
 }
 
+// Body 返回去掉 YAML frontmatter 的技能正文（LF/CRLF 均可）；无 frontmatter 时
+// 原样返回 trimmed 全文。供提示词注入统一使用，避免把 YAML 元数据塞给模型。
+// frontmatter 未闭合时保守返回原文，绝不因格式问题丢掉可用正文。
+func Body(raw string) string {
+	_, body, err := splitFrontmatter(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return body
+}
+
 // splitFrontmatter 从 markdown 原文中分离 frontmatter 和正文。
 // frontmatter 由开头的 --- 开始，下一个 --- 结束。
 func splitFrontmatter(raw string) (frontmatter, body string, err error) {
