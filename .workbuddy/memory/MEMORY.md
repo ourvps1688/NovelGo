@@ -39,6 +39,11 @@
 - 工单终态保护（#106）：**`UpdateIssueStatus` 兼容写必须条件 CAS** `WHERE status NOT IN (verified,dismissed,verifying)`，章节重写比复验晚收口时绝不把 verified 打回 fixed（verifying 事务分支同样拒绝终态）；`VerifyIssueTickets` 在写状态/派发前按 run 用 `issueFixActive` 拒绝修复在途的复验（避免读到未定稿正文 + 半截 verifying）。修复执行体快照的工单可能已被人工收口，收口写回一律走条件 CAS。
 - 卖点引导项（#107）：**标签/方向/一句话卖点/平台/风格五类落 `preference_items`，被 `intentFromPitch`（Intent 块）与 `NovelProfile→FormatPreferences`（system 全量注入，无 category 过滤）两条链路真实消费，绝非「仅做记录」**；`preferenceCategories.ts` 旧注释是错的，已修。唯一写入口必须是 `app.UpsertPitchPreferences`（全量 PUT、单事务按 novel_id+category 收敛、空串清除），严禁再逐条 `CreatePreference` 纯新增（自动保存+手动采纳会写两组，旧稿与冲突平台值一起进 system 白烧 token）。**保护边界**：`平台约束/创作约束` 与用户手写长纪律共用分类，>80 rune 且不等于本次值的历史行视为手写纪律、收敛不触碰，前端 read 也跳过；方向/标签/卖点无此包袱可全量收敛。平台名命中注册 preset 且该书**无检查器配置行**时自动武装 platform_profile（七猫→qimao，不覆盖已有行）。
 
+## 技能触发链（#108，勿回退）
+- 27 个 builtin **无一个 `mode: always`**；写章消息原先只注入 `next` 一个 manual 提醒（maxAuto=1/maxManual=1），其编排的 10 个技法技能在写章语料下 cue 命中 0，历史 55 次 next 注入仅 2 次真 `read /builtin/skills/`。**写章必须走 bundle**：`app.buildWritingSkillBundle` 按单源 `writingBundleSkills`（reader-immersion/scene-beats/plot-hook）注入纯正文、双封顶、声明为硬约束。
+- 注入一律用 `sk.Content` 或 `skill.Body`（LF/CRLF 通吃），**禁用 `sk.RawContent`**（会把 CRLF YAML frontmatter 拼进提示词）。`stripFrontmatter` 已委托 `skill.Body`。
+- `notWhen` 是 cue 边界单源：给 next 加宽泛 cue「动笔」必须同时保留 `notWhen: [动笔前]`，否则 canary / fallback 基准的 collect 样本被抢。`explicitSkillNames` 不得把「消息整体等于技能名」当显式点名排除（裸发 next 会永不触发）。`chat:started` 事件带 `skills` 供前端徽标，是唯一可见性通道。
+
 ## 其他契约
 - 章节寻址：chapter_id≠阅读序号；前端用 reading_number；工单 chapter_ids=全局阅读序号。
 - ONNX 仅 bge-small-zh-v1.5 向量化；reranker 已移除。熔断 internal/llm/breaker.go 三态只认硬失败。
