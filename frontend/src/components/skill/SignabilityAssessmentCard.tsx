@@ -89,7 +89,7 @@ export default function SignabilityAssessmentCard({
         </div>
       ) : null}
       {status.last_summary ? (
-        <p className="mt-1.5 text-sm leading-relaxed text-foreground/90">
+        <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
           {status.last_summary}
         </p>
       ) : null}

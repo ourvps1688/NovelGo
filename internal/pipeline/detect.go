@@ -74,6 +74,9 @@ type detectOutcome struct {
 // 检测任务走静默降级）；核心自身零 auto-advance/fix/gate、零阶段状态写入——跑完即返回，
 // run 状态不被推进（WBS T1.1 验收①）。
 func (s *Service) runDetection(ctx context.Context, req detectRequest, ctxt *GateContext, origContextJSON string) (detectOutcome, error) {
+	// 记录本次执行前的会话消息水位：定位只圈定本次 agent loop 追加的工具返回，
+	// 不把同一检测容器里跨天残留的历史消息误当成本次请求内容（#104）。
+	baseline := s.sessionMessageBaseline(ctx, req.sessionID)
 	out, err := s.dispatchSkill(ctx, req.skill, SkillInput{
 		NovelID:   req.novelID,
 		Prompt:    req.prompt,
@@ -82,6 +85,12 @@ func (s *Service) runDetection(ctx context.Context, req detectRequest, ctxt *Gat
 		RunID:     req.runRef,
 	})
 	if err != nil {
+		// 以 error 形式返回的上游内容审核拦截（HTTP 4xx content_filter / moderation）：
+		// 与巡检一致落可见的 error 报告，旧实现的「静默降级」会让作者只看到检测没结果，
+		// 连拒绝语都看不到。仅安全类错误走此路径，其余派发失败仍原样返回 err（契约③）。
+		if blocked, why := isLLMSafetyError(err); blocked {
+			return s.detectSafetyFailure(ctx, req, ctxt, "", why, err, baseline), nil
+		}
 		return detectOutcome{}, err
 	}
 	// 拒绝 / 安全审核拦截：上游把拒绝语当正常 content 回传（err == nil），必须在此拦截，
@@ -90,33 +99,7 @@ func (s *Service) runDetection(ctx context.Context, req detectRequest, ctxt *Gat
 	if refused, reason := isLLMRefusal(out.Text); refused {
 		s.logger.Warn(req.label+"：模型拒绝/安全审核拦截（落地失败态，非阻断）",
 			"run_id", req.runID, "skill", req.skill, "reason", reason, "snippet", firstN(out.Text, 120))
-		// 与巡检一致：回显模型/网关原始拒绝语（#101）。上游常在拒绝语里点名具体章节或
-		// 内容描写，丢掉它作者就只剩一句通用「high risk」，无从判断该改哪段。
-		summary := "检测未能完成：模型拒绝了本次请求（" + reason + "）。" +
-			"通常是因为发送给模型的章节/台账内容触发了上游模型的安全审核。"
-		if detail := refusalExcerpt(out.Text, 1200); detail != "" {
-			summary += "\n原始拒绝语（模型/网关原话，已截断）：" + detail +
-				"\n若其中点名了具体章节或内容，请对该处做局部脱敏/改写后重跑。\n"
-		}
-		summary += "建议：①更换内容审核更宽松的模型或供应商；" +
-			"②确认当前模型支持长上下文；③如确为内容命中，可先对该卷做局部脱敏后再检测。" +
-			"本次原始返回未作为体检结果使用，未生成任何工单。"
-		failed := AuditData{
-			Verdict: "error",
-			Summary: summary,
-			Issues:  []AuditIssue{},
-		}
-		failedJSON, _ := json.Marshal(failed)
-		if req.kind == "blueprint" {
-			ctxt.BlueprintAudit = string(failedJSON)
-		} else {
-			ctxt.Audit = string(failedJSON)
-		}
-		// 声明零问题时清掉重写/retcon 投影，避免残留旧清单（与正常落地语义一致）。
-		ctxt.RewriteBacklog = nil
-		ctxt.RetconBacklog = nil
-		updated, _ := json.Marshal(ctxt)
-		return detectOutcome{Audit: failed, Context: *ctxt, Updated: updated}, nil
+		return s.detectSafetyFailure(ctx, req, ctxt, out.Text, reason, nil, baseline), nil
 	}
 	audit := parseFreshAudit(out.Text)
 	// P2 文风漂移（WBS p2 §0.3）：确定性检测的 V 系 issue 追加到清单尾部（warning 级，
@@ -172,6 +155,51 @@ func (s *Service) runDetection(ctx context.Context, req detectRequest, ctxt *Gat
 		updated = []byte(origContextJSON)
 	}
 	return detectOutcome{Audit: audit, Context: *ctxt, Updated: updated}, nil
+}
+
+// detectSafetyFailure 把模型拒绝 / 网关内容审核拦截落地为 verdict=error 的可见失败态：
+// 回显原始拒绝语（或网关错误原文），并附上「本次真实请求内容」的逐段定位结果——
+// 签约体检是 24 轮 agent loop，工具返回的章节/台账大块同样进了请求，只探测章节正文
+// 会漏报（#104）。只报告不改写：零 issue、零工单、零修复派发、零阶段推进。
+func (s *Service) detectSafetyFailure(ctx context.Context, req detectRequest, ctxt *GateContext,
+	text, reason string, rawErr error, baseline int64) detectOutcome {
+	units := s.collectDetectSafetyUnits(ctx, req, baseline)
+	loc := localizeSafetyTriggers(ctx, units, s.safetyProbe())
+	s.logger.Info("检测：安全审核触犯内容定位完成",
+		"run_id", req.runID, "skill", req.skill, "units", len(units), "hits", len(loc.Hits),
+		"unconfirmed", len(loc.Unconfirmed), "hints", len(loc.Hints))
+
+	detail := refusalExcerpt(text, 1200)
+	detailLabel := "原始拒绝语"
+	if detail == "" && rawErr != nil {
+		detail = refusalExcerpt(rawErr.Error(), 1200)
+		detailLabel = "网关/API 错误原文"
+	}
+	summary := "检测未能完成：模型拒绝了本次请求（" + reason + "）。\n" +
+		"触发来源：本次发送给模型的体检提示词、上下文块与工具返回的章节/台账内容命中了上游模型或网关的内容审核。"
+	summary += loc.render()
+	summary += fmt.Sprintf("\n本次请求可定位片段：%d 段 / 约 %d 字符（提示词与工具返回按原文切分）。\n",
+		len(units), requestUnitsRunes(units))
+	if detail != "" {
+		summary += "\n" + detailLabel + "（模型/网关原话，已截断）：\n" + detail + "\n" +
+			"若其中点名了具体章节或内容，请与上面的定位结果一并参考。\n"
+	}
+	summary += "建议：①优先修改/脱敏上面列出的片段后重跑；②若为通用拦截或组合触发，" +
+		"优先排查供应商/网关策略与请求规模（更换模型或供应商、分批体检、缩短台账块），不必盲目逐段改稿；" +
+		"③确认当前模型支持长上下文。本次原始返回未作为体检结果使用，未生成任何工单。"
+
+	failed := AuditData{Verdict: "error", Summary: summary, Issues: []AuditIssue{}}
+	failedJSON, _ := json.Marshal(failed)
+	if req.kind == "blueprint" {
+		ctxt.BlueprintAudit = string(failedJSON)
+	} else {
+		ctxt.Audit = string(failedJSON)
+	}
+	// 声明零问题时清掉重写/retcon 投影，避免残留旧清单（与正常落地语义一致）。
+	ctxt.RewriteBacklog = nil
+	ctxt.RetconBacklog = nil
+	updated, _ := json.Marshal(ctxt)
+	return detectOutcome{Audit: failed, Context: *ctxt, Updated: updated}
 }
 
 // ── 统一检测任务入口 RunDetectionTask（R5-3 T1.2，WBS §0.1/§0.2）────────────

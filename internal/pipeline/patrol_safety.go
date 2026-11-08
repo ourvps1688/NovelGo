@@ -122,14 +122,19 @@ func (s *Service) newPatrolSafetyProbe() patrolSafetyProbe {
 	}
 }
 
-// probePatrolUnitsContent 把一组单元拼成探针文本。格式与巡检语料片段保持一致
-// （章标题 + 正文 / 台账行原文），使上游审核面对尽可能接近原始请求的内容形态。
+// probePatrolUnitsContent 把一组单元拼成探针文本。章节单元带章标题、台账行带定位标签
+// （尽量还原巡检语料形态）；#104 的请求侧单元（提示词 / 工具返回）按原文直接重放，
+// 不加任何前缀——上游看到的正是这段文本，多一个标题都可能改变审核结论。
 func probePatrolUnitsContent(units []patrolUnit) string {
 	var sb strings.Builder
 	for _, u := range units {
-		if u.Kind == "chapter" {
+		switch u.Kind {
+		case "chapter":
 			fmt.Fprintf(&sb, "### %s\n%s\n", u.Label, u.Content)
-		} else {
+		case "request":
+			sb.WriteString(u.Content)
+			sb.WriteString("\n")
+		default:
 			fmt.Fprintf(&sb, "%s：%s\n", u.Label, u.Content)
 		}
 	}
@@ -221,11 +226,12 @@ func localizeSafetyTriggers(ctx context.Context, units []patrolUnit, probe patro
 		res.Hints = scanLocalSafetyHints(units)
 	}
 	if len(res.Hits) == 0 && len(res.Unconfirmed) == 0 && res.Note == "" {
-		res.Note = "逐段探测未发现单独触发审核的片段：本次拦截可能由多段内容组合、提示词整体语境或网关侧规则触发。"
+		res.Note = "逐段探测未发现单独触发审核的片段：本次拦截更可能由多段内容组合、请求整体语境/体量或网关侧规则触发；" +
+			"建议优先排查供应商/网关策略与请求规模（更换模型或供应商、分批检测、缩短台账块），不必盲目逐段改稿。"
 		res.Hints = scanLocalSafetyHints(units)
 	}
 	res.Note = appendLocateNote(res.Note,
-		"探针仅重放章节/台账片段，未重放完整提示词与预筛块；结论为定位辅助，最终以你对该处内容的核查为准。")
+		"探针仅重放本次请求内的章节/台账/提示词/工具返回片段，未重放完整 system prompt 与工具调用结构；结论为定位辅助，最终以你对该处内容的核查为准。")
 	return res
 }
 
@@ -294,12 +300,33 @@ func (r safetyLocateResult) render() string {
 	return sb.String()
 }
 
+// safetyUnitExcerpt 给命中片段配一段可读摘录。长片段采用「首窗 + 中略 + 尾窗」：
+// 触犯内容常落在片段中后段（例如一大块台账的最后一行），只截开头会让作者看不到
+// 真正要改的字句，定位结果等于白给（#104 实测）。
 func safetyUnitExcerpt(content string) string {
 	collapsed := strings.Join(strings.Fields(content), " ")
 	if collapsed == "" {
 		return "（空内容）"
 	}
-	return firstN(collapsed, patrolSafetyExcerptRunes)
+	runes := []rune(collapsed)
+	if len(runes) <= patrolSafetyExcerptRunes {
+		return collapsed
+	}
+	headN := patrolSafetyExcerptRunes * 2 / 3
+	tailN := patrolSafetyExcerptRunes - headN
+	return string(runes[:headN]) + " …（中略）… " + string(runes[len(runes)-tailN:])
+}
+
+// safetyProbe 返回本次定位使用的探针。生产走轻量直连调用；测试可经
+// Service.safetyProbeFn 注入假上游，精确模拟命中/全清/被拦/不可用，不必发真实请求。
+func (s *Service) safetyProbe() patrolSafetyProbe {
+	if s == nil {
+		return func(context.Context, string) patrolProbeState { return probeUnknown }
+	}
+	if s.safetyProbeFn != nil {
+		return s.safetyProbeFn()
+	}
+	return s.newPatrolSafetyProbe()
 }
 
 // locatePatrolSafety 是 Service 侧接线：先广播 locating 进度（前端显示「正在定位…」），
@@ -309,7 +336,7 @@ func (s *Service) locatePatrolSafety(ctx context.Context, runCtx context.Context
 	emitPatrolProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "phase": "locating",
 	})
-	loc := localizeSafetyTriggers(runCtx, units, s.newPatrolSafetyProbe())
+	loc := localizeSafetyTriggers(runCtx, units, s.safetyProbe())
 	s.logger.Info("一致性巡检：安全审核触犯内容定位完成",
 		"run_id", runID, "units", len(units), "hits", len(loc.Hits),
 		"unconfirmed", len(loc.Unconfirmed), "hints", len(loc.Hints))

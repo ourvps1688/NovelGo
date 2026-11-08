@@ -45,6 +45,9 @@ type Service struct {
 	appCtx       context.Context
 	logger       *slog.Logger
 	skillRunner  SkillRunnerFunc
+	// safetyProbeFn 是可替换的安全审核定位探针构造器（#104）。生产为 nil → 走轻量直连
+	// 调用；测试注入假上游以验证定位接线，不必向真实供应商发请求。
+	safetyProbeFn func() patrolSafetyProbe
 	// chapterCount 返回本书已落库章节数，用于「黄金三章后自动进入 S4a 签约体检」的触发判定。
 	// 测试可替换为 stub 以确定性驱动 S3→S4 流转。
 	chapterCount func(ctx context.Context, novelID int64) (int, error)

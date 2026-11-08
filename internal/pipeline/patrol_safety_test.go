@@ -96,7 +96,7 @@ func TestLocalizeSafetyTriggersSingleHit(t *testing.T) {
 	require.Contains(t, got.Hits[0].Content, "BLOCK-ME-ALPHA")
 	require.Empty(t, got.Unconfirmed)
 	require.LessOrEqual(t, *calls, 12, "二分探测不得退化成逐条全量调用")
-	require.Contains(t, got.Note, "探针仅重放章节/台账片段")
+	require.Contains(t, got.Note, "探针仅重放本次请求内", "#104 起探针也重放提示词/工具返回块")
 }
 
 func TestLocalizeSafetyTriggersTwoHits(t *testing.T) {

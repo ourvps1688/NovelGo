@@ -130,14 +130,21 @@ func (s *Service) runConsistencyPatrol(ctx context.Context, runID string, novelI
 	// 语料缺失（无章正文）时归并步仍可用台账快照分析；buildPatrolCorpusWithUnits 自带容错降级。
 	// units 与拼入提示词的文本同源同截断：一旦上游触发内容审核，可据此逐段定位触犯的是
 	// 哪一章/哪张台账哪一行（#101），绝不出现「书里内容没发送过却被报成命中」的误定位。
-	corpus, units := s.buildPatrolCorpusWithUnits(runCtx, novelID, runID)
+	corpus, corpusUnits := s.buildPatrolCorpusWithUnits(runCtx, novelID, runID)
 	emitPatrolProgress(ctx, map[string]any{
 		"novel_id": novelID, "run_id": runID, "phase": "synthesizing", "total": total, "done": total,
 	})
 
 	// ── 单次归并：提示词内联【本书语料】（全书正文+台账）+ 预筛候选簇 作为全部证据 ──
 	synCtx, synCancel := context.WithTimeout(runCtx, patrolSynthesizeTimeout)
-	reducePrompt := synthesizePrompt(novelID, prescreen) + corpus + blocks.Render(contextasm.PurposePatrol)
+	headPrompt := synthesizePrompt(novelID, prescreen)
+	blockText := blocks.Render(contextasm.PurposePatrol)
+	reducePrompt := headPrompt + corpus + blockText
+	// #104：定位单元必须覆盖整条请求，而不只是语料章/台账行。旧探针从未重放提示词与
+	// 预筛/上下文块，上游因整体语境或这些块命中时只会得出「逐段探测未发现」，作者仍
+	// 无从下手。此处按真实发送顺序拼接：提示词/预筛 → 语料 → 上下文块。
+	units := append(splitRequestText(headPrompt, "巡检提示词/预筛"), corpusUnits...)
+	units = append(units, splitRequestText(blockText, "巡检上下文块")...)
 	out, rerr := s.dispatchSkill(synCtx, "consistency-patrol", SkillInput{
 		NovelID:   novelID,
 		Prompt:    reducePrompt,
