@@ -94,6 +94,14 @@ vi.mock("@/lib/wailsjs/go/app/App", () => ({
   ApproveTool: mockApproveTool,
   GetChapters: vi.fn().mockResolvedValue([]),
   GetVolumes: vi.fn().mockResolvedValue([]),
+  // 作品定位引导项（书架编辑弹窗 / 卖点孵化间接导入，app 绑定需可解析）。
+  GetPreferences: vi.fn().mockResolvedValue({
+    global: [],
+    novel: [],
+    token_count: 0,
+    over_budget: false,
+  }),
+  UpsertPitchPreferences: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/stores/useThemeStore", () => ({

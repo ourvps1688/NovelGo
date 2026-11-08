@@ -1316,6 +1316,26 @@ export namespace app {
 	        this.resolved_chapter_id = source["resolved_chapter_id"];
 	    }
 	}
+	export class UpsertPitchPreferencesInput {
+	    tags: string;
+	    direction: string;
+	    platform: string;
+	    style: string;
+	    one_liner: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpsertPitchPreferencesInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.tags = source["tags"];
+	        this.direction = source["direction"];
+	        this.platform = source["platform"];
+	        this.style = source["style"];
+	        this.one_liner = source["one_liner"];
+	    }
+	}
 	export class UpsertVoiceDimensionInput {
 	    novel_id: number;
 	    dimension: string;

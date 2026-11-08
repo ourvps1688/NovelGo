@@ -21,20 +21,12 @@ import { useBookPitchStore } from "@/stores/useBookPitchStore";
 import { useCreateNovel } from "@/components/novel/useCreateNovel";
 import { useUpdateNovel } from "@/components/novel/useUpdateNovel";
 import { useNovelStore } from "@/components/novel/useNovelStore";
+import { savePitchPreferences } from "@/components/preference/pitchPreferences";
 import {
-  CATEGORY_CREATIVE,
-  CATEGORY_PLATFORM,
-  CATEGORY_TAGS,
-  CATEGORY_DIRECTION,
-  CATEGORY_HOOK,
-} from "@/components/preference/preferenceCategories";
-import {
-  CreatePreference,
   GetSessionMessages,
   SetEnabledSkills,
   UpdateNovel,
 } from "@/lib/wailsjs/go/app/App";
-import type { app } from "@/lib/wailsjs/go/models";
 import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
 import { novelKeys, preferenceKeys } from "@/lib/queryKeys";
@@ -473,37 +465,22 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
   }, [msgQuery.data, fillFromData, incubatorId, qc, t]);
 
   // 把解析出的引导项持久化为本书偏好（自动保存 + 手动保存共用）。
+  // 改走 UpsertPitchPreferences 单事务全量 PUT：旧实现每次 CreatePreference 纯新增，
+  // 自动保存与「采纳方案」各写一组，重复行与冲突平台值会一起进 system 提示词。
   async function persistPitchPreferences(
     novelID: number,
     data: PitchData,
   ): Promise<void> {
-    const extra: Array<{ category: string; content: string }> = [];
-    if (data.platform.trim())
-      extra.push({
-        category: CATEGORY_PLATFORM,
-        content: data.platform.trim(),
+    try {
+      await savePitchPreferences(novelID, {
+        tags: data.tags.trim(),
+        direction: data.direction.trim(),
+        platform: data.platform.trim(),
+        style: data.style.trim(),
+        one_liner: data.oneLiner.trim(),
       });
-    if (data.style.trim())
-      extra.push({ category: CATEGORY_CREATIVE, content: data.style.trim() });
-    if (data.tags.trim())
-      extra.push({ category: CATEGORY_TAGS, content: data.tags.trim() });
-    if (data.direction.trim())
-      extra.push({
-        category: CATEGORY_DIRECTION,
-        content: data.direction.trim(),
-      });
-    if (data.oneLiner.trim())
-      extra.push({ category: CATEGORY_HOOK, content: data.oneLiner.trim() });
-    for (const e of extra) {
-      try {
-        await CreatePreference(novelID, {
-          is_global: false,
-          category: e.category,
-          content: e.content,
-        } as app.CreatePreferenceInput);
-      } catch {
-        // 偏好写入失败不阻塞主流程，静默忽略。
-      }
+    } catch {
+      // 引导项写入失败不阻塞建书，静默忽略（与原逐条 CreatePreference 语义一致）。
     }
   }
 

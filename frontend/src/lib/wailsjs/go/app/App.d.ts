@@ -410,6 +410,8 @@ export function UpdateTimelineEntry(arg1:number,arg2:number,arg3:app.UpdateTimel
 
 export function UpdateVolume(arg1:number,arg2:number,arg3:string):Promise<void>;
 
+export function UpsertPitchPreferences(arg1:number,arg2:app.UpsertPitchPreferencesInput):Promise<void>;
+
 export function UpsertVoiceDimension(arg1:app.UpsertVoiceDimensionInput):Promise<voice.Entry>;
 
 export function VerifyIssueTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<pipeline.IssueVerifySummary>;

@@ -1,7 +1,16 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import type { novel } from "@/lib/wailsjs/go/models";
+import { GetPreferences } from "@/lib/wailsjs/go/app/App";
 import { toErrorMessage } from "@/utils/error";
+import { preferenceKeys } from "@/lib/queryKeys";
+import {
+  EMPTY_PITCH_PREFERENCES,
+  readPitchPreferences,
+  savePitchPreferences,
+  type PitchPreferences,
+} from "@/components/preference/pitchPreferences";
 
 interface Props {
   open: boolean;
@@ -22,10 +31,12 @@ export default function NovelEditDialog({
   onSave,
 }: Props) {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [genre, setGenre] = useState("");
   const [kind, setKind] = useState("writing");
+  const [pitch, setPitch] = useState<PitchPreferences>(EMPTY_PITCH_PREFERENCES);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -41,14 +52,29 @@ export default function NovelEditDialog({
   ];
 
   useEffect(() => {
-    if (open) {
-      setTitle(novel?.title ?? "");
-      setDescription(novel?.description ?? "");
-      setGenre(novel?.genre ?? "");
-      setKind(novel?.kind === "reference" ? "reference" : "writing");
-      setSaving(false);
-      setError("");
+    if (!open) return;
+    setTitle(novel?.title ?? "");
+    setDescription(novel?.description ?? "");
+    setGenre(novel?.genre ?? "");
+    setKind(novel?.kind === "reference" ? "reference" : "writing");
+    setPitch(EMPTY_PITCH_PREFERENCES);
+    setSaving(false);
+    setError("");
+
+    // 五类引导项存在 preference_items，不随 novel 主体返回，打开时单独取一次最新值。
+    let active = true;
+    if (novel?.id) {
+      void GetPreferences(novel.id)
+        .then((result) => {
+          if (active) setPitch(readPitchPreferences(result));
+        })
+        .catch(() => {
+          // 读取失败不阻塞编辑：保留空表单，用户可自行补填。
+        });
     }
+    return () => {
+      active = false;
+    };
   }, [open, novel]);
 
   if (!open) return null;
@@ -56,11 +82,21 @@ export default function NovelEditDialog({
   const isEdit = !!novel;
   const canSave = title.trim().length > 0;
 
+  function setPitchField(key: keyof PitchPreferences, value: string) {
+    setPitch((prev) => ({ ...prev, [key]: value }));
+  }
+
   async function handleSave() {
     if (!canSave || saving) return;
     setSaving(true);
     setError("");
     try {
+      // 引导项先于主体保存：失败时弹窗仍在，错误可见且不误关。
+      // 后端按 (novel_id, category) 幂等收敛，重复保存不会堆积旧稿。
+      if (novel?.id) {
+        await savePitchPreferences(novel.id, pitch);
+        qc.invalidateQueries({ queryKey: preferenceKeys.list(novel.id) });
+      }
       await onSave({
         title: title.trim(),
         description: description.trim(),
@@ -86,7 +122,7 @@ export default function NovelEditDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
-        className="relative bg-background rounded-xl shadow-2xl border w-[420px] max-w-[90vw] p-6"
+        className="relative bg-background rounded-xl shadow-2xl border w-[460px] max-w-[90vw] max-h-[90vh] overflow-y-auto p-6"
         onKeyDown={handleKeyDown}
       >
         <button
@@ -152,6 +188,90 @@ export default function NovelEditDialog({
               rows={3}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
+          </div>
+
+          {/* 作品定位：book-pitch 建书时填的引导项，落 preference_items 并注入写章提示词。 */}
+          <div className="rounded-lg border border-border bg-card/50 p-3 space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-foreground">
+                {t("novel.pitchSection")}
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  {t("novel.pitchOptional")}
+                </span>
+              </p>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                {t("novel.pitchSectionHint")}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">
+                {t("novel.pitchTags")}
+              </label>
+              <input
+                type="text"
+                value={pitch.tags}
+                onChange={(e) => setPitchField("tags", e.target.value)}
+                placeholder={t("novel.pitchTagsPlaceholder")}
+                className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">
+                  {t("novel.pitchPlatform")}
+                </label>
+                <input
+                  type="text"
+                  value={pitch.platform}
+                  onChange={(e) => setPitchField("platform", e.target.value)}
+                  placeholder={t("novel.pitchPlatformPlaceholder")}
+                  className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">
+                  {t("novel.pitchStyle")}
+                </label>
+                <input
+                  type="text"
+                  value={pitch.style}
+                  onChange={(e) => setPitchField("style", e.target.value)}
+                  placeholder={t("novel.pitchStylePlaceholder")}
+                  className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {t("novel.pitchPlatformHint")}
+            </p>
+
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">
+                {t("novel.pitchOneLiner")}
+              </label>
+              <input
+                type="text"
+                value={pitch.one_liner}
+                onChange={(e) => setPitchField("one_liner", e.target.value)}
+                placeholder={t("novel.pitchOneLinerPlaceholder")}
+                className="w-full h-8 rounded-md border bg-background px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-medium text-muted-foreground mb-1.5">
+                {t("novel.pitchDirection")}
+              </label>
+              <textarea
+                value={pitch.direction}
+                onChange={(e) => setPitchField("direction", e.target.value)}
+                placeholder={t("novel.pitchDirectionPlaceholder")}
+                rows={2}
+                className="w-full rounded-md border bg-background px-2.5 py-1.5 text-xs resize-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
           </div>
 
           <div>
