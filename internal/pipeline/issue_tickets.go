@@ -114,6 +114,15 @@ func (s *Service) releaseIssueFix(runID string) {
 	s.issueFixMu.Unlock()
 }
 
+// issueFixRunning 报告该 run 是否有在途的工单修复执行体。标记由 StartIssueFixTickets
+// 在派发前置位、由 runIssueFixTickets 收口时摘除，覆盖「点去修复」到「修复完成」整段
+// 窗口（含任务队列排队）。进程重启时 AbandonActive 会把在途任务统一置 dead，无需跨进程兜底。
+func (s *Service) issueFixRunning(runID string) bool {
+	s.issueFixMu.Lock()
+	defer s.issueFixMu.Unlock()
+	return s.issueFixActive[runID]
+}
+
 // issueFixDrainPasses 是修复执行体排空循环的最多批次数（保险丝；正常由 seen 集合
 // 自然终止——只有 StartIssueFixTickets 会新增 fixing 态工单）。
 const issueFixDrainPasses = 32
@@ -461,6 +470,19 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 	// 载入工单行：终态（verified/dismissed）不接受复验，跳过不计；其余置 verifying 态后按 run 派发。
 	// 同时收集每个 run 本次要复验的工单键（runKeys），显式透传给执行体，避免执行体回扫
 	// verifying 态的读己写竞态（该竞态曾导致执行体读到 0 行而提前返回，工单永久卡在 verifying）。
+	// #106：复验必须针对定稿正文。同 run 的修复执行体在途时章节可能仍在被改写，
+	// 此时复验既读到未定稿语料，又会被晚到的修复回执抢写状态（曾把 verified 打回
+	// fixed）。在写任何状态/派发前统一拒绝，避免部分工单被置 verifying 却未派发。
+	fixRuns := map[string]bool{}
+	for _, ref := range refs {
+		fixRuns[ref.RunID] = true
+	}
+	for runID := range fixRuns {
+		if s.issueFixRunning(runID) {
+			return nil, fmt.Errorf("修复任务仍在进行中，请等待修复完成后再复验（run %s）；避免复验读到未定稿正文", runID)
+		}
+	}
+
 	seen := map[string]bool{}
 	summary := &IssueVerifySummary{}
 	runIDs := map[string]bool{}

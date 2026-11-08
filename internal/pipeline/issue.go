@@ -285,7 +285,9 @@ func (s *Store) ReplaceIssuesByPrefix(ctx context.Context, novelID int64, runID,
 }
 
 // UpdateIssueStatus 流转一条工单状态（fixed/skipped/rewrite/retcon/...）；skipReason
-// 非空时一并记录（skipped 即转人工工单的留痕依据）。
+// 非空时一并记录（skipped 即转人工工单的留痕依据）。流水线内部兼容写不校验
+// issueTicketNext 状态机，但终态（verified/dismissed）与复验瞬态（verifying）
+// 一律受保护、不可被晚到的修复回执覆盖（#106，条件 CAS 见函数尾注释）。
 func (s *Store) UpdateIssueStatus(ctx context.Context, novelID int64, runID, issueKey, status, skipReason string) error {
 	updates := map[string]any{"status": status, "updated_at": time.Now()}
 	if skipReason != "" {
@@ -308,6 +310,10 @@ func (s *Store) UpdateIssueStatus(ctx context.Context, novelID int64, runID, iss
 			if err != nil {
 				return err
 			}
+			// #106：终态（复验通过/驳回）不得被重新拖回复验瞬态。
+			if row.Status == IssueStatusVerified || row.Status == IssueStatusDismissed {
+				return nil
+			}
 			if row.Status != IssueStatusVerifying {
 				updates["pre_verify_status"] = row.Status
 			}
@@ -316,8 +322,14 @@ func (s *Store) UpdateIssueStatus(ctx context.Context, novelID int64, runID, iss
 				Updates(updates).Error
 		})
 	}
+	// #106：流水线内部同步（修复回执 fixed/skipped/rewrite/retcon）不得覆盖终态或
+	// 复验在途瞬态。章节重写可能耗时数分钟，修复执行体比复验晚收口时，无条件
+	// UPDATE 会把已复验通过（verified）的工单打回「已修复（待复验）」——用条件
+	// CAS 让晚到的修复回写静默失效，人工复验结论优先。verifying 同理：复验进行中
+	// 的工单不接收修复回执，避免收口与回执互相抢写。
 	return s.db.WithContext(ctx).Model(&PipelineIssue{}).
 		Where("novel_id = ? AND run_id = ? AND issue_key = ?", novelID, runID, issueKey).
+		Where("status NOT IN ?", []string{IssueStatusVerified, IssueStatusDismissed, IssueStatusVerifying}).
 		Updates(updates).Error
 }
 
