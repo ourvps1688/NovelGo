@@ -35,6 +35,7 @@
 - 定位须覆盖整条真实请求（#104）：request_units.go 把 prompt + 本次 session 工具返回切同源连续片段（baseline 按 MAX(messages.id) 圈定本次，pipeline skillRunner 不回放 DB 历史、勿误判会话累积）；detect.go 双路径落可见 error 报告，安全类硬错误不得静默降级；patrol 探针必须含提示词/预筛/上下文块，否则「逐段探测全清」只是覆盖缺口；摘录首尾双窗；前端 last_summary 用 whitespace-pre-wrap。
 - 台账 alive 写入面（#102）：create/update_character 开放 `Alive *bool`（指针三态、仅 在世→已死 单向、DisallowUnknownFields 保护不回退）；fix_reachability.go 派发前字段可达性预检+护栏**只注入派发层 prompt**（fixPrompt 全文被 p0 golden 基线锁定，勿改单源）。
 - 生死态派生（#103）：statesync 派发前 `character.DeriveAliveFromChapter` 从本章正文高精度单向标死（宁漏勿误、LLM 复核补漏、名单+摘录注入 instruction；人工裁决 source!=auto 优先不再覆盖）；`RunStateSyncForChapter` 增 db 参数（rw_tools 与 app/handler 两处调用点）；app `Create/UpdateCharacterInput.Alive *bool` 是唯一人工复活通道（MCP 工具仍单向）。存量 #121/#126 已于 2026-11-08 02:02 经用户授权修正（alive=0 + auto 履历，定点备份见日志）。
+- 复验字数口径（#105）：**word_count = 纯汉字+英文词（`text.ComputeStats`），不含标点/换行；含标点字符数、`@字符N/charN` 偏移都不是字数，台账/任务卡/证据片段不计入章长**。字数类必须走阶段1 L0 `tryL0Verify` 本地确定性判定：`mechanicalCheckKeywords` 补 `CheckOpeningLength`（命中即删 `chapter_length_fit`，作用域零重叠）、`parseChapterLengthWindow` 从工单处方取区间（零 checker profile 也须可判）、过滤 RunL0Checks 的 profile 口径防双口径；阶段2 两条语料路径都标「权威字数」+ `verifyPrompt`/signability-verify.md 硬性口径声明。正文不可读/无区间→回落 LLM 绝不瞎判。勿把确定性数字判断交回 LLM 数字符。
 
 ## 其他契约
 - 章节寻址：chapter_id≠阅读序号；前端用 reading_number；工单 chapter_ids=全局阅读序号。
