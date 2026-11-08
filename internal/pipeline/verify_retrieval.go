@@ -110,6 +110,9 @@ func (s *Service) buildVerifyEvidenceBatch(ctx context.Context, novelID int64, s
 		"核对完成后直接在最终回复末尾输出复验回执 JSON。**\n")
 	sb.WriteString("（以下为与各工单最相关的正文片段与台账条目；未覆盖到的改动拿不准时" +
 		"不要计入 ok=true，留待下轮复核）\n")
+	sb.WriteString("**字数口径：证据切片只是片段，其长度与 @字符偏移都不是章节字数；凡涉及章长/字数，" +
+		"一律以每章标注的「权威字数（word_count）」为准（纯汉字+英文词，不含标点/换行），" +
+		"台账条目与任务卡不属于正文，绝不计入。**\n")
 
 	budget := verifyEvidenceBatchCap
 	for _, t := range targets {
@@ -140,6 +143,13 @@ func (s *Service) buildIssueEvidence(ctx context.Context, novelID int64, src ver
 	hits := s.searchIssueChunks(ctx, novelID, src, searcher, queries, t)
 
 	var sb strings.Builder
+	// #105：先给出作用域章的权威字数，再放证据切片——模型不得用片段长度或
+	// @字符偏移反推全章字数（前者只是正文窗口，后者是含标点的字符坐标）。
+	for _, n := range t.Chapters {
+		if wc, ok := src.wordCount[n]; ok {
+			fmt.Fprintf(&sb, "\n（第%d章权威字数 %d 字，word_count 口径：纯汉字+英文词，不含标点/换行）\n", n, wc)
+		}
+	}
 	if len(hits) == 0 {
 		fmt.Fprintf(&sb, "\n### 工单 %s 的证据（向量检索零命中，作用域章窗口兜底）\n", t.ID)
 		s.appendChapterWindows(&sb, ctx, novelID, src, t.Chapters, verifyFallbackChapterWindow, verifyEvidencePerIssueCap)
@@ -154,7 +164,8 @@ func (s *Service) buildIssueEvidence(ctx context.Context, novelID int64, src ver
 			if title == "" {
 				title = "未知标题"
 			}
-			fmt.Fprintf(&sb, "\n【第%s章《%s》片段 @字符%d】\n%s\n", num, title, h.pos, capHeadTail(h.text, verifyEvidenceChunkCap))
+			fmt.Fprintf(&sb, "\n【第%s章《%s》片段 @字符偏移 %d（含标点，非字数坐标）】\n%s\n",
+				num, title, h.pos, capHeadTail(h.text, verifyEvidenceChunkCap))
 		}
 	}
 

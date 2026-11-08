@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // ── 复验语料预取（复验终极提速：取数与推理分离）────────────────────────────
@@ -39,17 +40,22 @@ const (
 type verifyCorpusSource struct {
 	byReading map[int64]chapter.Chapter // 阅读序号（工单章号）→ 章节行（含 ID/标题）
 	ledger    string                    // 台账快照（dumpLedgers 全量，渲染端各自截断）
+	// wordCount 是阅读序号 → 权威字数（word_count 口径：纯汉字+英文词，不含标点/换行）。
+	// 供窗口语料与 RAG 证据切片共用标注；正文可读时以现算值覆盖 DB 列，杜绝口径漂移（#105）。
+	wordCount map[int64]int
 }
 
 // loadVerifyCorpusSource 一次性取本轮复验的共享语料源（本地读，无 LLM 往返）。
 // 任何单步失败仅降级（空索引/空台账），绝不阻断复验——语料缺失的批次退化为
 // 「证据不全」提示，由回执未提及/留待下轮语义兜底，绝不臆测修复状态。
 func (s *Service) loadVerifyCorpusSource(ctx context.Context, novelID int64) verifyCorpusSource {
-	src := verifyCorpusSource{byReading: map[int64]chapter.Chapter{}}
+	src := verifyCorpusSource{byReading: map[int64]chapter.Chapter{}, wordCount: map[int64]int{}}
 	if s.chapterStore != nil {
 		if chapters, err := s.chapterStore.ListAllByNovel(ctx, nil, novelID); err == nil {
 			for _, ch := range chapters {
-				src.byReading[int64(ch.ReadingNumber)] = ch
+				num := int64(ch.ReadingNumber)
+				src.byReading[num] = ch
+				src.wordCount[num] = ch.WordCount
 			}
 		} else {
 			s.logger.Warn("复验语料：列章失败，本批章正文降级为空", "novel_id", novelID, "err", err)
@@ -69,6 +75,8 @@ func (s *Service) buildVerifyCorpus(ctx context.Context, novelID int64, src veri
 	sb.WriteString("\n\n【本次复验语料（后端已批量取好，本批所需证据已全部内联）】\n")
 	sb.WriteString("**复验方法：直接通读以下语料逐项核对，禁止调用任何工具（read / get_* / search）；" +
 		"核对完成后直接在最终回复末尾输出复验回执 JSON。**\n")
+	sb.WriteString("**字数口径：凡涉及章长/字数，一律以每章标注的「权威字数（word_count）」为准——" +
+		"纯汉字+英文词，不含标点/空格/换行；禁止自行数语料字符，禁止把台账快照或证据片段计入正文。**\n")
 
 	if s.appendChapterWindows(&sb, ctx, novelID, src, chapterNums, verifyChapterCap, verifyCorpusCap) {
 		sb.WriteString("\n（因单批语料预算，其余作用域章正文已省略；拿不准的项不要计入 ok=true，留待下轮复核）\n")
@@ -105,17 +113,25 @@ func (s *Service) appendChapterWindows(sb *strings.Builder, ctx context.Context,
 		if title == "" {
 			title = fmt.Sprintf("第%d章", n)
 		}
-		text := ""
+		body := ""
 		if s.chapterTextReader != nil {
 			if t, rerr := s.chapterTextReader(ctx, novelID, ch.ID); rerr == nil {
-				text = t
+				body = t
 			}
 		}
-		if strings.TrimSpace(text) == "" {
-			fmt.Fprintf(sb, "\n### 第%d章《%s》（正文不可读，无法内联）\n", n, title)
+		if strings.TrimSpace(body) == "" {
+			fmt.Fprintf(sb, "\n### 第%d章《%s》· 权威字数 %d 字（word_count，正文不可读，无法内联）\n",
+				n, title, src.wordCount[n])
 			continue
 		}
-		fmt.Fprintf(sb, "\n### 第%d章《%s》\n%s\n", n, title, capHeadTail(text, chapterCap))
+		// #105：正文可读时用同源 ComputeStats 现算权威字数，覆盖 DB 列（防外部直改文件
+		// 导致 word_count 滞后）；语料里显式标注，模型不得再自行数字符。
+		wc := text.ComputeStats(body).WordCount
+		if src.wordCount != nil {
+			src.wordCount[n] = wc
+		}
+		fmt.Fprintf(sb, "\n### 第%d章《%s》· 权威字数 %d 字（word_count：纯汉字+英文词，不含标点/换行；以下正文仅为证据，字数以此标注为准）\n%s\n",
+			n, title, wc, capHeadTail(body, chapterCap))
 	}
 	return omitted
 }

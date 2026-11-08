@@ -2,13 +2,17 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/structure"
+	"github.com/novelgo/novelgo/internal/text"
 	"github.com/novelgo/novelgo/internal/voice"
 	"gorm.io/gorm"
 )
@@ -21,15 +25,19 @@ import (
 // mechanicalCheckKeywords 把机械类问题关键词映射到 L0 检查项（quality 的 Check 常量，单源）。
 // 战力数值序对应 power_upset/power_crush 两个检查项，共用同一组关键词。
 var mechanicalCheckKeywords = map[string][]string{
-	quality.CheckWordCount:        {"字数", "偏短", "篇幅", "太短", "字数不足", "字数不够", "字数不达标", "字数未达标"},
-	quality.CheckTailHook:         {"章尾", "钩子", "悬念", "结尾", "收尾", "章末"},
-	quality.CheckAIFlavor:         {"ai味", "ai 味", "套话", "油腻", "口水", "机翻"},
-	quality.CheckNameDrift:        {"称呼", "叫法", "名字混乱", "同人异称", "别名", "称谓", "称呼混用"},
-	quality.CheckDeadAppearance:   {"死人", "已死", "去世", "亡故", "复活", "死亡"},
-	quality.CheckPowerUpset:       {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
-	quality.CheckPowerCrush:       {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
-	quality.CheckStyleDrift:       {"文风", "风格", "语感", "漂移", "笔调", "文笔", "语调", "文风漂移"},
-	quality.CheckOpeningHook:      {"开篇爆点", "爆点", "切入点", "开篇吸引力", "开头抓人"},
+	quality.CheckWordCount:      {"字数", "偏短", "篇幅", "太短", "字数不足", "字数不够", "字数不达标", "字数未达标"},
+	quality.CheckTailHook:       {"章尾", "钩子", "悬念", "结尾", "收尾", "章末"},
+	quality.CheckAIFlavor:       {"ai味", "ai 味", "套话", "油腻", "口水", "机翻"},
+	quality.CheckNameDrift:      {"称呼", "叫法", "名字混乱", "同人异称", "别名", "称谓", "称呼混用"},
+	quality.CheckDeadAppearance: {"死人", "已死", "去世", "亡故", "复活", "死亡"},
+	quality.CheckPowerUpset:     {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
+	quality.CheckPowerCrush:     {"战力", "境界", "越级", "等级", "修为", "实力", "碾压", "低阶", "越阶"},
+	quality.CheckStyleDrift:     {"文风", "风格", "语感", "漂移", "笔调", "文笔", "语调", "文风漂移"},
+	quality.CheckOpeningHook:    {"开篇爆点", "爆点", "切入点", "开篇吸引力", "开头抓人"},
+	// #105：黄金三章章长（opening_length）此前无映射，导致「第2章1799字超出黄金三章
+	// 1000-1500字章长口径」只命中 chapter_length_fit（黄金三章外全书章），在小说未配
+	// checker profile 时整单被判「依赖缺失」回落 LLM，模型自行数含标点字符 → 假驳回。
+	quality.CheckOpeningLength:    {"黄金三章", "章长口径", "开篇章长", "黄金三章章长"},
 	quality.CheckChapterLengthFit: {"章长", "平台区间", "字数区间", "章长适配"},
 	quality.CheckBeatDensity:      {"爽点密度", "爽点", "看点密度", "爽点不足"},
 	quality.CheckPacingDrag:       {"拖沓", "节奏拖", "平缓", "张力平坦", "拖节奏"},
@@ -66,7 +74,32 @@ func classifyMechanicalChecks(area, desc, fixType string) (map[string]bool, bool
 			break
 		}
 	}
+	// 黄金三章章长（opening_length）与平台章长适配（chapter_length_fit）在 quality 里
+	// 作用域零重叠：前者覆盖开篇窗口内章，后者覆盖其余章。工单明确写「黄金三章/章长口径」
+	// 时只保留前者，避免后者依赖 profile 的门控把整单拖回 LLM（#105）。
+	if checks[quality.CheckOpeningLength] {
+		delete(checks, quality.CheckChapterLengthFit)
+	}
 	return checks, ambiguous
+}
+
+// chapterLengthWindowRe 从工单处方里提取章长区间（如「压缩第2章正文至1000-1500字」）。
+// 只认 3~5 位数字且以连接符相隔的区间，避免把「第1章1450、第3章1497」误当区间。
+var chapterLengthWindowRe = regexp.MustCompile(`(\d{3,5})\s*[-–—~至]\s*(\d{3,5})\s*字?`)
+
+// parseChapterLengthWindow 解析工单声明的目标章长区间；无区间/非法区间返回 ok=false，
+// 调用方据此保守回落 LLM（宁缺勿错）。区间来自工单处方本身，与检测侧、平台 preset 解耦。
+func parseChapterLengthWindow(desc string) (min, max int, ok bool) {
+	m := chapterLengthWindowRe.FindStringSubmatch(desc)
+	if m == nil {
+		return 0, 0, false
+	}
+	lo, e1 := strconv.Atoi(m[1])
+	hi, e2 := strconv.Atoi(m[2])
+	if e1 != nil || e2 != nil || lo <= 0 || hi <= lo || hi > 100000 {
+		return 0, 0, false
+	}
+	return lo, hi, true
 }
 
 // l0ChapterReader 读取一章正文（可注入便于测试，默认走 git 文件存储）。
@@ -169,6 +202,9 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 		cfg = quality.DefaultCheckerConfig(novelID)
 	}
 	genre := s.novelGenre(ctx, novelID)
+	// #105：工单处方自带章长区间时，由后端按 text.ComputeStats（与 chapters.word_count /
+	// 检测侧 L0 同一口径）确定性判定，不依赖 checker profile 是否配置。
+	lenMin, lenMax, hasWindow := parseChapterLengthWindow(row.Desc)
 
 	// 依赖齐备性过滤：候选 check 所需台账缺失 → 该 check 不能由 L0 确定性判定，移除；
 	// 全部移除则退回 LLM（避免 L0 零发现被误判为已修复）。
@@ -193,8 +229,9 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 				effective[c] = true
 			}
 		case quality.CheckOpeningLength:
-			// 黄金三章章长查：关键词或平台 profile 任一武装才可判定。
-			if cfg.Opening() != nil || cfg.Profile() != nil {
+			// 黄金三章章长查：工单处方已声明区间即可本地判定（#105，零配置也能拦住
+			// 「LLM 自行数含标点字符」的假驳回）；否则仍按关键词/profile 门控。
+			if hasWindow || cfg.Opening() != nil || cfg.Profile() != nil {
 				effective[c] = true
 			}
 		case quality.CheckOpeningHook, quality.CheckChapterLengthFit:
@@ -225,6 +262,7 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 	chStore := chapter.NewStore(db, logger)
 	readCount := 0
 	var allFindings []quality.Finding
+	var lengthNotes []string
 	for _, n := range chapterIDs {
 		chID, err := chStore.GetChapterIDByReadingNumber(ctx, nil, novelID, int(n))
 		if err != nil {
@@ -236,6 +274,21 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 		}
 		readCount++
 		readingNumber, _ := chStore.GetReadingNumberByID(ctx, nil, novelID, chID)
+		// #105 字数口径单源：word_count = 纯汉字 + 英文词，不含标点/空白/换行。
+		// 与 chapters.word_count 落库、检测侧 L0、get_chapter_list 完全同源。
+		if hasWindow && checks[quality.CheckOpeningLength] {
+			wc := text.ComputeStats(content).WordCount
+			lengthNotes = append(lengthNotes, fmt.Sprintf(
+				"第%d章 word_count=%d 字（纯汉字+英文词，标点/换行不计），目标区间 %d–%d",
+				n, wc, lenMin, lenMax))
+			if wc < lenMin || wc > lenMax {
+				allFindings = append(allFindings, quality.Finding{
+					Check: quality.CheckOpeningLength,
+					Desc: fmt.Sprintf("本章权威字数 %d 字（word_count 口径，标点/换行不计）仍超出 %d–%d 区间",
+						wc, lenMin, lenMax),
+				})
+			}
+		}
 		_, fs := quality.RunL0Checks(quality.L0Input{
 			Text:             content,
 			ReadingNumber:    readingNumber,
@@ -249,7 +302,13 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 			Profile:          cfg.Profile(),
 			BeatDensityMin:   cfg.EffectiveBeatDensityMin(),
 		})
-		allFindings = append(allFindings, fs...)
+		for _, f := range fs {
+			// 处方区间已由本地确定性判定替代 profile 口径，避免双口径重复或互相矛盾。
+			if hasWindow && checks[quality.CheckOpeningLength] && f.Check == quality.CheckOpeningLength {
+				continue
+			}
+			allFindings = append(allFindings, f)
+		}
 	}
 	if readCount == 0 {
 		return false, false, "" // 章节正文均不可读 → 走 LLM，不臆测修复状态
@@ -259,10 +318,14 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 	if !decided {
 		return false, false, ""
 	}
-	if verified {
-		return true, true, "L0 快检：机械类问题已消除，自动确认通过（免 LLM 调用）"
+	lengthDetail := ""
+	if len(lengthNotes) > 0 {
+		lengthDetail = "；字数复验（后端确定性）：" + strings.Join(lengthNotes, "；")
 	}
-	return true, false, "L0 快检：仍命中机械类问题（" + strings.Join(hit, ",") + "），已退回待修"
+	if verified {
+		return true, true, "L0 快检：机械类问题已消除，自动确认通过（免 LLM 调用）" + lengthDetail
+	}
+	return true, false, "L0 快检：仍命中机械类问题（" + strings.Join(hit, ",") + "），已退回待修" + lengthDetail
 }
 
 // ── L0 依赖装配（封装底层 store 调用，与 mcp_tools 辅助函数同口径但用导出符号）─────────────
