@@ -59,21 +59,25 @@ func TestCuePrecisionRegression(t *testing.T) {
 	}
 
 	// 3) 显式 cue 必须正确路由（硬失败，兼防 cues 被误删）
+	// #111 P1：internalOnly 技能命中后不注入正文，只登记 Redirect（指引导语）。
+	// 因此「已路由」判定纳入 Redirects，并单独断言它不得进 Auto/Manual——
+	// 这正是「chat 侧反向错投 = 0」的回归锁。
 	positives := []struct {
-		msg  string
-		want string
+		msg      string
+		want     string
+		redirect bool
 	}{
-		{"设定一下修炼体系", "worldbuilding-design"},
-		{"帮我设计下人物关系", "character-design"},
-		{"这章结尾留个伏笔", "plot-hook"},
-		{"这两章节奏慢得不行", "pacing-control"},
-		{"帮我改一下文", "revision-pass"},
-		{"我想起个书名", "book-pitch"},
-		{"按之前的走向继续写下一章", "next"},
+		{"设定一下修炼体系", "worldbuilding-design", false},
+		{"帮我设计下人物关系", "character-design", false},
+		{"这章结尾留个伏笔", "plot-hook", false},
+		{"这两章节奏慢得不行", "pacing-control", false},
+		{"帮我改一下文", "revision-pass", false},
+		{"我想起个书名", "book-pitch", false},
+		{"按之前的走向继续写下一章", "next", false},
 		// 三个「签约智能」技能：确保它们的 cue 也纳入确定性回归闸门
-		{"帮我评估签约潜力", "signability-audit"},
-		{"写个全书卷纲", "story-blueprint"},
-		{"设定一下修炼体系", "worldbuilding-design"},
+		{"帮我评估签约潜力", "signability-audit", true},
+		{"写个全书卷纲", "story-blueprint", false},
+		{"设定一下修炼体系", "worldbuilding-design", false},
 	}
 	for _, p := range positives {
 		res := RouteUserMessage(all, p.msg, 1, 1, nil)
@@ -82,9 +86,19 @@ func TestCuePrecisionRegression(t *testing.T) {
 			got = res.Auto[0].Name
 		} else if len(res.Manual) > 0 {
 			got = res.Manual[0].Name
+		} else if len(res.Redirects) > 0 {
+			got = res.Redirects[0].Name
 		}
 		if got != p.want {
 			t.Errorf("确定性 cue 路由错误：%q -> 得到 %q，期望 %q", p.msg, got, p.want)
+		}
+		if p.redirect {
+			if len(res.Redirects) == 0 || res.Redirects[0].Name != p.want {
+				t.Errorf("internalOnly 技能 %s 必须只落在 Redirects（指引导语），实际 %+v", p.want, res.Redirects)
+			}
+			if len(res.Auto) > 0 || len(res.Manual) > 0 {
+				t.Errorf("internalOnly 技能 %s 不得进入 Auto/Manual（chat 侧零正文注入）", p.want)
+			}
 		}
 	}
 

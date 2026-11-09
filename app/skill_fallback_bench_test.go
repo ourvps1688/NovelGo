@@ -19,10 +19,13 @@ import (
 // fallbackCase 是一条用于测量 LLM 兜底命中率的样例消息。
 //   - expect: 期望路由到的技能名（文件名 stem）；negative=true 时表示期望“不命中任何技能”。
 //   - 正样例刻意避开所有技能的确定性 cue 子串，以便真正走 LLM 兜底路径。
+//   - internalOnly=true（#111 P1）：该技能已禁止 chat 路由，命中只回指引导语，
+//     不属于「LLM 兜底分类命中率」的分母；单独锁「不得进入 Auto/Manual」契约。
 type fallbackCase struct {
-	msg      string
-	expect   string
-	negative bool
+	msg          string
+	expect       string
+	negative     bool
+	internalOnly bool
 }
 
 // fallbackDataset 是人工编纂的模糊消息集，每个都对应一个明确意图但用口语化、不含 cue 的方式表达。
@@ -57,7 +60,7 @@ var fallbackDataset = []fallbackCase{
 	// revision-pass
 	{msg: "初稿写完了，我想整体过一遍把不顺的地方理平", expect: "revision-pass"},
 	// signability-audit
-	{msg: "我想知道这类题材在平台上受不受欢迎，有没有商业前景", expect: "signability-audit"},
+	{msg: "我想知道这类题材在平台上受不受欢迎，有没有商业前景", expect: "signability-audit", internalOnly: true},
 	// brainstorm-composer
 	{msg: "脑子空白，一点主意都冒不出来", expect: "brainstorm-composer"},
 	// review
@@ -67,7 +70,7 @@ var fallbackDataset = []fallbackCase{
 	// book-pitch (manual)
 	{msg: "我想给这部书想一句让人忍不住点开去看的话", expect: "book-pitch"},
 	// collect (manual)
-	{msg: "动笔前我想先把整本书的线索和坑都拢一遍，免得后面穿帮", expect: "collect"},
+	{msg: "动笔前我想先把整本书的线索和坑都拢一遍，免得后面穿帮", expect: "collect", internalOnly: true},
 
 	// ---- 负面样本：期望不命中任何技能 ----
 	{msg: "你好", expect: "", negative: true},
@@ -179,6 +182,16 @@ func TestSkillFallbackHitRate(t *testing.T) {
 	total, correct, llmTotal, llmCorrect, cueTotal, cueCorrect, negTotal, negCorrect := 0, 0, 0, 0, 0, 0, 0, 0
 
 	for _, c := range fallbackDataset {
+		// #111 P1：internalOnly 技能已退出 chat 路由，其样本不计入命中率分母；
+		// 单独锁「不得进入 Auto/Manual」这条反向错投契约（正文注入 = 0）。
+		if c.internalOnly {
+			redir := skill.RouteUserMessage(all, c.msg, 1, 1, nil)
+			if len(redir.Auto) > 0 || len(redir.Manual) > 0 {
+				t.Errorf("internalOnly 样本 %q 仍被 chat 注入：auto=%v manual=%v",
+					c.msg, redir.Auto, redir.Manual)
+			}
+			continue
+		}
 		exclude := map[string]bool{}
 		det := skill.RouteUserMessage(all, c.msg, 1, 1, exclude)
 		cueHit := len(det.Auto) > 0 || len(det.Manual) > 0

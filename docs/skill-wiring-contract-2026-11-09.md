@@ -140,7 +140,7 @@ useWhen:
 | 挂载点 | 装配函数 | 触发条件 | 预算纪律 |
 |---|---|---|---|
 | `chat_intent` | `buildAutoSkillInjectWithNames` | 过滤 `internalOnly`；`RouteUserMessageSmart(...,1,1,...)` 改为 **auto ≤3 + 同类去重 + 单轮总 rune 帽** | 新帽先埋点观测 7 天再定值，不拍脑袋 |
-| `writing_bundle` | `buildWritingSkillBundle` | 由固定 3 个改为按章况条件选（见 §3.3） | 保留单技能 1500 / 整块 5000 rune 双封顶与「如实标注节选」 |
+| `writing_bundle` | `buildWritingSkillBundle` | 由固定 3 个改为按章况条件选（见 §3.3） | 单技能 1500 / 整块 **9000** rune 双封顶与「如实标注节选」。P1 实测：固定 3 技法已占 4273，旧 5000 帽只剩 727，条件技能最短 1273 必被 break → 条件化失效；故整块帽按 6×1500 同步扩容，单技能帽与「异常回退固定 3 个」不变 |
 | `chapter_ci` | `buildChapterCIInstruction` | 追加写后自检技能正文块；**不动 `quality.L1ReceiptFormatLine()` 回执契约** | 非空才注入、空则逐字不变（复用现有降级写法 `:328-334`） |
 | `state_sync` | `RunStateSyncForChapter` | 函数签名加 `skillStore`，把 `collect` 收集清单拼在硬编码指令前 | 技能缺失时退回现有硬编码指令，逐字不变 |
 | `rewrite_method` | `rewriteMethodBlock` | 两张路由表补 `dialogue-subtext`/`deai-flavor`/`revision-pass` | 单技能 4000 / 整块 12000 双封顶、跨源去重、空块返回 `""` |

@@ -13,7 +13,10 @@ import (
 type RouteResult struct {
 	Auto   []SkillMeta
 	Manual []SkillMeta
-	Source MatchSource
+	// Redirects 是命中但属于 internalOnly 的技能：只回一行「请到检测/工单面板」指引，
+	// 绝不注入正文（内部技能带 JSON 回执契约或流水线阶段口径，投给 chat 主 Agent 会污染输出）。
+	Redirects []SkillMeta
+	Source    MatchSource
 }
 
 // RouteUserMessage 根据用户消息做确定性意图匹配，返回应注入的技能。
@@ -36,12 +39,22 @@ func RouteUserMessage(
 
 	seenAuto := make(map[string]bool)
 	seenManual := make(map[string]bool)
+	seenRedirect := make(map[string]bool)
 
 	for _, m := range all {
 		if exclude[m.Name] {
 			continue
 		}
 		if !skillMatches(m, msg) {
+			continue
+		}
+		// #111 P1：internalOnly 前置过滤。chat 侧 cue 命中不注入正文、只登记指引，
+		// 流水线挂载不受影响（该字段在契约里只约束 chat 路由与 catalog 可见性）。
+		if m.InternalOnly {
+			if !seenRedirect[m.Name] {
+				seenRedirect[m.Name] = true
+				res.Redirects = append(res.Redirects, m)
+			}
 			continue
 		}
 		switch m.Mode {
@@ -129,7 +142,9 @@ func RouteUserMessageSmart(
 	classifier Classifier,
 ) RouteResult {
 	res := RouteUserMessage(all, message, maxAuto, maxManual, exclude)
-	if len(res.Auto) > 0 || len(res.Manual) > 0 {
+	// Redirects 也算确定性命中：用户明确在找内部工作流时，不再让 LLM 兜底硬塞
+	// 一个不相关的 chat 技能（避免「修复」被解释成某个创作技法）。
+	if len(res.Auto) > 0 || len(res.Manual) > 0 || len(res.Redirects) > 0 {
 		res.Source = SourceCue
 		return res
 	}
@@ -143,7 +158,7 @@ func RouteUserMessageSmart(
 	}
 	cands := make([]IntentCandidate, 0, len(all))
 	for _, m := range all {
-		if exclude[m.Name] || len(m.UseWhen) == 0 {
+		if exclude[m.Name] || m.InternalOnly || len(m.UseWhen) == 0 {
 			continue
 		}
 		var cues []string
@@ -164,7 +179,7 @@ func RouteUserMessageSmart(
 		return res
 	}
 	for _, m := range all {
-		if m.Name != name {
+		if m.Name != name || m.InternalOnly {
 			continue
 		}
 		res.Source = SourceLLM

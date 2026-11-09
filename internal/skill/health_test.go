@@ -231,4 +231,65 @@ func TestHardcodedSkillListsDeclareMatchingMount(t *testing.T) {
 	if len(seen) == 0 {
 		t.Fatal("未能从 rewrite_skills.go 提取到任何技能名（路由表结构已变更？）")
 	}
+
+	// #111 P1：写章条件化技法单源。只提取 []string{...} 内的技能名（忽略条件 id），
+	// 逐个校验存在性、writing_bundle mount 与非 internalOnly，防止条件表变成摆设。
+	cond, err := os.ReadFile(filepath.Join("..", "..", "app", "writing_skill_conditions.go"))
+	if err != nil {
+		t.Fatalf("读取 writing_skill_conditions.go 失败: %v", err)
+	}
+	condSrc := string(cond)
+	condStart := strings.Index(condSrc, "var writingSkillConditions")
+	condEnd := strings.Index(condSrc, "// writingChapterContext")
+	if condStart < 0 || condEnd <= condStart {
+		t.Fatal("未找到 writingSkillConditions 声明（条件化技法单源）")
+	}
+	condNames := 0
+	for _, group := range regexp.MustCompile(`\[\]string\{([^}]*)\}`).FindAllStringSubmatch(condSrc[condStart:condEnd], -1) {
+		for _, m := range regexp.MustCompile(`"([a-z0-9-]+)"`).FindAllStringSubmatch(group[1], -1) {
+			condNames++
+			sk, ok := byName[m[1]]
+			if !ok {
+				t.Errorf("writingSkillConditions 含不存在的技能 %s", m[1])
+				continue
+			}
+			if !containsString(sk.Mounts, "writing_bundle") {
+				t.Errorf("条件技法 %s 未声明 writing_bundle mount", m[1])
+			}
+			if sk.InternalOnly {
+				t.Errorf("internalOnly 技能 %s 不得进入写章条件表", m[1])
+			}
+		}
+	}
+	if condNames == 0 {
+		t.Fatal("未能从 writingSkillConditions 提取到任何技能名（结构已变更？）")
+	}
+
+	// #111 P1：章 CI 写后自检单源，逐个校验 chapter_ci mount 与非 internalOnly。
+	ci, err := os.ReadFile(filepath.Join("..", "mcp_tools", "chapter_ci.go"))
+	if err != nil {
+		t.Fatalf("读取 chapter_ci.go 失败: %v", err)
+	}
+	ciDecl := regexp.MustCompile(`chapterCISelfCheckSkills = \[\]string\{([^}]*)\}`).FindStringSubmatch(string(ci))
+	if len(ciDecl) < 2 {
+		t.Fatal("未找到 chapterCISelfCheckSkills 声明（写后自检单源）")
+	}
+	ciNames := 0
+	for _, m := range regexp.MustCompile(`"([a-z0-9-]+)"`).FindAllStringSubmatch(ciDecl[1], -1) {
+		ciNames++
+		sk, ok := byName[m[1]]
+		if !ok {
+			t.Errorf("chapterCISelfCheckSkills 含不存在的技能 %s", m[1])
+			continue
+		}
+		if !containsString(sk.Mounts, "chapter_ci") {
+			t.Errorf("写后自检技能 %s 未声明 chapter_ci mount", m[1])
+		}
+		if sk.InternalOnly {
+			t.Errorf("internalOnly 技能 %s 不得进入写后自检表", m[1])
+		}
+	}
+	if ciNames == 0 {
+		t.Fatal("未能从 chapterCISelfCheckSkills 提取到任何技能名（结构已变更？）")
+	}
 }

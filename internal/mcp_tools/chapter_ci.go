@@ -306,9 +306,54 @@ func upsertL1(ctx context.Context, db *gorm.DB, logger *slog.Logger, record *qua
 	}
 }
 
+// chapterCISelfCheckSkills 是章写后自检清单的技法单源（#111 P1，§3.3）。
+// 与起草侧不同：自检类技法挂在「只报告不改写」的章 CI 指令里更贴切，既不占
+// 写章 bundle 的 rune 预算，也不会把自检条目误读成正文创作指令。
+var chapterCISelfCheckSkills = []string{"deai-flavor", "revision-pass", "dialogue-subtext"}
+
+const chapterCISelfCheckSkillCap = 1500 // 单技能自检正文上限（rune）
+
+// chapterCISelfCheckBlock 渲染写后自检块：按单源顺序取技能正文、单帽截断、
+// 如实标注节选；技能缺失/正文为空/ store 为 nil 一律返回空串（调用方逐字不变）。
+func chapterCISelfCheckBlock(skillStore *skill.Store, novelID, chapterID int64) string {
+	if skillStore == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, name := range chapterCISelfCheckSkills {
+		sk, ok := skillStore.Get(0, name)
+		if !ok || strings.TrimSpace(sk.Content) == "" {
+			continue
+		}
+		runes := []rune(sk.Content)
+		truncated := false
+		if len(runes) > chapterCISelfCheckSkillCap {
+			runes = runes[:chapterCISelfCheckSkillCap]
+			truncated = true
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "【写后自检·%s】\n%s", name, string(runes))
+		if truncated {
+			b.WriteString("\n（自检技法节选，完整以技能原文为准）")
+		}
+		activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
+			Skill: name, Channel: "chapter_ci_selfcheck", Mount: "chapter_ci",
+			NovelID: novelID, ChapterID: chapterID, Runes: len(runes),
+		})
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n# 写后自检清单（只报告不改写）\n以下技法的自检条目并入本次 L1 增量检查；命中问题写进清单，不要调用任何写工具：\n\n" +
+		b.String() + "\n"
+}
+
 // buildChapterCIInstruction 构造 L1 增量检查指令：小上下文范围 + 检查项 + 情绪曲线
 // 标注（P0-2，段号对照对齐分段）+ 回执契约，有 chapter-ci 技能时注入方法论正文（单源），
 // 无技能时内联最小指令（降级）。segHints 为空回落通用分段说明。
+// #111 P1 追加写后自检块；空块时输出与 P0 逐字一致，L1ReceiptFormatLine 契约不动。
 func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "章节（chapter_id=%d）正文刚刚修改并落盘。请对该章执行 L1 增量质检。\n", chapterID)
@@ -339,6 +384,8 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 			})
 		}
 	}
+	// #111 P1：写后自检清单（非空才注入；skillStore 为 nil 时整块为空，逐字不变）。
+	b.WriteString(chapterCISelfCheckBlock(skillStore, novelID, chapterID))
 	b.WriteString("\n最终回复末尾必须附 ```json 代码块上报回执，格式：\n")
 	b.WriteString(quality.L1ReceiptFormatLine())
 	b.WriteString("\n")

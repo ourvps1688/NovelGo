@@ -36,11 +36,17 @@ func TestSignabilityAuditE2E(t *testing.T) {
 	detName := ""
 	if len(det.Manual) > 0 {
 		detName = det.Manual[0].Name
+	} else if len(det.Redirects) > 0 {
+		// #111 P1：internalOnly 命中只登记指引导语，不注入技能正文。
+		detName = det.Redirects[0].Name
 	}
 	if detName != "signability-audit" {
 		t.Fatalf("确定性 cue 路由失败：\"帮我评估签约潜力\" 期望命中 signability-audit，实际 %q", detName)
 	}
-	t.Logf("OK 确定性 cue 路由：\"帮我评估签约潜力\" -> %s (source=cue, 零 LLM 开销)", detName)
+	if len(det.Auto) > 0 || len(det.Manual) > 0 {
+		t.Fatal("internalOnly 技能 signability-audit 不得进入 chat 正文注入（#111 P1）")
+	}
+	t.Logf("OK 确定性 cue 路由：\"帮我评估签约潜力\" -> %s (Redirect 指引，零 LLM 开销)", detName)
 
 	// 2) 真实 LLM 体检
 	cfg := loadEvalLLMConfig(t)

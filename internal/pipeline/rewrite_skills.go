@@ -36,13 +36,16 @@ const (
 //   - fit→book-pitch（题材卖点提炼）、longArc→plot-hook（伏笔/钩子）为近似口径；
 //   - pacing 双技能（节奏控制 + 场景节拍），与任务口径 dim4→pacing-control/scene-beats 一致。
 var auditDimSkillRoutes = map[string][]string{
-	review.AuditDimOpening:   {"opening-chapters"},
-	review.AuditDimFit:       {"book-pitch"},
-	review.AuditDimCharacter: {"character-design"},
+	review.AuditDimOpening: {"opening-chapters"},
+	review.AuditDimFit:     {"book-pitch"},
+	// #111 P1：补 3 个已声明 rewrite_method mount 的方法论技能（§6.2）。
+	// character → dialogue-subtext（人物潜台词）、reader → deai-flavor/revision-pass
+	// （去 AI 味与通稿修订直接决定读者体感）；pacing 双技能由契约测试锁定，不动。
+	review.AuditDimCharacter: {"character-design", "dialogue-subtext"},
 	review.AuditDimPacing:    {"pacing-control", "scene-beats"},
 	review.AuditDimWorld:     {"worldbuilding-design"},
 	review.AuditDimLongArc:   {"plot-hook"},
-	review.AuditDimReader:    {"reader-immersion"},
+	review.AuditDimReader:    {"reader-immersion", "deai-flavor", "revision-pass"},
 }
 
 // issueDimSkillRoutes issue 台账维度（contract dimension 枚举）→ 方法论技能。

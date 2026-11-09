@@ -74,14 +74,38 @@ var writingBundleSkills = []string{"reader-immersion", "scene-beats", "plot-hook
 
 const (
 	writingBundleSkillCap = 1500 // 单技能注入上限（rune）
-	writingBundleBlockCap = 5000 // 写章技法整块上限（rune）
+	// #111 P1：整块帽按 6×1500 同步扩容。固定 3 技法已占 4273 rune，旧 5000 帽
+	// 只剩 727，任何条件技能（最短 1273）都会被 break，条件化将永远不生效。
+	// 单技能帽保持 1500 不变；异常时仍可单条开关回退到固定 3 个（≤5000）。
+	writingBundleBlockCap = 9000
+
+	// #111 P1：chat 意图注入预算。auto 放宽到 3 但受同类去重与单轮总 rune 帽约束，
+	// 避免「多命中 = 多塞正文」把注意力稀释掉；新帽先按账本观测 7 天再定值。
+	chatMaxAutoSkills      = 3
+	chatMaxManualSkills    = 1
+	chatAutoInjectRuneCap  = 12000
+	chatSkillDefaultBudget = 4000
 )
+
+// capSkillRunes 按 manifest 声明的 budget 截断技能正文，返回实际注入 rune 与是否节选。
+// budget 非正时退回缺省值；如实标注由调用方负责（与写章技法包同口径）。
+func capSkillRunes(content string, budget, fallback int) ([]rune, bool) {
+	if budget <= 0 {
+		budget = fallback
+	}
+	runes := []rune(content)
+	if len(runes) > budget {
+		return runes[:budget], true
+	}
+	return runes, false
+}
 
 // buildAutoSkillInject 依据用户消息的意图匹配，自动构建应注入的技能正文。
 // 仅对 auto 技能注入完整内容（确定性预路由，让 LLM 不再靠猜目录）；
 // 对 manual 技能（如总调度 next）注入为「建议类」reminder，触发其执行；
-// always 技能已常驻，跳过。每轮最多各注入 1 条，防止过度注入稀释注意力。
-// 命中写章总调度 next 时额外注入 writingBundleSkills 的技法正文。
+// always 技能已常驻，跳过。#111 P1 起 auto ≤3 / manual ≤1，并受同类去重与
+// 单轮总 rune 帽约束，防止过度注入稀释注意力。
+// 命中写章总调度 next 时额外注入写章技法包（固定 3 个 + 按章况命中的条件项）。
 func (a *App) buildAutoSkillInject(ctx context.Context, novelID int64, message, providerName, modelID string) string {
 	inject, _ := a.buildAutoSkillInjectWithNames(ctx, novelID, message, providerName, modelID)
 	return inject
@@ -104,23 +128,40 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 		}
 	}
 
-	route := skill.RouteUserMessageSmart(ctx, all, message, 1, 1, exclude, classifier)
+	route := skill.RouteUserMessageSmart(ctx, all, message, chatMaxAutoSkills, chatMaxManualSkills, exclude, classifier)
 
 	var b strings.Builder
 	names := make([]string, 0, 4)
+	// #111 P1：同类去重 + 单轮总 rune 帽（auto/manual 正文合并计算；技法包另按自身双封顶）。
+	injectedRunes := 0
+	seenCategory := make(map[string]bool)
 	for _, m := range route.Auto {
+		if m.Category != "" && seenCategory[m.Category] {
+			continue
+		}
 		sk, ok := a.skill.Get(novelID, m.Name)
 		if !ok {
 			continue
 		}
+		runes, truncated := capSkillRunes(sk.Content, m.Budget, chatSkillDefaultBudget)
+		if injectedRunes+len(runes) > chatAutoInjectRuneCap {
+			break
+		}
+		injectedRunes += len(runes)
+		if m.Category != "" {
+			seenCategory[m.Category] = true
+		}
 		b.WriteString("<system-reminder>\n")
-		fmt.Fprintf(&b, "用户消息触发了技能「%s」的自动加载（意图匹配）。请依据该技能定义与用户需求工作。\n\n---\n%s\n---\n", m.Name, sk.Content)
+		fmt.Fprintf(&b, "用户消息触发了技能「%s」的自动加载（意图匹配）。请依据该技能定义与用户需求工作。\n\n---\n%s\n---\n", m.Name, string(runes))
+		if truncated {
+			b.WriteString("（技能正文节选，完整以技能原文为准）\n")
+		}
 		b.WriteString("</system-reminder>\n")
 		names = append(names, m.Name)
 		// #111 P0 统一账本：chat 意图通道每次正文注入记一条（只记标识与字符数）。
 		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
 			Skill: m.Name, Channel: "chat_intent", Mount: "chat_intent",
-			NovelID: novelID, Runes: len([]rune(sk.Content)),
+			NovelID: novelID, Runes: len(runes),
 		})
 	}
 	writingTurn := false
@@ -129,6 +170,13 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 		if !ok {
 			continue
 		}
+		// 总调度（next）必须注入完整正文：其阶段编排是写章 bundle 的上游依赖，
+		// 不按 budget 截断，只计入单轮总帽（与 #108 行为逐字一致）。
+		runes := []rune(sk.Content)
+		if injectedRunes+len(runes) > chatAutoInjectRuneCap {
+			break
+		}
+		injectedRunes += len(runes)
 		intent := skill.FirstIntent(m)
 		b.WriteString("<system-reminder>\n")
 		fmt.Fprintf(&b, "检测到用户意图匹配技能「%s」（%s）。请启用该总调度/技能，按其对用户需求开展工作：\n\n---\n%s\n---\n", m.Name, intent, sk.Content)
@@ -136,14 +184,22 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 		names = append(names, m.Name)
 		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
 			Skill: m.Name, Channel: "chat_intent", Mount: "chat_intent",
-			NovelID: novelID, Runes: len([]rune(sk.Content)),
+			NovelID: novelID, Runes: len(runes),
 		})
 		if m.Name == "next" {
 			writingTurn = true
 		}
 	}
+	// #111 P1：internalOnly 命中只回一行指引，不注入正文（消掉 signability-fix 反向错投）。
+	for _, m := range route.Redirects {
+		fmt.Fprintf(&b, "<system-reminder>\n用户消息命中内部工作流技能「%s」。该类技能由检测任务/发现项工单的流水线调用，聊天窗口不注入其正文，以免污染输出格式。请在「检测任务 / 工单面板」完成对应操作；若要继续常规创作，直接描述写作需求即可。\n</system-reminder>\n", m.Name)
+		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+			Skill: m.Name, Channel: "chat_redirect", Mount: "chat_redirect",
+			NovelID: novelID,
+		})
+	}
 	if writingTurn {
-		if block, bundle := a.buildWritingSkillBundle(ctx, novelID, names); block != "" {
+		if block, bundle := a.buildWritingSkillBundle(ctx, novelID, message, names); block != "" {
 			b.WriteString(block)
 			names = append(names, bundle...)
 		}
@@ -156,15 +212,19 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 
 // buildWritingSkillBundle 把写章技法正文按确定性顺序注入（去重、双封顶、如实标注节选）。
 // 明确声明为「本轮必须落实的硬约束」，避免模型把总调度提醒读成可选建议后跳过编排。
-func (a *App) buildWritingSkillBundle(ctx context.Context, novelID int64, already []string) (string, []string) {
+func (a *App) buildWritingSkillBundle(ctx context.Context, novelID int64, message string, already []string) (string, []string) {
 	seen := make(map[string]bool, len(already))
 	for _, n := range already {
 		seen[n] = true
 	}
+	// #111 P1：固定 3 个兜底 + 按章况命中的条件化技法。章况探测失败只退回固定 3 个，
+	// 不新增 DB 强依赖；所有追加项仍逐个过单技能/整块双封顶。
+	candidates := append([]string{}, writingBundleSkills...)
+	candidates = append(candidates, conditionWritingSkillNames(a.detectWritingChapterContext(ctx, novelID, message))...)
 	var b strings.Builder
 	var names []string
 	total := 0
-	for _, name := range writingBundleSkills {
+	for _, name := range candidates {
 		if seen[name] {
 			continue
 		}

@@ -73,3 +73,75 @@ func TestSkillBodyCRLF(t *testing.T) {
 	require.Equal(t, "正文", skill.Body("---\nname: x\n---\n正文"))    // LF 同样剥离
 	require.Contains(t, skill.Body("---\nname: x\n正文"), "name: x") // 未闭合保守返回原文
 }
+
+// TestWritingSkillConditions_HitAndUnknown #111 P1：条件命中按表顺序确定性输出、
+// 去重；章况探测全失败（零值）时一律不命中，退回固定 3 技法。
+func TestWritingSkillConditions_HitAndUnknown(t *testing.T) {
+	c := writingChapterContext{
+		nextReadingNumber: 2,
+		rhythmRequired:    true,
+		taskCardText:      "本章新卷开启，出现新地图与新势力，并有大量对白戏",
+		message:           "卡文了，没思路",
+	}
+	got := conditionWritingSkillNames(c)
+	require.Equal(t, []string{
+		"opening-chapters", "worldbuilding-design", "dialogue-subtext",
+		"pacing-control", "brainstorm-composer",
+	}, got)
+	seen := map[string]bool{}
+	for _, n := range got {
+		require.False(t, seen[n], "条件技能不得重复 %s", n)
+		seen[n] = true
+	}
+	require.Empty(t, conditionWritingSkillNames(writingChapterContext{}), "章况全未知时不得命中任何条件")
+	require.Empty(t, conditionWritingSkillNames(writingChapterContext{nextReadingNumber: 9}), "非黄金三章不命中开篇")
+}
+
+// TestBuildWritingSkillBundle_ConditionsAndCaps #111 P1：条件化扩容必须真实生效
+// （旧 5000 整块帽会把第 4 个技能全部 break），同时守住单技能/整块双封顶与零叠加。
+func TestBuildWritingSkillBundle_ConditionsAndCaps(t *testing.T) {
+	a := setupTestApp(t)
+	ctx := context.Background()
+	const msg = "卡文了，没思路，开始创作下一章"
+	block, names := a.buildWritingSkillBundle(ctx, 0, msg, nil)
+	require.NotEmpty(t, block)
+	for _, n := range writingBundleSkills {
+		require.Contains(t, names, n, "固定兜底技法 %s 不得被条件项挤掉", n)
+	}
+	// 测试库 0 章 → 下一章阅读序号 1 → opening 命中；消息含「卡文/没思路」→ brainstorm 命中。
+	require.Contains(t, names, "opening-chapters")
+	require.Contains(t, names, "brainstorm-composer")
+	require.Greater(t, len(names), 3, "条件化扩容必须真实生效，不能被整块帽全 break")
+	require.LessOrEqual(t, len(names), 6, "验收口径 3~6 个技法")
+	require.LessOrEqual(t, len([]rune(block)), writingBundleBlockCap+300, "整块注入须有界（含包裹文案余量）")
+
+	// 零叠加：already 覆盖全部候选时，一块都不再注入。
+	candidates := append([]string{}, writingBundleSkills...)
+	candidates = append(candidates, conditionWritingSkillNames(a.detectWritingChapterContext(ctx, 0, msg))...)
+	emptyBlock, emptyNames := a.buildWritingSkillBundle(ctx, 0, msg, candidates)
+	require.Empty(t, emptyBlock)
+	require.Empty(t, emptyNames)
+}
+
+// TestCapSkillRunes manifest budget 真正被装配器消费：超帽截断并如实标注，
+// 未声明 budget 时退回缺省值。
+func TestCapSkillRunes(t *testing.T) {
+	runes, truncated := capSkillRunes("一二三四五", 3, 4000)
+	require.Equal(t, "一二三", string(runes))
+	require.True(t, truncated)
+	runes2, truncated2 := capSkillRunes("短", 0, 4000)
+	require.Equal(t, "短", string(runes2))
+	require.False(t, truncated2)
+}
+
+// TestBuildAutoSkillInject_InternalOnlyRedirect #111 P1：chat 侧不再注入
+// signability-fix 正文，只回一行指引导语（验收：反向错投 = 0）。
+func TestBuildAutoSkillInject_InternalOnlyRedirect(t *testing.T) {
+	a := setupTestApp(t)
+	inject, names := a.buildAutoSkillInjectWithNames(context.Background(), 0, "帮我修复一下签约体检的问题", "", "")
+	require.NotContains(t, names, "signability-fix", "internalOnly 技能不得计入本轮注入技能徽标")
+	require.Contains(t, inject, "内部工作流技能")
+	require.Contains(t, inject, "signability-fix", "指引里要指名命中的内部技能")
+	require.Contains(t, inject, "工单面板")
+	require.NotContains(t, inject, "【写章技法", "内部工作流消息不得误触发写章技法包")
+}

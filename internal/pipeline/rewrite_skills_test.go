@@ -53,8 +53,10 @@ func TestRewriteSkillRoutesContract(t *testing.T) {
 
 	// 任务口径三例断言。
 	assert.Equal(t, []string{"opening-chapters"}, auditDimSkillRoutes[review.AuditDimOpening])
-	assert.Equal(t, []string{"character-design"}, auditDimSkillRoutes[review.AuditDimCharacter])
+	assert.Equal(t, []string{"character-design", "dialogue-subtext"}, auditDimSkillRoutes[review.AuditDimCharacter])
 	assert.Equal(t, []string{"pacing-control", "scene-beats"}, auditDimSkillRoutes[review.AuditDimPacing])
+	// #111 P1 新增的三项：读者体感三件套（去 AI 味 / 通稿修订 / 代入感）。
+	assert.Equal(t, []string{"reader-immersion", "deai-flavor", "revision-pass"}, auditDimSkillRoutes[review.AuditDimReader])
 }
 
 // TestLowAuditDims 低分判定：星级 ≤3 入选、0/4/5 剔除；顺序按 AuditDimOrder 确定性。

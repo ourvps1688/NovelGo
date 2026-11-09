@@ -165,3 +165,50 @@ func TestRouteUserMessageSmart_ShortMessageSkipsLLM(t *testing.T) {
 		t.Fatalf("expected source=none, got %s", res.Source)
 	}
 }
+
+// TestRouteUserMessage_InternalOnlyRedirect #111 P1：internalOnly 命中只登记指引，
+// 不进 Auto/Manual（不注入正文），且不阻断同轮其他 chat 可见技能被正常匹配。
+func TestRouteUserMessage_InternalOnlyRedirect(t *testing.T) {
+	internal := mkMeta("signability-fix", ModeManual, "修复")
+	internal.InternalOnly = true
+	all := []SkillMeta{
+		internal,
+		mkMeta("dialogue-subtext", ModeAuto, "修复"),
+	}
+	res := RouteUserMessage(all, "帮我修复一下这段", 3, 1, nil)
+	if len(res.Auto) != 1 || res.Auto[0].Name != "dialogue-subtext" {
+		t.Fatalf("chat 可见技能应仍能命中, got %+v", res.Auto)
+	}
+	if len(res.Manual) != 0 {
+		t.Fatalf("internalOnly 不得进入 Manual, got %+v", res.Manual)
+	}
+	if len(res.Redirects) != 1 || res.Redirects[0].Name != "signability-fix" {
+		t.Fatalf("internalOnly 应登记一条 Redirect, got %+v", res.Redirects)
+	}
+}
+
+// TestRouteUserMessageSmart_InternalOnlyNotFallback #111 P1：Redirect 命中即视为
+// 确定性命中，不再走 LLM 兜底；且 internalOnly 不进兜底候选、LLM 返回其名也不注入。
+func TestRouteUserMessageSmart_InternalOnlyNotFallback(t *testing.T) {
+	internal := mkMeta("signability-fix", ModeManual, "修复")
+	internal.InternalOnly = true
+	all := []SkillMeta{internal, mkMeta("scene-beats", ModeAuto, "场面")}
+
+	fc := &fakeClassifier{name: "signability-fix", conf: 0.95}
+	res := RouteUserMessageSmart(context.Background(), all, "帮我修复一下", 3, 1, nil, fc.fn)
+	if fc.called {
+		t.Fatal("Redirect 命中时不应再调用 LLM 兜底")
+	}
+	if res.Source != SourceCue || len(res.Redirects) != 1 {
+		t.Fatalf("expected source=cue + 1 redirect, got %s / %+v", res.Source, res.Redirects)
+	}
+
+	fc2 := &fakeClassifier{name: "signability-fix", conf: 0.95}
+	res2 := RouteUserMessageSmart(context.Background(), all, "随便聊点别的事情吧", 3, 1, nil, fc2.fn)
+	if !fc2.called {
+		t.Fatal("无 cue 命中时应允许走 LLM 兜底")
+	}
+	if len(res2.Auto) != 0 || len(res2.Manual) != 0 || len(res2.Redirects) != 0 {
+		t.Fatalf("LLM 返回 internalOnly 技能名时不得注入, got %+v", res2)
+	}
+}
