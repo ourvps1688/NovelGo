@@ -15,8 +15,9 @@
 - 分层：app 绑定层只 DTO+委托；internal 禁 import wails（走 event.Emitter）；DB=真相源。
 - 台账唯一约束（147b667c）：四类台账自然键去重 find-or-create；v172 迁移合并+唯一索引。
 
-## 质量升级路线图 2026-11（已全落地，设计决策勿回退）
-- 落地：P0-0 开篇体检(4189a7bb)/P1-1 编辑反馈回流(67410ffb)/P0-1 平台 profile(qimao preset+L0 三查)/P0-3 评分打通(review/score_mapping.go 6↔8 映射)/P1-2 平台对账(platform_metrics)/P0-2 情绪账(chapter_tension+E 系 ts- 容器)/P2-1 技能路由/P2-2 scene-beats/P2-3 benchmark_books。
+## 质量升级路线图 2026-11（P1-2/P2-3 已按用户判定下线，其余勿回退）
+- 落地：P0-0 开篇体检(4189a7bb)/P1-1 编辑反馈回流(67410ffb)/P0-1 平台 profile(qimao preset+L0 三查)/P0-3 评分打通(review/score_mapping.go 6↔8 映射)/P0-2 情绪账(chapter_tension+E 系 ts- 容器)/P2-1 技能路由/P2-2 scene-beats；~~P1-2 平台对账(platform_metrics)~~/~~P2-3 benchmark_books~~ 已于 2026-11-09 整体移除（#109）。
+- **#109 移除边界（勿回退/勿误删）**：用户判定「平台数据对账」「对标书库」实际写作价值低，属多余设计。删 14 文件（app 10 个导出方法、quality 两组模型/解析、pipeline 两组服务+对账诊断、前端两面板），改 `auditInput.benchmark`/`signabilityPrompt` 注入块、detect.go+service.go 两处装配、zh/en i18n 各 85 行、docs 升级计划标注下线；`signability-audit.md` **只删 dim2 的「对标书库摘要」证据纪律句，八维定义/desc 未动**。**保留**：platform_profile（P0-1/P2-2 platformRhythmBlock）、`review/score_mapping.go`、`quality/feedback.go`、ScoreTrendPanel 的 `review.JudgeAuditDimScore`。`pipeline.AuditDimScore` 从 wails 生成类消失仅因不再作 DTO 暴露。存量表靠 `internal/migrate/v173`（Destructive=true/PostSchemaStep/幂等）DROP，备份在 `build/bin/backups/v1.7.3-drop-retired-quality-tables/`。
 - 关键决策：mcp_tools→pipeline 是 import cycle，反馈落单走 SetFeedbackTicketLander 回调（feedback 测试用外部包 mcp_tools_test）；issue.Dimension=台账维枚举≠八维键；E 系文案避开语义排除词（矛盾/冲突/逻辑/人设/崩/连贯/伏笔/悬念/篇幅）；CheckerConfig 关键词全空=不检查；Validate 空白 profile 归一为空；字数=纯 CJK；golden 基线 `go test ./internal/pipeline/ -run TestP0BaselineRegen -p0-update`。
 
 ## 复验闭环（勿回退）
