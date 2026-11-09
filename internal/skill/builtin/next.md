@@ -29,6 +29,9 @@ useWhen:
       - "创作下一章"
       - "开工"
       - "落笔"
+mounts: [chat_intent]
+internalOnly: false
+budget: 2000
 ---
 
 # 下一章创作总调度（Chapter Orchestrator）

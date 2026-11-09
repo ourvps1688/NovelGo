@@ -1030,6 +1030,12 @@ func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, runSub func(ctx co
 	)
 	// 本地派生在派发前完成：LLM 读到的台账已是最新，指令里给出派生名单供复核/补漏。
 	instruction += aliveDerivationNote(ctx, db, logger, novelID, chapterID)
+	// #111 P0 统一账本：state_sync 通道级事件（Skill 为空——P0 仍是硬编码指令，
+	// P2 接入 collect 收集清单后改记具体技能名；空 skill 不参与技能用量统计）。
+	activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+		Channel: "state_sync", Mount: "state_sync",
+		NovelID: novelID, ChapterID: chapterID,
+	})
 	if _, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "statesync",
 		NovelID:     novelID,

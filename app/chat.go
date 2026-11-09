@@ -165,6 +165,12 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	}
 
 	if injectName != "" {
+		// #111 P0 统一账本：斜杠技能正文注入（高级入口）记一条。
+		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+			Skill: injectName, Channel: "slash", Mount: "slash_only",
+			NovelID: input.NovelID, SessionID: sess.SessionID,
+			Runes: len([]rune(slashInject)),
+		})
 		a.logger.Info("slash injected", "name", injectName, "session", sess.SessionID)
 	}
 

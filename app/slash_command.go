@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/skill"
 )
 
@@ -116,6 +117,11 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 		fmt.Fprintf(&b, "用户消息触发了技能「%s」的自动加载（意图匹配）。请依据该技能定义与用户需求工作。\n\n---\n%s\n---\n", m.Name, sk.Content)
 		b.WriteString("</system-reminder>\n")
 		names = append(names, m.Name)
+		// #111 P0 统一账本：chat 意图通道每次正文注入记一条（只记标识与字符数）。
+		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+			Skill: m.Name, Channel: "chat_intent", Mount: "chat_intent",
+			NovelID: novelID, Runes: len([]rune(sk.Content)),
+		})
 	}
 	writingTurn := false
 	for _, m := range route.Manual {
@@ -128,12 +134,16 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 		fmt.Fprintf(&b, "检测到用户意图匹配技能「%s」（%s）。请启用该总调度/技能，按其对用户需求开展工作：\n\n---\n%s\n---\n", m.Name, intent, sk.Content)
 		b.WriteString("</system-reminder>\n")
 		names = append(names, m.Name)
+		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+			Skill: m.Name, Channel: "chat_intent", Mount: "chat_intent",
+			NovelID: novelID, Runes: len([]rune(sk.Content)),
+		})
 		if m.Name == "next" {
 			writingTurn = true
 		}
 	}
 	if writingTurn {
-		if block, bundle := a.buildWritingSkillBundle(novelID, names); block != "" {
+		if block, bundle := a.buildWritingSkillBundle(ctx, novelID, names); block != "" {
 			b.WriteString(block)
 			names = append(names, bundle...)
 		}
@@ -146,7 +156,7 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 
 // buildWritingSkillBundle 把写章技法正文按确定性顺序注入（去重、双封顶、如实标注节选）。
 // 明确声明为「本轮必须落实的硬约束」，避免模型把总调度提醒读成可选建议后跳过编排。
-func (a *App) buildWritingSkillBundle(novelID int64, already []string) (string, []string) {
+func (a *App) buildWritingSkillBundle(ctx context.Context, novelID int64, already []string) (string, []string) {
 	seen := make(map[string]bool, len(already))
 	for _, n := range already {
 		seen[n] = true
@@ -181,6 +191,11 @@ func (a *App) buildWritingSkillBundle(novelID int64, already []string) (string, 
 		total += len(runes)
 		names = append(names, name)
 		seen[name] = true
+		// #111 P0 统一账本：写章技法包按实际注入的字符数逐技能记账（截断后的 runes）。
+		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+			Skill: name, Channel: "writing_bundle", Mount: "writing_bundle",
+			NovelID: novelID, Runes: len(runes),
+		})
 	}
 	if len(names) == 0 {
 		return "", nil

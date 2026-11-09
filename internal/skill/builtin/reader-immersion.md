@@ -20,6 +20,9 @@ useWhen:
       - "读者代入"
       - "五感"
       - "心理距离"
+mounts: [chat_intent, writing_bundle, rewrite_method]
+internalOnly: false
+budget: 4000
 ---
 
 # 读者代入感工程（Reader Immersion）

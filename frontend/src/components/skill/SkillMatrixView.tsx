@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ExternalLink, Check, X, Loader2 } from "lucide-react";
 import type { skill } from "@/lib/wailsjs/go/models";
 import { useSkills } from "./useSkills";
+import SkillUsagePanel from "./SkillUsagePanel";
 import {
   useEnabledSkills,
   useSetEnabledSkills,
@@ -126,6 +127,7 @@ export default function SkillMatrixView({
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-4">
+        <SkillUsagePanel novelId={novelId} />
         {skills.length === 0 ? (
           <CenterMsg>
             <span className="text-sm text-muted-foreground">

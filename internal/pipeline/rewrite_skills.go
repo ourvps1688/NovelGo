@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/skill"
 )
@@ -125,6 +126,12 @@ func rewriteMethodBlock(dims []AuditDimScore, issueDim string) string {
 		}
 		total += len([]rune(seg))
 		written++
+		// #111 P0 统一账本：重写方法论正文注入逐技能记账（解决子 Agent 初始 prompt
+		// 不落库导致 exec_run_stats 看不到 8 个重写技法的口径缺口）。
+		activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
+			Skill: e.name, Channel: "rewrite_method", Mount: "rewrite_method",
+			Runes: len([]rune(seg)),
+		})
 	}
 	if written == 0 {
 		return ""

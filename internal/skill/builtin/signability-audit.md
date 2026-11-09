@@ -22,6 +22,9 @@ useWhen:
       - "过审"
       - "上架"
       - "算法"
+mounts: [pipeline_dispatch, blueprint_audit]
+internalOnly: true
+budget: 4000
 ---
 
 # 签约级体检（Signability Audit）

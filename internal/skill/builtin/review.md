@@ -14,5 +14,8 @@ useWhen:
       - "审一遍"
       - "审读"
       - "编辑意见"
+mounts: [chapter_ci, slash_only]
+internalOnly: false
+budget: 4000
 ---
 用户要求你调用 review agent。请根据用户指令执行审阅任务。

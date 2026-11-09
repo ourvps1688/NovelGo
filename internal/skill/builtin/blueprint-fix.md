@@ -12,6 +12,9 @@ useWhen:
       - "卷纲修复"
       - "S5 蓝图"
       - "改卷纲"
+mounts: [pipeline_dispatch]
+internalOnly: true
+budget: 4000
 ---
 
 # 蓝图修复（Blueprint Fix）

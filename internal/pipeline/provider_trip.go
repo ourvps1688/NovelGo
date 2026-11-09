@@ -69,6 +69,11 @@ func providerTripErr(openProviders []string) error {
 // （测试 TestSkillRunnerDispatchOnlyViaTripGuard 源码锁定）——任何新增派发点必须走
 // dispatchSkill，天然过熔断判定与 R0 观测。
 func (s *Service) dispatchSkill(ctx context.Context, name string, input SkillInput) (SkillOutput, error) {
+	// #111 P0 统一账本：每次技能派发（含熔断跳过）记一条；纯本地、零行为变化。
+	activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+		Skill: name, Channel: "pipeline_dispatch", Mount: "pipeline_dispatch",
+		NovelID: input.NovelID, RunID: input.RunID,
+	})
 	if tripped, open := providerTripped(); tripped {
 		s.recordExecStat(ctx, activity.ExecStat{
 			NovelID: input.NovelID, RunID: input.RunID, Skill: name,

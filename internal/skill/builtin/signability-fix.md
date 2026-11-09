@@ -12,6 +12,9 @@ useWhen:
       - "S5"
       - "改稿"
       - "提升签约力"
+mounts: [pipeline_dispatch]
+internalOnly: true
+budget: 4000
 ---
 
 # 签约体检修复（Signability Fix）

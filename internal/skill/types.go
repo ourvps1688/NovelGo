@@ -44,6 +44,15 @@ type Skill struct {
 	Content      string         `json:"content" yaml:"-"`
 	RawContent   string         `json:"raw_content,omitempty" yaml:"-"` // 原始 markdown 全文（含 YAML frontmatter）
 
+	// —— 技能装配契约（#111 P0）：能力清单 manifest，健康检查 CI 闸据此断言 ——
+	// Mounts 声明该技能被哪些确定性装配点消费；为空且未标 Deprecated → 健康检查失败。
+	// InternalOnly 仅约束 chat 路由与 catalog 可见性，不约束流水线挂载。
+	// Budget 是该技能正文注入的 rune 上限（P0 只声明，装配器 P1 起消费）。
+	Mounts       []string `json:"mounts,omitempty" yaml:"mounts,omitempty"`
+	InternalOnly bool     `json:"internal_only" yaml:"internalOnly"`
+	Budget       int      `json:"budget" yaml:"budget"`
+	Deprecated   bool     `json:"deprecated" yaml:"deprecated"`
+
 	// —— 以下为 V3 跨书聚合（cross-book mental-skill aggregation）派生字段 ——
 	// 仅当 Aggregated=true 的派生 skill 使用；普通 skill 这些字段为零值，序列化时被 yaml 忽略。
 	Aggregated      bool     `json:"aggregated" yaml:"aggregated,omitempty"`               // 是否为跨书聚合派生 skill
@@ -69,7 +78,11 @@ type SkillMeta struct {
 	Author       string         `json:"author"`
 	SourceAuthor string         `json:"source_author"`
 	Version      int            `json:"version"`
-	Source       string         `json:"source"` // "builtin" | "user" | "novel"
+	Source       string         `json:"source"`           // "builtin" | "user" | "novel"
+	Mounts       []string       `json:"mounts,omitempty"` // 装配契约：该技能被哪些挂载点消费
+	InternalOnly bool           `json:"internal_only"`    // 仅禁 chat 路由/catalog 可见性，不禁流水线挂载
+	Budget       int            `json:"budget"`           // 正文注入 rune 上限
+	Deprecated   bool           `json:"deprecated"`       // 显式占位/待下线（健康检查允许 mounts 为空）
 
 	// —— 以下为 V3 跨书聚合派生字段（仅 Aggregated=true 时有意义）——
 	Aggregated      bool     `json:"aggregated"`        // 是否为跨书聚合派生 skill
@@ -93,6 +106,10 @@ func (s *Skill) Meta(source string) SkillMeta {
 		SourceAuthor: s.SourceAuthor,
 		Version:      s.Version,
 		Source:       source,
+		Mounts:       s.Mounts,
+		InternalOnly: s.InternalOnly,
+		Budget:       s.Budget,
+		Deprecated:   s.Deprecated,
 
 		Aggregated:      s.Aggregated,
 		AggregatedFrom:  s.AggregatedFrom,

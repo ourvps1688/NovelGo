@@ -13,6 +13,9 @@ useWhen:
       - "S2"
       - "蓝图过签"
       - "故事地图体检"
+mounts: [blueprint_audit, pipeline_dispatch]
+internalOnly: true
+budget: 4000
 ---
 
 # 蓝图级体检（Blueprint Audit）

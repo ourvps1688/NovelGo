@@ -22,6 +22,9 @@ useWhen:
       - "打戏"
       - "文戏"
       - "戏的张力"
+mounts: [chat_intent, writing_bundle, rewrite_method]
+internalOnly: false
+budget: 4000
 ---
 # 场景节拍设计
 

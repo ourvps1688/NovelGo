@@ -18,6 +18,9 @@ useWhen:
       - "一句话简介"
       - "定方向"
       - "一句话卖点"
+mounts: [pitch_flow, chat_intent, rewrite_method]
+internalOnly: false
+budget: 4000
 ---
 
 # 作品外包装（Book Pitch）

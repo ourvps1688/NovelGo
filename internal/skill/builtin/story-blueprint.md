@@ -23,6 +23,9 @@ useWhen:
       - "主线规划"
       - "全书规划"
       - "起承转合"
+mounts: [chat_intent, blueprint_audit, rewrite_method]
+internalOnly: false
+budget: 4000
 ---
 
 # 故事蓝图（宏观结构）

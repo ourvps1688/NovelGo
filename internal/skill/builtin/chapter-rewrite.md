@@ -12,6 +12,9 @@ useWhen:
       - "S3 重写"
       - "整章重写"
       - "回流重写"
+mounts: [pipeline_dispatch]
+internalOnly: true
+budget: 4000
 ---
 
 # 章节重写（Chapter Rewrite）

@@ -1794,7 +1794,19 @@
     "emptyDesc": "(no description)",
     "categories": "Categories",
     "useWhen": "When to use",
-    "command": "Command"
+    "command": "Command",
+    "usage": {
+      "title": "Skill usage (last 30 days)",
+      "hint": "Unified ledger: only content injections or skill dispatches count; being listed in the catalog does not.",
+      "skill": "Skill",
+      "channel": "Channel",
+      "count": "Count",
+      "lastSeen": "Last seen",
+      "times": "{{count}} times",
+      "empty": "No usage records yet",
+      "idleTitle": "No records in 30 days",
+      "idleHint": "These skills have no channel records; add a mount point or mark them deprecated."
+    }
   },
   "signability": {
     "title": "Signability Workflow",

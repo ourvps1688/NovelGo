@@ -341,6 +341,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 
 	a.activity = activity.NewStore(db, a.logger)
 	a.activity.InitTracking(a.ctx)
+	// 技能装配统一账本（#111 P0）：app / pipeline / mcp_tools / agentcfg 六条注入通道
+	// 经包级 sink 记账（只记标识与字符数、纯本地不上传）；未注入时全链路 no-op。
+	activity.SetSkillInvocationSink(a.activity.AddSkillInvocation)
 
 	// 4. 加载运行时配置
 	settings, err := config.LoadSettings(db)

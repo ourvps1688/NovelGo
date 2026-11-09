@@ -11,6 +11,9 @@ useWhen:
       - "章节 CI"
       - "增量检查"
       - "落盘质检"
+mounts: [chapter_ci]
+internalOnly: true
+budget: 4000
 ---
 
 # 章节 CI（Chapter CI · L1 增量检查）

@@ -21,6 +21,9 @@ useWhen:
       - "想情节"
       - "没灵感"
       - "卡文"
+mounts: [chat_intent, writing_bundle]
+internalOnly: false
+budget: 4000
 ---
 # 共创构思工作流
 

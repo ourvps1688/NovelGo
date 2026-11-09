@@ -15,6 +15,9 @@ useWhen:
       - "编辑说"
       - "签约反馈"
       - "录入反馈"
+mounts: [feedback]
+internalOnly: true
+budget: 4000
 ---
 
 # 编辑反馈结构化回流（Editor Feedback · P1-1）

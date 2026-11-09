@@ -410,6 +410,10 @@ export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }
 
+export function GetSkillUsage(arg1) {
+  return window['go']['app']['App']['GetSkillUsage'](arg1);
+}
+
 export function GetStartupState() {
   return window['go']['app']['App']['GetStartupState']();
 }

@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/skill"
 )
 
@@ -50,6 +51,13 @@ func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillS
 			all = excludeNames(all, []string{persona.Ref})
 		}
 		msg.Always = BuildAlwaysSkillsContent(all, skillStore, novelID)
+		// #111 P0 统一账本：常驻技能正文走 system 消息，不进任何执行统计；
+		// 按实际注入的 --- <name> --- 分隔符逐个记账（超过常驻上限的不记）。
+		for _, name := range alwaysSkillNames(msg.Always) {
+			activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+				Skill: name, Channel: "always", Mount: "always", NovelID: novelID,
+			})
+		}
 		catalogMeta := skillStore.ListMetaForCatalog(all)
 		// 已勾选启用的技能已常驻注入，从 auto 目录中排除，避免重复占 token。
 		if enabled := skillStore.EnabledNames(novelID); len(enabled) > 0 {
@@ -81,4 +89,27 @@ func BuildSystemMessages(ctx context.Context, db *gorm.DB, novelID int64, skillS
 		err = fmt.Errorf("build system messages: %s", strings.Join(errs, "; "))
 	}
 	return msg, err
+}
+
+// alwaysSkillNames 从 BuildAlwaysSkillsContent 生成的常驻块里提取实际注入的技能名。
+// 只接受纯 [a-z0-9-] 技能名，避免把正文里的 markdown 分隔线误判为技能。
+func alwaysSkillNames(content string) []string {
+	if content == "" {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "--- ") || !strings.HasSuffix(line, " ---") || len(line) <= 8 {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "--- "), " ---"))
+		if name == "" || strings.IndexFunc(name, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-'
+		}) >= 0 {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
 }

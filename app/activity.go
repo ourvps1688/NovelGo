@@ -29,6 +29,16 @@ func (a *App) GetFeatureUsage(days int) ([]activity.FeatureUsageStat, error) {
 	return a.activity.ListFeatureUsage(a.ctx, days)
 }
 
+// GetSkillUsage 返回近 days 天（含今天）按 skill + channel 聚合的技能装配用量
+// （#111 统一账本：谁被注入、走哪条通道、最近一次；纯本地不上传）。
+// days 非正时按 30 天。失败返回错误，由前端静默降级为空表。
+func (a *App) GetSkillUsage(days int) ([]activity.SkillInvocationStat, error) {
+	if a.activity == nil {
+		return []activity.SkillInvocationStat{}, nil
+	}
+	return a.activity.SummarizeSkillInvocations(a.ctx, days)
+}
+
 // GetPipelineExecStats 返回近 days 天（含今天）按 skill 聚合的流水线执行体观测汇总
 // （R0 瓶颈分布取数口：耗时/轮数/turn 数，纯本地不上传）；days 非正时按 30 天。
 // 失败返回错误，由调用方静默降级为空表。

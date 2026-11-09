@@ -14,6 +14,9 @@ useWhen:
       - "全书巡检"
       - "吃书检查"
       - "patrol"
+mounts: [pipeline_dispatch]
+internalOnly: true
+budget: 4000
 ---
 
 # 全书一致性巡检（Consistency Patrol / 张力报告）

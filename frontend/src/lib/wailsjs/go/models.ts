@@ -44,6 +44,24 @@ export namespace activity {
 	        this.count = source["count"];
 	    }
 	}
+	export class SkillInvocationStat {
+	    skill: string;
+	    channel: string;
+	    count: number;
+	    last_seen: string;
+
+	    static createFrom(source: any = {}) {
+	        return new SkillInvocationStat(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.skill = source["skill"];
+	        this.channel = source["channel"];
+	        this.count = source["count"];
+	        this.last_seen = source["last_seen"];
+	    }
+	}
 
 }
 
@@ -3781,6 +3799,10 @@ export namespace skill {
 	    version: number;
 	    content: string;
 	    raw_content?: string;
+	    mounts?: string[];
+	    internal_only: boolean;
+	    budget: number;
+	    deprecated: boolean;
 	    aggregated: boolean;
 	    aggregated_from: string[];
 	    merged_books: string[];
@@ -3807,6 +3829,10 @@ export namespace skill {
 	        this.version = source["version"];
 	        this.content = source["content"];
 	        this.raw_content = source["raw_content"];
+	        this.mounts = source["mounts"];
+	        this.internal_only = source["internal_only"];
+	        this.budget = source["budget"];
+	        this.deprecated = source["deprecated"];
 	        this.aggregated = source["aggregated"];
 	        this.aggregated_from = source["aggregated_from"];
 	        this.merged_books = source["merged_books"];
@@ -3846,6 +3872,10 @@ export namespace skill {
 	    source_author: string;
 	    version: number;
 	    source: string;
+	    mounts?: string[];
+	    internal_only: boolean;
+	    budget: number;
+	    deprecated: boolean;
 	    aggregated: boolean;
 	    aggregated_from: string[];
 	    merged_books: string[];
@@ -3869,6 +3899,10 @@ export namespace skill {
 	        this.source_author = source["source_author"];
 	        this.version = source["version"];
 	        this.source = source["source"];
+	        this.mounts = source["mounts"];
+	        this.internal_only = source["internal_only"];
+	        this.budget = source["budget"];
+	        this.deprecated = source["deprecated"];
 	        this.aggregated = source["aggregated"];
 	        this.aggregated_from = source["aggregated_from"];
 	        this.merged_books = source["merged_books"];

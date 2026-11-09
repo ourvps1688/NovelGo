@@ -12,6 +12,9 @@ useWhen:
       - "蓝图漂移"
       - "蓝图一致性"
       - "drift"
+mounts: [blueprint_audit]
+internalOnly: true
+budget: 4000
 ---
 
 # 蓝图一致性巡检（Blueprint Drift Check）

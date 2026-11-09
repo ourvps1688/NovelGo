@@ -11,6 +11,9 @@ useWhen:
       - "增量复验"
       - "修复复验"
       - "复验回执"
+mounts: [pipeline_dispatch]
+internalOnly: true
+budget: 4000
 ---
 
 # 修复增量复验（Signability Verify）

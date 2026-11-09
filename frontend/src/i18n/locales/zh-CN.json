@@ -1754,7 +1754,19 @@
     "emptyDesc": "（无描述）",
     "categories": "分类",
     "useWhen": "何时使用",
-    "command": "命令"
+    "command": "命令",
+    "usage": {
+      "title": "技能用量（近 30 天）",
+      "hint": "统一账本：正文被注入或技能被派发才计一次；仅出现在技能目录不算使用。",
+      "skill": "技能",
+      "channel": "通道",
+      "count": "次数",
+      "lastSeen": "最近一次",
+      "times": "{{count}} 次",
+      "empty": "暂无用量记录",
+      "idleTitle": "近 30 天零记录",
+      "idleHint": "以下技能没有任何通道记录，需补挂载点或标为待下线。"
+    }
   },
   "signability": {
     "title": "签约潜力工作流",

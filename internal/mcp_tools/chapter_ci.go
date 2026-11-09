@@ -20,6 +20,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/chapter"
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/skill"
@@ -330,6 +331,12 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 			b.WriteString("\n# 本次任务方法论\n")
 			b.WriteString(sk.Content)
 			b.WriteString("\n")
+			// #111 P0 统一账本：chapter-ci 走 RunSubAgent，不进 exec_run_stats，
+			// 在注入点直接记账（口径陷阱之一）。
+			activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
+				Skill: "chapter-ci", Channel: "chapter_ci", Mount: "chapter_ci",
+				NovelID: novelID, ChapterID: chapterID, Runes: len([]rune(sk.Content)),
+			})
 		}
 	}
 	b.WriteString("\n最终回复末尾必须附 ```json 代码块上报回执，格式：\n")
