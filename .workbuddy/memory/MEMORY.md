@@ -45,6 +45,11 @@
 - 注入一律用 `sk.Content` 或 `skill.Body`（LF/CRLF 通吃），**禁用 `sk.RawContent`**（会把 CRLF YAML frontmatter 拼进提示词）。`stripFrontmatter` 已委托 `skill.Body`。
 - `notWhen` 是 cue 边界单源：给 next 加宽泛 cue「动笔」必须同时保留 `notWhen: [动笔前]`，否则 canary / fallback 基准的 collect 样本被抢。`explicitSkillNames` 不得把「消息整体等于技能名」当显式点名排除（裸发 next 会永不触发）。`chat:started` 事件带 `skills` 供前端徽标，是唯一可见性通道。
 
+## 技能装配与可观测契约（#111，设计定稿待实施，勿回退口径）
+- 规划单源 `docs/skill-wiring-contract-2026-11-09.md`：manifest（mounts/internalOnly/budget/deprecated）+ 确定性装配 + `skill_invocations` 统一账本 + 健康检查 CI 闸；P0 可观测先行 → P1 错投抑制/写章扩容 → P2 七技能+S2 → P3 收口，串行。立论：摆设与口径陷阱同源 = 正文消费权交给 LLM/用户自觉 + 各通道留痕不统一。
+- 三处纠偏（勿按口述方案直接写码）：`dispatchSkill` 在 `internal/pipeline/provider_trip.go:71`（非 skillrun.go，埋点落 provider_trip.go:71/73/85 + service.go:283/311）；新表按 R3/activity 先例加 `migrate.go:93-145` models 由 AutoMigrate 建，**不写 v174 版本化迁移**（v173 是删表特例）；S2 是「代码已接线、入口已退役」（StartPipeline 前端零调用、开新书走 RunDetectionTask("book")、四 kind 无 blueprint），触发**必须显式按钮**，守零 auto-advance / 不恢复旧流水线 / 不加第五检测 kind。
+- `internalOnly` 只禁 chat 路由与 catalog 可见性，**不禁流水线挂载**；健康检查是开发期静态断言，不是运行时质量闸门。技能名与 `agent_type` 重名（memory/review）须显式解耦。`GetPipelineExecStats` 有绑定但前端零消费 = 账本已建消费未接线的反面案例，P0 必须连用量面板一起交付。
+
 ## 其他契约
 - 悬空口径已清（#109/#110，勿回退）：`signability-audit` 的 description/cues/何时使用禁再出现「对标」（对标书库已下线；dim2 开放式问句是八维契约、保留）；`stockAuditPrompt` 维度必须逐字对齐八维，禁「数据预期」等非八维口径（contract_test 有断言）；退役技能名 `signability-workflow` 仅存于 10-16/10-18 历史 system 消息与 v1.7.2 备份 novel17 的 `.enabled.json`，**历史数据不清理**，`filterByNames` 按真实 meta 取交集即设计护栏（skill_catalog_test 有断言）；`identity.go` 去 AI 味自查清单已内联可直执行，不再硬写「必须 read deai-flavor.md」。
 - 章节寻址：chapter_id≠阅读序号；前端用 reading_number；工单 chapter_ids=全局阅读序号。
