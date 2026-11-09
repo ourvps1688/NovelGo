@@ -46,6 +46,7 @@
 - `notWhen` 是 cue 边界单源：给 next 加宽泛 cue「动笔」必须同时保留 `notWhen: [动笔前]`，否则 canary / fallback 基准的 collect 样本被抢。`explicitSkillNames` 不得把「消息整体等于技能名」当显式点名排除（裸发 next 会永不触发）。`chat:started` 事件带 `skills` 供前端徽标，是唯一可见性通道。
 
 ## 其他契约
+- 悬空口径已清（#109/#110，勿回退）：`signability-audit` 的 description/cues/何时使用禁再出现「对标」（对标书库已下线；dim2 开放式问句是八维契约、保留）；`stockAuditPrompt` 维度必须逐字对齐八维，禁「数据预期」等非八维口径（contract_test 有断言）；退役技能名 `signability-workflow` 仅存于 10-16/10-18 历史 system 消息与 v1.7.2 备份 novel17 的 `.enabled.json`，**历史数据不清理**，`filterByNames` 按真实 meta 取交集即设计护栏（skill_catalog_test 有断言）；`identity.go` 去 AI 味自查清单已内联可直执行，不再硬写「必须 read deai-flavor.md」。
 - 章节寻址：chapter_id≠阅读序号；前端用 reading_number；工单 chapter_ids=全局阅读序号。
 - ONNX 仅 bge-small-zh-v1.5 向量化；reranker 已移除。熔断 internal/llm/breaker.go 三态只认硬失败。
 
