@@ -20,6 +20,7 @@ import (
 	_ "github.com/novelgo/novelgo/internal/migrate/v170" // blank：注册 series bible 存量迁移（temporal 回填 + 结构化尽力填充）
 	_ "github.com/novelgo/novelgo/internal/migrate/v171" // blank：注册 retcon_cases.kind 列与历史回填迁移
 	_ "github.com/novelgo/novelgo/internal/migrate/v172" // blank：注册四类台账按自然键去重 + 唯一索引迁移
+	_ "github.com/novelgo/novelgo/internal/migrate/v173" // blank：注册 platform_metrics / benchmark_books 存量表清理迁移
 	"github.com/novelgo/novelgo/internal/novel"
 	"github.com/novelgo/novelgo/internal/personasetting"
 	"github.com/novelgo/novelgo/internal/pipeline"
@@ -136,8 +137,6 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&quality.ChapterTension{},
 		&quality.CheckerConfig{},
 		&quality.EditorFeedback{},
-		&quality.PlatformMetric{},
-		&quality.BenchmarkBook{},
 		&structure.PinnedInvariant{},
 		&structure.PowerLevel{},
 		&review.QualityAttempt{},

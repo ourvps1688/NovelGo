@@ -134,14 +134,6 @@ export function DeleteArcNode(arg1, arg2) {
   return window['go']['app']['App']['DeleteArcNode'](arg1, arg2);
 }
 
-export function DeleteBenchmarkBook(arg1, arg2) {
-  return window['go']['app']['App']['DeleteBenchmarkBook'](arg1, arg2);
-}
-
-export function DeleteBenchmarkBooks(arg1) {
-  return window['go']['app']['App']['DeleteBenchmarkBooks'](arg1);
-}
-
 export function DeleteChapter(arg1, arg2) {
   return window['go']['app']['App']['DeleteChapter'](arg1, arg2);
 }
@@ -168,10 +160,6 @@ export function DeleteNovel(arg1) {
 
 export function DeleteNovelSetting(arg1) {
   return window['go']['app']['App']['DeleteNovelSetting'](arg1);
-}
-
-export function DeletePlatformMetrics(arg1) {
-  return window['go']['app']['App']['DeletePlatformMetrics'](arg1);
 }
 
 export function DeletePreference(arg1) {
@@ -382,10 +370,6 @@ export function GetPlatform() {
   return window['go']['app']['App']['GetPlatform']();
 }
 
-export function GetPlatformReconciliation(arg1) {
-  return window['go']['app']['App']['GetPlatformReconciliation'](arg1);
-}
-
 export function GetPreferences(arg1) {
   return window['go']['app']['App']['GetPreferences'](arg1);
 }
@@ -486,20 +470,12 @@ export function IsInitialized() {
   return window['go']['app']['App']['IsInitialized']();
 }
 
-export function ListBenchmarkBooksView(arg1) {
-  return window['go']['app']['App']['ListBenchmarkBooksView'](arg1);
-}
-
 export function ListDetectionTaskStatuses(arg1) {
   return window['go']['app']['App']['ListDetectionTaskStatuses'](arg1);
 }
 
 export function ListIssueTickets(arg1) {
   return window['go']['app']['App']['ListIssueTickets'](arg1);
-}
-
-export function ListPlatformMetricsView(arg1) {
-  return window['go']['app']['App']['ListPlatformMetricsView'](arg1);
 }
 
 export function ListRemoteSkills(arg1) {
@@ -550,14 +526,6 @@ export function PlaceVolume(arg1) {
   return window['go']['app']['App']['PlaceVolume'](arg1);
 }
 
-export function PreviewBenchmarkBooks(arg1, arg2) {
-  return window['go']['app']['App']['PreviewBenchmarkBooks'](arg1, arg2);
-}
-
-export function PreviewPlatformMetrics(arg1, arg2) {
-  return window['go']['app']['App']['PreviewPlatformMetrics'](arg1, arg2);
-}
-
 export function RebuildAggregated(arg1) {
   return window['go']['app']['App']['RebuildAggregated'](arg1);
 }
@@ -606,10 +574,6 @@ export function SaveAvatar(arg1) {
   return window['go']['app']['App']['SaveAvatar'](arg1);
 }
 
-export function SaveBenchmarkBooksText(arg1, arg2) {
-  return window['go']['app']['App']['SaveBenchmarkBooksText'](arg1, arg2);
-}
-
 export function SaveContent(arg1) {
   return window['go']['app']['App']['SaveContent'](arg1);
 }
@@ -628,10 +592,6 @@ export function SaveLLMConfig(arg1) {
 
 export function SavePersonaSetting(arg1, arg2) {
   return window['go']['app']['App']['SavePersonaSetting'](arg1, arg2);
-}
-
-export function SavePlatformMetricsText(arg1, arg2, arg3) {
-  return window['go']['app']['App']['SavePlatformMetricsText'](arg1, arg2, arg3);
 }
 
 export function SaveSettings(arg1) {
