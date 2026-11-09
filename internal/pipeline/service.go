@@ -1984,7 +1984,7 @@ func (s *Service) runStockAudit(ctx context.Context, novelID int64) (AuditData, 
 // stockAuditPrompt 构造「全量对齐」全本现状体检的任务提示词。issue JSON 契约片段由 contract.go 单源生成（全量契约）。
 func stockAuditPrompt(novelID int64) string {
 	return fmt.Sprintf("本书 novel_id=%d。请对全书做**签约级现状体检**：用 get_chapter_list 列出全部章节，**逐章通读所有已落库章节**（不得抽样跳章），"+
-		"从签约编辑视角评估：开篇钩子与过签力、人设记忆点、节奏与爽点密度、世界观/设定自洽、完本潜力、题材契合与数据预期等维度，逐维打分并举证；"+
+		"从签约编辑视角按 signability-audit 八维逐维打分并举证：开篇过签力（黄金三章）、题材契合与差异化、人设卖点、节奏与爽点密度、世界/设定自洽与卖点、长线牵引（追读钩子）、平台调性合规、读者视角；"+
 		"最终回复末尾**必须**附一个 ```json 代码块，格式："+
 		auditFormatLine(true, issueSampleDefault)+"——"+issueFieldRules()+
 		"存在任意 P0 致命伤 → verdict=needs_fix；无 P0 且 score≥29/40 → pass。", novelID)

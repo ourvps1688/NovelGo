@@ -277,6 +277,16 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 		require.Contains(t, p, rules, "%s 应引用契约必填说明", name)
 		require.Contains(t, p, `"schema_version"`, "%s 应要求 schema_version", name)
 	}
+	// 存量体检曾写「数据预期」这个不属于现行八维的口径（对标书库/平台对账下线后
+	// 一并失效）；改锁八维列举，防止自由发挥维度或旧口径回潮。
+	stock := stockAuditPrompt(1)
+	require.NotContains(t, stock, "数据预期", "存量体检提示词不得再引用非八维口径")
+	for _, dim := range []string{
+		"开篇过签力", "题材契合与差异化", "人设卖点", "节奏与爽点密度",
+		"世界/设定自洽", "长线牵引", "平台调性合规", "读者视角",
+	} {
+		require.Contains(t, stock, dim, "存量体检提示词应与 signability-audit 八维对齐")
+	}
 	for name, p := range map[string]string{
 		"blueprintAuditPrompt": blueprintAuditPrompt(1),
 		"driftPatrolPrompt":    driftPatrolPrompt(1),

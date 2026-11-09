@@ -33,8 +33,10 @@ func TestBuildAlwaysSkillsContent_MergesEnabled(t *testing.T) {
 	}
 	novelID := int64(42)
 
-	// 勾选启用 skill-enabled；ghost 已不存在，应被忽略
-	if err := skill.SaveEnabled(novelID, []string{"skill-enabled", "ghost"}); err != nil {
+	// 勾选启用 skill-enabled；signability-workflow 是 2026-10-18 退役删除的内置编排技能，
+	// 老小说的 .enabled.json 与历史 system 消息里仍可能残留该名字。启用清单必须与
+	// 真实 meta 取交集：退役名静默忽略，不注入常驻正文、不进技能目录、不报错。
+	if err := skill.SaveEnabled(novelID, []string{"skill-enabled", "signability-workflow"}); err != nil {
 		t.Fatalf("SaveEnabled: %v", err)
 	}
 
@@ -58,6 +60,9 @@ func TestBuildAlwaysSkillsContent_MergesEnabled(t *testing.T) {
 			t.Errorf("常驻注入不应包含 %s\ngot: %s", notWant, content)
 		}
 	}
+	if strings.Contains(content, "signability-workflow") {
+		t.Errorf("已退役技能名残留不应进入常驻注入\ngot: %s", content)
+	}
 
 	// 已勾选启用的技能从 auto 目录中排除（与 BuildSystemMessages 中组合一致），避免重复
 	enabled, _ := skill.LoadEnabled(novelID)
@@ -67,6 +72,9 @@ func TestBuildAlwaysSkillsContent_MergesEnabled(t *testing.T) {
 	}
 	if !strings.Contains(catalog, "skill-auto") {
 		t.Errorf("目录应包含未启用的 skill-auto\ngot: %s", catalog)
+	}
+	if strings.Contains(catalog, "signability-workflow") {
+		t.Errorf("目录不应包含启用清单里残留的退役技能名\ngot: %s", catalog)
 	}
 
 	// 未勾选任何技能时回到原有行为：仅 always 注入

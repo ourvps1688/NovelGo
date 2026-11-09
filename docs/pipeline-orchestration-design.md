@@ -76,7 +76,7 @@
 | S1 孵化 | `book-pitch` skill + `BookPitchWorkflowView` | G1 确认书名/简介/卖点 | `novelgo.md` 元数据 + 一句话卖点 |
 | S2 蓝图（**自动建卷/写卷纲**） | `story-blueprint` skill（一次性 agent run）+ `create_volume` / 写卷纲工具（**落库**） | G2 确认大纲/卷纲/立意/爽点地图 | 卷结构（Volumes 落库）+ `blueprint.md` + 各卷卷纲 |
 | S3 逐章 | **写章细纲(强制前置)** → `edit` → `评分门禁` → **`statesync`(强制,必须落库)** → `review` 子 agent | 内部每章走评分门禁；**无章细纲不得 edit、台账未同步完不得进下一章/闸门**；卷1前3章完成后进 S4a；每5章/卷边界进 G3b | 章节正文 + 章细纲 + 评分 + 台账同步结果 + 审稿意见 |
-| S4 签约评审（开篇/里程碑/完本触发） | `signability-audit` skill（一次性 agent run） | **自身即门**：产出 issue list + 通过/不通过判定，驱动 S5 | 签约体检报告 + issue list（编辑审稿口径/黄金三章/完本潜力/数据预期） |
+| S4 签约评审（开篇/里程碑/完本触发） | `signability-audit` skill（一次性 agent run） | **自身即门**：产出 issue list + 通过/不通过判定，驱动 S5 | 签约体检报告 + issue list（编辑审稿口径/黄金三章/八维评分与举证） |
 | S5 修复（共享） | 复用 `edit` / 卷纲工具 / 章细纲 / `statesync` 复查 | 按 issue list 改完回到 S4 复评（通过则出循环／不通过继续修／用户可强制继续） | 修正后的卷纲/章细纲/正文/逻辑/台账 |
 | S6 完本终检 | `signability-audit`(全本) | G终 完本确认 | 终检报告 |
 
