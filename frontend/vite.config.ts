@@ -11,6 +11,9 @@ export default defineConfig({
     },
   },
   server: {
+    // 固定绑 IPv4：Wails dev server 只监听 127.0.0.1，Vite 若解析到 ::1
+    // 会让 localhost/wails.localhost 的双栈解析落在不匹配的栈上，页面加载失败即白屏。
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
   },
