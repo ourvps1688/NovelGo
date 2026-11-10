@@ -30,18 +30,18 @@
 - parseAudit 禁把 LLM 原文塞 Summary/Desc（7cb519d8）；idleRetryable 零字节空转=不可重试（c4afcb37）。
 - args_coerce.go JSON 文本参数宽容化（8add66ac）；golangci-lint 禁 reflect.Ptr 须 reflect.Pointer。
 - 一致性巡检（0da8355c）：单次归并+本地预筛+内联语料帽+patrolSynthesizeMaxTokens=48k；dev 运行中改 Go 文件会杀在途任务。
-- 工单状态回退（298d779c，#100）：ReplaceIssuesByPrefix 换血按「键+Area→Area 兜底」继承流转状态（carryIssueWorkflow）；StartIssueFixTickets 幂等容忍+issueFixMu 互斥排空循环+dispatchExecutorUnique 防孤儿化；pre_verify_status 快照+verifyRestoreStatus 恢复；前端两视图补订 fix/verify 事件失效内联查询。
+- 工单状态回退（298d779c，#100）：ReplaceIssuesByPrefix 换血按「键+Area→Area 兜底」继承流转状态（carryIssueWorkflow）；pre_verify_status 快照+verifyRestoreStatus 恢复；前端两视图补订 fix/verify 事件失效内联查询。**注：本条中 `StartIssueFixTickets`/`issueFixMu`/`dispatchExecutorUnique` 是当时实现，2026-11-10 后台自动修复全清时已删除；carryIssueWorkflow 与状态继承口径仍有效**。
 - 写章误入最后一卷（8c919913，#99）：多卷书裸 new.md 一律拒绝并列卷清单（0 卷→未分卷/1 卷→该卷兜底），废弃 LastByNovel 静默默认（rw_tools 审批前解析）；新增 move_chapter 移章工具（chapter.Store.Place 封装，target 0=未分卷、before 缺省推断目标组、metadata_only 事件刷前端目录）。
 - 安全审核定位（1f670de5，#101）：巡检语料单元同源回收（章/台账行，截断逐行重建）；patrol_safety.go 二分探针（control 先行+64 探针/8min 帽+三态）与词面提示降级；软拒绝、APIError 审核错误双路径回显原文+定位结果；探测走 llmClient.GenerateText 非 skillRunner。
 - 定位须覆盖整条真实请求（#104）：request_units.go 把 prompt + 本次 session 工具返回切同源连续片段（baseline 按 MAX(messages.id) 圈定本次，pipeline skillRunner 不回放 DB 历史、勿误判会话累积）；detect.go 双路径落可见 error 报告，安全类硬错误不得静默降级；patrol 探针必须含提示词/预筛/上下文块，否则「逐段探测全清」只是覆盖缺口；摘录首尾双窗；前端 last_summary 用 whitespace-pre-wrap。
-- 台账 alive 写入面（#102）：create/update_character 开放 `Alive *bool`（指针三态、仅 在世→已死 单向、DisallowUnknownFields 保护不回退）；fix_reachability.go 派发前字段可达性预检+护栏**只注入派发层 prompt**（fixPrompt 全文被 p0 golden 基线锁定，勿改单源）。
+- 台账 alive 写入面（#102）：create/update_character 开放 `Alive *bool`（指针三态、仅 在世→已死 单向、DisallowUnknownFields 保护不回退）；护栏**只注入派发层 prompt**（fixPrompt 全文被 p0 golden 基线锁定，勿改单源）。**注：原 `fix_reachability.go` 护栏随后台自动修复全清已删除，本条保留的是「人工 alive 写入 + 单向」口径**。
 - 生死态派生（#103）：statesync 派发前 `character.DeriveAliveFromChapter` 从本章正文高精度单向标死（宁漏勿误、LLM 复核补漏、名单+摘录注入 instruction；人工裁决 source!=auto 优先不再覆盖）；`RunStateSyncForChapter` 增 db 参数（rw_tools 与 app/handler 两处调用点）；app `Create/UpdateCharacterInput.Alive *bool` 是唯一人工复活通道（MCP 工具仍单向）。存量 #121/#126 已于 2026-11-08 02:02 经用户授权修正（alive=0 + auto 履历，定点备份见日志）。
 - 复验字数口径（#105）：**word_count = 纯汉字+英文词（`text.ComputeStats`），不含标点/换行；含标点字符数、`@字符N/charN` 偏移都不是字数，台账/任务卡/证据片段不计入章长**。字数类必须走阶段1 L0 `tryL0Verify` 本地确定性判定：`mechanicalCheckKeywords` 补 `CheckOpeningLength`（命中即删 `chapter_length_fit`，作用域零重叠）、`parseChapterLengthWindow` 从工单处方取区间（零 checker profile 也须可判）、过滤 RunL0Checks 的 profile 口径防双口径；阶段2 两条语料路径都标「权威字数」+ `verifyPrompt`/signability-verify.md 硬性口径声明。正文不可读/无区间→回落 LLM 绝不瞎判。勿把确定性数字判断交回 LLM 数字符。
-- 工单终态保护（#106）：**`UpdateIssueStatus` 兼容写必须条件 CAS** `WHERE status NOT IN (verified,dismissed,verifying)`，章节重写比复验晚收口时绝不把 verified 打回 fixed（verifying 事务分支同样拒绝终态）；`VerifyIssueTickets` 在写状态/派发前按 run 用 `issueFixActive` 拒绝修复在途的复验（避免读到未定稿正文 + 半截 verifying）。修复执行体快照的工单可能已被人工收口，收口写回一律走条件 CAS。
+- 工单终态保护（#106）：**`UpdateIssueStatus` 兼容写必须条件 CAS** `WHERE status NOT IN (verified,dismissed,verifying)`，章节重写比复验晚收口时绝不把 verified 打回 fixed（verifying 事务分支同样拒绝终态）。修复执行体快照的工单可能已被人工收口，收口写回一律走条件 CAS。**注：原 `VerifyIssueTickets` 用 `issueFixActive` 拒绝「修复在途」的互斥护栏，随后台自动修复全清已删除（不再有在途执行体）；CAS 终态保护仍有效**。
 - 卖点引导项（#107）：**标签/方向/一句话卖点/平台/风格五类落 `preference_items`，被 `intentFromPitch`（Intent 块）与 `NovelProfile→FormatPreferences`（system 全量注入，无 category 过滤）两条链路真实消费，绝非「仅做记录」**；`preferenceCategories.ts` 旧注释是错的，已修。唯一写入口必须是 `app.UpsertPitchPreferences`（全量 PUT、单事务按 novel_id+category 收敛、空串清除），严禁再逐条 `CreatePreference` 纯新增（自动保存+手动采纳会写两组，旧稿与冲突平台值一起进 system 白烧 token）。**保护边界**：`平台约束/创作约束` 与用户手写长纪律共用分类，>80 rune 且不等于本次值的历史行视为手写纪律、收敛不触碰，前端 read 也跳过；方向/标签/卖点无此包袱可全量收敛。平台名命中注册 preset 且该书**无检查器配置行**时自动武装 platform_profile（七猫→qimao，不覆盖已有行）。
 
 ## 技能触发链（#108，勿回退）
-- 27 个 builtin **无一个 `mode: always`**；写章消息原先只注入 `next` 一个 manual 提醒（maxAuto=1/maxManual=1），其编排的 10 个技法技能在写章语料下 cue 命中 0，历史 55 次 next 注入仅 2 次真 `read /builtin/skills/`。**写章必须走 bundle**：`app.buildWritingSkillBundle` 按单源 `writingBundleSkills`（reader-immersion/scene-beats/plot-hook）注入纯正文、双封顶、声明为硬约束。
+- builtin **无一个 `mode: always`**（当时 27 个；2026-11-10 退役 4 个后现值 23）；写章消息原先只注入 `next` 一个 manual 提醒（maxAuto=1/maxManual=1），其编排的 10 个技法技能在写章语料下 cue 命中 0，历史 55 次 next 注入仅 2 次真 `read /builtin/skills/`。**写章必须走 bundle**：`app.buildWritingSkillBundle` 按单源 `writingBundleSkills`（reader-immersion/scene-beats/plot-hook）注入纯正文、双封顶、声明为硬约束。
 - 注入一律用 `sk.Content` 或 `skill.Body`（LF/CRLF 通吃），**禁用 `sk.RawContent`**（会把 CRLF YAML frontmatter 拼进提示词）。`stripFrontmatter` 已委托 `skill.Body`。
 - `notWhen` 是 cue 边界单源：给 next 加宽泛 cue「动笔」必须同时保留 `notWhen: [动笔前]`，否则 canary / fallback 基准的 collect 样本被抢。`explicitSkillNames` 不得把「消息整体等于技能名」当显式点名排除（裸发 next 会永不触发）。`chat:started` 事件带 `skills` 供前端徽标，是唯一可见性通道。
 
@@ -72,8 +72,15 @@
 - render 禁 Date.now()/new Date()；vitest 偶发沙箱失败以四道闸兜底；wails 绑定文件噪声 git checkout 还原。
 - 无 sqlite3 CLI：`node -e "require('node:sqlite').DatabaseSync(...,{readOnly:true})"`；tasks 非终态=status NOT IN ('done','dead')。
 
-## 工单修复双轨（#270，2026-11-10 收口，勿回退）
-- 「去修复」= 发 chat + `StartManualIssueFixTickets`（只置 fixing，**不派发自动执行体、不占 `issueFixActive`**）；`StartIssueFixTickets` 仅由「自动修复」显式按钮触发，R5-2 执行体（互斥/排空/FixRounds/回执）一字未动。`IssueTicketsPanel`/`PatrolReportPanel` 两个面板同口径。
-- 状态机补 `fixing → fixed` 人工收口出口；`CloseIssueFixTickets`（标记已修复留 note）/`CancelIssueFixTickets`（回 pending）经 `rejectFixInFlight` 拒绝自动执行体在途的 run。前端新增「标记已修复 / 取消修复 / 自动修复」。
+## 工单修复双轨（#270，2026-11-10 收口；**历史方案，已被下方「全清」覆盖**）
+- 「去修复」= 发 chat + `StartManualIssueFixTickets`（只置 fixing，**不派发自动执行体、不占 `issueFixActive`**）；`IssueTicketsPanel`/`PatrolReportPanel` 两个面板同口径。
+- 状态机补 `fixing → fixed` 人工收口出口；`CloseIssueFixTickets`（标记已修复留 note）/`CancelIssueFixTickets`（回 pending）。前端「标记已修复 / 取消修复」保留。
 - 事故原型：chat 修完点复验报「修复任务仍在进行中」，旧「去修复」隐含派发的后台执行体跑 72 分钟未落回执（heartbeat 一直续租、工单 round=0）。**`issueFixActive` 是进程内标记，只有执行体返回或重启才摘**；处置 = 停 dev → 启动清扫 `AbandonActive` 置 dead → 工单人工收口为 fixed → 冷启动。别让用户干等，也别只改 DB（内存标记还在）。
 - 前端闸门脚本链用 `| tail` 会吞掉 `tsc -b` 失败仍打印成功，**必须 `set -o pipefail`**；新增 toolbar kind 要同步 `BusyKind` type alias，否则 TS2345/TS2367。
+
+## 后台自动修复彻底下线（2026-11-10，用户判定「全清+技能退役」，勿回退）
+- **所有修复都走 chat**：用户明确「后台自动 LLM 修复并不需要」。删 `app.StartIssueFixTickets` 绑定 + `internal/pipeline` 整条运行时链（互斥 `issueFixActive`/`issueFixMu`、`taskKindIssueFix`、`dispatchExecutorUnique`、分组批处理、台账/正文执行体、修复回执链 `parseFixReceipt`/`applyFixReceipt`、漂移巡检 `runBlueprintDriftPatrol`、字段可达性护栏 `fix_reachability.go`）；`VerifyIssueTickets` 的修复在途死护栏删除；`GateContext.FixRounds` 保留兼容读恒为 0。
+- **技能 27→23**：退役 `signability-fix`/`blueprint-fix`/`chapter-rewrite`/`blueprint-drift-check` 四个 builtin md + `skillrun.go` 三条专用 Agent 映射；`health_test.go` 内置技能数断言改 23，`WorkflowAutoArms` 去自动重写语义。**p0 golden 五构造器（fixPrompt/chapterRewritePrompt/blueprintFixPrompt/fixLogBlock/fixReceiptFormatLine）仅作测试与契约单源保留、生产零调用，函数体仍逐字不动**。
+- 前端删「自动修复」按钮 + `autoFix`/`autoFixHint`/`autoFixOk` 双语键 + wails 绑定条目；`issue_no_auto_fix_test.go` 用 `autoFixBanned` 静态扫描（源码 + 前端入口 + 退役技能 + 手工链路与 golden 构造器仍在）锁死零回潮。
+- 文档口径：`docs/TECHNICAL_STATUS_AND_GUARDRAILS.md` §3 现值 23 + §9 变更行；`AGENTS.md` 新增「工单修复唯一路径」；`docs/skill-wiring-contract-2026-11-09.md` 的 27 技能表/验收判据是**下线前历史时点快照，原样保留不回改**，仅在头部、§6.5、C.3、C.4 加时点注记。
+- 闸门坑：删代码后 `golangci-lint` 报 3 个残留死 helper（`countKey`/`upsertManualItem`/`emitFixStart` wrapper，后者只删 wrapper、保留 `emitFixStartSlot`+`swapEmitFixStart` 测试接缝）；前端 `format:check` 因删 JSX 后 `BusyKind` 格式挂，`build` 需 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 绕 vite emptyDir 的 shim 批量删除守卫。
