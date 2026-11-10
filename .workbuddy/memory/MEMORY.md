@@ -67,6 +67,7 @@
 
 ## 排障
 - 重启 dev：全套 CGO export+`CODEBUDDY_SAFE_DELETE_ENABLED=0` 跑 wails dev（shim 拦 vite emptyDir；tsc -b 重吐 assets）。杀旧进程用 PowerShell Get-Process 取真实 PID（**循环变量禁叫 `$pid`，只读自动变量**）。5173 白屏=正常。判据=exe mtime 更新 + 二进制含新文案符号 + 34115/5173 双端口监听；`models.ts` 生成噪声 git checkout 还原，`novelgo-res.syso` 编译后自清理。旧后台任务 exit 127 是停进程预期通知。
+- **dev 运行中忽然白屏（2026-11-11 判据）**：多为 **localhost 双栈绑定错配**而非代码问题——Wails dev server 34115 只绑 `127.0.0.1`、Vite 8（vite.config.ts 的 `server` 未设 `host`）只绑 `::1`；`localhost` 解析切换后重载即取不到资源 → 纯白且零报错。判据用 `curl --noproxy '*'` 打四种组合：`127.0.0.1:34115`=200、`[::1]:34115`=超时、`127.0.0.1:5173`=超时、`[::1]:5173`=200；配套佐证=后端仍在写库 + WebView2 全 Responding + 前端源码 mtime 未变 + 日志零 error/panic + 到 5173 只剩 TimeWait。处置=冷启动恢复；根治=`server.host:'127.0.0.1'` 或 `-frontenddevserverurl http://127.0.0.1:5173`（未做，会复发）。**旧口径「5173 白屏=正常」仅指浏览器直开 5173 时 `window.go` 未注入，别拿它套 Wails 应用窗口白屏**。`novelgo-llm.log` 密集 `idle watchdog 9m` 是流结束后延迟清理的既有噪声，非白屏根因；Bash 的 `HTTP_PROXY` 与 Windows `ProxyOverride` 是两套，系统层已 bypass localhost。
 - watcher 失活判据：无 [Rebuild triggered]+exe mtime 停滞→整机重启 dev。**exe mtime 更新≠跑的是最新代码**：watcher 可能只重建一次就失活，须按「最后一个改动」的具体符号/文案核验（#107 曾出现 23:19 中间版本缺 23:35 才补的保护逻辑）。
 - git commit 含 Go 必须同条命令带 export；commit 可能谎报 "nothing to commit"——git log 核实后单独补 push。
 - render 禁 Date.now()/new Date()；vitest 偶发沙箱失败以四道闸兜底；wails 绑定文件噪声 git checkout 还原。
