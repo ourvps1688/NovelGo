@@ -38,6 +38,10 @@ export function CancelExtractPattern(arg1) {
   return window['go']['app']['App']['CancelExtractPattern'](arg1);
 }
 
+export function CancelIssueFixTickets(arg1, arg2) {
+  return window['go']['app']['App']['CancelIssueFixTickets'](arg1, arg2);
+}
+
 export function CancelIssueVerify(arg1, arg2) {
   return window['go']['app']['App']['CancelIssueVerify'](arg1, arg2);
 }
@@ -60,6 +64,10 @@ export function CompressContext(arg1) {
 
 export function ComputeStyleStats(arg1) {
   return window['go']['app']['App']['ComputeStyleStats'](arg1);
+}
+
+export function CloseIssueFixTickets(arg1, arg2) {
+  return window['go']['app']['App']['CloseIssueFixTickets'](arg1, arg2);
 }
 
 export function ConfirmIssueTickets(arg1, arg2) {
@@ -660,6 +668,10 @@ export function SetVolumeFrozen(arg1, arg2, arg3) {
 
 export function StartIssueFixTickets(arg1, arg2) {
   return window['go']['app']['App']['StartIssueFixTickets'](arg1, arg2);
+}
+
+export function StartManualIssueFixTickets(arg1, arg2) {
+  return window['go']['app']['App']['StartManualIssueFixTickets'](arg1, arg2);
 }
 
 export function StartPipeline(arg1, arg2, arg3, arg4) {

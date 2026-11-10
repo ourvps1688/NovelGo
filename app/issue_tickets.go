@@ -7,8 +7,9 @@ import (
 )
 
 // ── 发现项工单面板 API（R5-1，提案 §10.1/§10.2）──────────────────────────────
-// 工单面板按钮（去修复/复验/驳回/确认）经此调用 pipeline.Service 的工单入口。
-// 修复执行改工单被动触发属 R5-2；此处只做流转与显式复验。
+// 工单面板按钮（去修复/自动修复/标记已修复/取消修复/复验/驳回/确认）经此调用
+// pipeline.Service 的工单入口。#270 起「去修复」是人工 chat 路径，只有「自动修复」
+// 才派发后台 LLM 修复执行体；修复执行改工单被动触发属 R5-2。
 
 // ListIssueTickets 列出一本书的全部发现项工单（跨 run，新单在前）。
 func (a *App) ListIssueTickets(novelID int64) ([]pipeline.PipelineIssue, error) {
@@ -26,12 +27,38 @@ func (a *App) ConfirmIssueTickets(novelID int64, refs []pipeline.IssueTicketRef)
 	return a.pipeline.ConfirmIssueTickets(a.ctx, novelID, refs)
 }
 
-// StartIssueFixTickets 「去修复」：选中工单进入人工修复中（状态机：→修复中）。
+// StartManualIssueFixTickets 「去修复」（人工路径）：选中工单进入「修复中」，由前端把
+// 问题上下文发到 chat 协作修复；不派发后台自动修复执行体。
+func (a *App) StartManualIssueFixTickets(novelID int64, refs []pipeline.IssueTicketRef) error {
+	if a.pipeline == nil {
+		return fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.StartManualIssueFixTickets(a.ctx, novelID, refs)
+}
+
+// StartIssueFixTickets 「自动修复」（显式按钮）：工单进入「修复中」并异步派发 LLM
+// 修复执行体；与「去修复」的人工 chat 路径互斥，不再由其隐含触发。
 func (a *App) StartIssueFixTickets(novelID int64, refs []pipeline.IssueTicketRef) error {
 	if a.pipeline == nil {
 		return fmt.Errorf("创作流水线服务未初始化")
 	}
 	return a.pipeline.StartIssueFixTickets(a.ctx, novelID, refs)
+}
+
+// CloseIssueFixTickets 「标记已修复」：chat 人工修完后把「修复中」收口为「已修复待复验」。
+func (a *App) CloseIssueFixTickets(novelID int64, refs []pipeline.IssueTicketRef) error {
+	if a.pipeline == nil {
+		return fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.CloseIssueFixTickets(a.ctx, novelID, refs)
+}
+
+// CancelIssueFixTickets 「取消修复」：放弃本次人工修复，工单退回待确认。
+func (a *App) CancelIssueFixTickets(novelID int64, refs []pipeline.IssueTicketRef) error {
+	if a.pipeline == nil {
+		return fmt.Errorf("创作流水线服务未初始化")
+	}
+	return a.pipeline.CancelIssueFixTickets(a.ctx, novelID, refs)
 }
 
 // VerifyIssueTickets 「复验」：对选中工单定点复验并落复验回执（复验通过/退回待修）。

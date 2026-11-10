@@ -10,8 +10,9 @@ import {
 } from "lucide-react";
 import type { pipeline } from "@/lib/wailsjs/go/models";
 import {
+  CloseIssueFixTickets,
   ListIssueTickets,
-  StartIssueFixTickets,
+  StartManualIssueFixTickets,
   VerifyIssueTickets,
 } from "@/lib/wailsjs/go/app/App";
 import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
@@ -209,6 +210,7 @@ export default function PatrolReportPanel({
   // 单条「去修复」（#270 语义单条版）：把该张力项的清理内容发到中央聊天（最重要的
   // 下一步，先发不吞），并把对应工单翻为「修复中」留痕；旧报告无对应工单时退化为
   // 纯聊天发送（不丢下一步），绝不阻断人工修复入口。
+  // #270 双轨拆分：走人工路径，不派发后台自动修复，chat 修完可直接收口/复验。
   const onFixOne = useCallback(
     async (it: AuditIssue) => {
       if (!it.id || !novelId || !runId) return;
@@ -232,11 +234,33 @@ export default function PatrolReportPanel({
           (r) => r.run_id === ref.run_id && r.issue_key === ref.issue_key,
         );
         if (hit) {
-          await StartIssueFixTickets(novelId, [ref]);
+          await StartManualIssueFixTickets(novelId, [ref]);
           toastSuccess(t("pipeline.patrol.fixSent"));
         } else {
           toastInfo(t("pipeline.patrol.fixNoTicket"));
         }
+        void loadTickets();
+      } catch (error) {
+        toastError(toErrorMessage(error));
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [novelId, runId, t, loadTickets],
+  );
+
+  // 单条「标记已修复」：chat 里人工修完后显式收口（修复中 → 已修复待复验），
+  // 之后即可点复验；自动修复执行体在途时由后端拒绝。
+  const onCloseOne = useCallback(
+    async (it: AuditIssue) => {
+      if (!it.id || !novelId || !runId) return;
+      const key = `close:${it.id}`;
+      setBusyKey(key);
+      try {
+        await CloseIssueFixTickets(novelId, [
+          { run_id: runId, issue_key: it.id },
+        ]);
+        toastSuccess(t("pipeline.tickets.closeFixOk", { count: 1 }));
         void loadTickets();
       } catch (error) {
         toastError(toErrorMessage(error));
@@ -426,8 +450,9 @@ export default function PatrolReportPanel({
                     </p>
                   ) : null}
                   <IssueScopeTags issue={it} />
-                  {/* 单条人工入口（复用工单闭环）：去修复=发聊天+标修复中；复验=定点核验。
-                      仅在能定位工单（runId+issue.id）时渲染；动作均人工触发，不自动改稿。 */}
+                  {/* 单条人工入口（复用工单闭环）：去修复=发聊天+标修复中（不派自动修复）；
+                      标记已修复=人工收口；复验=定点核验。仅在能定位工单时渲染，
+                      动作均人工触发，不自动改稿。 */}
                   {runId && novelId && it.id ? (
                     <div className="mt-2 flex items-center gap-2">
                       <button
@@ -442,6 +467,20 @@ export default function PatrolReportPanel({
                           <Wrench className="h-3 w-3" />
                         )}
                         {t("pipeline.tickets.fix")}
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                        title={t("pipeline.tickets.closeFixHint")}
+                        disabled={busyKey !== null || verifyingId !== null}
+                        onClick={() => void onCloseOne(it)}
+                      >
+                        {busyKey === `close:${it.id}` ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <ClipboardCheck className="h-3 w-3" />
+                        )}
+                        {t("pipeline.tickets.closeFix")}
                       </button>
                       <button
                         type="button"

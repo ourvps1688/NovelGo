@@ -49,10 +49,12 @@ var (
 // 复验退回 pending=退回待修，与显式复验 VerifyIssueTickets 同口径）。
 // verified/dismissed 是终态无出边；→verified 一律只经 RecordIssueVerify（必带复验回执），
 // 不经通用流转。本表只管工单面板显式流转，流水线内部同步（syncIssueRow）不校验（兼容写）。
+// fixing → fixed 是 #270 双轨拆分后新增的人工收口出口：chat 里修完点「标记已修复」
+// 落到「已修复待复验」，不再依赖后台自动修复执行体的回执。
 var issueTicketNext = map[string][]string{
 	IssueStatusPending:   {IssueStatusConfirmed, IssueStatusFixing, IssueStatusDismissed},
 	IssueStatusConfirmed: {IssueStatusFixing, IssueStatusDismissed},
-	IssueStatusFixing:    {IssueStatusPending, IssueStatusDismissed},
+	IssueStatusFixing:    {IssueStatusPending, IssueStatusDismissed, IssueStatusFixed},
 	IssueStatusFixed:     {IssueStatusFixing, IssueStatusPending, IssueStatusDismissed},
 	IssueStatusRewrite:   {IssueStatusFixing, IssueStatusDismissed},
 	IssueStatusSkipped:   {IssueStatusFixing, IssueStatusDismissed},

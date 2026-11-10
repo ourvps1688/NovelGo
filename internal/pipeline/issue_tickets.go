@@ -49,9 +49,45 @@ func (s *Service) ConfirmIssueTickets(ctx context.Context, novelID int64, refs [
 	return s.transitionIssueTickets(ctx, novelID, refs, IssueStatusConfirmed, "")
 }
 
-// StartIssueFixTickets 「去修复」：工单进入（人工）修复中（状态机：→修复中），并异步派发
-// 修复执行体（#240 R5-2 工单接执行：修复动作由人显式触发，执行体按 run 聚合全部 fixing
-// 态工单被动处理）。幂等容忍：已在 fixing 态的工单不报错（重复点击/跨批重试直接并入，
+// StartManualIssueFixTickets 是工单面板「去修复」的人工路径（#270 双轨拆分）：
+// 把选中工单置「修复中」，前端同时把问题上下文发到 chat 交给人工/AI 协作修复。
+// **不派发后台自动修复执行体，也不占用 issueFixActive 互斥窗口**——chat 里修完点
+// 「标记已修复」收口后即可复验，不会再被「修复任务仍在进行中」拦住。
+// 自动 LLM 修复保留为独立的显式按钮 StartIssueFixTickets（见下）。
+//
+// 同 run 若已有自动修复执行体在途（旧数据 / 点过「自动修复」），人工置 fixing 会被
+// 其排空循环拾起造成双轨抢单，故显式拒绝：等其结束或应用重启后再操作。
+func (s *Service) StartManualIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
+	if s.store == nil {
+		return errors.New("issue 工单表未初始化")
+	}
+	if len(refs) == 0 {
+		return errors.New("未选择工单")
+	}
+	if err := s.rejectFixInFlight(refs); err != nil {
+		return err
+	}
+	var errs []error
+	for _, ref := range refs {
+		row, err := s.store.getIssueRow(ctx, novelID, ref.RunID, ref.IssueKey)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
+			continue
+		}
+		if row.Status == IssueStatusFixing {
+			continue // 幂等：重复点「去修复」不报错
+		}
+		if err := s.store.TransitionIssueTicket(ctx, novelID, ref.RunID, ref.IssueKey, IssueStatusFixing, ""); err != nil {
+			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// StartIssueFixTickets 「自动修复」（显式按钮）：工单进入修复中并异步派发 LLM 修复
+// 执行体（#240 R5-2 工单接执行：修复动作由人显式触发，执行体按 run 聚合全部 fixing
+// 态工单被动处理）。#270 后不再是「去修复」的隐含行为——「去修复」走人工 chat 路径
+// StartManualIssueFixTickets，只有用户明确点「自动修复」才进本入口。幂等容忍：已在 fixing 态的工单不报错（重复点击/跨批重试直接并入，
 // 由在跑执行体排空拾起）；逐条独立、部分失败不整体放弃——成功的照常派发，失败的逐条
 // 报错（#100 帮凶修复：旧实现任一条流转失败即整批放弃派发，同批工单全部陪葬）。
 // 「置 fixing + 派发决策」在 issueFixMu 互斥锁内完成，与执行体的「排空扫描 + 摘标记」
@@ -445,6 +481,70 @@ func (s *Service) transitionIssueTickets(ctx context.Context, novelID int64, ref
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// CloseIssueFixTickets 「标记已修复」：chat 人工修复完成后的显式收口（fixing → fixed）。
+// fixed 是「已修复待复验」态，走状态机校验并留 note，不碰 verified/dismissed 终态
+// （#106 保护）。自动修复执行体在途时拒绝：其晚到回执会覆盖人工结论，且正文可能仍在
+// 被改写，此时收口后立即复验会读到未定稿语料。
+func (s *Service) CloseIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
+	return s.closeManualFix(ctx, novelID, refs, IssueStatusFixed,
+		"人工修复完成，显式收口（待复验）")
+}
+
+// CancelIssueFixTickets 「取消修复」：放弃这次人工修复，工单退回待确认
+// （fixing → pending，状态机已有出边）。同样拒绝自动修复在途的 run。
+func (s *Service) CancelIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
+	return s.closeManualFix(ctx, novelID, refs, IssueStatusPending,
+		"取消修复，退回待确认")
+}
+
+func (s *Service) closeManualFix(ctx context.Context, novelID int64, refs []IssueTicketRef, to, note string) error {
+	if s.store == nil {
+		return errors.New("issue 工单表未初始化")
+	}
+	if len(refs) == 0 {
+		return errors.New("未选择工单")
+	}
+	if err := s.rejectFixInFlight(refs); err != nil {
+		return err
+	}
+	var errs []error
+	for _, ref := range refs {
+		row, err := s.store.getIssueRow(ctx, novelID, ref.RunID, ref.IssueKey)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
+			continue
+		}
+		if row.Status == to {
+			continue // 幂等
+		}
+		if row.Status != IssueStatusFixing {
+			errs = append(errs, fmt.Errorf("工单 %s 当前为「%s」，只有「修复中」可收口",
+				ref.IssueKey, row.Status))
+			continue
+		}
+		if err := s.store.TransitionIssueTicket(ctx, novelID, ref.RunID, ref.IssueKey, to, note); err != nil {
+			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// rejectFixInFlight 是人工修复链路的统一互斥：自动修复执行体在途时，人工置 fixing /
+// 标记已修复 / 取消修复一律拒绝，避免两条链路抢同一批工单（#270 双轨拆分护栏）。
+func (s *Service) rejectFixInFlight(refs []IssueTicketRef) error {
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		if seen[ref.RunID] {
+			continue
+		}
+		seen[ref.RunID] = true
+		if s.issueFixRunning(ref.RunID) {
+			return fmt.Errorf("run %s 的自动修复执行体仍在途；请等它结束或重启应用后再做人工修复/收口", ref.RunID)
+		}
+	}
+	return nil
 }
 
 // VerifyIssueTickets 是工单面板「复验」按钮的执行入口（§10.3 显式复验）。审计 P0 起改为

@@ -9,11 +9,14 @@ import {
 } from "lucide-react";
 import type { pipeline } from "@/lib/wailsjs/go/models";
 import {
+  CancelIssueFixTickets,
   CancelIssueVerify,
+  CloseIssueFixTickets,
   ConfirmIssueTickets,
   DismissIssueTickets,
   ListIssueTickets,
   StartIssueFixTickets,
+  StartManualIssueFixTickets,
   VerifyIssueTickets,
 } from "@/lib/wailsjs/go/app/App";
 import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
@@ -29,6 +32,17 @@ function fmtTime(v?: unknown): string {
   const d = new Date(String(v));
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 }
+
+// 工具栏动作互斥键：#270 双轨拆分后新增自动修复/标记已修复/取消修复三种动作。
+type BusyKind =
+  | ""
+  | "confirm"
+  | "fix"
+  | "verify"
+  | "dismiss"
+  | "autoFix"
+  | "closeFix"
+  | "cancelFix";
 
 // 工单状态徽章配色（theme token，与 RetconPanel 同口径）：
 // 待行动态（pending/rewrite/retcon）警示色、进行态（confirmed/fixing/fixed）主色、
@@ -120,9 +134,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showAll, setShowAll] = useState(false);
-  const [busy, setBusy] = useState<
-    "" | "confirm" | "fix" | "verify" | "dismiss"
-  >("");
+  const [busy, setBusy] = useState<BusyKind>("");
   const [dismissOpen, setDismissOpen] = useState(false);
   const [dismissReason, setDismissReason] = useState("");
   // 供应商疑似挂起弹窗（#271 中期方案）：复验遇熔断时给可操作弹窗，区分可重试与真错误。
@@ -278,7 +290,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
 
   const runAction = useCallback(
     async (
-      kind: "confirm" | "fix" | "verify" | "dismiss",
+      kind: Exclude<BusyKind, "">,
       action: () => Promise<unknown>,
       okMsg: string,
     ) => {
@@ -319,6 +331,10 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
   // 「去修复」的下一步（#270）：把选中工单的问题上下文发到中央聊天窗口，给人工明确
   // 的修复入口；同时把状态翻为「修复中」以记录进度。即使状态标记失败（如供应商挂起），
   // 上下文已发到聊天，不丢失下一步。
+  // #270 双轨拆分：这里只走人工路径 StartManualIssueFixTickets —— **不派发后台自动
+  // LLM 修复执行体**。否则 chat 里人工修完后，后台仍在跑的执行体会一直占着
+  // issueFixActive 互斥窗口，让「复验」报「修复任务仍在进行中」，且晚到回执会
+  // 覆盖人工结论。自动修复改由独立的「自动修复」按钮显式触发。
   const onFix = useCallback(async () => {
     const rows = selectedRows;
     if (rows.length === 0) {
@@ -351,7 +367,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
         t("pipeline.tickets.fixPromptReachability");
       // 先发聊天（最重要的下一步），再标记状态，避免状态标记失败吞掉下一步。
       useChatLaunchStore.getState().send?.(content);
-      await StartIssueFixTickets(
+      await StartManualIssueFixTickets(
         novelId,
         rows.map((r) => refOf(r)),
       );
@@ -368,6 +384,34 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       setBusy("");
     }
   }, [selectedRows, novelId, t, load]);
+
+  // 「自动修复」：显式派发后台 LLM 修复执行体（#270 后不再是「去修复」的隐含行为）。
+  // 执行期间该 run 的人工收口与复验都会被互斥拒绝，须等执行体自行跑完。
+  const onAutoFix = useCallback(() => {
+    void runAction(
+      "autoFix",
+      () => StartIssueFixTickets(novelId, selectedRefs),
+      t("pipeline.tickets.autoFixOk", { count: selectedRefs.length }),
+    );
+  }, [runAction, novelId, selectedRefs, t]);
+
+  // 「标记已修复」：chat 里人工修完后的显式收口（修复中 → 已修复待复验）。
+  const onCloseFix = useCallback(() => {
+    void runAction(
+      "closeFix",
+      () => CloseIssueFixTickets(novelId, selectedRefs),
+      t("pipeline.tickets.closeFixOk", { count: selectedRefs.length }),
+    );
+  }, [runAction, novelId, selectedRefs, t]);
+
+  // 「取消修复」：放弃本次人工修复，退回待确认。
+  const onCancelFix = useCallback(() => {
+    void runAction(
+      "cancelFix",
+      () => CancelIssueFixTickets(novelId, selectedRefs),
+      t("pipeline.tickets.cancelFixOk", { count: selectedRefs.length }),
+    );
+  }, [runAction, novelId, selectedRefs, t]);
 
   // 「复验」审计 P0：入口只派发后台复验（立即返回已派发数），不再整段阻塞 LLM 调用；
   // 进度/结果经 pipeline:verify_progress / verify_done 事件推送，进行态由 verifyingRuns 呈现，
@@ -493,6 +537,7 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
               <button
                 type="button"
                 disabled={busy !== "" || selectedRefs.length === 0}
+                title={t("pipeline.tickets.fixHint")}
                 onClick={() => void onFix()}
                 className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
               >
@@ -502,6 +547,30 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
                   <Wrench className="h-3 w-3" />
                 )}
                 {t("pipeline.tickets.fix")}
+              </button>
+              <button
+                type="button"
+                disabled={busy !== "" || selectedRefs.length === 0}
+                title={t("pipeline.tickets.closeFixHint")}
+                onClick={() => void onCloseFix()}
+                className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              >
+                {busy === "closeFix" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <ClipboardCheck className="h-3 w-3" />
+                )}
+                {t("pipeline.tickets.closeFix")}
+              </button>
+              <button
+                type="button"
+                disabled={busy !== "" || selectedRefs.length === 0}
+                title={t("pipeline.tickets.cancelFixHint")}
+                onClick={() => void onCancelFix()}
+                className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              >
+                <XCircle className="h-3 w-3" />
+                {t("pipeline.tickets.cancelFix")}
               </button>
               <button
                 type="button"
@@ -527,6 +596,20 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
               >
                 <XCircle className="h-3 w-3" />
                 {t("pipeline.tickets.dismiss")}
+              </button>
+              <button
+                type="button"
+                disabled={busy !== "" || selectedRefs.length === 0}
+                title={t("pipeline.tickets.autoFixHint")}
+                onClick={() => void onAutoFix()}
+                className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              >
+                {busy === "autoFix" ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Wrench className="h-3 w-3" />
+                )}
+                {t("pipeline.tickets.autoFix")}
               </button>
             </div>
           </div>

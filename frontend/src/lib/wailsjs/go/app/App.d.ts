@@ -50,6 +50,8 @@ export function CancelExtract(arg1:string):Promise<void>;
 
 export function CancelExtractPattern(arg1:number):Promise<void>;
 
+export function CancelIssueFixTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
+
 export function CancelIssueVerify(arg1:number,arg2:string):Promise<boolean>;
 
 export function CancelQuit():Promise<void>;
@@ -61,6 +63,8 @@ export function CheckUpdate(arg1:boolean):Promise<update.CheckResult>;
 export function CompressContext(arg1:app.CompressInput):Promise<app.CompressResult>;
 
 export function ComputeStyleStats(arg1:app.ComputeStyleStatsInput):Promise<style.Stats>;
+
+export function CloseIssueFixTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
 
 export function ConfirmIssueTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
 
@@ -361,6 +365,8 @@ export function SetSelectedModel(arg1:string,arg2:string):Promise<void>;
 export function SetVolumeFrozen(arg1:number,arg2:number,arg3:boolean):Promise<volume.Volume>;
 
 export function StartIssueFixTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
+
+export function StartManualIssueFixTickets(arg1:number,arg2:Array<pipeline.IssueTicketRef>):Promise<void>;
 
 export function StartPipeline(arg1:number,arg2:string,arg3:any,arg4:boolean):Promise<pipeline.PipelineRun>;
 
