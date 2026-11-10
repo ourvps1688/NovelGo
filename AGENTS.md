@@ -76,6 +76,15 @@ NovelGo 是一个使用 Wails（Go + React）的桌面 AI 网文写作助手。�
 - ONNX embedder、VectorStore 和 RefreshQueue 是全局 singleton。
 - ONNX 库查找顺序、模型目录和向量表命名沿用现有实现，不要在单个功能中重新定义路径规则。
 
+## 技能装配与可观测（#111）
+
+- 内置技能当前 **27 个**（`internal/skill/builtin/*.md`）。历史文档写「26 个」是 2026-10 的旧时点，勿据此改动数量或恢复已退役的 `signability-workflow`。
+- 技能是「能力注册项」，不是「文档 + 目录」：frontmatter 的 `mounts` / `internalOnly` / `budget` / `deprecated` 是装配契约单源；`internal/skill/health_test.go` 是开发期静态断言（零挂载点即构建失败），**不是运行时质量闸门**。
+- 正文只由 Go 确定性装配器注入（`app/slash_command.go`、`internal/mcp_tools/chapter_ci.go` / `rw_tools.go`、`internal/pipeline/rewrite_skills.go` / `provider_trip.go` 等）。`<available_skills>` 是说明性目录，不承担注入职责；禁止把「请用 read 加载完整内容」「建议用户启用对应技能」这类靠模型/用户自觉的引导写回目录。
+- 工作流自动武装清单见 `internal/skill/workflow.go` 的 `WorkflowAutoArms`（说明性单源 + 健康检查断言，不参与运行时调度）。`.enabled.json` 勾选与 slash 是高级兼容入口，常驻上限 `MaxAlwaysSkillsResident=3`，二者都**不作为技能可用性判据**。
+- 每次注入写 `skill_invocations`（只记标识与 runes、纯本地不上传）；只读出口 `App.GetSkillUsage(days)` 与前端 `SkillUsagePanel`。判断「某技能是不是摆设」用账本 SQL / 用量面板，不要再挖 messages 模板字串或 `exec_run_stats`。
+- 硬约束不变：零 auto-advance、零运行时闸门、检测四 kind 独立启动 → 工单 → 人工确认 → 修复 → 显式复验为质量保障唯一规范路径；p0 golden 五构造器与八维契约不得改动。
+
 ## 代码审查重点
 
 - 检查是否误改自动生成文件、日志/注释、数据 append-only 语义或 cgo build tag。

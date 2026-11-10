@@ -13,8 +13,10 @@ import (
 // 造成"规则越多执行越差"的退化。显式 mode=always 的技能优先保留，其次才轮到勾选启用的。
 const MaxAlwaysSkillsResident = 3
 
-// BuildSkillCatalog 将 auto 模式的 skill 元数据格式化为 LLM 可用的技能目录。
+// BuildSkillCatalog 将 auto 模式的 skill 元数据格式化为**说明性**技能目录（#111 P3）。
 // manual 和 always 模式的 skill 不出现在目录中。
+// 目录降级后不承担正文通道职责：不再要求 LLM 用 read 自读、不再建议用户手动启用；
+// 正文由 Go 按 workflow 自动武装点确定性注入，目录只解释这套装配规则。
 // 按 novel > user > builtin 分组；每个来源块内再按 category 子分组（category 字段
 // 此前仅被解析却未使用，现真正参与目录结构，便于 LLM 区分语义相邻的技法）。
 func BuildSkillCatalog(meta []skill.SkillMeta) string {
@@ -28,13 +30,23 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 
 	var b strings.Builder
 	b.WriteString("<available_skills>\n")
+	// #111 P3：目录降级为说明性。原先这里要求 LLM「用 read 工具加载技能完整内容」、
+	// 「主动建议用户启用对应技能」，把正文消费权交给了模型与用户的自觉，正是 #111
+	// 判定的摆设根因。现在只说明系统如何确定性装配，不再下发自读/启用指令。
+	b.WriteString("【说明性目录】以下仅列出可用技能及其用途；技能正文由系统按工作流确定性装配，\n")
+	b.WriteString("无需手动 read 加载，也无需手动启用，本目录不承担注入职责。\n")
+	b.WriteString("系统自动武装点（触发即由 Go 注入对应挂载点的技能正文）：\n")
+	for _, arm := range skill.WorkflowAutoArms {
+		fmt.Fprintf(&b, "- %s → %s\n", arm.Workflow, arm.Mount)
+	}
+	b.WriteString("\n")
 
 	writeSourceGroup(&b, "小说专属技能", novel)
 	writeSourceGroup(&b, "用户技能", user)
 	writeSourceGroup(&b, "内置技能（只读）", builtin)
 
 	b.WriteString("---\n")
-	b.WriteString("路由指引（意图 → 技能，依据各技能 frontmatter 的 useWhen 自动生成）：\n")
+	b.WriteString("意图索引（意图 → 技能，依据各技能 frontmatter 的 useWhen 自动生成，仅供说明）：\n")
 	wroteRoute := false
 	for _, s := range meta {
 		if len(s.UseWhen) == 0 {
@@ -44,7 +56,7 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 		if intent == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "- 当用户想做【%s】→ 用 read 工具加载技能 `%s`\n", intent, s.Name)
+		fmt.Fprintf(&b, "- 当用户想做【%s】→ 系统按意图装配 `%s`（无需手动加载）\n", intent, s.Name)
 		wroteRoute = true
 	}
 	if !wroteRoute {
@@ -52,13 +64,12 @@ func BuildSkillCatalog(meta []skill.SkillMeta) string {
 	}
 	b.WriteString("\n通用原则：\n")
 	b.WriteString("- 宏观层（story-blueprint 蓝图 / opening-chapters 前三章 / worldbuilding-design 设定体系 / character-design 人设 / signability-audit 签约体检）先于微观层（scene-beats 场景 / pacing-control 节奏 / plot-hook 钩子 / dialogue-subtext 对白 / revision-pass 打磨 / reader-immersion 代入 / deai-flavor 去味 / brainstorm-composer 发散）。\n")
-	b.WriteString("- 只改某类具体技法时点名加载对应技能；综合请求先对齐宏观层再下沉，勿一次堆砌多个微观技法。\n")
-	b.WriteString("- 检测到用户意图可由某技能覆盖时，主动建议用户启用对应技能（例如：「你在设计力量体系，要我加载 worldbuilding-design 吗？」），提升可发现性。\n")
-	b.WriteString("\n使用 read 工具加载技能完整内容：\n")
-	b.WriteString("- skills/<name>.md（小说技能）\n")
-	b.WriteString("- ~/.novelgo/skills/<name>.md（用户技能）\n")
-	b.WriteString("- /builtin/skills/<name>.md（内置技能，只读）\n")
-	b.WriteString("使用 edit 工具创建或修改技能。内置技能不可编辑。\n")
+	b.WriteString("- 只改某类具体技法时由系统装配对应技法技能；综合请求先对齐宏观层再下沉，勿一次堆砌多个微观技法。\n")
+	b.WriteString("\n高级用法（兼容入口，不作为技能是否可用的判据）：\n")
+	b.WriteString("- 斜杠 /<name> 与小说 .enabled.json 勾选仍可用；系统自动武装不依赖这两条入口。\n")
+	b.WriteString("- read 仅用于查看用户/小说自定义技能：skills/<name>.md、~/.novelgo/skills/<name>.md；\n")
+	b.WriteString("  内置技能只读，正文已由系统装配，无需再 read /builtin/skills/<name>.md。\n")
+	b.WriteString("使用 edit 工具创建或修改自定义技能。内置技能不可编辑。\n")
 	b.WriteString("</available_skills>")
 
 	return b.String()
@@ -89,6 +100,11 @@ func writeSourceGroup(b *strings.Builder, title string, skills []skill.SkillMeta
 			if s.Description != "" {
 				b.WriteString(": ")
 				b.WriteString(s.Description)
+			}
+			// #111 P3：声明了确定性挂载点的技能由系统自动注入正文，目录不再暗示
+			// 「需要 LLM 自己 read」。用户/小说自定义技能无 mounts，不加此标注。
+			if len(s.Mounts) > 0 {
+				b.WriteString("（由系统按意图注入）")
 			}
 			b.WriteString("\n")
 		}
@@ -126,6 +142,10 @@ func groupByCategoryOrdered(skills []skill.SkillMeta) []categoryGroup {
 // 除 frontmatter mode=always 的技能外，还会合并小说"勾选启用"的技能
 // （用户在聊天输入区 + 菜单里按书勾选，存于小说技能目录 .enabled.json）——
 // 勾选即临时 always，取消勾选即恢复原 mode 行为。
+//
+// #111 P3：本块降级为**兼容层**。技能正文已由 Go 按 WorkflowAutoArms 在各工作流
+// 自动武装，用户不必知道技能名、也不必手动勾选；此处保留只为不破坏老小说的
+// .enabled.json 与显式 mode=always，且继续受 MaxAlwaysSkillsResident=3 硬上限约束。
 func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelID int64) string {
 	if store == nil {
 		return ""
@@ -177,8 +197,12 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 	}
 
 	var b strings.Builder
-	b.WriteString("【常驻技能】\n")
-	b.WriteString("以下技能在本次对话中始终生效：\n\n")
+	b.WriteString("【常驻技能（兼容层）】\n")
+	b.WriteString("以下技能正文来自 frontmatter mode=always 或小说 .enabled.json 勾选；\n")
+	b.WriteString("系统已按工作流自动装配所需技能，本块不改变装配结果，也不作为技能可用性判据。\n")
+	b.WriteString("常驻上限 ")
+	b.WriteString(strconv.Itoa(MaxAlwaysSkillsResident))
+	b.WriteString(" 个。\n\n")
 
 	for _, m := range resident {
 		sk, ok := store.Get(novelID, m.Name)

@@ -127,12 +127,18 @@ func TestBuildSkillCatalog_GroupsByCategory(t *testing.T) {
 		t.Errorf("「其他」组应包含无分类技能 orphan-skill\ngot: %s", catalog[otherIdx:])
 	}
 
-	// 5. 路由指引存在（无 useWhen 时给出兜底提示）
-	if !strings.Contains(catalog, "路由指引（意图 → 技能") {
-		t.Errorf("目录应包含意图→技能路由指引\ngot: %s", catalog)
+	// 5. 意图索引存在（无 useWhen 时给出兜底提示）；#111 P3 起已是说明性索引，
+	// 不再下发「用 read 工具加载技能」这类靠模型自觉的指令。
+	if !strings.Contains(catalog, "意图索引（意图 → 技能") {
+		t.Errorf("目录应包含说明性意图索引\ngot: %s", catalog)
 	}
 	if !strings.Contains(catalog, "暂无技能声明 useWhen") {
 		t.Errorf("无 useWhen 时应给出兜底提示\ngot: %s", catalog)
+	}
+	if strings.Contains(catalog, "用 read 工具加载技能") ||
+		strings.Contains(catalog, "主动建议用户启用") ||
+		strings.Contains(catalog, "使用 read 工具加载技能完整内容") {
+		t.Errorf("目录降级后不得再引导 LLM 自读或建议用户手动启用\ngot: %s", catalog)
 	}
 }
 
@@ -162,6 +168,75 @@ func TestBuildSkillCatalog_RoutingTableFromUseWhen(t *testing.T) {
 	}
 	if !strings.Contains(catalog, "worldbuilding-design") || !strings.Contains(catalog, "signability-audit") {
 		t.Errorf("路由表应列出技能名\ngot: %s", catalog)
+	}
+}
+
+// TestBuildSkillCatalog_DescriptiveDowngrade 锁住 #111 P3 的目录降级：自动武装点
+// 由 WorkflowAutoArms 单源渲染、有 mounts 的技能标注「由系统按意图注入」、
+// 自定义技能不误标；正文消费权不再交给 LLM 自读或用户勾选。
+func TestBuildSkillCatalog_DescriptiveDowngrade(t *testing.T) {
+	meta := []skill.SkillMeta{
+		{
+			Name: "scene-beats", Description: "场景节拍", Category: "结构",
+			Mode: skill.ModeAuto, Source: "builtin",
+			Mounts:  []string{"writing_bundle"},
+			UseWhen: []skill.UseWhenEntry{{Intent: "拆场景节拍"}},
+		},
+		{
+			Name: "my-custom", Description: "我的自定义技能", Category: "其他",
+			Mode: skill.ModeAuto, Source: "user",
+		},
+	}
+	catalog := BuildSkillCatalog(meta)
+
+	for _, want := range []string{
+		"【说明性目录】", "本目录不承担注入职责", "系统自动武装点",
+		"高级用法（兼容入口", "系统按意图装配 `scene-beats`（无需手动加载）",
+	} {
+		if !strings.Contains(catalog, want) {
+			t.Errorf("降级目录缺少 %q\ngot: %s", want, catalog)
+		}
+	}
+	for _, arm := range skill.WorkflowAutoArms {
+		if !strings.Contains(catalog, "- "+arm.Workflow+" → "+arm.Mount) {
+			t.Errorf("目录未渲染自动武装点 %s\ngot: %s", arm.Mount, catalog)
+		}
+	}
+	if !strings.Contains(catalog, "- scene-beats: 场景节拍（由系统按意图注入）") {
+		t.Errorf("有 mounts 的内置技能应标注由系统注入\ngot: %s", catalog)
+	}
+	if strings.Contains(catalog, "- my-custom: 我的自定义技能（由系统按意图注入）") {
+		t.Errorf("自定义技能无 mounts，不应误标为系统注入\ngot: %s", catalog)
+	}
+	if strings.Contains(catalog, "用 read 工具加载技能") ||
+		strings.Contains(catalog, "主动建议用户启用") {
+		t.Errorf("降级目录不得再引导自读/手动启用\ngot: %s", catalog)
+	}
+}
+
+// TestBuildAlwaysSkillsContent_CompatLayerNotice 锁住常驻块已降级为兼容层，
+// 且 MaxAlwaysSkillsResident 的口径仍如实写进 system 消息。
+func TestBuildAlwaysSkillsContent_CompatLayerNotice(t *testing.T) {
+	dir := t.TempDir()
+	writeTestSkill(t, dir, "resident", "always", "RESIDENT_BODY")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	store, err := skill.NewStore(logger, dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	meta := []skill.SkillMeta{{Name: "resident", Mode: skill.ModeAlways, Source: "user"}}
+
+	content := BuildAlwaysSkillsContent(meta, store, int64(11))
+	for _, want := range []string{
+		"【常驻技能（兼容层）】", ".enabled.json 勾选", "本块不改变装配结果", "常驻上限 3 个。",
+		"RESIDENT_BODY",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("常驻兼容层缺少 %q\ngot: %s", want, content)
+		}
+	}
+	if strings.Contains(content, "以下技能在本次对话中始终生效") {
+		t.Errorf("旧口径不应残留（常驻已非正文主通道）\ngot: %s", content)
 	}
 }
 

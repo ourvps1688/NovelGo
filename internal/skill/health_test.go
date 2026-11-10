@@ -28,8 +28,11 @@ var mountOwners = map[string]string{
 	"feedback":          "internal/mcp_tools/feedback_tools.go",
 	"slash_only":        "app/slash_command.go",
 	"always":            "internal/agentcfg/skill_catalog.go",
-	"catalog_read":      "internal/agentcfg/skill_catalog.go",
 }
+
+// #111 P3：catalog_read 已从合法 mounts 枚举中退役——技能目录降级为说明性，
+// 不再承担正文通道职责；常驻 always 仅保留为 .enabled.json 兼容层，同样不得
+// 作为内置技能的可用性挂载点（见 TestWorkflowAutoArmContract 第 3 条）。
 
 // #111 P2：P0 的 legacyPlaceholders 临时豁免已清空——memory / review 已补齐
 // useWhen 与 ≥5 行正文，全量技能一律过同一套硬断言，不留永久后门。
@@ -354,5 +357,80 @@ func TestP2SkillWiringZeroExemption(t *testing.T) {
 		if !dispatch[name] {
 			t.Errorf("重名技能 %s 未接入 slashSubAgentDispatch（同名异物未解耦）", name)
 		}
+	}
+}
+
+// TestWorkflowAutoArmContract 锁住 #111 P3 的目录降级收口：工作流自动武装清单
+// 必须由真实装配器消费、覆盖全部确定性挂载点，且目录自读/勾选常驻不再算挂载点。
+// 这是开发期静态断言，不引入运行时闸门，也不改变质量保障唯一规范路径。
+func TestWorkflowAutoArmContract(t *testing.T) {
+	skills, _ := loadBuiltinForHealth(t)
+
+	// 1. 每个自动武装点的 mount 有主、且至少有一个内置技能真的声明了它（不空转）。
+	seenMount := map[string]bool{}
+	for _, arm := range WorkflowAutoArms {
+		if arm.Workflow == "" || arm.Mount == "" {
+			t.Fatalf("自动武装点字段不得为空: %+v", arm)
+		}
+		if seenMount[arm.Mount] {
+			t.Errorf("自动武装点重复声明 mount %q", arm.Mount)
+		}
+		seenMount[arm.Mount] = true
+		owner, ok := mountOwners[arm.Mount]
+		if !ok {
+			t.Errorf("自动武装点 %s 的 mount %q 未在 mountOwners 登记消费点", arm.Workflow, arm.Mount)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join("..", "..", owner)); err != nil {
+			t.Errorf("自动武装点 %s 的 owner 文件不存在: %s", arm.Workflow, owner)
+		}
+		declared := false
+		for _, sk := range skills {
+			if containsString(sk.Mounts, arm.Mount) {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			t.Errorf("自动武装点 %s 的 mount %q 无任何内置技能声明（空转）", arm.Workflow, arm.Mount)
+		}
+	}
+
+	// 2. 所有确定性挂载点都必须被自动武装清单覆盖，否则目录说明会撒谎。
+	// slash_only 是高级入口、always 是兼容层，均不作为可用性指标，故排除。
+	declaredMounts := map[string]bool{}
+	for _, sk := range skills {
+		for _, m := range sk.Mounts {
+			if m == "slash_only" || m == "always" || m == "catalog_read" {
+				continue
+			}
+			declaredMounts[m] = true
+		}
+	}
+	for m := range declaredMounts {
+		if !seenMount[m] {
+			t.Errorf("内置技能声明了挂载点 %q，但工作流自动武装清单未覆盖", m)
+		}
+	}
+
+	// 3. 目录降级后，内置技能不得再靠「LLM 自读 / 用户勾选常驻」当挂载点。
+	for _, sk := range skills {
+		for _, m := range sk.Mounts {
+			if m == "catalog_read" {
+				t.Errorf("技能 %s 仍声明已退役的 catalog_read（目录已降级为说明性）", sk.Name)
+			}
+			if m == "always" {
+				t.Errorf("技能 %s 仍声明 always（常驻已降级为 .enabled.json 兼容层）", sk.Name)
+			}
+		}
+	}
+
+	// 4. 常驻上限不得被抬高：兼容层不能重新膨胀成正文主通道。
+	catalogSrc, err := os.ReadFile(filepath.Join("..", "agentcfg", "skill_catalog.go"))
+	if err != nil {
+		t.Fatalf("读取 skill_catalog.go 失败: %v", err)
+	}
+	if !regexp.MustCompile(`MaxAlwaysSkillsResident\s*=\s*3`).Match(catalogSrc) {
+		t.Error("MaxAlwaysSkillsResident 必须为 3（P3 收口硬约束，抬高须重新评审）")
 	}
 }

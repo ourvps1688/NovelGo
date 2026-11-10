@@ -1,6 +1,8 @@
 # 技能装配与可观测契约（2026-11-09）
 
-> 状态：**设计定稿，待实施**。本文只描述规划与开发计划，除本文外未改动任何代码。
+> 状态：**已实施（P0–P3，2026-11-09 ~ 2026-11-10）**。本文保留设计原文与当时的取证口径，
+> 实施结果、相对设计的偏差与 27 技能用量实测统一记在**附录 C**；规划期行号按 2026-11-09
+> HEAD 保留，实施时以函数名为准。四期各自的提交 hash 见附录 C.1。
 > 关联：#108 写章技法 bundle、#109 下线平台数据对账/对标书库、#110 四个悬空口径清理。
 > 取证：dev 库 `build/bin/novel-agent.db` 只读查询（messages 2026-10-11 ~ 11-09，
 > exec_run_stats 10-25 ~ 11-08，chapter_quality 10-28 ~ 11-09）。
@@ -22,7 +24,8 @@
 > `detect.go`、`contract_test.go` 同理）；
 > 完整仓库相对路径统一见附录 A，行号基于 2026-11-09 HEAD，实施时以函数名为准。
 > 文中 `internal/skill/health_test.go`、`internal/activity/skill_invocation_test.go`、
-> `frontend/src/components/skill/SkillUsagePanel.tsx` 为**规划待新建文件**，当前不存在属预期。
+> `frontend/src/components/skill/SkillUsagePanel.tsx` 在 P0 规划时为待新建文件，
+> 现均已落地（另有规划时未列出的 `internal/skill/workflow.go`、蓝图任务等，见附录 C）。
 
 ---
 
@@ -397,6 +400,7 @@ GROUP BY skill, channel ORDER BY n DESC;
 |---|---|
 | 改动 | `agentcfg/skill_catalog.go` 目录降级为说明性（auto 标注「由系统按意图注入」）；常驻改工作流自动武装（保留 `.enabled.json` 兼容，守住 `MaxAlwaysSkillsResident=3`）；`docs/TECHNICAL_STATUS_AND_GUARDRAILS.md` / `AGENTS.md` 技能口径更新（历史文档写「26 个」为旧时点，当前 27 个）；本文状态改为「已实施」并补实测数据 |
 | 验收 | 全量回归；一次 SQL 导出 27 技能用量表附在本文末尾 |
+| 状态 | ✅ 已实施（2026-11-10）：目录降级、常驻兼容层、`WorkflowAutoArms` 单源 + 健康检查、三份文档口径同步；27 技能用量表见附录 C.4 |
 
 ### 6.5 验收硬指标
 
@@ -478,3 +482,104 @@ GROUP BY skill, channel ORDER BY n DESC;
 | `app/skill_writing_bundle_test.go` | `TestBuildAutoSkillInject_WritingBundle`、`TestWritingCueBoundary`、`TestSkillBodyCRLF` |
 | `internal/mcp_tools/chapter_ci_test.go` | `TestRunChapterCIReceiptLanded`、`TestRunChapterCIDegradesToSkipped` |
 | `internal/migrate/activity_test.go` / `r3_task_gateobject_test.go` | AutoMigrate 建表回归（P0 建 `skill_invocations` 的模板） |
+
+---
+
+## 附录 C：实施结果与 27 技能用量实测（2026-11-10）
+
+### C.1 四期落地
+
+| 期 | 提交 | 实际交付 |
+|---|---|---|
+| P0 | `e043e9cf`（记忆账 `abb0e8aa`） | 27 个 builtin 补 manifest；`skill_invocations` 模型 + `activity.RecordSkillInvocation` sink + `App.GetSkillUsage`；8 通道埋点；`health_test.go` 健康检查；`SkillUsagePanel` 用量面板与双语 i18n；AutoMigrate 注册新表。零行为变更，账本 0 行属预期 |
+| P1 | `8f06e205`（记忆账 `bf065005`） | `RouteResult.Redirects` + `internalOnly` 只回指引导语；`RouteUserMessageSmart(...,3,1,...)` + 12000 总帽 + manifest `Budget`；`writingSkillConditions` 五类条件；`chapterCISelfCheckSkills` 写后自检；`rewrite_skills.go` 补 3 个映射；同步 `internalOnly` 相关回归测试 |
+| P2 | `54fd87b3`（记忆账 `95a63624`） | `stateSyncSkills`（`collect` + `memory`）前置注入且技能缺失时指令逐字不变；`memory.md`/`review.md` 补正文与 `useWhen`；`slashSubAgentDispatch` 改派 `/memory`、`/review`；`EditorFeedbackPanel` + `feedback` 埋点；S2 `RunBlueprintTask` 显式入口 + `BlueprintTaskPanel` + `GetRunningRunByMode` 互斥；健康检查零豁免 |
+| P3 | 本轮 `feat(skill): #111 P3 ...`（hash 由提交后记忆账记录） | `WorkflowAutoArms` 说明性单源；`BuildSkillCatalog` 降级为说明性（自动武装点渲染、按 `mounts` 标注「由系统按意图注入」、移除自读/启用引导）；`BuildAlwaysSkillsContent` 标为 `.enabled.json` 兼容层；`catalog_read` 退役、常驻上限由健康检查锁死；三份文档口径同步 + 本附录 |
+
+### C.2 相对设计的偏差（均为有意决策，勿按规划表格回改）
+
+1. **P1 整块帽 5000 → 9000 rune**：实测固定 3 技法已占 4273，旧帽只剩 727，最短条件技能 1273 必被 `break`，条件化会整体失效。单技能 1500 帽与「异常回退固定 3 个」不变。
+2. **P0 埋点是 8 条通道而非 6 个位置**：`chat_intent` / `writing_bundle` / `pipeline_dispatch` / `rewrite_method` / `chapter_ci` / `state_sync` / `slash` / `always`。`catalog_read` 因目录降级从未承担正文通道；`always` 记的是 `.enabled.json` / frontmatter 兼容常驻，不是可用性指标。
+3. **新表未写 v174**：按 §2.4 的迁移纠偏，`&activity.SkillInvocation{}` 加入 `internal/migrate/migrate.go` 的 `models` 由 AutoMigrate 建表。实得 10 列：`id, skill, channel, mount, novel_id, run_id, chapter_id, session_id, runes, created_at`。
+4. **S2 入口形态**：落地为 `pipeline.(*Service).RunBlueprintTask(ctx, novelID)` + `app` 薄转发 + `BlueprintTaskPanel` 显式按钮（含存量书补跑），配套 `Store.GetRunningRunByMode` 做同模式在途互斥——修掉了初版用 `GetByNovel` 做幂等判断的缺陷。未恢复 `StartPipeline`、未加第五检测 kind、零 auto-advance / 零自动复评。
+5. **健康检查零豁免**：`legacyPlaceholders` 已清空；`memory` / `review` 补正文与 `useWhen`，同名异物由 `agentTypeCollisions` 显式登记并接入 `slashSubAgentDispatch`。
+6. **P3 的「工作流自动武装」不是第二套调度器**：运行时装配仍由 P0–P2 各挂载点自己的确定性装配器负责；`internal/skill/workflow.go` 的 `WorkflowAutoArms` 只用于渲染目录说明与开发期静态断言，不参与运行时路由决策，避免与 cue 路由竞争。`catalog_read` 从合法 `mounts` 枚举退役，`always` 保留登记但不得被内置技能声明，`MaxAlwaysSkillsResident=3` 由 `TestWorkflowAutoArmContract` 锁死。
+7. **文档口径**：`docs/TECHNICAL_STATUS_AND_GUARDRAILS.md` §3 的「26 个」修正为 27 并保留历史时点注记，§9 补 2026-11-10 变更行；`AGENTS.md` 新增「技能装配与可观测（#111）」小节。
+
+### C.3 §6.5 硬指标对照
+
+| 指标 | 状态 | 说明 |
+|---|---|---|
+| 27 技能零使用 = 0；每技能 ≥1 确定性挂载点 | ✅ 挂载点 27/27 | 全部技能声明了有效 mount，且 mount 有真实消费点（`mountOwners` + 健康检查） |
+| 每技能账本 30 天有记录 | ⏳ 待运行态取证 | 属取证要求而非接线要求，当前账本 0 行，见 C.4 口径说明 |
+| chat 反向错投 = 0；单轮 ≤3 auto + rune 预算 | ✅ 代码层达成 | `internalOnly` 前置过滤只回指引导语、`3,1`、12000 总帽、manifest `Budget`；运行态计数同样待账本取证 |
+| 一条 SQL 可答任意技能用量/通道/最近一次 | ✅ 达成 | `SummarizeSkillInvocations` + `App.GetSkillUsage` + 面板 + C.4 复测 SQL |
+| p0 golden 与八维契约零变化；#109 保留项零回归 | ✅ 达成 | 每期显式核 p0 baseline diff 为空；只扩输入块不动五构造器函数体 |
+| 全套闸门 | 见 C.5 | 后端四闸 + 前端四道闸 + 健康检查零豁免 |
+
+> **口径纪律**：「账本有记录」是**取证**而非接线。`skill_invocations` 只在真实注入发生时写行，
+> P0–P3 上线后 dev 尚未发生真实 LLM 交互，故本次导出全部为 0。不得为凑指标伪造账本行，
+> 也不得擅自自动派发写章/体检/蓝图任务（违反零 auto-advance 与质量保障唯一规范路径）。
+
+### C.4 27 技能用量实测（一次 SQL 导出）
+
+导出时间 **2026-11-10**，库 `build/bin/novel-agent.db`（只读）。`skill_invocations` 共 **0 行**，
+27 个技能名由 CTE `VALUES` 给出，挂载点列取自各 builtin md 的 frontmatter `mounts`，
+次数 / 通道 / 最近一次由 LEFT JOIN 账本聚合得出（无记录补 `-`，不伪造）。
+
+| 技能 | 声明挂载点（manifest） | 近 30 天次数 | 通道 | 最近一次 |
+|---|---|---:|---|---|
+| `blueprint-audit` | `blueprint_audit` / `pipeline_dispatch` | 0 | - | - |
+| `blueprint-drift-check` | `blueprint_audit` | 0 | - | - |
+| `blueprint-fix` | `pipeline_dispatch` | 0 | - | - |
+| `book-pitch` | `pitch_flow` / `chat_intent` / `rewrite_method` | 0 | - | - |
+| `brainstorm-composer` | `chat_intent` / `writing_bundle` | 0 | - | - |
+| `chapter-ci` | `chapter_ci` | 0 | - | - |
+| `chapter-rewrite` | `pipeline_dispatch` | 0 | - | - |
+| `character-design` | `chat_intent` / `rewrite_method` / `blueprint_audit` | 0 | - | - |
+| `collect` | `state_sync` | 0 | - | - |
+| `consistency-patrol` | `pipeline_dispatch` | 0 | - | - |
+| `deai-flavor` | `chat_intent` / `writing_bundle` / `chapter_ci` / `rewrite_method` | 0 | - | - |
+| `dialogue-subtext` | `chat_intent` / `writing_bundle` / `chapter_ci` / `rewrite_method` | 0 | - | - |
+| `editor-feedback` | `feedback` | 0 | - | - |
+| `memory` | `state_sync` / `slash_only` | 0 | - | - |
+| `next` | `chat_intent` | 0 | - | - |
+| `opening-chapters` | `chat_intent` / `writing_bundle` / `rewrite_method` | 0 | - | - |
+| `pacing-control` | `chat_intent` / `writing_bundle` / `rewrite_method` | 0 | - | - |
+| `plot-hook` | `chat_intent` / `writing_bundle` / `rewrite_method` | 0 | - | - |
+| `reader-immersion` | `chat_intent` / `writing_bundle` / `rewrite_method` | 0 | - | - |
+| `review` | `chapter_ci` / `slash_only` | 0 | - | - |
+| `revision-pass` | `chat_intent` / `chapter_ci` / `rewrite_method` | 0 | - | - |
+| `scene-beats` | `chat_intent` / `writing_bundle` / `rewrite_method` | 0 | - | - |
+| `signability-audit` | `pipeline_dispatch` / `blueprint_audit` | 0 | - | - |
+| `signability-fix` | `pipeline_dispatch` | 0 | - | - |
+| `signability-verify` | `pipeline_dispatch` | 0 | - | - |
+| `story-blueprint` | `chat_intent` / `blueprint_audit` / `rewrite_method` | 0 | - | - |
+| `worldbuilding-design` | `chat_intent` / `writing_bundle` / `rewrite_method` | 0 | - | - |
+
+复测 SQL（真实跑一轮写章 / 体检 / 章 CI / 蓝图后重跑，即可把「接线」升级为「运行态取证」）：
+
+```sql
+SELECT skill, channel, COUNT(*) AS n, MAX(created_at) AS last_seen
+FROM skill_invocations
+WHERE created_at >= datetime('now', '-30 days') AND skill <> ''
+GROUP BY skill, channel ORDER BY n DESC;
+```
+
+判据：27 个技能名全部出现；`internalOnly` 技能不得出现 `chat_intent` / `writing_bundle` 通道；
+若仍有技能 0 次，用 `SkillUsagePanel` 的标红清单定位其挂载点装配器，不要退回「加 cue / 让用户 read」的老路。
+
+### C.5 全量回归记录（2026-11-10）
+
+后端（Windows / Go / `CGO_ENABLED=1` / `CGO_CFLAGS=-IC:/tools/sqlite3-headers`）：
+
+- `go build -tags webkit2_41 ./...`、`go vet -tags webkit2_41 ./...`：通过。
+- `go test -tags webkit2_41 ./...`：全包通过（最慢三项 `internal/pattern` 210s、`internal/pipeline` 133s、`app` 84s）。
+- `golangci-lint run --build-tags webkit2_41 ./...`：`0 issues.`
+- `gofmt -l` 四个改动 Go 文件：无输出。
+- p0 契约单测 `-run 'TestP0Baseline|TestPromptBlocks|TestSkillMDExamplesMatchContract|TestAuditDimsFormatLineSingleSource|TestRewriteSkillRoutesContract' -count=1` 通过，`git diff -- internal/pipeline/testdata/` 为空 → **p0 golden 与八维契约零变化**。
+- `internal/skill/health_test.go`：`TestBuiltinSkillManifestHealth` / `TestP2SkillWiringZeroExemption` / 新增 `TestWorkflowAutoArmContract` 全通过，健康检查零豁免；`internal/agentcfg` 目录降级与常驻兼容层用例全通过。
+
+前端（`npm --prefix frontend run ...`）：`format:check`、`i18n:check`、`lint`（0 error，既有 warning 不阻断）、`build`、`test`（50 个测试文件 / 400 用例）全绿。
+
+冷启动 `wails dev` 的二进制符号与双端口核验按 §6.0 纪律单独执行，结论记入当日记忆账。
