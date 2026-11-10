@@ -71,3 +71,9 @@
 - git commit 含 Go 必须同条命令带 export；commit 可能谎报 "nothing to commit"——git log 核实后单独补 push。
 - render 禁 Date.now()/new Date()；vitest 偶发沙箱失败以四道闸兜底；wails 绑定文件噪声 git checkout 还原。
 - 无 sqlite3 CLI：`node -e "require('node:sqlite').DatabaseSync(...,{readOnly:true})"`；tasks 非终态=status NOT IN ('done','dead')。
+
+## 工单修复双轨（#270，2026-11-10 收口，勿回退）
+- 「去修复」= 发 chat + `StartManualIssueFixTickets`（只置 fixing，**不派发自动执行体、不占 `issueFixActive`**）；`StartIssueFixTickets` 仅由「自动修复」显式按钮触发，R5-2 执行体（互斥/排空/FixRounds/回执）一字未动。`IssueTicketsPanel`/`PatrolReportPanel` 两个面板同口径。
+- 状态机补 `fixing → fixed` 人工收口出口；`CloseIssueFixTickets`（标记已修复留 note）/`CancelIssueFixTickets`（回 pending）经 `rejectFixInFlight` 拒绝自动执行体在途的 run。前端新增「标记已修复 / 取消修复 / 自动修复」。
+- 事故原型：chat 修完点复验报「修复任务仍在进行中」，旧「去修复」隐含派发的后台执行体跑 72 分钟未落回执（heartbeat 一直续租、工单 round=0）。**`issueFixActive` 是进程内标记，只有执行体返回或重启才摘**；处置 = 停 dev → 启动清扫 `AbandonActive` 置 dead → 工单人工收口为 fixed → 冷启动。别让用户干等，也别只改 DB（内存标记还在）。
+- 前端闸门脚本链用 `| tail` 会吞掉 `tsc -b` 失败仍打印成功，**必须 `set -o pipefail`**；新增 toolbar kind 要同步 `BusyKind` type alias，否则 TS2345/TS2367。
