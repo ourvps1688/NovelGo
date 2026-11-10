@@ -58,7 +58,9 @@ export interface TurnSegment {
   approvalPayload?: Record<string, unknown>;
   // subagent
   status?: "streaming" | "done" | "failed";
-  agentType?: "memory" | "review";
+  // 历史会话里除 memory/review 外还有 statesync/chapterci 等真实 agent_type；
+  // 类型放宽为 string，由 SubagentCard 统一降级展示，禁止用 as 枚举硬转。
+  agentType?: string;
   taskId?: string;
   segments?: TurnSegment[];
   finalText?: string;
@@ -245,7 +247,7 @@ export function rebuildTurns(messages: session.Message[]): Turn[] {
               ...emptySegment(`seg_${segCounter++}`),
               type: "subagent",
               status: "done",
-              agentType: (msg.agent_type as "memory" | "review") || "memory",
+              agentType: msg.agent_type || "memory",
               taskId: subTaskId,
               segments: [],
               finalText: "",

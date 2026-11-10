@@ -863,9 +863,12 @@ export default function ChatPanel({
 
               // run_subagent：维护对应的 subagent segment
               if (isSubagent) {
+                // metadata.agent_type 是后端真实值（statesync/chapterci 等），
+                // 不再强转两值枚举；SubagentCard 对未知类型统一降级展示。
                 const agentType =
-                  (event.metadata?.agent_type as "memory" | "review") ||
-                  "memory";
+                  typeof event.metadata?.agent_type === "string"
+                    ? event.metadata.agent_type
+                    : "memory";
                 const toolId = event.tool_id || "";
                 const subIdx = segments.findIndex(
                   (seg) => seg.type === "subagent" && seg.taskId === toolId,

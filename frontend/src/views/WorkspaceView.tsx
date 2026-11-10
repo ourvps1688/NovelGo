@@ -734,15 +734,19 @@ export default function WorkspaceView({
                       : "contents",
                 }}
               >
-                <ChatPanel
-                  novelId={activeNovelId}
-                  onApprove={handleApprove}
-                  onReject={handleReject}
-                  onApprovalFileEdit={handleApprovalFileEdit}
-                  onFileEditFinished={handleFileEditFinished}
-                  chatPanelWidth={chatPanelWidth}
-                  onChatPanelResize={setChatPanelWidth}
-                />
+                {/* 聊天面板独立兜底：子代理卡片等渲染异常只降级本面板，
+                    不再把整棵 WorkspaceView 卸载成白屏。 */}
+                <ErrorBoundary>
+                  <ChatPanel
+                    novelId={activeNovelId}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onApprovalFileEdit={handleApprovalFileEdit}
+                    onFileEditFinished={handleFileEditFinished}
+                    chatPanelWidth={chatPanelWidth}
+                    onChatPanelResize={setChatPanelWidth}
+                  />
+                </ErrorBoundary>
               </div>
             </>
           )}

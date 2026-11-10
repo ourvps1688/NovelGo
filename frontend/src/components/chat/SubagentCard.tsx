@@ -17,7 +17,9 @@ import CompressionBlock from "./CompressionBlock";
 import "./SubagentCard.css";
 
 interface Props {
-  agentType: "memory" | "review";
+  // 放宽为 string：历史会话会回放 statesync / chapterci 等真实 agent_type，
+  // 以及未来新增的子代理类型，渲染层必须自己兜底而不是假定只两种。
+  agentType: string;
   segments: TurnSegment[];
   status: "streaming" | "done" | "failed";
   // P1: 子 agent 重试状态（由 EventRetrying 携带 sub_task_id 时设置）
@@ -50,6 +52,8 @@ function getAgentMeta(
   return {
     memory: { label: t("chat.memoryAnalyst"), emoji: "📝" },
     review: { label: t("chat.reviewEditor"), emoji: "🔍" },
+    statesync: { label: t("chat.stateSyncAgent"), emoji: "🔄" },
+    chapterci: { label: t("chat.chapterCheckAgent"), emoji: "📖" },
   };
 }
 
@@ -65,7 +69,12 @@ export default memo(function SubagentCard({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(status !== "streaming");
   const autoExpanded = useRef(false);
-  const meta = getAgentMeta(t)[agentType];
+  // 未知/新增 agent_type 一律走通用卡片：绝不能让 undefined.emoji 抛错，
+  // 否则 React 19 会卸载整棵根树 → 应用窗口纯白（历史 statesync/chapterci 会话即此路径）。
+  const meta = getAgentMeta(t)[agentType] ?? {
+    label: t("chat.subagentGeneric", { type: agentType || "-" }),
+    emoji: "🧩",
+  };
   const isStreaming = status === "streaming";
   const isDone = status === "done";
   const isFailed = status === "failed";

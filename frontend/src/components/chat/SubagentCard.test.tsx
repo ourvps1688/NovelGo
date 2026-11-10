@@ -194,6 +194,25 @@ describe("SubagentCard 长跑可见性（P4 T1.3）", () => {
     expect(content).toContain("startedAtMs={seg.startedAtMs}");
     expect(content).toContain("lastActivityAtMs={seg.lastActivityAtMs}");
   });
+
+  it("未知 agentType 降级为通用卡片，不再因 undefined.emoji 抛错", () => {
+    render(
+      <SubagentCard agentType="future-agent" segments={[]} status="done" />,
+    );
+    expect(screen.getByText("🧩")).toBeTruthy();
+    expect(document.querySelector(".subagent-label")?.textContent).toBeTruthy();
+  });
+
+  it("历史 statesync / chapterci 子代理消息渲染为已知类型卡片", () => {
+    const { rerender } = render(
+      <SubagentCard agentType="statesync" segments={[]} status="done" />,
+    );
+    expect(screen.getByText("🔄")).toBeTruthy();
+    rerender(
+      <SubagentCard agentType="chapterci" segments={[]} status="done" />,
+    );
+    expect(screen.getByText("📖")).toBeTruthy();
+  });
 });
 
 /** 定位 frontend/src：vitest 下 import.meta.dirname 形态不稳，按候选逐一探测。 */
