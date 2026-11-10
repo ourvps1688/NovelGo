@@ -77,6 +77,67 @@ func nonEmptyBodyLines(body string) int {
 	return n
 }
 
+// readHealthSource 读取静态断言所需的源码，并把 CRLF 归一为 LF。
+// GitHub Actions 的 windows-latest 默认 core.autocrlf=true，checkout 后的 .go 文件
+// 是 CRLF；健康检查按 "\n}\n" / 行边界截取声明窗口时必须免疫行尾差异，否则同一份
+// 代码会 ubuntu/macos 全绿、windows 独红（#111 P2 的 TestP2SkillWiringZeroExemption
+// 曾在 #420/#421 连续 3 次重跑仍失败）。仓库内 .go 行尾并不统一，故不靠
+// .gitattributes 全量强制，只在读取侧归一，避免制造大规模行尾变更。
+func readHealthSource(t *testing.T, parts ...string) string {
+	t.Helper()
+	name := filepath.Join(parts...)
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("读取 %s 失败: %v", name, err)
+	}
+	return normalizeHealthSource(string(b))
+}
+
+func normalizeHealthSource(src string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(src, "\r\n", "\n"), "\r", "")
+}
+
+// healthVarBlock 截取 var 声明到其闭合 "}" 之间的片段。结尾标记用 "\n}\n" 而非
+// "\n}"：[]struct{...}{ 那行本身以 "\n}{" 开头，用 "\n}" 会把窗口截断在字段定义处，
+// 提取不到技能名。调用方必须先经 normalizeHealthSource 归一。
+func healthVarBlock(src, marker string) (string, bool) {
+	start := strings.Index(src, marker)
+	if start < 0 {
+		return "", false
+	}
+	rest := src[start:]
+	end := strings.Index(rest, "\n}\n")
+	if end <= 0 {
+		return "", false
+	}
+	return rest[:end], true
+}
+
+// TestHealthSourceLineEndingTolerance 锁住 Windows CI 的 CRLF 检出不会让静态断言
+// 误报：#111 P2 的两个 "\n}\n" 窗口曾在 CRLF 源码下失配，且本地 LF 环境测不出来。
+func TestHealthSourceLineEndingTolerance(t *testing.T) {
+	const lfSample = "package sample\n\n" +
+		"var stateSyncSkills = []struct{ name, body string }{\n" +
+		"\t{\"collect\", \"body\"},\n" +
+		"\t{\"memory\", \"body\"},\n" +
+		"}\n"
+	crlfSample := strings.ReplaceAll(lfSample, "\n", "\r\n")
+	if got := normalizeHealthSource(crlfSample); got != lfSample {
+		t.Fatalf("CRLF 归一结果不等于 LF 原文:\ngot  %q\nwant %q", got, lfSample)
+	}
+	if _, ok := healthVarBlock(crlfSample, "var stateSyncSkills"); ok {
+		t.Fatal("未归一的 CRLF 源码不应侥幸通过窗口提取（回归样本失效）")
+	}
+	block, ok := healthVarBlock(normalizeHealthSource(crlfSample), "var stateSyncSkills")
+	if !ok {
+		t.Fatal("归一后的 CRLF 源码应能提取 stateSyncSkills 声明窗口")
+	}
+	names := regexp.MustCompile(`\{"([a-z0-9-]+)",`).FindAllStringSubmatch(block, -1)
+	if len(names) != 2 || names[0][1] != "collect" || names[1][1] != "memory" {
+		t.Errorf("CRLF 源码窗口内技能名提取错误: %v", names)
+	}
+}
+
 // TestBuiltinSkillManifestHealth 锁住 manifest 的最小可用契约：
 // 零挂载点即构建失败、枚举有主、预算为正、internalOnly 自洽、占位稿不放行。
 func TestBuiltinSkillManifestHealth(t *testing.T) {
@@ -174,11 +235,8 @@ func containsString(list []string, want string) bool {
 func TestHardcodedSkillListsDeclareMatchingMount(t *testing.T) {
 	_, byName := loadBuiltinForHealth(t)
 
-	slash, err := os.ReadFile(filepath.Join("..", "..", "app", "slash_command.go"))
-	if err != nil {
-		t.Fatalf("读取 slash_command.go 失败: %v", err)
-	}
-	decl := regexp.MustCompile(`writingBundleSkills = \[\]string\{([^}]*)\}`).FindStringSubmatch(string(slash))
+	slash := readHealthSource(t, "..", "..", "app", "slash_command.go")
+	decl := regexp.MustCompile(`writingBundleSkills = \[\]string\{([^}]*)\}`).FindStringSubmatch(slash)
 	if len(decl) < 2 {
 		t.Fatal("未找到 writingBundleSkills 声明（写章技法包单源）")
 	}
@@ -196,11 +254,7 @@ func TestHardcodedSkillListsDeclareMatchingMount(t *testing.T) {
 		}
 	}
 
-	rewrite, err := os.ReadFile(filepath.Join("..", "pipeline", "rewrite_skills.go"))
-	if err != nil {
-		t.Fatalf("读取 rewrite_skills.go 失败: %v", err)
-	}
-	src := string(rewrite)
+	src := readHealthSource(t, "..", "pipeline", "rewrite_skills.go")
 	start := strings.Index(src, "var auditDimSkillRoutes")
 	end := strings.Index(src, "// lowAuditDims")
 	if start < 0 || end <= start {
@@ -225,11 +279,7 @@ func TestHardcodedSkillListsDeclareMatchingMount(t *testing.T) {
 
 	// #111 P1：写章条件化技法单源。只提取 []string{...} 内的技能名（忽略条件 id），
 	// 逐个校验存在性、writing_bundle mount 与非 internalOnly，防止条件表变成摆设。
-	cond, err := os.ReadFile(filepath.Join("..", "..", "app", "writing_skill_conditions.go"))
-	if err != nil {
-		t.Fatalf("读取 writing_skill_conditions.go 失败: %v", err)
-	}
-	condSrc := string(cond)
+	condSrc := readHealthSource(t, "..", "..", "app", "writing_skill_conditions.go")
 	condStart := strings.Index(condSrc, "var writingSkillConditions")
 	condEnd := strings.Index(condSrc, "// writingChapterContext")
 	if condStart < 0 || condEnd <= condStart {
@@ -257,11 +307,8 @@ func TestHardcodedSkillListsDeclareMatchingMount(t *testing.T) {
 	}
 
 	// #111 P1：章 CI 写后自检单源，逐个校验 chapter_ci mount 与非 internalOnly。
-	ci, err := os.ReadFile(filepath.Join("..", "mcp_tools", "chapter_ci.go"))
-	if err != nil {
-		t.Fatalf("读取 chapter_ci.go 失败: %v", err)
-	}
-	ciDecl := regexp.MustCompile(`chapterCISelfCheckSkills = \[\]string\{([^}]*)\}`).FindStringSubmatch(string(ci))
+	ci := readHealthSource(t, "..", "mcp_tools", "chapter_ci.go")
+	ciDecl := regexp.MustCompile(`chapterCISelfCheckSkills = \[\]string\{([^}]*)\}`).FindStringSubmatch(ci)
 	if len(ciDecl) < 2 {
 		t.Fatal("未找到 chapterCISelfCheckSkills 声明（写后自检单源）")
 	}
@@ -299,20 +346,13 @@ func TestP2SkillWiringZeroExemption(t *testing.T) {
 	}
 
 	// statesync 前置技能单源：每个技能必须存在且声明 state_sync mount。
-	rwSrc, err := os.ReadFile(filepath.Join("..", "mcp_tools", "rw_tools.go"))
-	if err != nil {
-		t.Fatalf("读取 rw_tools.go 失败: %v", err)
-	}
-	rw := string(rwSrc)
-	rwStart := strings.Index(rw, "var stateSyncSkills")
-	// 结尾标记用 "\n}\n" 而非 "\n}"：[]struct{...}{ 那行本身以 "\n}{" 开头，
-	// 用 "\n}" 会把窗口截断在字段定义处，提取不到技能名。
-	rwEnd := strings.Index(rw[rwStart:], "\n}\n")
-	if rwStart < 0 || rwEnd <= 0 {
+	rw := readHealthSource(t, "..", "mcp_tools", "rw_tools.go")
+	rwBlock, ok := healthVarBlock(rw, "var stateSyncSkills")
+	if !ok {
 		t.Fatal("未找到 stateSyncSkills 单源声明（结构已变更？）")
 	}
 	stateNames := 0
-	for _, m := range regexp.MustCompile(`\{"([a-z0-9-]+)",`).FindAllStringSubmatch(rw[rwStart:rwStart+rwEnd], -1) {
+	for _, m := range regexp.MustCompile(`\{"([a-z0-9-]+)",`).FindAllStringSubmatch(rwBlock, -1) {
 		stateNames++
 		sk, ok := byName[m[1]]
 		if !ok {
@@ -328,18 +368,13 @@ func TestP2SkillWiringZeroExemption(t *testing.T) {
 	}
 
 	// slash 确定性调度单源：同名异物必须显式登记，且技能声明 slash_only mount。
-	slSrc, err := os.ReadFile(filepath.Join("..", "..", "app", "slash_command.go"))
-	if err != nil {
-		t.Fatalf("读取 slash_command.go 失败: %v", err)
-	}
-	sl := string(slSrc)
-	slStart := strings.Index(sl, "var slashSubAgentDispatch")
-	slEnd := strings.Index(sl[slStart:], "\n}\n")
-	if slStart < 0 || slEnd <= 0 {
+	sl := readHealthSource(t, "..", "..", "app", "slash_command.go")
+	slBlock, ok := healthVarBlock(sl, "var slashSubAgentDispatch")
+	if !ok {
 		t.Fatal("未找到 slashSubAgentDispatch 声明（/memory、/review 调度已失联？）")
 	}
 	dispatch := map[string]bool{}
-	for _, m := range regexp.MustCompile(`"([a-z0-9-]+)":\s*"[a-z0-9-]+"`).FindAllStringSubmatch(sl[slStart:slStart+slEnd], -1) {
+	for _, m := range regexp.MustCompile(`"([a-z0-9-]+)":\s*"[a-z0-9-]+"`).FindAllStringSubmatch(slBlock, -1) {
 		dispatch[m[1]] = true
 		sk, ok := byName[m[1]]
 		if !ok {
@@ -426,11 +461,8 @@ func TestWorkflowAutoArmContract(t *testing.T) {
 	}
 
 	// 4. 常驻上限不得被抬高：兼容层不能重新膨胀成正文主通道。
-	catalogSrc, err := os.ReadFile(filepath.Join("..", "agentcfg", "skill_catalog.go"))
-	if err != nil {
-		t.Fatalf("读取 skill_catalog.go 失败: %v", err)
-	}
-	if !regexp.MustCompile(`MaxAlwaysSkillsResident\s*=\s*3`).Match(catalogSrc) {
+	catalogSrc := readHealthSource(t, "..", "agentcfg", "skill_catalog.go")
+	if !regexp.MustCompile(`MaxAlwaysSkillsResident\s*=\s*3`).MatchString(catalogSrc) {
 		t.Error("MaxAlwaysSkillsResident 必须为 3（P3 收口硬约束，抬高须重新评审）")
 	}
 }
