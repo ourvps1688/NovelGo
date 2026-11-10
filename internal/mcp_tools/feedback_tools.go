@@ -23,6 +23,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/skill"
 )
@@ -171,6 +172,12 @@ func buildFeedbackInstruction(skillStore *skill.Store, row *quality.EditorFeedba
 			b.WriteString("\n# 本次任务方法论\n")
 			b.WriteString(sk.Content)
 			b.WriteString("\n")
+			// #111 P2 统一账本：editor-feedback 走 RunSubAgent，不进 exec_run_stats；
+			// 与 chapter-ci 同纪律，在技能正文注入点直接记账。
+			activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
+				Skill: "editor-feedback", Channel: "feedback", Mount: "feedback",
+				NovelID: row.NovelID, Runes: len([]rune(sk.Content)),
+			})
 		}
 	}
 	b.WriteString("\n最终回复末尾必须附 ```json 代码块上报回执，格式：\n")

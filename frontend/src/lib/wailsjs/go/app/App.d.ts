@@ -270,6 +270,8 @@ export function IsInitialized():Promise<boolean>;
 
 export function ListDetectionTaskStatuses(arg1:number):Promise<Array<pipeline.DetectionTaskStatus>>;
 
+export function ListEditorFeedbacks(arg1:number):Promise<Array<app.EditorFeedbackRow>>;
+
 export function ListIssueTickets(arg1:number):Promise<Array<pipeline.PipelineIssue>>;
 
 export function ListRemoteSkills(arg1:app.ListRemoteSkillsInput):Promise<apperr.Result_github_com_novelgo_novelgo_internal_storage_PageResult_github_com_novelgo_novelgo_internal_skill_remote_RemoteSkillMeta__>;
@@ -302,6 +304,8 @@ export function RebuildNovelIndex(arg1:number):Promise<void>;
 
 export function RecordCreativeActivity(arg1:number):Promise<void>;
 
+export function RecordEditorFeedback(arg1:app.EditorFeedbackInput):Promise<app.EditorFeedbackResult>;
+
 export function RecordFeatureUsage(arg1:string):Promise<void>;
 
 export function RecordRetconEdit(arg1:number,arg2:string):Promise<retcon.RetconCase>;
@@ -313,6 +317,8 @@ export function ResumePipeline(arg1:string,arg2:string,arg3:string):Promise<void
 export function RetryStartup():Promise<void>;
 
 export function RollbackRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
+
+export function RunBlueprintTask(arg1:number):Promise<pipeline.BlueprintTaskResult>;
 
 export function RunDetectionTask(arg1:number,arg2:string,arg3:any):Promise<pipeline.DetectionTaskResult>;
 

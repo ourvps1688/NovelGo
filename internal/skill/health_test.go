@@ -31,9 +31,8 @@ var mountOwners = map[string]string{
 	"catalog_read":      "internal/agentcfg/skill_catalog.go",
 }
 
-// legacyPlaceholders 是 P0 的临时豁免：这两个技能仍是占位稿（memory 缺 useWhen、
-// 两个正文均不足 5 行）。P2 补正文后必须清空本表，不留永久后门。
-var legacyPlaceholders = map[string]bool{"memory": true, "review": true}
+// #111 P2：P0 的 legacyPlaceholders 临时豁免已清空——memory / review 已补齐
+// useWhen 与 ≥5 行正文，全量技能一律过同一套硬断言，不留永久后门。
 
 // agentTypeCollisions 显式登记技能名与 agentcfg.AgentType 子 Agent 枚举的重名。
 // 二者同名异物（ReviewAgent / MemoryAgent 不是这两个技能），必须显式解耦。
@@ -79,11 +78,6 @@ func nonEmptyBodyLines(body string) int {
 // 零挂载点即构建失败、枚举有主、预算为正、internalOnly 自洽、占位稿不放行。
 func TestBuiltinSkillManifestHealth(t *testing.T) {
 	skills, byName := loadBuiltinForHealth(t)
-	for name := range legacyPlaceholders {
-		if _, ok := byName[name]; !ok {
-			t.Errorf("legacyPlaceholders 含不存在的技能: %s", name)
-		}
-	}
 	for name := range agentTypeCollisions {
 		if _, ok := byName[name]; !ok {
 			t.Errorf("agentTypeCollisions 含不存在的技能: %s", name)
@@ -117,12 +111,6 @@ func TestBuiltinSkillManifestHealth(t *testing.T) {
 			}
 			hasUseWhen := len(sk.UseWhen) > 0
 			bodyOK := nonEmptyBodyLines(sk.Content) >= 5
-			if legacyPlaceholders[sk.Name] {
-				if hasUseWhen && bodyOK {
-					t.Errorf("占位稿 %s 已补齐正文与 useWhen，请从 legacyPlaceholders 移除豁免", sk.Name)
-				}
-				return
-			}
 			if !hasUseWhen {
 				t.Errorf("技能 %s 缺 useWhen（cue 路由不可达）", sk.Name)
 			}
@@ -291,5 +279,80 @@ func TestHardcodedSkillListsDeclareMatchingMount(t *testing.T) {
 	}
 	if ciNames == 0 {
 		t.Fatal("未能从 chapterCISelfCheckSkills 提取到任何技能名（结构已变更？）")
+	}
+}
+
+// TestP2SkillWiringZeroExemption 锁住 #111 P2 的两条收口：占位稿豁免已清空、
+// 同名异物技能真正接上子 Agent 调度，且新增的 state_sync / slash_only 挂点有单源校验。
+func TestP2SkillWiringZeroExemption(t *testing.T) {
+	skills, byName := loadBuiltinForHealth(t)
+	for _, sk := range skills {
+		if len(sk.UseWhen) == 0 {
+			t.Errorf("零豁免：技能 %s 仍缺 useWhen", sk.Name)
+		}
+		if nonEmptyBodyLines(sk.Content) < 5 {
+			t.Errorf("零豁免：技能 %s 正文非空行少于 5（占位稿不得再放行）", sk.Name)
+		}
+	}
+
+	// statesync 前置技能单源：每个技能必须存在且声明 state_sync mount。
+	rwSrc, err := os.ReadFile(filepath.Join("..", "mcp_tools", "rw_tools.go"))
+	if err != nil {
+		t.Fatalf("读取 rw_tools.go 失败: %v", err)
+	}
+	rw := string(rwSrc)
+	rwStart := strings.Index(rw, "var stateSyncSkills")
+	// 结尾标记用 "\n}\n" 而非 "\n}"：[]struct{...}{ 那行本身以 "\n}{" 开头，
+	// 用 "\n}" 会把窗口截断在字段定义处，提取不到技能名。
+	rwEnd := strings.Index(rw[rwStart:], "\n}\n")
+	if rwStart < 0 || rwEnd <= 0 {
+		t.Fatal("未找到 stateSyncSkills 单源声明（结构已变更？）")
+	}
+	stateNames := 0
+	for _, m := range regexp.MustCompile(`\{"([a-z0-9-]+)",`).FindAllStringSubmatch(rw[rwStart:rwStart+rwEnd], -1) {
+		stateNames++
+		sk, ok := byName[m[1]]
+		if !ok {
+			t.Errorf("stateSyncSkills 含不存在的技能 %s", m[1])
+			continue
+		}
+		if !containsString(sk.Mounts, "state_sync") {
+			t.Errorf("statesync 技能 %s 未声明 state_sync mount", m[1])
+		}
+	}
+	if stateNames == 0 {
+		t.Fatal("未能从 stateSyncSkills 提取到任何技能名")
+	}
+
+	// slash 确定性调度单源：同名异物必须显式登记，且技能声明 slash_only mount。
+	slSrc, err := os.ReadFile(filepath.Join("..", "..", "app", "slash_command.go"))
+	if err != nil {
+		t.Fatalf("读取 slash_command.go 失败: %v", err)
+	}
+	sl := string(slSrc)
+	slStart := strings.Index(sl, "var slashSubAgentDispatch")
+	slEnd := strings.Index(sl[slStart:], "\n}\n")
+	if slStart < 0 || slEnd <= 0 {
+		t.Fatal("未找到 slashSubAgentDispatch 声明（/memory、/review 调度已失联？）")
+	}
+	dispatch := map[string]bool{}
+	for _, m := range regexp.MustCompile(`"([a-z0-9-]+)":\s*"[a-z0-9-]+"`).FindAllStringSubmatch(sl[slStart:slStart+slEnd], -1) {
+		dispatch[m[1]] = true
+		sk, ok := byName[m[1]]
+		if !ok {
+			t.Errorf("slashSubAgentDispatch 含不存在的技能 %s", m[1])
+			continue
+		}
+		if !containsString(sk.Mounts, "slash_only") {
+			t.Errorf("调度技能 %s 未声明 slash_only mount", m[1])
+		}
+		if !agentTypeCollisions[m[1]] {
+			t.Errorf("调度技能 %s 与子 Agent 枚举同名，须在 agentTypeCollisions 显式登记", m[1])
+		}
+	}
+	for name := range agentTypeCollisions {
+		if !dispatch[name] {
+			t.Errorf("重名技能 %s 未接入 slashSubAgentDispatch（同名异物未解耦）", name)
+		}
 	}
 }

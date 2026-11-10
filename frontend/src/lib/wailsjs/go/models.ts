@@ -522,6 +522,86 @@ export namespace app {
 	        this.id = source["id"];
 	    }
 	}
+	export class EditorFeedbackInput {
+	    novel_id: number;
+	    work_title: string;
+	    platform: string;
+	    channel: string;
+	    verdict: string;
+
+	    static createFrom(source: any = {}) {
+	        return new EditorFeedbackInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.novel_id = source["novel_id"];
+	        this.work_title = source["work_title"];
+	        this.platform = source["platform"];
+	        this.channel = source["channel"];
+	        this.verdict = source["verdict"];
+	    }
+	}
+	export class EditorFeedbackResult {
+	    feedback_id: number;
+	    parse_status: string;
+	    degraded?: string;
+	    dims?: string[];
+	    issue_count: number;
+	    constraint_count: number;
+	    run_id?: string;
+	    tickets_landed: number;
+	    summary?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new EditorFeedbackResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.feedback_id = source["feedback_id"];
+	        this.parse_status = source["parse_status"];
+	        this.degraded = source["degraded"];
+	        this.dims = source["dims"];
+	        this.issue_count = source["issue_count"];
+	        this.constraint_count = source["constraint_count"];
+	        this.run_id = source["run_id"];
+	        this.tickets_landed = source["tickets_landed"];
+	        this.summary = source["summary"];
+	    }
+	}
+	export class EditorFeedbackRow {
+	    id: number;
+	    novel_id: number;
+	    work_title: string;
+	    platform: string;
+	    channel: string;
+	    verdict: string;
+	    parse_status: string;
+	    summary: string;
+	    issue_count: number;
+	    ticket_run_id: string;
+	    created_at: string;
+
+	    static createFrom(source: any = {}) {
+	        return new EditorFeedbackRow(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.novel_id = source["novel_id"];
+	        this.work_title = source["work_title"];
+	        this.platform = source["platform"];
+	        this.channel = source["channel"];
+	        this.verdict = source["verdict"];
+	        this.parse_status = source["parse_status"];
+	        this.summary = source["summary"];
+	        this.issue_count = source["issue_count"];
+	        this.ticket_run_id = source["ticket_run_id"];
+	        this.created_at = source["created_at"];
+	    }
+	}
 	export class ExtractStyleInput {
 	    task_id: string;
 	    sample_ids: number[];
@@ -2770,7 +2850,23 @@ export namespace personasetting {
 }
 
 export namespace pipeline {
-	
+
+	export class BlueprintTaskResult {
+	    run_id: string;
+	    novel_id: number;
+	    dispatched: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new BlueprintTaskResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.run_id = source["run_id"];
+	        this.novel_id = source["novel_id"];
+	        this.dispatched = source["dispatched"];
+	    }
+	}
 	export class ChapterQualityArchive {
 	    chapter_id: number;
 	    reading_number: number;

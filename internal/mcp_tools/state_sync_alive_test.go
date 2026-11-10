@@ -64,7 +64,7 @@ func captureStateSync(t *testing.T, db *gorm.DB, chapterID int64) string {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	require.NoError(t, mcp_tools.RunStateSyncForChapter(
-		context.Background(), db, stub, logger, "test", 1, chapterID,
+		context.Background(), db, nil, stub, logger, "test", 1, chapterID,
 	))
 	return instruction
 }
@@ -103,7 +103,7 @@ func TestRunStateSyncForChapter_NilDBDegradesWithoutBlocking(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	require.NoError(t, mcp_tools.RunStateSyncForChapter(
-		context.Background(), nil, stub, logger, "test", 1, 9,
+		context.Background(), nil, nil, stub, logger, "test", 1, 9,
 	))
 	require.Contains(t, instruction, "本地派生不可用")
 	require.Contains(t, instruction, "update_character(alive=false)")

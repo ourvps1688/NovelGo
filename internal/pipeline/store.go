@@ -343,6 +343,20 @@ func (s *Store) GetLatestDetectRun(ctx context.Context, novelID int64, kind stri
 	return &run, nil
 }
 
+// GetRunningRunByMode 取该小说某 mode 下仍在 running 的最新一条 run（#111 P2 S2）。
+// 显式蓝图任务的幂等合并必须按 mode 精确查：GetByNovel 只取「全书最新一条非终态
+// run」，同书后起的章节检测会把它顶掉，导致重复派发长耗时 LLM 蓝图任务。
+func (s *Store) GetRunningRunByMode(ctx context.Context, novelID int64, mode string) (*PipelineRun, error) {
+	var run PipelineRun
+	if err := s.db.WithContext(ctx).
+		Where("novel_id = ? AND mode = ? AND status = ?", novelID, mode, StatusRunning).
+		Order("id DESC").First(&run).Error; err != nil {
+		return nil, err
+	}
+	s.hydrateGateObjects(ctx, []*PipelineRun{&run})
+	return &run, nil
+}
+
 // HasActiveScopedChild 判断指定 book-run 是否仍有活跃（未结束/未中止）的卷级 scoped sub-run。
 // 供启动恢复自愈：waiting 的 book-run 若无活跃子 run，说明子 run 已收口而唤醒前崩溃，需唤醒。
 func (s *Store) HasActiveScopedChild(ctx context.Context, parentRunID string) (bool, error) {

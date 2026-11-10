@@ -42,6 +42,15 @@ func (a *App) ListSlashCommands(input ListSlashCommandsInput) []SlashCommand {
 	return result
 }
 
+// slashSubAgentDispatch 是显式斜杠指令 → 子 Agent 类型的确定性映射（#111 P2）。
+// memory / review 与 agentcfg.AgentType 枚举同名异物：技能正文只给调度契约与输出格式，
+// 真正的派发由主 Agent 的 run_subagent 工具完成。此处由 Go 生成不可省略的调度指令，
+// 避免 `/memory` 只注入一行占位正文、实际检索根本不发生（P0 实证零使用的根因）。
+var slashSubAgentDispatch = map[string]string{
+	"memory": "memory",
+	"review": "review",
+}
+
 // resolveSlashCommand 根据名称查找 skill 并返回注入内容（空串表示未命中）。
 func (a *App) resolveSlashCommand(novelID int64, name string) (inject string, logName string) {
 	if a.skill == nil {
@@ -60,6 +69,13 @@ func (a *App) resolveSlashCommand(novelID int64, name string) (inject string, lo
 		return "<system-reminder>\n" + content + "\n</system-reminder>", sk.Name
 	case "manual":
 		content := "用户启用了快捷指令「" + sk.Name + "」。请根据该指令的内容和用户需求进行工作。\n\n---\n" + sk.Content + "\n---"
+		// #111 P2：同名子 Agent 技能走确定性调度文案，而非泛泛的「请根据指令工作」。
+		if agentType, ok := slashSubAgentDispatch[sk.Name]; ok {
+			content = "用户显式启用了 /" + sk.Name + " —— 这是一次子 Agent 调度，不是普通问答。\n" +
+				"必须调用 run_subagent 工具：AgentType 固定为 \"" + agentType + "\"，" +
+				"Instruction 取用户消息里的具体目标；不得用主 Agent 的零星上下文自行代替检索或审读结果。\n" +
+				"下方技能正文是本次调度的契约与输出格式，严格遵循：\n\n---\n" + sk.Content + "\n---"
+		}
 		return "<system-reminder>\n" + content + "\n</system-reminder>", sk.Name
 	default: // auto
 		content := "用户启用了技能「" + sk.Name + "」。请根据该技能的定义和用户需求进行工作。\n\n---\n" + sk.Content + "\n---"

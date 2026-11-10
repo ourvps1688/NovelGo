@@ -309,7 +309,10 @@ func upsertL1(ctx context.Context, db *gorm.DB, logger *slog.Logger, record *qua
 // chapterCISelfCheckSkills 是章写后自检清单的技法单源（#111 P1，§3.3）。
 // 与起草侧不同：自检类技法挂在「只报告不改写」的章 CI 指令里更贴切，既不占
 // 写章 bundle 的 rune 预算，也不会把自检条目误读成正文创作指令。
-var chapterCISelfCheckSkills = []string{"deai-flavor", "revision-pass", "dialogue-subtext"}
+// #111 P2：review 补齐「章后评审清单」正文后并入本表——原本近乎零使用的编辑视角
+// 技能由此获得 chapter_ci 确定性挂载；其正文首段自带「不派发子 Agent」护栏，
+// 不会被章 CI 子 Agent 误读成调度指令。
+var chapterCISelfCheckSkills = []string{"deai-flavor", "revision-pass", "dialogue-subtext", "review"}
 
 const chapterCISelfCheckSkillCap = 1500 // 单技能自检正文上限（rune）
 

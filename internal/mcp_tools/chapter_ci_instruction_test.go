@@ -53,7 +53,8 @@ func TestChapterCISelfCheckBlock_NonEmpty(t *testing.T) {
 		require.Contains(t, block, "【写后自检·"+n+"】")
 	}
 	require.Contains(t, block, "只报告不改写")
-	require.LessOrEqual(t, len([]rune(block)), 3*chapterCISelfCheckSkillCap+300)
+	require.LessOrEqual(t, len([]rune(block)), len(chapterCISelfCheckSkills)*chapterCISelfCheckSkillCap+300)
+	require.Contains(t, block, "【写后自检·review】", "P2：章后评审清单须真实并入自检块")
 
 	got := buildChapterCIInstruction(s, 1, 7, "")
 	require.Contains(t, got, "写后自检清单")

@@ -478,6 +478,10 @@ export function ListDetectionTaskStatuses(arg1) {
   return window['go']['app']['App']['ListDetectionTaskStatuses'](arg1);
 }
 
+export function ListEditorFeedbacks(arg1) {
+  return window['go']['app']['App']['ListEditorFeedbacks'](arg1);
+}
+
 export function ListIssueTickets(arg1) {
   return window['go']['app']['App']['ListIssueTickets'](arg1);
 }
@@ -542,6 +546,10 @@ export function RecordCreativeActivity(arg1) {
   return window['go']['app']['App']['RecordCreativeActivity'](arg1);
 }
 
+export function RecordEditorFeedback(arg1) {
+  return window['go']['app']['App']['RecordEditorFeedback'](arg1);
+}
+
 export function RecordFeatureUsage(arg1) {
   return window['go']['app']['App']['RecordFeatureUsage'](arg1);
 }
@@ -564,6 +572,10 @@ export function RetryStartup() {
 
 export function RollbackRetconCase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RollbackRetconCase'](arg1, arg2, arg3);
+}
+
+export function RunBlueprintTask(arg1) {
+  return window['go']['app']['App']['RunBlueprintTask'](arg1);
 }
 
 export function RunDetectionTask(arg1, arg2, arg3) {

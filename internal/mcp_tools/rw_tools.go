@@ -1010,17 +1010,77 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 	stateSyncMu.Unlock()
 }
 
+// stateSyncSkills 是写后状态同步的前置技能单源（#111 P2，§3.1）。
+// collect 提供逐类核对清单，memory 提供归档口径：二者原本 30 天零使用，
+// 挂到 statesync 后每次写章同步都确定性进入子 Agent 上下文，而非塞进 chat cue。
+// cap 是单技能 rune 帽，避免写后同步指令被技能正文稀释。
+var stateSyncSkills = []struct {
+	name string
+	cap  int
+}{
+	{"collect", 1200},
+	{"memory", 400},
+}
+
+// stateSyncSkillBlock 渲染前置核对块：技能正文取自 builtin md（单源）、逐个单帽截断、
+// 如实标注节选；store 缺失 / 技能缺失 / 正文为空一律返回空串与 false，调用方据此
+// 保持 P0 指令逐字不变。命中注入的技能各自写一条统一账本，不再另记空 Skill 事件。
+func stateSyncSkillBlock(skillStore *skill.Store, novelID, chapterID int64) (string, bool) {
+	if skillStore == nil {
+		return "", false
+	}
+	var b strings.Builder
+	mounted := false
+	for _, e := range stateSyncSkills {
+		sk, ok := skillStore.Get(0, e.name)
+		if !ok || strings.TrimSpace(sk.Content) == "" {
+			continue
+		}
+		// #108 注入洁净化：历史 builtin md 可能带 CRLF/混合换行，统一为 LF 再拼进指令，
+		// 避免正文里夹 \r 干扰子 Agent 的分段与回执解析。
+		content := strings.ReplaceAll(sk.Content, "\r\n", "\n")
+		runes := []rune(content)
+		truncated := false
+		if len(runes) > e.cap {
+			runes = runes[:e.cap]
+			truncated = true
+		}
+		if !mounted {
+			b.WriteString("# 前置核对（只作维度，不改变本指令的工具白名单）\n")
+			b.WriteString("以下清单用于同步前逐类核对；清单里未开放的工具一律跳过，仍只调用台账类 create_*/update_*，" +
+				"严禁编辑章节文件、严禁派发子 Agent、严禁把清单条目改写成正文创作指令。\n")
+		}
+		fmt.Fprintf(&b, "\n【%s】\n%s", e.name, string(runes))
+		if truncated {
+			b.WriteString("\n（技能正文节选，完整以技能原文为准）")
+		}
+		// #111 P2 统一账本：技能正文真正进入 statesync 子 Agent 上下文才计一次。
+		activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
+			Skill: e.name, Channel: "state_sync", Mount: "state_sync",
+			NovelID: novelID, ChapterID: chapterID, Runes: len(runes),
+		})
+		mounted = true
+	}
+	if !mounted {
+		return "", false
+	}
+	b.WriteString("\n\n")
+	return b.String(), true
+}
+
 // RunStateSyncForChapter 对指定章节执行后台状态同步（statesync 子 Agent）。
 // runSub 为实际派发子 Agent 的函数（调用方决定用 ToolContext.RunSubAgent 还是 agent.RunSubAgent）；
 // db 用于写前本地派生 characters.alive（#103，nil 时优雅降级跳过派生，不阻断同步）；
+// skillStore 用于注入 collect 前置收集清单（#111 P2，nil 时指令逐字不变）；
 // logger 用于失败日志；toolID 标识调用来源（用于 statesync 进度事件）。返回派发错误（非阻断调用方可忽略）。
-func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, runSub func(ctx context.Context, req SubAgentRequest) (string, error), logger *slog.Logger, toolID string, novelID, chapterID int64) error {
+func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, skillStore *skill.Store, runSub func(ctx context.Context, req SubAgentRequest) (string, error), logger *slog.Logger, toolID string, novelID, chapterID int64) error {
 	eventBus.Emit(ctx, "statesync:progress", map[string]any{
 		"novel_id":   novelID,
 		"chapter_id": chapterID,
 		"status":     "started",
 	})
-	instruction := fmt.Sprintf(
+	skillBlock, skillMounted := stateSyncSkillBlock(skillStore, novelID, chapterID)
+	instruction := skillBlock + fmt.Sprintf(
 		"刚刚完成了章节（chapter_id=%d）的修改并已落盘。请读取该章正文（read 路径 chapters/id_%d.md），"+
 			"将其涉及的角色（含生死态）、地点、弧线节点、时间线（伏笔/章节计划）、读者认知变化，对照现有台账做**增量**同步："+
 			"新增首次出场者、更新已变化者、推进/回收伏笔与弧线节点、记录读者已知/误知变化。"+
@@ -1030,12 +1090,14 @@ func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, runSub func(ctx co
 	)
 	// 本地派生在派发前完成：LLM 读到的台账已是最新，指令里给出派生名单供复核/补漏。
 	instruction += aliveDerivationNote(ctx, db, logger, novelID, chapterID)
-	// #111 P0 统一账本：state_sync 通道级事件（Skill 为空——P0 仍是硬编码指令，
-	// P2 接入 collect 收集清单后改记具体技能名；空 skill 不参与技能用量统计）。
-	activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
-		Channel: "state_sync", Mount: "state_sync",
-		NovelID: novelID, ChapterID: chapterID,
-	})
+	// #111 P0 统一账本：无任何技能注入时只记通道级事件（Skill 为空，不参与技能用量统计），
+	// 避免与 stateSyncSkillBlock 的具体技能记录重复计数。
+	if !skillMounted {
+		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{
+			Channel: "state_sync", Mount: "state_sync",
+			NovelID: novelID, ChapterID: chapterID,
+		})
+	}
 	if _, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "statesync",
 		NovelID:     novelID,
@@ -1066,7 +1128,7 @@ func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 	if tc.RunSubAgent == nil {
 		return
 	}
-	_ = RunStateSyncForChapter(ctx, tc.DB, tc.RunSubAgent, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
+	_ = RunStateSyncForChapter(ctx, tc.DB, tc.SkillStore, tc.RunSubAgent, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {
