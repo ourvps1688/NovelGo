@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/google/uuid"
 	"github.com/novelgo/novelgo/internal/contextasm"
@@ -14,9 +13,10 @@ import (
 
 // ── 发现项工单面板的服务入口（R5-1，提案 §10.2/§10.3/§10.7）──────────────────
 // 流水线核心交付物收敛为「质量档案 + 发现项工单」（§10.2）：本文件只做工单流转与
-// 显式复验，**不做自动修复派发**——修复动作永远由人显式触发，修复执行改工单被动
-// 触发属 R5-2；复验沿用 §4.3-4 增量复验逻辑（signability-verify + verifyPrompt +
-// 复验回执），只是不再自动串起来（§10.3）。
+// 显式复验，**不做任何自动修复派发**（#270 后续收口：后台 LLM 修复执行体已整体下线）——
+// 修复一律由「去修复」把上下文发到 chat 人工/AI 协作完成，再点「标记已修复」收口；
+// 复验沿用 §4.3-4 增量复验逻辑（signability-verify + verifyPrompt + 复验回执），
+// 只是不再自动串起来（§10.3）。
 
 // IssueTicketRef 定位一条发现项工单（run 内稳定键，与 ListIssueTickets 返回行配套）。
 type IssueTicketRef struct {
@@ -51,21 +51,14 @@ func (s *Service) ConfirmIssueTickets(ctx context.Context, novelID int64, refs [
 
 // StartManualIssueFixTickets 是工单面板「去修复」的人工路径（#270 双轨拆分）：
 // 把选中工单置「修复中」，前端同时把问题上下文发到 chat 交给人工/AI 协作修复。
-// **不派发后台自动修复执行体，也不占用 issueFixActive 互斥窗口**——chat 里修完点
-// 「标记已修复」收口后即可复验，不会再被「修复任务仍在进行中」拦住。
-// 自动 LLM 修复保留为独立的显式按钮 StartIssueFixTickets（见下）。
-//
-// 同 run 若已有自动修复执行体在途（旧数据 / 点过「自动修复」），人工置 fixing 会被
-// 其排空循环拾起造成双轨抢单，故显式拒绝：等其结束或应用重启后再操作。
+// **不派发任何后台自动修复执行体，也不占用互斥窗口**——chat 里修完点
+// 「标记已修复」收口后即可复验。后台 LLM 修复链路已整体下线，本方法是修复的唯一起点。
 func (s *Service) StartManualIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
 	if s.store == nil {
 		return errors.New("issue 工单表未初始化")
 	}
 	if len(refs) == 0 {
 		return errors.New("未选择工单")
-	}
-	if err := s.rejectFixInFlight(refs); err != nil {
-		return err
 	}
 	var errs []error
 	for _, ref := range refs {
@@ -82,378 +75,6 @@ func (s *Service) StartManualIssueFixTickets(ctx context.Context, novelID int64,
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// StartIssueFixTickets 「自动修复」（显式按钮）：工单进入修复中并异步派发 LLM 修复
-// 执行体（#240 R5-2 工单接执行：修复动作由人显式触发，执行体按 run 聚合全部 fixing
-// 态工单被动处理）。#270 后不再是「去修复」的隐含行为——「去修复」走人工 chat 路径
-// StartManualIssueFixTickets，只有用户明确点「自动修复」才进本入口。幂等容忍：已在 fixing 态的工单不报错（重复点击/跨批重试直接并入，
-// 由在跑执行体排空拾起）；逐条独立、部分失败不整体放弃——成功的照常派发，失败的逐条
-// 报错（#100 帮凶修复：旧实现任一条流转失败即整批放弃派发，同批工单全部陪葬）。
-// 「置 fixing + 派发决策」在 issueFixMu 互斥锁内完成，与执行体的「排空扫描 + 摘标记」
-// 同锁互斥：每张翻为 fixing 的工单必被执行体排空拾起或触发新执行体，彻底闭合
-// 「派发被任务队列去重合并 → 工单永卡修复中」的孤儿化路径（#100 帮凶修复）。
-func (s *Service) StartIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
-	if s.store == nil {
-		return errors.New("issue 工单表未初始化")
-	}
-	if len(refs) == 0 {
-		return errors.New("未选择工单")
-	}
-	s.issueFixMu.Lock()
-	if s.issueFixActive == nil {
-		s.issueFixActive = map[string]bool{}
-	}
-	var errs []error
-	runIDs := map[string]bool{}
-	for _, ref := range refs {
-		row, err := s.store.getIssueRow(ctx, novelID, ref.RunID, ref.IssueKey)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
-			continue
-		}
-		if row.Status == IssueStatusFixing {
-			runIDs[ref.RunID] = true // 已在修复中：幂等容忍（在跑执行体排空会拾起）
-			continue
-		}
-		if err := s.store.TransitionIssueTicket(ctx, novelID, ref.RunID, ref.IssueKey, IssueStatusFixing, ""); err != nil {
-			errs = append(errs, fmt.Errorf("工单 %s: %w", ref.IssueKey, err))
-			continue
-		}
-		runIDs[ref.RunID] = true
-	}
-	need := make([]string, 0, len(runIDs))
-	for runID := range runIDs {
-		if s.issueFixActive[runID] {
-			continue // 在跑执行体排空收尾会拾起这批工单，不重复派发
-		}
-		s.issueFixActive[runID] = true
-		need = append(need, runID)
-	}
-	s.issueFixMu.Unlock()
-	// 按 run 分组派发（一个 run 一个执行体聚合本 run 全部 fixing 态工单）。派发用唯一
-	// dedup 键（dispatchExecutorUnique）：应用层互斥已保证同 run 单执行体，任务队列侧
-	// 不再合并——合并会把互斥窗口内新翻 fixing 的工单孤儿化。队列不可用时降级直派。
-	for _, runID := range need {
-		runID := runID
-		s.dispatchExecutorUnique(taskKindIssueFix, runID, novelID, func() {
-			s.runIssueFixTickets(runID, novelID)
-		})
-	}
-	return errors.Join(errs...)
-}
-
-// releaseIssueFix 修复执行体收口摘标记（任何退出路径，defer 调用）。
-func (s *Service) releaseIssueFix(runID string) {
-	s.issueFixMu.Lock()
-	delete(s.issueFixActive, runID)
-	s.issueFixMu.Unlock()
-}
-
-// issueFixRunning 报告该 run 是否有在途的工单修复执行体。标记由 StartIssueFixTickets
-// 在派发前置位、由 runIssueFixTickets 收口时摘除，覆盖「点去修复」到「修复完成」整段
-// 窗口（含任务队列排队）。进程重启时 AbandonActive 会把在途任务统一置 dead，无需跨进程兜底。
-func (s *Service) issueFixRunning(runID string) bool {
-	s.issueFixMu.Lock()
-	defer s.issueFixMu.Unlock()
-	return s.issueFixActive[runID]
-}
-
-// issueFixDrainPasses 是修复执行体排空循环的最多批次数（保险丝；正常由 seen 集合
-// 自然终止——只有 StartIssueFixTickets 会新增 fixing 态工单）。
-const issueFixDrainPasses = 32
-
-// runIssueFixTickets 是工单「去修复」的执行体（#240，R5-2 工单接执行）：处理本 run 全部
-// 处于 fixing 态的发现项工单，按问题类型分流到既有修复执行能力（台账级 signability-fix /
-// blueprint-fix、正文级 chapter-rewrite），不派发任何自动回路、不自动回复评。V 系文风漂移
-// 与冻结卷写保护项绝不派发，退回原状态留 note（只报告不改写 / 人工裁决）。
-//
-// 收尾排空（#100 帮凶修复）：单批处理完后重扫 fixing 态工单——执行期间被用户点「去修复」
-// 翻为 fixing 的新工单（其派发在去重窗口内被合并）在此拾起继续处理，直至无新单，
-// 杜绝「执行体快照后到达的工单永卡修复中」的孤儿化。seen 集合保证每张工单至多处理一遍
-// （落库失败卡 fixing 的行不无限重试，留待下次显式派发/启动清扫）。
-// 幂等重入：已不在 fixing 态的工单直接跳过；互斥由 issueFixActive 标记保证（见 StartIssueFixTickets）。
-func (s *Service) runIssueFixTickets(runID string, novelID int64) {
-	defer s.releaseIssueFix(runID)
-	seen := map[string]bool{}
-	for pass := 0; pass < issueFixDrainPasses; pass++ {
-		// 扫描与摘标记/派发决策同锁（StartIssueFixTickets 的互斥协议）：要么本轮扫到
-		// 新翻的工单，要么其派发会拉起新执行体，二选一必达。
-		s.issueFixMu.Lock()
-		rows, err := s.store.ListFixingTickets(s.appCtx, novelID, runID)
-		s.issueFixMu.Unlock()
-		if err != nil {
-			s.logger.Error("工单修复：加载 fixing 工单失败", "run_id", runID, "err", err)
-			return
-		}
-		fresh := make([]PipelineIssue, 0, len(rows))
-		for _, r := range rows {
-			if !seen[r.IssueKey] {
-				seen[r.IssueKey] = true
-				fresh = append(fresh, r)
-			}
-		}
-		if len(fresh) == 0 {
-			if pass == 0 {
-				s.logger.Info("工单修复：本 run 无 fixing 态工单，跳过", "run_id", runID)
-			}
-			return
-		}
-		s.runIssueFixPass(runID, novelID, fresh)
-	}
-}
-
-// runIssueFixPass 执行一批 fixing 态工单的修复（原 runIssueFixTickets 单遍逻辑）：
-// 分流 → 台账级并行小批修复 / 正文级逐章重写 → 逐条落回执（fixed/skipped），
-// 收口递增 FixRounds + 蓝图漂移巡检 + 广播修复完成。
-func (s *Service) runIssueFixPass(runID string, novelID int64, rows []PipelineIssue) {
-	ctx := s.appCtx
-	run, err := s.store.GetByRunID(ctx, runID)
-	if err != nil || run == nil {
-		s.logger.Error("工单修复：加载流水线失败", "run_id", runID, "err", err)
-		return
-	}
-
-	var ctxt GateContext
-	if run.ContextJSON != "" {
-		_ = json.Unmarshal([]byte(run.ContextJSON), &ctxt)
-	}
-
-	// 显式修复执行开始（R5-2：由用户「去修复」触发，替代旧 S5 自动派发修复的 emitFixStart
-	// 信号，供前端展示修复进行态）。
-	keys := make([]string, 0, len(rows))
-	for _, r := range rows {
-		keys = append(keys, r.IssueKey)
-	}
-	emitFixStart(ctx, map[string]any{
-		"run_id":       runID,
-		"novel_id":     novelID,
-		"ticket_count": len(rows),
-		"ticket_keys":  keys,
-	})
-
-	// 分流：V 系 / 写保护 → 退回原状态（不派发）；body → 章节重写；其余 → 台账级修复。
-	var bodyItems []RewriteItem
-	var ledgerIssues []AuditIssue
-	bounced := 0
-	for _, r := range rows {
-		switch {
-		case isStyleExempt(r.IssueKey):
-			// V 系只报告不改写：退回 rewrite 态，作者润色或驳回（绝不派发重写）。
-			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusRewrite,
-				"V 系文风漂移只报告不改写：已退回待作者在写作页润色或驳回")
-			bounced++
-		case writeProtected(r.TargetScope, r.Direction):
-			// 冻结卷写保护：退回 retcon 态，经 retcon 审批闸门人工裁决（绝不派发修复）。
-			s.syncIssueRow(ctx, novelID, runID, r.IssueKey, IssueStatusRetcon,
-				"命中冻结卷写保护：已退回 retcon 候选，经 retcon 审批闸门人工裁决")
-			bounced++
-		case r.FixType == FixTypeBody:
-			bodyItems = append(bodyItems, RewriteItem{
-				ID: r.IssueKey, Level: r.Level, Area: r.Area, Desc: r.Desc,
-				Chapters:    decodeIssueChapterIDs(r.ChapterIDsJSON),
-				TargetScope: r.TargetScope, Dimension: r.Dimension, Direction: r.Direction,
-			})
-		default:
-			ledgerIssues = append(ledgerIssues, AuditIssue{
-				ID: r.IssueKey, Level: r.Level, Area: r.Area, Desc: r.Desc,
-				FixType: r.FixType, TargetScope: r.TargetScope, Dimension: r.Dimension,
-				Direction: r.Direction, ChapterIDs: decodeIssueChapterIDs(r.ChapterIDsJSON),
-			})
-		}
-	}
-
-	// 台账级修复（串行派发，FixLog 共享，台账变更入账）+ 正文级重定向重写一章一章。
-	// P2-1 定向路由：本 run 体检维度星级透传正文重写（低分维/issue 维度 → 方法论技能）。
-	dimsJSON := ctxt.Audit
-	if ctxt.AuditKind == "blueprint" {
-		dimsJSON = ctxt.BlueprintAudit
-	}
-	rewriteDims := parseAudit(dimsJSON).Dims
-	fixedLedger, skippedLedger := s.runLedgerFixTickets(ctx, runID, novelID, &ctxt, ledgerIssues)
-	fixedBody, skippedBody := s.runBodyRewriteTickets(ctx, runID, novelID, bodyItems, rewriteDims)
-
-	// 收口：修复轮数 +1（工单轮次统计与增量复验分轮，R5-2 起只由工单修复收口递增），
-	// 蓝图漂移巡检（G3，非阻断）结论写入 DriftReport 持久化，广播修复完成。
-	ctxt.FixRounds++
-	patrol := s.runBlueprintDriftPatrol(ctx, runID, novelID)
-	if patrol != "" {
-		ctxt.DriftReport = patrol
-	}
-	if updated, merr := json.Marshal(ctxt); merr == nil {
-		if serr := s.store.SetStageStatus(ctx, runID, run.CurrentStage, run.Status, string(updated)); serr != nil {
-			s.logger.Warn("工单修复：落库 FixRounds/DriftReport 失败（非阻断）", "err", serr)
-		}
-	}
-	dispatched := fixedLedger + skippedLedger + fixedBody + skippedBody
-	emitFixDone(ctx, map[string]any{
-		"run_id":        runID,
-		"novel_id":      novelID,
-		"ok":            true,
-		"tickets":       true,
-		"fixed_count":   fixedLedger + fixedBody,
-		"bounced_count": bounced,
-		"error": fmt.Sprintf("工单修复执行完毕：%d 项派发修复（已修复 %d 项 / 跳过 %d 项），%d 项退回（V 系/写保护）；"+
-			"请在工单面板查看回执，可复验/驳回/重试。%s",
-			dispatched, fixedLedger+fixedBody, skippedLedger+skippedBody, bounced, patrol),
-	})
-}
-
-// runLedgerFixTickets 执行本 run 台账级工单的修复（#240）：作用域分组（planFixGroups）→
-// 组内小批（planFixBatches）→ 不相交分组并行派发 signability-fix（蓝图源走 blueprint-fix），
-// 修复日志共享（FixLog），台账变更入账（ledgerChangeWatermark 起点 + appendLedgerChangeLog）。
-// 并行语义（R1b，F2 根治）：不相交分组各起 goroutine 并发派发，写冲突天然规避、互不拖慢；
-// 组内小批串行（修复日志与 run 级计数由 mu 串行化）。每批回执逐条落工单 fixed/skipped，
-// 并记 §9.4 命中率度量（confirmed/dismissed）。返回已修复数/已跳过数。
-func (s *Service) runLedgerFixTickets(ctx context.Context, runID string, novelID int64, ctxt *GateContext, issues []AuditIssue) (int, int) {
-	if len(issues) == 0 {
-		return 0, 0
-	}
-	blocks := s.buildBlocks(ctx, novelID, contextasm.PurposeFix)
-	// 摘要从本 run 审计结果 JSON 解析（蓝图源取 BlueprintAudit），与 executeFix 同口径，
-	// 注入修复提示词作背景（无 Summary 字段，宁缺勿错降级为空串）。
-	auditJSON := ctxt.Audit
-	if ctxt.AuditKind == "blueprint" {
-		auditJSON = ctxt.BlueprintAudit
-	}
-	summary := parseAudit(auditJSON).Summary
-	groups := planFixGroups(issues)
-	// 台账变更水位取 sweep 起点（修复前最大履历 id）：本轮修复动过的台账履历全部
-	// id > sweepWatermark，收口时一次性入账（R2b-7，与 HEAD 同口径——用刷新后的末批
-	// 水位会漏记末批自身写入的履历，导致复验缺下游影响核对块）。
-	sweepWatermark := s.ledgerChangeWatermark(ctx, novelID)
-
-	var (
-		mu      sync.Mutex
-		wg      sync.WaitGroup
-		fixed   int
-		skipped int
-	)
-	for _, group := range groups {
-		group := group
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for _, batch := range planFixBatches(group) {
-				// 字段可达性前置（#102）：巡检/复验把结构化列当事实源读，但台账写工具未必
-				// 开放该列。命中不可写列的 issue 直接落 skipped 转人工，一次 LLM 调用都不派发
-				// （旧路径会派发修复→只在自由文本里做等效标注→复验判只改一半→再空转一轮）。
-				reachable, unreachable := filterUnreachableFixIssues(batch)
-				batch = reachable
-				if len(unreachable) > 0 {
-					mu.Lock()
-					for id, reason := range unreachable {
-						s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
-						skipped++
-					}
-					mu.Unlock()
-				}
-				if len(batch) == 0 {
-					continue
-				}
-				// 提示词构建读取修复日志——先快照再释放锁，避免 dispatchSkill 被锁串行化
-				// （并行派发依赖 dispatchSkill 不被锁挡住）。
-				mu.Lock()
-				logSnapshot := append([]FixLogEntry(nil), ctxt.FixLog...)
-				mu.Unlock()
-
-				var (
-					prompt string
-					skill  = "signability-fix"
-				)
-				if ctxt.AuditKind == "blueprint" {
-					skill = "blueprint-fix"
-					prompt = blueprintFixPrompt(novelID, batch, summary, logSnapshot)
-				} else {
-					prompt = fixPrompt(novelID, batch, summary, logSnapshot, blocks)
-				}
-				// 字段可达性护栏在派发层注入，不写进 fixPrompt 契约单源（其全文被
-				// testdata/p0_baseline_*.txt 逐字锁定，演进需 -p0-update 重定格）。
-				prompt += fixReachabilityGuard()
-				out, derr := s.dispatchSkill(ctx, skill, SkillInput{
-					NovelID:   novelID,
-					Prompt:    prompt,
-					MaxTurns:  12,
-					SessionID: "pipeline:" + runID + ":issue-fix:" + uuid.NewString(),
-					RunID:     runID,
-				})
-				if derr != nil {
-					s.logger.Warn("工单修复：台账级批次派发失败，整批标记 skipped", "run_id", runID, "err", derr)
-					mu.Lock()
-					for _, it := range batch {
-						s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusSkipped, "修复派发失败："+derr.Error())
-						skipped++
-					}
-					mu.Unlock()
-					continue
-				}
-				// 回执解析（applyFixReceipt 同步 FixStates/ManualBacklog/FixLog）+ 落库 +
-				// 度量，全部在锁内串行化（跨组并发安全，与 HEAD 同口径）。
-				mu.Lock()
-				fixedNow, skipReasons := applyFixReceipt(ctxt, batch, out.Text, s.logger)
-				for _, id := range fixedNow {
-					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusFixed, "")
-					fixed++
-				}
-				for id, reason := range skipReasons {
-					s.syncIssueRow(ctx, novelID, runID, id, IssueStatusSkipped, reason)
-					skipped++
-				}
-				// §9.4 命中率度量：修复回执流转=告警确认/未确认（body 级走重写回路不经
-				// 修复回执，不计入——见 alert_metrics.go 单源注释）。
-				s.recordFeatureUsageN(ctx, featureAlertConfirmedL2, len(fixedNow))
-				s.recordFeatureUsageN(ctx, featureAlertDismissedL2, len(skipReasons))
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	// 收口：本轮修复动过的台账履历增量入账（id > sweepWatermark，keep-first 幂等）。
-	s.appendLedgerChangeLog(ctx, novelID, ctxt, sweepWatermark)
-	return fixed, skipped
-}
-
-// runBodyRewriteTickets 执行本 run 正文级工单的定向章节重写（#240）：resolveRewriteChapters
-// 定位真实章节，对每章派发 chapter-rewrite（整章重写）；成功→fixed，失败→skipped 留原因。
-// dims 透传给重写提示词做 P2-1 方法论定向路由（空=通用口径）。
-// 返回已修复数/已跳过数。
-func (s *Service) runBodyRewriteTickets(ctx context.Context, runID string, novelID int64, items []RewriteItem, dims []AuditDimScore) (int, int) {
-	if len(items) == 0 {
-		return 0, 0
-	}
-	resolved, rerr := s.resolveRewriteChapters(ctx, novelID, items)
-	if rerr != nil {
-		s.logger.Warn("工单修复：正文级章节定位失败，整批标记 skipped", "run_id", runID, "err", rerr)
-		for _, it := range items {
-			s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusSkipped, "章节定位失败："+rerr.Error())
-		}
-		return 0, len(items)
-	}
-	fixed, skipped := 0, 0
-	for _, it := range items {
-		chapters := resolved[it.ID]
-		if len(chapters) == 0 {
-			s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusSkipped, "未定位到涉及章节，无法重写")
-			skipped++
-			continue
-		}
-		ok := true
-		for _, ch := range chapters {
-			if rerr := s.executeChapterRewrite(ctx, runID, novelID, it, ch, dims); rerr != nil {
-				s.logger.Warn("工单修复：章节重写失败", "run_id", runID, "issue", it.ID, "chapter_id", ch.ID, "err", rerr)
-				s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusSkipped, "章节重写失败："+rerr.Error())
-				ok = false
-				break
-			}
-		}
-		if ok {
-			s.syncIssueRow(ctx, novelID, runID, it.ID, IssueStatusFixed, "")
-			fixed++
-		} else {
-			skipped++
-		}
-	}
-	return fixed, skipped
 }
 
 // DismissIssueTickets 「驳回」：工单进终态 dismissed。必须给出理由（写 note 列留痕，
@@ -485,15 +106,14 @@ func (s *Service) transitionIssueTickets(ctx context.Context, novelID int64, ref
 
 // CloseIssueFixTickets 「标记已修复」：chat 人工修复完成后的显式收口（fixing → fixed）。
 // fixed 是「已修复待复验」态，走状态机校验并留 note，不碰 verified/dismissed 终态
-// （#106 保护）。自动修复执行体在途时拒绝：其晚到回执会覆盖人工结论，且正文可能仍在
-// 被改写，此时收口后立即复验会读到未定稿语料。
+// （#106 保护）。后台自动修复执行体已下线，不再有晚到回执覆盖人工结论的窗口。
 func (s *Service) CloseIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
 	return s.closeManualFix(ctx, novelID, refs, IssueStatusFixed,
 		"人工修复完成，显式收口（待复验）")
 }
 
 // CancelIssueFixTickets 「取消修复」：放弃这次人工修复，工单退回待确认
-// （fixing → pending，状态机已有出边）。同样拒绝自动修复在途的 run。
+// （fixing → pending，状态机已有出边）。
 func (s *Service) CancelIssueFixTickets(ctx context.Context, novelID int64, refs []IssueTicketRef) error {
 	return s.closeManualFix(ctx, novelID, refs, IssueStatusPending,
 		"取消修复，退回待确认")
@@ -505,9 +125,6 @@ func (s *Service) closeManualFix(ctx context.Context, novelID int64, refs []Issu
 	}
 	if len(refs) == 0 {
 		return errors.New("未选择工单")
-	}
-	if err := s.rejectFixInFlight(refs); err != nil {
-		return err
 	}
 	var errs []error
 	for _, ref := range refs {
@@ -529,22 +146,6 @@ func (s *Service) closeManualFix(ctx context.Context, novelID int64, refs []Issu
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// rejectFixInFlight 是人工修复链路的统一互斥：自动修复执行体在途时，人工置 fixing /
-// 标记已修复 / 取消修复一律拒绝，避免两条链路抢同一批工单（#270 双轨拆分护栏）。
-func (s *Service) rejectFixInFlight(refs []IssueTicketRef) error {
-	seen := map[string]bool{}
-	for _, ref := range refs {
-		if seen[ref.RunID] {
-			continue
-		}
-		seen[ref.RunID] = true
-		if s.issueFixRunning(ref.RunID) {
-			return fmt.Errorf("run %s 的自动修复执行体仍在途；请等它结束或重启应用后再做人工修复/收口", ref.RunID)
-		}
-	}
-	return nil
 }
 
 // VerifyIssueTickets 是工单面板「复验」按钮的执行入口（§10.3 显式复验）。审计 P0 起改为
@@ -570,19 +171,8 @@ func (s *Service) VerifyIssueTickets(ctx context.Context, novelID int64, refs []
 	// 载入工单行：终态（verified/dismissed）不接受复验，跳过不计；其余置 verifying 态后按 run 派发。
 	// 同时收集每个 run 本次要复验的工单键（runKeys），显式透传给执行体，避免执行体回扫
 	// verifying 态的读己写竞态（该竞态曾导致执行体读到 0 行而提前返回，工单永久卡在 verifying）。
-	// #106：复验必须针对定稿正文。同 run 的修复执行体在途时章节可能仍在被改写，
-	// 此时复验既读到未定稿语料，又会被晚到的修复回执抢写状态（曾把 verified 打回
-	// fixed）。在写任何状态/派发前统一拒绝，避免部分工单被置 verifying 却未派发。
-	fixRuns := map[string]bool{}
-	for _, ref := range refs {
-		fixRuns[ref.RunID] = true
-	}
-	for runID := range fixRuns {
-		if s.issueFixRunning(runID) {
-			return nil, fmt.Errorf("修复任务仍在进行中，请等待修复完成后再复验（run %s）；避免复验读到未定稿正文", runID)
-		}
-	}
-
+	// #106：复验必须针对定稿正文。后台自动修复执行体已下线，正文只由 chat 人工改写，
+	// 不再存在「执行体在途 + 晚到回执抢写状态」的窗口；终态保护仍由条件 CAS 兜底。
 	seen := map[string]bool{}
 	summary := &IssueVerifySummary{}
 	runIDs := map[string]bool{}

@@ -78,12 +78,19 @@ NovelGo 是一个使用 Wails（Go + React）的桌面 AI 网文写作助手。�
 
 ## 技能装配与可观测（#111）
 
-- 内置技能当前 **27 个**（`internal/skill/builtin/*.md`）。历史文档写「26 个」是 2026-10 的旧时点，勿据此改动数量或恢复已退役的 `signability-workflow`。
+- 内置技能当前 **23 个**（`internal/skill/builtin/*.md`）。历史文档写「26 个」是 2026-10 的旧时点，附录 C 的「27 个」是 2026-11-10 #111 收口时点；当天下线后台自动修复时一并退役 `signability-fix` / `blueprint-fix` / `chapter-rewrite` / `blueprint-drift-check` 四个专属技能（27→23）。勿据历史数字改动现值或恢复已退役技能。
 - 技能是「能力注册项」，不是「文档 + 目录」：frontmatter 的 `mounts` / `internalOnly` / `budget` / `deprecated` 是装配契约单源；`internal/skill/health_test.go` 是开发期静态断言（零挂载点即构建失败），**不是运行时质量闸门**。
 - 正文只由 Go 确定性装配器注入（`app/slash_command.go`、`internal/mcp_tools/chapter_ci.go` / `rw_tools.go`、`internal/pipeline/rewrite_skills.go` / `provider_trip.go` 等）。`<available_skills>` 是说明性目录，不承担注入职责；禁止把「请用 read 加载完整内容」「建议用户启用对应技能」这类靠模型/用户自觉的引导写回目录。
 - 工作流自动武装清单见 `internal/skill/workflow.go` 的 `WorkflowAutoArms`（说明性单源 + 健康检查断言，不参与运行时调度）。`.enabled.json` 勾选与 slash 是高级兼容入口，常驻上限 `MaxAlwaysSkillsResident=3`，二者都**不作为技能可用性判据**。
 - 每次注入写 `skill_invocations`（只记标识与 runes、纯本地不上传）；只读出口 `App.GetSkillUsage(days)` 与前端 `SkillUsagePanel`。判断「某技能是不是摆设」用账本 SQL / 用量面板，不要再挖 messages 模板字串或 `exec_run_stats`。
 - 硬约束不变：零 auto-advance、零运行时闸门、检测四 kind 独立启动 → 工单 → 人工确认 → 修复 → 显式复验为质量保障唯一规范路径；p0 golden 五构造器与八维契约不得改动。
+
+## 工单修复唯一路径（#270 后续，勿回退）
+
+- **所有修复都走 chat**：后台 LLM 自动修复执行体已整体下线，系统不派发任何自动改稿任务。「去修复」（`StartManualIssueFixTickets`）只把选中工单的问题上下文发到中央聊天窗口并把状态翻为 `fixing`，由人工/AI 协作在 chat 里改稿；改完点「标记已修复」（`CloseIssueFixTickets` → `fixed`）或「取消修复」（`CancelIssueFixTickets` → `pending`），再显式点「复验」。
+- 严禁回潮：不得新增 `StartIssueFixTickets` 之类的自动修复入口、`issue_fix` 任务 kind、`issueFixActive`/`issueFixMu` 互斥、修复分组/批处理、台账或正文执行体、修复回执链、蓝图漂移巡检，也不得恢复 4 个已退役技能。`internal/pipeline/issue_no_auto_fix_test.go` 用静态契约断言锁死这些符号与前端入口。
+- p0 golden 五构造器（`fixPrompt` / `chapterRewritePrompt` / `blueprintFixPrompt` / `fixLogBlock` / `fixReceiptFormatLine`）**仅作测试与契约单源保留，生产代码零调用**；函数体仍逐字不动，不要因为「既然不用了」而删除或改写。
+- `GateContext.FixRounds` 保留供历史 run 兼容读，后台自动修复不再递增，恒为 0。`VerifyIssueTickets` 中「修复任务仍在进行中」的死护栏已删；#100 状态继承、#106 终态保护、复验 L0 快路径与 RAG-Verify 口径一律不变。
 
 ## 代码审查重点
 

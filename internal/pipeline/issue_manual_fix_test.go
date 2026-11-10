@@ -8,14 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// #270 双轨拆分（2026-11-10）：工单面板「去修复」原先把问题上下文发到 chat 的同时
-// 隐含派发后台自动 LLM 修复执行体。chat 里人工修完后，后台执行体可能仍在长耗时调用里，
-// issueFixActive 不摘 → #106 互斥让「复验」一直报「修复任务仍在进行中」，而面板又没有
-// 「我修好了」的收口入口。本组测试锁住拆分后的三条不变量：
-//   1. 人工「去修复」只置 fixing，绝不占用自动修复互斥窗口（复验可正常进入）；
+// #270 及后续收口（2026-11-10）：工单面板「去修复」原先把问题上下文发到 chat 的同时
+// 隐含派发后台自动 LLM 修复执行体，chat 人工修完后工单仍卡 fixing、复验被互斥拒绝。
+// 后台自动修复链路现已整体下线，本组测试锁住「所有修复都走 chat」后的不变量：
+//   1. 「去修复」只置 fixing，不产生任何后台任务 / 不占用互斥窗口；
 //   2. 「标记已修复」/「取消修复」按状态机收口并留痕，非 fixing 不得误收；
-//   3. 自动修复在途时，人工链路整体拒绝且不写任何状态（防双轨抢单）。
-// 自动修复执行体本身的派发/排空/回执语义由既有 R5-2 测试覆盖，此处不重复触发 LLM。
+//   3. 终态（verified/dismissed）不得被人工收口翻案（#106）。
+// 零自动修复入口的静态断言见 issue_no_auto_fix_test.go。
 
 func newManualFixService(t *testing.T) (*Service, context.Context) {
 	t.Helper()
@@ -24,7 +23,7 @@ func newManualFixService(t *testing.T) (*Service, context.Context) {
 	return svc, context.Background()
 }
 
-func TestManualIssueFixDoesNotOccupyFixMutex(t *testing.T) {
+func TestManualIssueFixOnlyMarksFixing(t *testing.T) {
 	svc, ctx := newManualFixService(t)
 	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
 		{ID: "I1", Level: "P1", Area: "设定失真", Desc: "台账与正文不一致"},
@@ -42,11 +41,9 @@ func TestManualIssueFixDoesNotOccupyFixMutex(t *testing.T) {
 	for _, r := range rows {
 		require.Equal(t, IssueStatusFixing, r.Status)
 	}
-	// 复验入口的互斥判据就是 issueFixRunning；人工路径必须恒为 false，
-	// 否则 chat 修完后仍会被「修复任务仍在进行中」拒之门外。
-	require.False(t, svc.issueFixRunning("run-a"))
-
-	// 幂等：重复点「去修复」不报错（与自动修复入口同口径）。
+	// 后台自动修复执行体已下线：人工路径不产生任何 issue_fix 任务，
+	// 复验入口也不再存在「修复任务仍在进行中」的拒绝分支。
+	// 幂等：重复点「去修复」不报错。
 	require.NoError(t, svc.StartManualIssueFixTickets(ctx, 7, refs))
 }
 
@@ -98,31 +95,4 @@ func TestCloseAndCancelManualIssueFix(t *testing.T) {
 			require.Equal(t, IssueStatusVerified, r.Status)
 		}
 	}
-}
-
-func TestManualFixBlockedWhileAutoFixInFlight(t *testing.T) {
-	svc, ctx := newManualFixService(t)
-	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
-		{ID: "I1", Level: "P1", Area: "设定失真", Desc: "台账与正文不一致"},
-	}))
-	refs := []IssueTicketRef{{RunID: "run-a", IssueKey: "I1"}}
-	svc.issueFixActive = map[string]bool{"run-a": true}
-
-	cases := map[string]func() error{
-		"去修复": func() error { return svc.StartManualIssueFixTickets(ctx, 7, refs) },
-		"标记已修复": func() error {
-			return svc.CloseIssueFixTickets(ctx, 7, refs)
-		},
-		"取消修复": func() error {
-			return svc.CancelIssueFixTickets(ctx, 7, refs)
-		},
-	}
-	for name, fn := range cases {
-		err := fn()
-		require.Error(t, err, name)
-		require.Contains(t, err.Error(), "仍在途", name)
-	}
-	rows, err := svc.store.ListIssues(ctx, 7, "run-a")
-	require.NoError(t, err)
-	require.Equal(t, IssueStatusPending, rows[0].Status, "拒绝时不得写任何状态")
 }

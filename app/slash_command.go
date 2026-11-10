@@ -206,7 +206,7 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 			writingTurn = true
 		}
 	}
-	// #111 P1：internalOnly 命中只回一行指引，不注入正文（消掉 signability-fix 反向错投）。
+	// #111 P1：internalOnly 命中只回一行指引，不注入正文（消掉内部工作流技能的反向错投）。
 	for _, m := range route.Redirects {
 		fmt.Fprintf(&b, "<system-reminder>\n用户消息命中内部工作流技能「%s」。该类技能由检测任务/发现项工单的流水线调用，聊天窗口不注入其正文，以免污染输出格式。请在「检测任务 / 工单面板」完成对应操作；若要继续常规创作，直接描述写作需求即可。\n</system-reminder>\n", m.Name)
 		activity.RecordSkillInvocation(ctx, activity.SkillInvocation{

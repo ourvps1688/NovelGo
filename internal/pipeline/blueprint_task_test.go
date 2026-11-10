@@ -150,7 +150,7 @@ func TestBlueprintTaskStaticContract(t *testing.T) {
 
 	for _, banned := range []string{
 		"StartPipeline", "DetermineEntryStage", "DetectionKind",
-		"StartIssueFixTickets", "VerifyIssueTickets", ".Advance(", "RunDetectionTask",
+		"VerifyIssueTickets", ".Advance(", "RunDetectionTask",
 		"GetByNovel", // 幂等判断必须按 mode 精确查，不得退回「全书最新一条」
 	} {
 		require.NotContains(t, code, banned, "S2 入口不得出现 %s", banned)
@@ -180,7 +180,7 @@ func TestBlueprintTaskStaticContract(t *testing.T) {
 	appCode := stripGoLineComments(string(appRaw))
 	require.Contains(t, appCode, "a.pipeline.RunBlueprintTask(a.ctx, novelID)")
 	for _, banned := range []string{
-		"StartPipeline", "StartIssueFixTickets", "VerifyIssueTickets", "DetectionKind",
+		"StartPipeline", "VerifyIssueTickets", "DetectionKind",
 	} {
 		require.NotContains(t, appCode, banned)
 	}

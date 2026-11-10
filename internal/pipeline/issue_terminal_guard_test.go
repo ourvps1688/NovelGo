@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,29 +56,4 @@ func TestUpdateIssueStatusProtectsTerminal(t *testing.T) {
 	require.Equal(t, IssueStatusVerifying, byKey["I3"].Status, "复验在途瞬态不得被抢写")
 	require.Equal(t, IssueStatusSkipped, byKey["I4"].Status, "正常流转不受影响")
 	require.Equal(t, "正常跳过", byKey["I4"].SkipReason)
-}
-
-// TestVerifyIssueTicketsBlockedWhileFixRunning 验收 #106 上游互斥：同 run 修复执行体
-// 在途时，复验入口必须在任何状态写入/派发之前明确拒绝，避免复验读到未定稿正文，
-// 且不能留下「部分工单已置 verifying 却未派发」的半截状态。
-func TestVerifyIssueTicketsBlockedWhileFixRunning(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
-		{ID: "I1", Level: "P1", Area: "节奏", Desc: "拖沓"},
-	}))
-
-	svc.issueFixActive = map[string]bool{"run-a": true}
-	_, err := svc.VerifyIssueTickets(ctx, 7, []IssueTicketRef{{RunID: "run-a", IssueKey: "I1"}})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "修复任务仍在进行中")
-
-	rows, lerr := svc.store.ListIssues(ctx, 7, "run-a")
-	require.NoError(t, lerr)
-	require.Equal(t, IssueStatusPending, rows[0].Status, "拒绝时不得先写 verifying 留半截状态")
-
-	// 修复收口摘标记后不再拦截（helper 语义）。
-	svc.issueFixActive = map[string]bool{}
-	require.False(t, svc.issueFixRunning("run-a"))
 }

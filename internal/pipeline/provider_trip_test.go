@@ -178,19 +178,15 @@ func TestProviderTripSkipsDispatchS6FinalAudit(t *testing.T) {
 	require.Equal(t, StatusPaused, got.Status, "S6 失败通道=落 paused")
 }
 
-// TestProviderTripSkipsDispatchPatrols 验收②：三个非阻断派发点（G3 蓝图漂移巡检 /
-// 一致性巡检 / 全量体检）熔断触发零派发，各点失败通道语义不变（跳过不阻断 / 不广播 /
-// needs_fix+error 交上层）。
+// TestProviderTripSkipsDispatchPatrols 验收②：两个非阻断派发点（一致性巡检 /
+// 全量体检）熔断触发零派发，各点失败通道语义不变（G3 蓝图漂移巡检随后台自动修复
+// 执行体一并下线）。
 func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
 	ctx := context.Background()
 	forceProviderTrip(t)
 	calls := countSkillCalls(svc)
-
-	// G3 蓝图漂移巡检：失败通道=记日志返回空串（非阻断）。
-	require.Empty(t, svc.runBlueprintDriftPatrol(ctx, "run-x", 905),
-		"G3 巡检熔断应走原失败通道：返回空串（非阻断）")
 
 	// 一致性巡检：失败通道=落地 verdict=error 失败态并广播（面板需回执，避免永久「运行中」），
 	// 但绝不派发 agent（熔断护的是 LLM 调用，取语料是本地 DB 读取、不触网）。
@@ -205,11 +201,9 @@ func TestProviderTripSkipsDispatchPatrols(t *testing.T) {
 	require.Contains(t, serr.Error(), "疑似供应商挂起", "提示统一「疑似供应商挂起」口径")
 	require.Equal(t, "needs_fix", data.Verdict, "全量体检失败通道语义不变：needs_fix+error")
 
-	require.Zero(t, *calls, "三个巡检/体检派发点熔断时必须零 agent 派发")
+	require.Zero(t, *calls, "两个巡检/体检派发点熔断时必须零 agent 派发")
 }
 
-// TestProviderTripBreaksRewriteLoop 已退役：自动重写循环（finishFixHandoffRewrite /
-// RewriteRounds / autoRewriteCap）随 R5-2 自动修复摘除而删除，逐章重写熔断护栏改由
-// r5_execute_fix_test.go 的 TestServiceExecuteChapterRewriteTripGuarded（executeChapterRewrite
-// 返回 errProviderTripped）与 TestProviderTripFixDispatchGuarded（工单修复派发零 agent）承接，
-// 单源 dispatchSkill 护栏 + 源码锁定 TestSkillRunnerDispatchOnlyViaTripGuard 保证整循环中断。
+// TestProviderTripBreaksRewriteLoop 已退役：自动重写循环与后台工单修复执行体均已下线。
+// 单源 dispatchSkill 护栏 + 源码锁定 TestSkillRunnerDispatchOnlyViaTripGuard 保证
+// 检测/巡检/复验各派发点在熔断时零 agent 调用。

@@ -10,7 +10,7 @@ interface Props {
 
 // S2 全书蓝图的唯一显式入口（#111 P2，§4.3）：用户点按钮才启动一次
 // 「生成蓝图 → 蓝图体检 → 落工单」。默认绝不自动派发，也不自动修复或复评；
-// 体检落工单后由用户在工单面板显式「去修复」触发 blueprint-fix。
+// 体检落工单后由用户在工单面板「去修复」把上下文发到 chat 人工修复。
 // 同一入口对存量书同样可用，天然覆盖「存量书补跑」，无需第二个按钮。
 export default function BlueprintTaskPanel({ novelId }: Props) {
   const { t } = useTranslation();

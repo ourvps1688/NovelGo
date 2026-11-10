@@ -15,7 +15,6 @@ import {
   ConfirmIssueTickets,
   DismissIssueTickets,
   ListIssueTickets,
-  StartIssueFixTickets,
   StartManualIssueFixTickets,
   VerifyIssueTickets,
 } from "@/lib/wailsjs/go/app/App";
@@ -33,16 +32,9 @@ function fmtTime(v?: unknown): string {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 }
 
-// 工具栏动作互斥键：#270 双轨拆分后新增自动修复/标记已修复/取消修复三种动作。
+// 工具栏动作互斥键：所有修复走 chat，「去修复 / 标记已修复 / 取消修复」为人工路径。
 type BusyKind =
-  | ""
-  | "confirm"
-  | "fix"
-  | "verify"
-  | "dismiss"
-  | "autoFix"
-  | "closeFix"
-  | "cancelFix";
+  "" | "confirm" | "fix" | "verify" | "dismiss" | "closeFix" | "cancelFix";
 
 // 工单状态徽章配色（theme token，与 RetconPanel 同口径）：
 // 待行动态（pending/rewrite/retcon）警示色、进行态（confirmed/fixing/fixed）主色、
@@ -328,13 +320,9 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
     );
   }, [dismissReason, runAction, novelId, selectedRefs, t]);
 
-  // 「去修复」的下一步（#270）：把选中工单的问题上下文发到中央聊天窗口，给人工明确
-  // 的修复入口；同时把状态翻为「修复中」以记录进度。即使状态标记失败（如供应商挂起），
-  // 上下文已发到聊天，不丢失下一步。
-  // #270 双轨拆分：这里只走人工路径 StartManualIssueFixTickets —— **不派发后台自动
-  // LLM 修复执行体**。否则 chat 里人工修完后，后台仍在跑的执行体会一直占着
-  // issueFixActive 互斥窗口，让「复验」报「修复任务仍在进行中」，且晚到回执会
-  // 覆盖人工结论。自动修复改由独立的「自动修复」按钮显式触发。
+  // 「去修复」是修复的唯一起点：把选中工单的问题上下文发到中央聊天窗口，
+  // 同时把状态翻为「修复中」留痕。后台 LLM 自动修复执行体已整体下线，
+  // 系统不派发任何自动改稿任务；即使状态标记失败，上下文已发到聊天，不丢失下一步。
   const onFix = useCallback(async () => {
     const rows = selectedRows;
     if (rows.length === 0) {
@@ -384,16 +372,6 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
       setBusy("");
     }
   }, [selectedRows, novelId, t, load]);
-
-  // 「自动修复」：显式派发后台 LLM 修复执行体（#270 后不再是「去修复」的隐含行为）。
-  // 执行期间该 run 的人工收口与复验都会被互斥拒绝，须等执行体自行跑完。
-  const onAutoFix = useCallback(() => {
-    void runAction(
-      "autoFix",
-      () => StartIssueFixTickets(novelId, selectedRefs),
-      t("pipeline.tickets.autoFixOk", { count: selectedRefs.length }),
-    );
-  }, [runAction, novelId, selectedRefs, t]);
 
   // 「标记已修复」：chat 里人工修完后的显式收口（修复中 → 已修复待复验）。
   const onCloseFix = useCallback(() => {
@@ -596,20 +574,6 @@ export default function IssueTicketsPanel({ novelId }: { novelId: number }) {
               >
                 <XCircle className="h-3 w-3" />
                 {t("pipeline.tickets.dismiss")}
-              </button>
-              <button
-                type="button"
-                disabled={busy !== "" || selectedRefs.length === 0}
-                title={t("pipeline.tickets.autoFixHint")}
-                onClick={() => void onAutoFix()}
-                className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
-              >
-                {busy === "autoFix" ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Wrench className="h-3 w-3" />
-                )}
-                {t("pipeline.tickets.autoFix")}
               </button>
             </div>
           </div>

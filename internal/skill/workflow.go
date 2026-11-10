@@ -26,7 +26,7 @@ var WorkflowAutoArms = []WorkflowAutoArm{
 	{"起草章节（含条件化技法）", "writing_bundle"},
 	{"章节写后自检", "chapter_ci"},
 	{"章节状态同步", "state_sync"},
-	{"章节重写 / 低分维修复", "rewrite_method"},
+	{"写作技法定向（低分维 / 编辑反馈）", "rewrite_method"},
 	{"签约体检 / 一致性巡检", "pipeline_dispatch"},
 	{"全书蓝图体检", "blueprint_audit"},
 	{"编辑反馈回流", "feedback"},

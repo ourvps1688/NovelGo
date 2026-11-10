@@ -22,7 +22,6 @@ import (
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/retcon"
 	"github.com/novelgo/novelgo/internal/skill"
-	"github.com/novelgo/novelgo/internal/storage"
 	"github.com/novelgo/novelgo/internal/structure"
 	"github.com/novelgo/novelgo/internal/task"
 	"github.com/novelgo/novelgo/internal/timeline"
@@ -139,12 +138,6 @@ type Service struct {
 	// CancelIssueVerify 按 key 取出并调用 cancel，使本轮复验 ctx 立即 Done；逐工单
 	// 复验循环感知后安全退出（未复验工单复位 pending）。与 detectCancelFns 同口径。
 	verifyCancelFns sync.Map
-	// issueFixMu/issueFixActive 是工单「去修复」执行体的进程内互斥（#100 帮凶修复）：
-	// key=runID。StartIssueFixTickets 在锁内完成「置 fixing + 派发决策」，执行体在锁内
-	// 「扫描 fixing 工单 + 收口摘标记」——二选一必达（每张翻为 fixing 的工单必被执行体
-	// 排空拾起或触发新执行体），杜绝任务队列去重合并导致的工单孤儿化（永卡修复中）。
-	issueFixMu     sync.Mutex
-	issueFixActive map[string]bool
 }
 
 // NewService 构造流水线服务。
@@ -943,7 +936,7 @@ func (s *Service) enterAudit(ctx context.Context, run *PipelineRun, reason strin
 }
 
 // enterFix 置 S5 running 并异步执行「检测结果路由 + 工单沉淀」（R5-2 自动修复摘除后，
-// S5 不再派发任何修复执行；修复动作由发现项工单显式触发，见 StartIssueFixTickets）。
+// S5 不再派发任何修复执行；修复动作一律由工单面板「去修复」发到 chat 人工完成）。
 func (s *Service) enterFix(ctx context.Context, run *PipelineRun) {
 	if err := s.store.SetStageStatus(ctx, run.RunID, StageS5, StatusRunning, run.ContextJSON); err != nil {
 		s.logger.Error("S5 进入失败", "err", err)
@@ -1152,119 +1145,6 @@ func (s *Service) emitGateDecision(ctx context.Context, runID string, novelID in
 // 把检测结果四分区路由（写保护→retcon 候选 / 正文级·V 系→重写清单 / 其余→待修工单）后
 // 沉淀为发现项工单，交回用户在工单面板显式处理（去修复/复验/驳回），不派发任何修复执行、
 // 不自动回流复评（§10.3「修复动作永远由人显式触发，复验显式点」）。
-// fixBatchP0 / fixBatchP1 是工单修复（StartIssueFixTickets 被动触发）的每批问题数：
-// P0 单条常涉及整章改写/重排，独占一批；P1 每批两条。保证每条问题都有充足的对话轮数
-// 预算，避免一轮对话吃下全部问题导致 MaxTurns 耗尽、整轮修复失败。
-const (
-	fixBatchP0 = 1
-	fixBatchP1 = 2
-)
-
-// planFixBatches 把待修问题按优先级分批（保持原有顺序）：P0 每批 fixBatchP0 条，
-// P1 每批 fixBatchP1 条。
-func planFixBatches(issues []AuditIssue) [][]AuditIssue {
-	batches := make([][]AuditIssue, 0, len(issues))
-	var cur []AuditIssue
-	flush := func() {
-		if len(cur) > 0 {
-			batches = append(batches, cur)
-			cur = nil
-		}
-	}
-	for _, it := range issues {
-		if it.Level == "P0" {
-			flush()
-			batches = append(batches, []AuditIssue{it})
-			continue
-		}
-		cur = append(cur, it)
-		if len(cur) >= fixBatchP1 {
-			flush()
-		}
-	}
-	flush()
-	return batches
-}
-
-// fixScopeGlobal 是作用域未知问题（无章节且维度 none）的共享 token：这类问题可能
-// 触碰任意台账条目，无法证明与谁互斥，全部收进同一组串行（宁缺勿错）。
-const fixScopeGlobal = "global"
-
-// fixGroupTokens 计算一条 issue 的作用域 token 集合（R1b 分组并行的原子单位）：
-//   - ch:<N>：问题涉及的每个章节（chapter_ids 结构化字段优先，issueChapterIDs 正则兜底）；
-//   - dim:<X>：机器归属维度（dimension 非 none/空），同一台账维度的修复可能互相碰；
-//   - 全空 → fixScopeGlobal（作用域未知，共享串行组）。
-//
-// token 集合有交集（直接或传递）的问题必须同组串行；不相交的组间可并行（写冲突天然规避）。
-func fixGroupTokens(it AuditIssue) []string {
-	chs := issueChapterIDs(it)
-	toks := make([]string, 0, len(chs)+1)
-	for _, n := range chs {
-		toks = append(toks, fmt.Sprintf("ch:%d", n))
-	}
-	if d := strings.TrimSpace(it.Dimension); d != "" && d != DimensionNone {
-		toks = append(toks, "dim:"+d)
-	}
-	if len(toks) == 0 {
-		toks = append(toks, fixScopeGlobal)
-	}
-	return toks
-}
-
-// planFixGroups 把待修问题按作用域分组（R1b，F2 根治）：issue 的作用域 token 集合
-// （fixGroupTokens）有交集（含传递相连，如 I1↔ch:3↔I2↔dim:character↔I3）的归入同组——
-// 组内条目可能触碰同一章节/同一台账维度，必须串行（组内再按 planFixBatches 切小批，
-// 保留 P0/P1 轮数预算语义）；token 集合不相交的组间可并行派发修复会话。
-// 组顺序按各组首条问题在输入中的出现次序（确定性，测试可断言）。
-func planFixGroups(issues []AuditIssue) [][]AuditIssue {
-	parent := make([]int, len(issues))
-	for i := range parent {
-		parent[i] = i
-	}
-	find := func(x int) int {
-		for parent[x] != x {
-			parent[x] = parent[parent[x]]
-			x = parent[x]
-		}
-		return x
-	}
-	union := func(a, b int) {
-		ra, rb := find(a), find(b)
-		if ra != rb {
-			// 小根合大根：根号=组内最小问题下标，组序即首现次序。
-			if ra < rb {
-				parent[rb] = ra
-			} else {
-				parent[ra] = rb
-			}
-		}
-	}
-	tokenOwner := make(map[string]int, len(issues))
-	for i, it := range issues {
-		for _, tok := range fixGroupTokens(it) {
-			if j, ok := tokenOwner[tok]; ok {
-				union(i, j)
-			} else {
-				tokenOwner[tok] = i
-			}
-		}
-	}
-	// 按根（=组内最小下标）归组，输出按根升序=首现次序；组内保持输入顺序。
-	index := make(map[int]int, len(issues))
-	groups := make([][]AuditIssue, 0, len(issues))
-	for i, it := range issues {
-		r := find(i)
-		gi, ok := index[r]
-		if !ok {
-			gi = len(groups)
-			index[r] = gi
-			groups = append(groups, nil)
-		}
-		groups[gi] = append(groups[gi], it)
-	}
-	return groups
-}
-
 // （R3c 退役）执行体存活不再由 GateContext.Dispatching 自报：队列的 kind:run_id
 // 活跃去重即「活跃不重派、已退出即重派」（dispatchExecutor），存活判据见
 // task.Store.HasActiveForRun。
@@ -1419,8 +1299,8 @@ func (s *Service) executeFix(runID string, novelID int64) {
 		s.handoffRetconToUser(ctx, runID, novelID, ctxt)
 		return
 	}
-	// R5-2 自动修复摘除（提案 §10.3）：待修（台账级）问题不再派发 signability-fix
-	// 批次——修复执行改由发现项工单显式触发（StartIssueFixTickets 被动响应，作用域
+	// 后台自动修复执行体已下线（提案 §10.3）：待修（台账级）问题不再派发任何修复 agent
+	// 批次——修复一律由 chat 人工完成（后台自动修复执行体已下线，作用域
 	// 分组/修复日志共享/定向重写等执行能力原样保留）。统一收口：路由结果已沉淀为
 	// 工单，交回用户在工单面板处理；不派发修复、不自动回复评（复验/复评由用户显式
 	// 触发，§10.3「修复动作永远由人显式触发，修复完成后显式点复验」）。
@@ -1533,65 +1413,6 @@ func (s *Service) persistRetconCandidates(ctx context.Context, novelID int64, it
 	}
 }
 
-// resolveRewriteChapters 把重写清单里每个 issue 涉及的章节阅读序号，映射回本书真实章节
-// （chapter_id + 标题 + 阅读序号），供章节重写 agent 精确定位。返回 issueID → 章节列表；
-// 无法定位的章节（序号越界 / 章节已删）被丢弃；chaptersStore 为 nil 时返回空（降级手动）。
-func (s *Service) resolveRewriteChapters(ctx context.Context, novelID int64, items []RewriteItem) (map[string][]chapter.Chapter, error) {
-	if s.chapterStore == nil {
-		return map[string][]chapter.Chapter{}, nil
-	}
-	chapters, err := s.chapterStore.ListAllByNovel(ctx, nil, novelID)
-	if err != nil {
-		return nil, err
-	}
-	// 阅读序号（1 起）→ 章节。
-	byReading := make(map[int64]chapter.Chapter, len(chapters))
-	for _, ch := range chapters {
-		byReading[int64(ch.ReadingNumber)] = ch
-	}
-	out := make(map[string][]chapter.Chapter, len(items))
-	for _, item := range items {
-		if len(item.Chapters) == 0 {
-			continue
-		}
-		var resolved []chapter.Chapter
-		for _, rn := range item.Chapters {
-			if ch, ok := byReading[rn]; ok {
-				resolved = append(resolved, ch)
-			} else {
-				s.logger.Warn("S5 重写：章节阅读序号无法定位，跳过", "novel_id", novelID, "item", item.ID, "reading_number", rn)
-			}
-		}
-		if len(resolved) > 0 {
-			out[item.ID] = resolved
-		}
-	}
-	return out, nil
-}
-
-// executeChapterRewrite 对单章派发章节重写 agent（chapter-rewrite 技能），按 body issue 整章重写。
-// dims 是本 run 体检的维度星级（P2-1 定向路由输入）：低分维/issue 维度命中方法论技能时
-// 注入「方法论定向」块，否则提示词保持通用口径逐字不变。
-func (s *Service) executeChapterRewrite(ctx context.Context, runID string, novelID int64, item RewriteItem, ch chapter.Chapter, dims []AuditDimScore) error {
-	// P2-1 方法论定向块 + P2-2 平台节奏模板块（缺省空串零注入，通用口径逐字不变）。
-	methodBlock := joinRewriteBlocks(
-		rewriteMethodBlock(dims, item.Dimension),
-		s.platformRhythmBlock(ctx, novelID))
-	prompt := chapterRewritePrompt(novelID, item, ch, methodBlock,
-		s.buildBlocks(ctx, novelID, contextasm.PurposeRewrite))
-	_, err := s.dispatchSkill(ctx, "chapter-rewrite", SkillInput{
-		NovelID:   novelID,
-		Prompt:    prompt,
-		MaxTurns:  18,
-		SessionID: "pipeline:" + runID + ":rewrite:" + uuid.NewString(),
-		RunID:     runID,
-	})
-	if err != nil {
-		return fmt.Errorf("章节重写（chapter_id=%d）失败: %w", ch.ID, err)
-	}
-	return nil
-}
-
 // chapterRewritePrompt 构造单章重写的任务提示：注入章节定位信息与要解决的正文级 issue。
 // methodBlock 是「方法论定向」块（P2-1，低分维/issue 维度命中技能时非空；空串=通用口径
 // 逐字不变，缺省不模板）；blocks 按 Facts→Voice→Intent 顺序尾部装配（P0 §0.5 rewrite 三块全注）；
@@ -1611,52 +1432,8 @@ func chapterRewritePrompt(novelID int64, item RewriteItem, ch chapter.Chapter, m
 	return prompt + blocks.Render(contextasm.PurposeRewrite)
 }
 
-// runBlueprintDriftPatrol 执行一次 G3 轻量蓝图一致性巡检（只读、非阻断）：
-// 跑 blueprint-drift-check 技能比对「当前卷纲」与「已写章节」，返回人类可读结论；
-// 巡检失败只记日志并返回空串（不落库、不阻断复评主流程）。
-func (s *Service) runBlueprintDriftPatrol(ctx context.Context, runID string, novelID int64) string {
-	out, err := s.dispatchSkill(ctx, "blueprint-drift-check", SkillInput{
-		NovelID:   novelID,
-		Prompt:    driftPatrolPrompt(novelID),
-		MaxTurns:  8,
-		SessionID: "pipeline:" + runID + ":drift",
-		RunID:     runID,
-	})
-	if err != nil {
-		s.logger.Warn("G3 蓝图巡检执行失败（非阻断，跳过）", "run_id", runID, "err", err)
-		return ""
-	}
-	audit := parseFreshAudit(out.Text)
-	if audit.Verdict == "pass" || len(audit.Issues) == 0 {
-		return "蓝图巡检：未发现与当前卷纲冲突的章节。"
-	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "蓝图巡检：%d 章与当前卷纲冲突，建议重读：", len(audit.Issues))
-	for i, iss := range audit.Issues {
-		if i >= 5 {
-			sb.WriteString("等。")
-			break
-		}
-		if i > 0 {
-			sb.WriteString("；")
-		}
-		fmt.Fprintf(&sb, "%s %s", iss.Area, iss.Desc)
-	}
-	return sb.String()
-}
-
-// driftPatrolPrompt 构造 G3 蓝图漂移巡检的任务提示词（只读、轻量、非评分）。
-func driftPatrolPrompt(novelID int64) string {
-	return fmt.Sprintf("本书 novel_id=%d。请基于 blueprint-drift-check 方法论做一次**轻量蓝图一致性巡检**："+
-		"逐卷 read 当前卷纲（volumes/id_{卷id}.md），对照已写章节的细纲与关键正文段落，"+
-		"只标出与当前卷纲冲突的章节（剧情矛盾/卷纲承诺未兑现/顺序错位），不评分、不修稿；"+
-		"若没有任何已写章节，直接输出空冲突清单。最终回复末尾**必须**附一个 ```json 代码块，格式："+
-		auditFormatLine(false, issueSampleDrift)+"。"+
-		"无冲突 → verdict=pass；有冲突 → needs_fix。", novelID)
-}
-
-// autoFixCap（R5-4 已退役）：auto_run 自动裁决分支随「裁决交还用户」一并摘除，
-// 修复轮数上限判断不再需要（FixRounds 仍保留供工单轮次统计与增量复验分轮）。
+// 后台自动修复执行体已整体下线：修复一律由 chat 人工完成，GateContext.FixRounds
+// 不再递增（保留字段供历史 run 兼容读与工单轮次统计，恒为 0）。
 
 // ── S6 完本终检（PR5）────────────────────────────────
 
@@ -1994,139 +1771,10 @@ func stockAuditPrompt(novelID int64) string {
 var auditJSONRe = regexp.MustCompile("(?s)```json\\s*(.*?)```")
 
 // parseAudit 从 skill 输出文本解析结构化体检结果；失败则退化为单条 P0 issue。
-// fixReceipt 是修复 agent 在输出末尾上报的修复回执契约（由 fixPrompt/blueprintFixPrompt 要求）。
-// Log 是可选修复日志（R1b）：已修复条目的一行改动摘要，进 GateContext.FixLog 供同轮
-// 后续修复会话参照；旧回执无此字段照常解析（兼容读）。
-type fixReceipt struct {
-	Fixed   []string `json:"fixed"`
-	Skipped []struct {
-		ID     string `json:"id"`
-		Reason string `json:"reason"`
-	} `json:"skipped"`
-	Log []struct {
-		ID   string `json:"id"`
-		Note string `json:"note"`
-	} `json:"log"`
-}
-
-// applyFixReceipt 解析修复输出回执并把本批问题的断点状态写入 ctxt.FixStates：
-// 回执 fixed → "fixed"；skipped → "skipped"（记录原因，不再重试，R1c：同时沉淀进
-// 人工工单 ManualBacklog 转交作者）；未提及 → 不落断点（后续轮次重试）。
-// 输出缺少回执 JSON 时退化为旧行为（整批 "fixed"），保证兼容不卡死流水线。
-// 回执可选 log 字段逐条 upsert 进 ctxt.FixLog（按 id 去重，保序）。
-// 返回本批新标记为 fixed 的 id 列表（供前端 done_ids 累积）与 skipped 原因映射。
-func applyFixReceipt(ctxt *GateContext, batch []AuditIssue, outText string, log *slog.Logger) ([]string, map[string]string) {
-	fixedSet, skipReasons, logEntries, found := parseFixReceipt(outText)
-	if !found {
-		log.Warn("S5 修复：本批修复输出缺少回执 JSON，按整批已修复处理（兼容回退）",
-			"batch_size", len(batch))
-	}
-	if ctxt.FixStates == nil {
-		ctxt.FixStates = map[string]string{}
-	}
-	fixedNow := make([]string, 0, len(batch))
-	skipped := make(map[string]string, len(batch))
-	for _, it := range batch {
-		switch {
-		case !found || fixedSet[it.ID]:
-			ctxt.FixStates[it.ID] = "fixed"
-			fixedNow = append(fixedNow, it.ID)
-		case skipReasons[it.ID] != "":
-			ctxt.FixStates[it.ID] = "skipped"
-			skipped[it.ID] = skipReasons[it.ID]
-			// R1c：skipped 即转人工工单——沉淀进 ManualBacklog（含无法修复原因与涉及
-			// 章节），由闸门 summary 列出交作者处理，不再进自动修复/复验循环。
-			ctxt.ManualBacklog = upsertManualItem(ctxt.ManualBacklog, ManualItem{
-				ID: it.ID, Level: it.Level, Area: it.Area, Desc: it.Desc,
-				Reason: skipReasons[it.ID], Chapters: issueChapterIDs(it),
-			})
-			log.Info("S5 修复：agent 上报无法修复，标记跳过并转人工工单",
-				"issue", it.ID, "reason", skipReasons[it.ID])
-		default:
-			// 回执未提及：不落断点，后续轮次重试。
-		}
-	}
-	ctxt.FixLog = upsertFixLog(ctxt.FixLog, logEntries)
-	return fixedNow, skipped
-}
-
-// upsertFixLog 把回执 log 条目按 id upsert 进修复日志（保完成先后序，同 id 覆盖旧摘要）。
-// 空 id/空 note 的条目忽略（宁缺勿错，不入日志污染后续提示词）。
-func upsertFixLog(entries []FixLogEntry, add []FixLogEntry) []FixLogEntry {
-	for _, e := range add {
-		if e.ID == "" || e.Note == "" {
-			continue
-		}
-		replaced := false
-		for i := range entries {
-			if entries[i].ID == e.ID {
-				entries[i].Note = e.Note
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			entries = append(entries, e)
-		}
-	}
-	return entries
-}
-
 // fixLogLedgerPrefix 是台账变更入账条目在修复日志里的 ID 前缀（"L:<履历id>"）：
 // 与 issue 系 ID（I/D/T/V/C）命名空间不相交，供工单复验（VerifyIssueTickets）识别
 // 台账变更条目做「台账修改下游影响」核对（R2b-7 §8.3-3）。
 const fixLogLedgerPrefix = "L:"
-
-// ledgerChangeWatermark 返回本书 ledger_change_history 当前最大 id（修复 sweep 起点
-// 水位，R2b-7）。取数失败返回 -1：调用方跳过入账（宁缺勿错，不拉全量履历污染日志）。
-func (s *Service) ledgerChangeWatermark(ctx context.Context, novelID int64) int64 {
-	if s.store == nil || s.store.db == nil {
-		return -1
-	}
-	var maxID *int64
-	if err := s.store.db.WithContext(ctx).
-		Raw("SELECT MAX(id) FROM ledger_change_history WHERE novel_id = ?", novelID).Scan(&maxID).Error; err != nil {
-		s.logger.Debug("修复日志：读取台账履历水位失败（跳过台账变更入账）", "novel_id", novelID, "err", err)
-		return -1
-	}
-	if maxID == nil {
-		return 0
-	}
-	return *maxID
-}
-
-// appendLedgerChangeLog 把本轮修复产生的台账变更（ledger_change_history 水位增量）
-// 落入修复日志（R2b-7 §8.3-3「修台账本身进修复日志」）：不依赖修复回执自报，
-// 变更内容从履历确定性取。keep-first 幂等：同履历条目只入账一次（并行批次重复
-// 拉取不覆盖先前条目）；水位无效/取数失败 → 跳过（降级零提示）。
-func (s *Service) appendLedgerChangeLog(ctx context.Context, novelID int64, ctxt *GateContext, watermark int64) {
-	if s.store == nil || s.store.db == nil || watermark < 0 {
-		return
-	}
-	var rows []storage.LedgerChangeHistory
-	if err := s.store.db.WithContext(ctx).
-		Where("novel_id = ? AND id > ?", novelID, watermark).
-		Order("id ASC").Find(&rows).Error; err != nil {
-		s.logger.Debug("修复日志：读取台账变更履历失败（跳过入账）", "err", err)
-		return
-	}
-	seen := map[string]bool{}
-	for _, e := range ctxt.FixLog {
-		seen[e.ID] = true
-	}
-	for _, r := range rows {
-		id := fmt.Sprintf("%s%d", fixLogLedgerPrefix, r.ID)
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		ctxt.FixLog = upsertFixLog(ctxt.FixLog, []FixLogEntry{{
-			ID: id,
-			Note: fmt.Sprintf("台账变更 %s:%d %s: %q→%q（source=%s）",
-				r.EntryTable, r.EntryID, r.Field, r.Old, r.New, r.Source),
-		}})
-	}
-}
 
 // ledgerChangeNotes 从修复日志提取台账变更条目（ID 前缀 fixLogLedgerPrefix），
 // 供增量复验注入「台账修改下游影响核对」块（R2b-7）。无台账变更返回空切片。
@@ -2153,39 +1801,6 @@ func fixLogBlock(entries []FixLogEntry) string {
 		b.WriteString("- " + e.ID + "：" + e.Note + "\n")
 	}
 	return b.String()
-}
-
-// parseFixReceipt 从修复 agent 输出解析修复回执：{"fixed":["I1"],"skipped":[{"id":"I2","reason":"..."}],"
-// "log":[{"id":"I1","note":"..."}]}。
-// 回执可能在 ```json 围栏或纯文本中，且 skipped/log 含嵌套对象——从每个 '{' 起用 json.Decoder
-// 流式解码（容忍尾部文本），取最后一个合法且非空的回执。found=false 表示输出中没有回执，
-// 调用方退化为「整批已修复」的旧行为。log 为可选字段，旧回执/未上报时为空（兼容读）。
-func parseFixReceipt(text string) (fixed map[string]bool, skipReasons map[string]string, logEntries []FixLogEntry, found bool) {
-	for i := strings.LastIndex(text, "{"); i >= 0; i = strings.LastIndex(text[:i], "{") {
-		var r fixReceipt
-		if err := json.NewDecoder(strings.NewReader(text[i:])).Decode(&r); err != nil {
-			continue
-		}
-		if len(r.Fixed) == 0 && len(r.Skipped) == 0 {
-			continue
-		}
-		fixed = make(map[string]bool, len(r.Fixed))
-		for _, id := range r.Fixed {
-			fixed[id] = true
-		}
-		skipReasons = make(map[string]string, len(r.Skipped))
-		for _, sk := range r.Skipped {
-			if sk.ID != "" {
-				skipReasons[sk.ID] = sk.Reason
-			}
-		}
-		logEntries = make([]FixLogEntry, 0, len(r.Log))
-		for _, lg := range r.Log {
-			logEntries = append(logEntries, FixLogEntry{ID: lg.ID, Note: lg.Note})
-		}
-		return fixed, skipReasons, logEntries, true
-	}
-	return nil, nil, nil, false
 }
 
 // verifyReceiptEntry 复验回执 verified 数组的一条判定（截断抢救按条目流式解码复用）。
@@ -2220,7 +1835,7 @@ type verifyTarget struct {
 
 // parseVerifyReceipt 从增量复验 agent 输出解析复验回执：
 // {"verified":[{"id":"I1","ok":true,"note":"..."}],"summary":"..."}。
-// 解析策略与 parseFixReceipt 同构（回执可能在 ```json 围栏或纯文本中，verified 含嵌套
+// 解析策略同修复回执旧实现（回执可能在 ```json 围栏或纯文本中，verified 含嵌套
 // 对象——从每个 '{' 起流式解码取最后一个合法回执）。found=false 表示输出中没有回执，
 // 调用方按「已修复确认」兼容回退（与修复回执缺省口径一致，不卡死闭环）。
 //
@@ -2576,17 +2191,6 @@ func retconItemsOf(audit AuditData) []RewriteItem {
 
 // upsertRewriteItem 按 ID 去重写入/更新重写清单项（复评后同 ID 问题刷新内容）。
 func upsertRewriteItem(list []RewriteItem, item RewriteItem) []RewriteItem {
-	for i, it := range list {
-		if it.ID == item.ID {
-			list[i] = item
-			return list
-		}
-	}
-	return append(list, item)
-}
-
-// upsertManualItem 按 ID 去重写入/更新转人工工单项（R1c，同 upsertRewriteItem 语义）。
-func upsertManualItem(list []ManualItem, item ManualItem) []ManualItem {
 	for i, it := range list {
 		if it.ID == item.ID {
 			list[i] = item
@@ -3142,7 +2746,6 @@ func emitConsistencyPatrol(ctx context.Context, p map[string]any) {
 func emitPatrolProgress(ctx context.Context, p map[string]any) {
 	emitPatrolProgressSlot.emit(ctx, p)
 }
-func emitFixStart(ctx context.Context, p map[string]any)       { emitFixStartSlot.emit(ctx, p) }
 func emitFixDone(ctx context.Context, p map[string]any)        { emitFixDoneSlot.emit(ctx, p) }
 func emitRewriteBacklog(ctx context.Context, p map[string]any) { emitRewriteBacklogSlot.emit(ctx, p) }
 func emitDetectDone(ctx context.Context, p map[string]any)     { emitDetectDoneSlot.emit(ctx, p) }

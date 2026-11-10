@@ -54,8 +54,8 @@ func loadBuiltinForHealth(t *testing.T) ([]Skill, map[string]Skill) {
 	if err != nil {
 		t.Fatalf("加载内置技能失败: %v", err)
 	}
-	if len(skills) != 27 {
-		t.Fatalf("内置技能数量应为 27，实际 %d（新增/删除技能须同步 manifest 与健康检查）", len(skills))
+	if len(skills) != 23 {
+		t.Fatalf("内置技能数量应为 23，实际 %d（新增/删除技能须同步 manifest 与健康检查）", len(skills))
 	}
 	byName := make(map[string]Skill, len(skills))
 	for _, sk := range skills {
@@ -200,7 +200,7 @@ func TestManifestFieldsParsed(t *testing.T) {
 		{"next", "chat_intent", false, 2000},
 		{"collect", "state_sync", true, 1200},
 		{"memory", "state_sync", true, 1200},
-		{"signability-fix", "pipeline_dispatch", true, 4000},
+		{"signability-verify", "pipeline_dispatch", true, 4000},
 		{"reader-immersion", "writing_bundle", false, 4000},
 		{"chapter-ci", "chapter_ci", true, 4000},
 	}

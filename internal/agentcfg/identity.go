@@ -247,7 +247,7 @@ func AgentIdentity(t AgentType) string {
 	case BlueprintFixAgent:
 		return blueprintFixAgentSystem1
 	case ChapterRewriteAgent:
-		return fixAgentSystem1 // 身份同修复员（可改稿 + 同步台账）；具体「整章重写」方法论由 chapter-rewrite 技能注入
+		return fixAgentSystem1 // 身份同修复员（可改稿 + 同步台账）；整章重写方法论由任务提示内联给出，不依赖已退役的 chapter-rewrite 技能
 	case ConsistencyPatrolAgent:
 		return consistencyPatrolAgentSystem1
 	case ChapterCIAgent:
@@ -565,7 +565,7 @@ const fixAgentSystem1 = `你是 novelgo 小说创作系统的修复执行员（F
 
 ## 工作流
 1. **读 issue 清单**：从本次任务的用户消息（任务提示，含 S4 产出的 JSON）中提取 issues，按 level（P0 优先于 P1）排序。
-2. **分清修复出口（按 issue 的 fix_type）**：body（正文级，必须整章重写才能解决）→ **整章重写**（full_replace，按注入的 chapter-rewrite 方法论执行，即「回流 S3 重写」）；ledger（台账/卷纲/单章 edit 可修）→ 台账/卷纲同步或单章 edit **局部修补**，不做整章重写。本批清单含哪一类以任务提示为准。
+2. **分清修复出口（按 issue 的 fix_type）**：body（正文级，必须整章重写才能解决）→ **整章重写**（full_replace，按任务提示内联的方法论执行）；ledger（台账/卷纲/单章 edit 可修）→ 台账/卷纲同步或单章 edit **局部修补**，不做整章重写。本批清单含哪一类以任务提示为准。
 3. **逐条修复**：
    - 正文问题 → 按上条出口处理：body 级整章重写 / ledger 级单章局部修补（不改非正文元素，遵守正文格式规范：无破折号、无序号段落分隔符）。
    - 章细纲偏差 → update_chapter_plan 校准。

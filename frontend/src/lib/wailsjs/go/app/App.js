@@ -666,10 +666,6 @@ export function SetVolumeFrozen(arg1, arg2, arg3) {
   return window['go']['app']['App']['SetVolumeFrozen'](arg1, arg2, arg3);
 }
 
-export function StartIssueFixTickets(arg1, arg2) {
-  return window['go']['app']['App']['StartIssueFixTickets'](arg1, arg2);
-}
-
 export function StartManualIssueFixTickets(arg1, arg2) {
   return window['go']['app']['App']['StartManualIssueFixTickets'](arg1, arg2);
 }

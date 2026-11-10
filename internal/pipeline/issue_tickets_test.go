@@ -329,7 +329,7 @@ func TestServiceIssueTicketPanelActions(t *testing.T) {
 	// 确认 + 去修复（批量）。
 	refs := []IssueTicketRef{{RunID: "run-a", IssueKey: "I1"}, {RunID: "run-a", IssueKey: "I2"}}
 	require.NoError(t, svc.ConfirmIssueTickets(ctx, 7, refs[:1]))
-	require.NoError(t, svc.StartIssueFixTickets(ctx, 7, refs))
+	require.NoError(t, svc.StartManualIssueFixTickets(ctx, 7, refs))
 	rows, err = svc.ListIssueTickets(ctx, 7)
 	require.NoError(t, err)
 	for _, r := range rows {
@@ -469,108 +469,6 @@ func TestServiceVerifyIssueTicketsSkillError(t *testing.T) {
 }
 
 // ── #100 状态回退 / 派发孤儿化修复回归 ────────────────────────────────────────
-
-// TestStartIssueFixTicketsToleratesFixingAndPartialFail 验收「去修复」批量入口的容错语义
-// （#100 帮凶修复）：单条流转失败（终态工单）逐条报错不拖垮整批——成功的照常置 fixing
-// 并派发；已在 fixing 态的工单幂等容忍（重复点击不报错）。本测试无 run 行：执行体在
-// 加载流水线处确定性早退，工单保持 fixing（与 TestServiceIssueTicketPanelActions 同口径）。
-func TestStartIssueFixTicketsToleratesFixingAndPartialFail(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	require.NoError(t, svc.store.ReplaceIssues(ctx, 7, "run-a", 0, []AuditIssue{
-		{ID: "I1", Level: "P0", Area: "开篇", Desc: "前三章未立人设"},
-		{ID: "I2", Level: "P1", Area: "节奏", Desc: "拖沓"},
-		{ID: "I3", Level: "P1", Area: "人设", Desc: "误报"},
-	}))
-	// I3 已驳回（终态）：→fixing 非法迁移，单条失败不得拖垮整批。
-	require.NoError(t, svc.store.TransitionIssueTicket(ctx, 7, "run-a", "I3", IssueStatusDismissed, "误报"))
-
-	refs := []IssueTicketRef{
-		{RunID: "run-a", IssueKey: "I1"},
-		{RunID: "run-a", IssueKey: "I2"},
-		{RunID: "run-a", IssueKey: "I3"},
-	}
-	err := svc.StartIssueFixTickets(ctx, 7, refs)
-	require.Error(t, err, "终态 I3 流转失败应逐条报错（部分失败不整体放弃）")
-	require.Contains(t, err.Error(), "I3", "错误应定位到失败工单")
-
-	rows, lerr := svc.store.ListIssues(ctx, 7, "run-a")
-	require.NoError(t, lerr)
-	byKey := map[string]PipelineIssue{}
-	for _, r := range rows {
-		byKey[r.IssueKey] = r
-	}
-	require.Equal(t, IssueStatusFixing, byKey["I1"].Status, "失败的不拖垮成功的：I1 照常置修复中并派发")
-	require.Equal(t, IssueStatusFixing, byKey["I2"].Status, "失败的不拖垮成功的：I2 照常置修复中并派发")
-	require.Equal(t, IssueStatusDismissed, byKey["I3"].Status, "终态工单不动")
-
-	// 二次点击「去修复」：已在修复中的工单幂等容忍，不报错（重复点击/跨批重试并入在跑执行体）。
-	require.NoError(t, svc.StartIssueFixTickets(ctx, 7, refs[:2]))
-	rows, _ = svc.store.ListIssues(ctx, 7, "run-a")
-	byKey = map[string]PipelineIssue{}
-	for _, r := range rows {
-		byKey[r.IssueKey] = r
-	}
-	require.Equal(t, IssueStatusFixing, byKey["I1"].Status)
-	require.Equal(t, IssueStatusFixing, byKey["I2"].Status)
-}
-
-// TestRunIssueFixTicketsDrainsNewFixingTickets 验收修复执行体的收尾排空（#100 帮凶修复）：
-// 执行期间用户对新工单点「去修复」（其派发因执行体在跑被互斥去重），该工单必须被执行体
-// 排空拾起继续处理，绝不孤儿化为「永卡修复中」。skillRunner 桩在 I1 修复派发中途把 V2
-// 翻为 fixing（模拟真实并发点击，走 StartIssueFixTickets 全量语义）后返回失败：
-// I1 → skipped（修复派发失败），V2 → rewrite（V 系退回，排空拾起实证）。
-func TestRunIssueFixTicketsDrainsNewFixingTickets(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	ctx := context.Background()
-	novelID := int64(707)
-
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"待修","issues":[` +
-		`{"id":"I1","level":"P0","area":"成稿质量","desc":"开场灌水","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix"},` +
-		`{"id":"V2","level":"P1","area":"文风漂移","desc":"第2章文风偏离","fix_type":"body","target_scope":"active_volume","dimension":"none","direction":"forward_fix"}]}`
-	runID := startS5Run(t, svc, novelID, auditJSON)
-
-	// 桩在 runLedgerFixTickets 的分组 goroutine 里执行，失败/断言经变量回收（require 不可跨 goroutine）。
-	var mu sync.Mutex
-	var innerErr error
-	var innerCalls int
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-fix":
-			// 执行期间用户对 V2 点「去修复」：走真实入口（置 fixing + 派发决策）。
-			ierr := svc.StartIssueFixTickets(ctx, novelID, []IssueTicketRef{{RunID: runID, IssueKey: "V2"}})
-			mu.Lock()
-			innerCalls++
-			innerErr = ierr
-			mu.Unlock()
-			return SkillOutput{}, assert.AnError // 本批修复失败 → I1 标 skipped
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-
-	outerErr := svc.StartIssueFixTickets(ctx, novelID, []IssueTicketRef{{RunID: runID, IssueKey: "I1"}})
-	mu.Lock()
-	gotInnerErr, gotCalls := innerErr, innerCalls
-	mu.Unlock()
-	require.NoError(t, outerErr)
-	require.NoError(t, gotInnerErr, "执行期间的「去修复」应成功置 fixing（在跑执行体排空拾起，不重复派发）")
-	require.Equal(t, 1, gotCalls)
-
-	rows, lerr := svc.store.ListIssues(ctx, novelID, runID)
-	require.NoError(t, lerr)
-	byKey := map[string]PipelineIssue{}
-	for _, r := range rows {
-		byKey[r.IssueKey] = r
-	}
-	require.Equal(t, IssueStatusSkipped, byKey["I1"].Status, "修复派发失败 → skipped 留原因")
-	require.Contains(t, byKey["I1"].SkipReason, "修复派发失败")
-	require.Equal(t, IssueStatusRewrite, byKey["V2"].Status,
-		"排空拾起实证：执行期间新翻 fixing 的 V2 被后续批次处理（V 系退回 rewrite），不得永卡修复中")
-	require.Contains(t, byKey["V2"].SkipReason, "只报告不改写", "V 系退回留 note（skip_reason 列）")
-}
 
 // TestRecordIssueVerifyUnverifiedRestoresPreStatus 验收复验「未确认」回退语义（#100）：
 // 恢复进复验前快照而非一律 pending——已修复（待复验）的工单不被一次供应商超时/回执

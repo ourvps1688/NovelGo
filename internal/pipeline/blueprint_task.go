@@ -27,7 +27,7 @@ type BlueprintTaskResult struct {
 //   - 不复用 StartPipeline（其自动裁决链路已退役），不调 DetermineEntryStage；
 //   - 不往 DetectionKind* 加 blueprint（检测四 kind 独立启动是架构约束）；
 //   - 不新增运行时质量闸门、不引入 auto-advance；
-//   - 体检落工单后由用户在工单面板显式「去修复」触发 blueprint-fix，绝不自动派发修复。
+//   - 体检落工单后由用户在工单面板「去修复」把上下文发到 chat 人工修复，绝不自动派发修复。
 //
 // 复用既有链路：executeBlueprint → enterBlueprintAudit（唯一置 AuditKind=blueprint 处）
 // → executeAudit 改派 blueprint-audit → runDetection 蓝图落法 → pipeline_issues；

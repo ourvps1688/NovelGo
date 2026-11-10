@@ -103,9 +103,16 @@ func TestAuditFormatLineTiers(t *testing.T) {
 	}
 }
 
-// TestFixReceiptFormatLine 验证修复回执格式串可被 fixReceipt 结构解析。
+// TestFixReceiptFormatLine 验证修复回执格式串仍是合法 JSON 且字段齐全。
+// 后台自动修复执行体已下线，此处只守 p0 golden 构造器引用的契约单源，不依赖解析结构。
 func TestFixReceiptFormatLine(t *testing.T) {
-	var r fixReceipt
+	var r struct {
+		Fixed   []string `json:"fixed"`
+		Skipped []struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason"`
+		} `json:"skipped"`
+	}
 	require.NoError(t, json.Unmarshal([]byte(fixReceiptFormatLine()), &r))
 	require.NotEmpty(t, r.Fixed)
 	require.NotEmpty(t, r.Skipped)
@@ -207,7 +214,7 @@ func TestParseFreshAuditStampsSchemaVersion(t *testing.T) {
 // ── P2 T3.2：V 系契约接线与解析兼容 ────────────────────────────────────────
 
 // TestIssueSampleStyleWiring 验证 V 系 schema 片段接线 auditFormatLine
-// （driftPatrolPrompt 同款体例，WBS p2 T3.2）：体检提示词携带 V 系全量契约
+// （契约单源同款体例，WBS p2 T3.2）：体检提示词携带 V 系全量契约
 // 片段与示例值断言（体例同 issueSampleDrift/issueSamplePatrol 既有断言）。
 func TestIssueSampleStyleWiring(t *testing.T) {
 	frag := auditFormatLine(true, issueSampleStyle)
@@ -289,12 +296,10 @@ func TestPromptSchemaSingleSource(t *testing.T) {
 	}
 	for name, p := range map[string]string{
 		"blueprintAuditPrompt": blueprintAuditPrompt(1),
-		"driftPatrolPrompt":    driftPatrolPrompt(1),
 	} {
 		require.NotContains(t, p, `"fix_type"`, "%s（核心契约）不应含全量字段", name)
 		require.NotContains(t, p, `"target_scope"`, "%s（核心契约）不应含全量字段", name)
 	}
-	require.Contains(t, driftPatrolPrompt(1), `"id":"D1"`, "巡检提示词应使用巡检示例值")
 	// 张力报告（WBS 3.3）用专属示例值 T1，但同持全量契约片段（张力需标
 	// target_scope/dimension/direction 供报告视图展示建议方向）。
 	patrol := patrolPrompt(1, contextasm.ContextBlocks{})

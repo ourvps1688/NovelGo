@@ -16,7 +16,7 @@ import (
 //
 // 消费方：
 //   - 提示词：signabilityPrompt / finalAuditPrompt / stockAuditPrompt（全量契约）、
-//     blueprintAuditPrompt / driftPatrolPrompt（核心字段）、
+//     blueprintAuditPrompt（核心字段）、
 //     fixPrompt / blueprintFixPrompt（修复回执）、verifyPrompt（增量复验回执）
 //   - skill md：signability-audit.md 输出格式节（示例 JSON）
 //   - 前端：types/pipeline.ts（AuditIssue / AuditData / FixIssuePayload / RewriteItem）

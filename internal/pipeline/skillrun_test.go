@@ -129,20 +129,19 @@ func TestBlueprintFixAgentAllowlistScoped(t *testing.T) {
 	}
 }
 
-// TestSkillAgentTypeBlueprintMappings 验证蓝图技能 → Agent 类型映射：
-// blueprint-audit 复用签约体检的只读白名单（SignabilityAgent），blueprint-fix 走限权蓝图修复（BlueprintFixAgent）。
+// TestSkillAgentTypeBlueprintMappings 验证蓝图体检技能 → Agent 类型映射，并锁死
+// 4 个退役修复技能不再映射任何专用 Agent（后台自动修复执行体已整体下线）。
 func TestSkillAgentTypeBlueprintMappings(t *testing.T) {
 	require.Equal(t, agentcfg.SignabilityAgent, skillAgentType("blueprint-audit"),
 		"蓝图体检应复用签约体检只读白名单")
-	require.Equal(t, agentcfg.BlueprintFixAgent, skillAgentType("blueprint-fix"),
-		"蓝图修复应走限权 BlueprintFixAgent")
 	require.Equal(t, agentTypeSignability, skillAgentTypeString("blueprint-audit"),
 		"蓝图体检 AgentType 字符串应复用 signability（同属只读体检）")
-	require.Equal(t, agentTypeBlueprintFix, skillAgentTypeString("blueprint-fix"),
-		"蓝图修复 AgentType 字符串应为 blueprintfix")
-	// G3 蓝图漂移巡检：只读巡检复用签约体检只读白名单。
-	require.Equal(t, agentcfg.SignabilityAgent, skillAgentType("blueprint-drift-check"),
-		"蓝图巡检应复用签约体检只读白名单")
-	require.Equal(t, agentTypeSignability, skillAgentTypeString("blueprint-drift-check"),
-		"蓝图巡检 AgentType 字符串应复用 signability（同属只读体检）")
+	for _, retired := range []string{
+		"signability-fix", "blueprint-fix", "chapter-rewrite", "blueprint-drift-check",
+	} {
+		require.Equal(t, agentcfg.BlueprintAgent, skillAgentType(retired),
+			"退役技能 %s 不得再映射专用修复 Agent", retired)
+		require.Equal(t, agentTypeBlueprint, skillAgentTypeString(retired),
+			"退役技能 %s 不得再映射专用 AgentType 字符串", retired)
+	}
 }

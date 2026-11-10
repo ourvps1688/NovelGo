@@ -1,8 +1,15 @@
 # 技能装配与可观测契约（2026-11-09）
 
 > 状态：**已实施（P0–P3，2026-11-09 ~ 2026-11-10）**。本文保留设计原文与当时的取证口径，
-> 实施结果、相对设计的偏差与 27 技能用量实测统一记在**附录 C**；规划期行号按 2026-11-09
+> 实施结果、相对设计的偏差与**当时** 27 技能用量实测统一记在**附录 C**；规划期行号按 2026-11-09
 > HEAD 保留，实施时以函数名为准。四期各自的提交 hash 见附录 C.1。
+>
+> **后续变更（2026-11-10，晚于本文收口）**：用户判定后台自动 LLM 修复无实际价值，已彻底下线
+> 后台自动修复执行体，并退役 4 个只服务该链路的内置技能 `signability-fix` / `blueprint-fix` /
+> `chapter-rewrite` / `blueprint-drift-check`，**内置技能现值 23 个**。本文设计原文、附录 C 的
+> 27 技能用量表与验收判据均为**下线前的历史时点快照**，按项目纪律不回改历史数据；当前口径以
+> `docs/TECHNICAL_STATUS_AND_GUARDRAILS.md` §3 与 `AGENTS.md`「工单修复唯一路径」小节为准。
+> 所有修复现在一律由「去修复」把工单上下文发到 chat 人工/AI 协作完成，系统零自动改稿。
 > 关联：#108 写章技法 bundle、#109 下线平台数据对账/对标书库、#110 四个悬空口径清理。
 > 取证：dev 库 `build/bin/novel-agent.db` 只读查询（messages 2026-10-11 ~ 11-09，
 > exec_run_stats 10-25 ~ 11-08，chapter_quality 10-28 ~ 11-09）。
@@ -317,6 +324,9 @@ GROUP BY skill, channel ORDER BY n DESC;
   `executeBlueprint → enterBlueprintAudit → executeAudit` 与
   `dispatchExecutor` / task 记录，跑完落工单后由用户「去修复」显式触发
   `blueprint-fix`；全程无自动复评、无自动修复。
+  > **实施注记（勿回改规划口径）**：S2 落地为 `RunBlueprintTask` + 显式按钮（见 C.2 第 4 条）；
+  > 后续后台自动修复下线后，`blueprint-fix` 已退役，「去修复」现只把工单上下文发到 chat，
+  > 不再触发任何修复技能或后台执行体。
 - 附一个「存量书补跑」入口，避免只对新书生效。
 
 备选方案：若产品上确认不再需要 S2，则把
@@ -403,6 +413,10 @@ GROUP BY skill, channel ORDER BY n DESC;
 | 状态 | ✅ 已实施（2026-11-10）：目录降级、常驻兼容层、`WorkflowAutoArms` 单源 + 健康检查、三份文档口径同步；27 技能用量表见附录 C.4 |
 
 ### 6.5 验收硬指标
+
+> 规划期指标按当时 27 技能时点原样保留（历史不回改）。后台自动修复下线后内置技能为 23 个，
+> 「每技能 ≥1 挂载点」的现行判据由 `internal/skill/health_test.go` 的 23 技能断言承接；
+> 本节其余指标（零错投、SQL 可答、p0 golden 零变化、全套闸门）继续有效。
 
 1. 27 个技能零使用 = **0**；每个技能 ≥1 个确定性挂载点且账本 30 天有记录。
 2. chat 反向错投 = **0**；单轮注入 ≤3 个 auto 且有 rune 预算。
@@ -508,9 +522,11 @@ GROUP BY skill, channel ORDER BY n DESC;
 
 ### C.3 §6.5 硬指标对照
 
+> 以下指标均为 **2026-11-10 P3 收口时点（27 技能）** 的验收结论，历史数据不回改；当前内置技能为 23 个，健康检查结果以 `internal/skill/health_test.go` 的现值断言为准。
+
 | 指标 | 状态 | 说明 |
 |---|---|---|
-| 27 技能零使用 = 0；每技能 ≥1 确定性挂载点 | ✅ 挂载点 27/27 | 全部技能声明了有效 mount，且 mount 有真实消费点（`mountOwners` + 健康检查） |
+| 27 技能零使用 = 0；每技能 ≥1 确定性挂载点 | ✅ 挂载点 27/27（当时时点） | 全部技能声明了有效 mount，且 mount 有真实消费点（`mountOwners` + 健康检查） |
 | 每技能账本 30 天有记录 | ⏳ 待运行态取证 | 属取证要求而非接线要求，当前账本 0 行，见 C.4 口径说明 |
 | chat 反向错投 = 0；单轮 ≤3 auto + rune 预算 | ✅ 代码层达成 | `internalOnly` 前置过滤只回指引导语、`3,1`、12000 总帽、manifest `Budget`；运行态计数同样待账本取证 |
 | 一条 SQL 可答任意技能用量/通道/最近一次 | ✅ 达成 | `SummarizeSkillInvocations` + `App.GetSkillUsage` + 面板 + C.4 复测 SQL |
@@ -522,6 +538,10 @@ GROUP BY skill, channel ORDER BY n DESC;
 > 也不得擅自自动派发写章/体检/蓝图任务（违反零 auto-advance 与质量保障唯一规范路径）。
 
 ### C.4 27 技能用量实测（一次 SQL 导出）
+
+> **历史快照**：此表为 2026-11-10 后台自动修复下线**之前**的 27 技能全量清单，按纪律原样保留。
+> 其中 `blueprint-drift-check` / `blueprint-fix` / `chapter-rewrite` / `signability-fix` 四行对应的
+> 技能现已退役（当前 23 个），请勿据此表恢复技能或把「27」当作现值。
 
 导出时间 **2026-11-10**，库 `build/bin/novel-agent.db`（只读）。`skill_invocations` 共 **0 行**，
 27 个技能名由 CTE `VALUES` 给出，挂载点列取自各 builtin md 的 frontmatter `mounts`，
@@ -566,7 +586,7 @@ WHERE created_at >= datetime('now', '-30 days') AND skill <> ''
 GROUP BY skill, channel ORDER BY n DESC;
 ```
 
-判据：27 个技能名全部出现；`internalOnly` 技能不得出现 `chat_intent` / `writing_bundle` 通道；
+判据（当时 27 技能时点；现行判据为 23 个，且 4 个退役技能不应再出现）：27 个技能名全部出现；`internalOnly` 技能不得出现 `chat_intent` / `writing_bundle` 通道；
 若仍有技能 0 次，用 `SkillUsagePanel` 的标红清单定位其挂载点装配器，不要退回「加 cue / 让用户 read」的老路。
 
 ### C.5 全量回归记录（2026-11-10）

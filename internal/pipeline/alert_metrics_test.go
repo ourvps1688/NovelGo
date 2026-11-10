@@ -64,41 +64,6 @@ func TestAlertMetricsRaisedL2OnAudit(t *testing.T) {
 		"2 条 issue → raised.l2 记 2 次（曝光口径）")
 }
 
-// TestAlertMetricsFixReceiptFlow confirmed/dismissed：修复回执 fixed 逐条记确认、
-// skipped 逐条记未确认。
-func TestAlertMetricsFixReceiptFlow(t *testing.T) {
-	db := newTestDB(t)
-	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
-	sk := &sinkKeys{}
-	svc.SetFeatureSink(sk.record)
-	auditJSON := `{"verdict":"needs_fix","score":18,"summary":"两条待修","schema_version":3,"issues":[` +
-		`{"id":"I1","level":"P0","area":"a","desc":"d1","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[1]},` +
-		`{"id":"I2","level":"P1","area":"b","desc":"d2","fix_type":"ledger","target_scope":"active_volume","dimension":"none","direction":"forward_fix","chapter_ids":[5]}]}`
-	svc.skillRunner = func(_ context.Context, name string, _ SkillInput) (SkillOutput, error) {
-		switch name {
-		case "signability-fix":
-			return SkillOutput{Text: "已修复：\n```json\n" +
-				`{"fixed":["I1"],"skipped":[{"id":"I2","reason":"查无此问题"}]}` + "\n```"}, nil
-		default:
-			return SkillOutput{Text: "ok"}, nil
-		}
-	}
-	ctx := context.Background()
-
-	// R5-2：S5 不再自动派发修复——路由为待修工单后由显式「去修复」触发，修复回执度量不变。
-	runID := startS5Run(t, svc, 903, auditJSON)
-	svc.executeFix(runID, 903) // I1/I2 路由为待修工单
-	require.NoError(t, svc.StartIssueFixTickets(ctx, 903, []IssueTicketRef{
-		{RunID: runID, IssueKey: "I1"}, {RunID: runID, IssueKey: "I2"},
-	}))
-
-	keys := sk.snapshot()
-	require.Contains(t, keys, featureAlertConfirmedL2, "fixed 1 条 → confirmed 记 1 次")
-	require.Contains(t, keys, featureAlertDismissedL2, "skipped 1 条 → dismissed 记 1 次")
-	require.Equal(t, 1, countKey(keys, featureAlertConfirmedL2))
-	require.Equal(t, 1, countKey(keys, featureAlertDismissedL2))
-}
-
 // TestAlertMetricsRaisedStructOnStructureBlock 结构告警产生（曝光口径）：
 // 告警块非空按条数记 raised.struct；零告警不记。
 func TestAlertMetricsRaisedStructOnStructureBlock(t *testing.T) {
@@ -178,15 +143,4 @@ func TestIssueHitStats(t *testing.T) {
 	got2, err := svc.IssueHitStats(ctx, 999)
 	require.NoError(t, err)
 	require.Nil(t, got2, "零工单=空结果（nil，零提示）")
-}
-
-// countKey 统计 keys 中某 key 的出现次数。
-func countKey(keys []string, key string) int {
-	n := 0
-	for _, k := range keys {
-		if k == key {
-			n++
-		}
-	}
-	return n
 }

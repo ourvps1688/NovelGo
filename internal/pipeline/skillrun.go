@@ -15,39 +15,28 @@ import (
 // agentTypeBlueprint 是蓝图规划 Agent 在 agent.Run 中的 AgentType 字符串。
 const agentTypeBlueprint = "blueprint"
 
-// agentTypeSignability / agentTypeFix 分别是签约体检 / 修复执行 Agent 的 AgentType 字符串。
-// agentTypeBlueprintFix 是蓝图修复 Agent 的 AgentType 字符串（限权：只改卷纲 / 补卷）。
-// agentTypeRewrite 是章节重写 Agent 的 AgentType 字符串（回流 S3 重写回路：整章重写）。
+// agentTypeSignability 是签约体检 Agent 的 AgentType 字符串。
+// 后台自动修复执行体已整体下线：修复 / 蓝图修复 / 章节重写三类专用
+// AgentType 字符串随 4 个退役技能一并移除。
 // agentTypePatrol 是一致性巡检 Agent 的 AgentType 字符串（WBS 3.3：张力报告，只读）。
 // agentTypeChapterCI 是章节 CI 检查员（R2 L1）的 AgentType 字符串（只读，只报告不改写）。
 const (
-	agentTypeSignability  = "signability"
-	agentTypeFix          = "fix"
-	agentTypeBlueprintFix = "blueprintfix"
-	agentTypeRewrite      = "rewrite"
-	agentTypePatrol       = "patrol"
-	agentTypeChapterCI    = "chapterci"
+	agentTypeSignability = "signability"
+	agentTypePatrol      = "patrol"
+	agentTypeChapterCI   = "chapterci"
 )
 
 // skillAgentType 按 skill 名返回其在 agent.Run 中使用的 AgentType。
-// 蓝图规划走 BlueprintAgent（可建卷），签约体检走 SignabilityAgent（只读），
-// 修复执行走 FixAgent（可改稿 + 同步台账）；未知 skill 默认 BlueprintAgent。
+// 蓝图规划走 BlueprintAgent（可建卷），签约体检走 SignabilityAgent（只读）；
+// 修复类专用 Agent 随后台自动修复执行体下线，未知 skill 默认 BlueprintAgent。
 func skillAgentType(name string) agentcfg.AgentType {
 	switch name {
 	case "signability-audit":
 		return agentcfg.SignabilityAgent
 	case "signability-verify":
 		return agentcfg.SignabilityAgent // 增量复验只读（R1c）：复用只读体检白名单
-	case "signability-fix":
-		return agentcfg.FixAgent
 	case "blueprint-audit":
 		return agentcfg.SignabilityAgent // 复用只读白名单
-	case "blueprint-fix":
-		return agentcfg.BlueprintFixAgent // 限权：只改卷纲 / 补卷
-	case "chapter-rewrite":
-		return agentcfg.ChapterRewriteAgent // 回流 S3 重写回路：整章重写（授权 full_replace）
-	case "blueprint-drift-check":
-		return agentcfg.SignabilityAgent // 复用只读白名单（G3 蓝图漂移巡检）
 	case "consistency-patrol":
 		return agentcfg.ConsistencyPatrolAgent // 全书张力报告：只读、只报告不改写（WBS 3.3）
 	case "chapter-ci":
@@ -66,16 +55,8 @@ func skillAgentTypeString(name string) string {
 		return agentTypeSignability
 	case "signability-verify":
 		return agentTypeSignability // 增量复验（R1c）：同属只读体检 AgentType
-	case "signability-fix":
-		return agentTypeFix
 	case "blueprint-audit":
 		return agentTypeSignability // 复用签约体检 AgentType 字符串（同属只读体检）
-	case "blueprint-fix":
-		return agentTypeBlueprintFix
-	case "chapter-rewrite":
-		return agentTypeRewrite
-	case "blueprint-drift-check":
-		return agentTypeSignability // 复用只读体检 AgentType（G3 蓝图漂移巡检）
 	case "consistency-patrol":
 		return agentTypePatrol // 一致性巡检（张力报告，只读）
 	case "chapter-ci":

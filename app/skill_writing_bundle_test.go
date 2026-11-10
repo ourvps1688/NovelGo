@@ -135,13 +135,26 @@ func TestCapSkillRunes(t *testing.T) {
 }
 
 // TestBuildAutoSkillInject_InternalOnlyRedirect #111 P1：chat 侧不再注入
-// signability-fix 正文，只回一行指引导语（验收：反向错投 = 0）。
+// internalOnly 技能正文，只回一行指引导语（验收：反向错投 = 0）。
+// 退役 4 个自动修复技能后，本条 cue 命中的内部技能名可能随路由调整，
+// 故从引导语解析真实命中名，不硬编码具体技能。
 func TestBuildAutoSkillInject_InternalOnlyRedirect(t *testing.T) {
 	a := setupTestApp(t)
 	inject, names := a.buildAutoSkillInjectWithNames(context.Background(), 0, "帮我修复一下签约体检的问题", "", "")
-	require.NotContains(t, names, "signability-fix", "internalOnly 技能不得计入本轮注入技能徽标")
 	require.Contains(t, inject, "内部工作流技能")
-	require.Contains(t, inject, "signability-fix", "指引里要指名命中的内部技能")
+
+	const marker = "用户消息命中内部工作流技能「"
+	start := strings.Index(inject, marker)
+	require.GreaterOrEqual(t, start, 0, "指引里要指名命中的内部技能")
+	rest := inject[start+len(marker):]
+	end := strings.Index(rest, "」")
+	require.Greater(t, end, 0, "技能名须用「」闭合")
+	hit := rest[:end]
+	require.NotEmpty(t, hit)
+	require.NotContains(t, names, hit, "命中的内部技能不得计入本轮注入技能徽标")
+	for _, retired := range []string{"signability-fix", "blueprint-fix", "chapter-rewrite", "blueprint-drift-check"} {
+		require.NotEqual(t, retired, hit, "已退役的自动修复技能不得再被 chat 路由命中")
+	}
 	require.Contains(t, inject, "工单面板")
 	require.NotContains(t, inject, "【写章技法", "内部工作流消息不得误触发写章技法包")
 }

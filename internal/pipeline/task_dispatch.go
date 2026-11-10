@@ -1,7 +1,7 @@
 package pipeline
 
 // task_dispatch.go 是 R3b「执行体迁持久任务队列」的派发口
-// （pipeline-core-redesign-proposal.md §4.4）：流水线执行体（体检/修复/复验/终检/
+// （pipeline-core-redesign-proposal.md §4.4）：流水线执行体（体检/路由沉淀/复验/终检/
 // 蓝图/S0 对齐/全量对齐/巡检）从裸 goroutine 迁到 internal/task 队列——
 // 幂等消费（同 kind+run 去重）、崩溃续跑（租约过期重领）、可观察（task 表）。
 //
@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/novelgo/novelgo/internal/task"
 )
 
@@ -31,7 +29,6 @@ import (
 const (
 	taskKindAudit       = "audit"        // 签约体检（S4/S4b/蓝图体检，含 enterAudit/enterBlueprintAudit）
 	taskKindFix         = "fix"          // S5 检测结果路由+工单沉淀（R5-2 自动修复摘除后）
-	taskKindIssueFix    = "issue_fix"    // 发现项工单「去修复」执行体（#240 R5-2 工单接执行）
 	taskKindIssueVerify = "issue_verify" // 发现项工单「复验」执行体（审计 P0）：按 run 后台逐工单异步复验
 	taskKindFinalAudit  = "final_audit"  // S6 完本终检
 	taskKindBlueprint   = "blueprint"    // S2 蓝图生成
@@ -99,21 +96,11 @@ var legacyGuard sync.Map
 // 队列不可用（表缺失/Runner 未启动）→ 降级走裸 goroutine（迁移前的裸 goroutine 行为，非阻塞）。
 // 入队时数据库可能短暂锁竞争（operation_log 写与其他写入并发）：短重试吸收瞬态锁，避免误降级；
 // 重试仍失败才降级——降级**后台 goroutine** 而非同步直跑，绝不阻塞请求调用方（否则
-// 「去修复/复验」等用户操作会因执行体长耗时 LLM 调用卡死 UI，表现为按钮转圈 + 工单状态陈旧）。
+// 「复验」等用户操作会因执行体长耗时 LLM 调用卡死 UI，表现为按钮转圈 + 工单状态陈旧）。
 // issueKeys 仅复验执行体使用：显式携带待复验工单键，经 task payload 透传给消费侧，
 // 避免消费侧回扫 verifying 态（读己写竞态根因）。其余执行体不传（空）。
 func (s *Service) dispatchExecutor(kind, runID string, novelID int64, legacy func(), issueKeys ...string) {
 	s.dispatchExecutorKey(kind, fmt.Sprintf("%s:%s", kind, runID), runID, novelID, legacy, issueKeys...)
-}
-
-// dispatchExecutorUnique 与 dispatchExecutor 同，但 dedup_key 带唯一后缀：派发必入队，
-// 不与同 kind:run_id 的既有任务合并。供带应用层互斥的执行体使用（工单修复，
-// StartIssueFixTickets 的 issueFixActive 标记）——队列侧的去重合并会把互斥窗口内
-// 新翻 fixing 的工单孤儿化（#100 帮凶：合并丢弃后永卡修复中），同 run 单执行体
-// 由应用层互斥保证，队列侧不再合并。
-func (s *Service) dispatchExecutorUnique(kind, runID string, novelID int64, legacy func()) {
-	s.dispatchExecutorKey(kind, fmt.Sprintf("%s:%s:%s", kind, runID, uuid.NewString()),
-		runID, novelID, legacy)
 }
 
 // dispatchExecutorKey 是 dispatchExecutor 的 dedup_key 可定制版本（见上方两个入口）。
@@ -185,9 +172,6 @@ func (s *Service) registerTaskHandlers() {
 	}))
 	s.taskRunner.Register(taskKindFix, s.runIDNovelIDHandler(func(runID string, novelID int64) {
 		s.executeFix(runID, novelID)
-	}))
-	s.taskRunner.Register(taskKindIssueFix, s.runIDNovelIDHandler(func(runID string, novelID int64) {
-		s.runIssueFixTickets(runID, novelID)
 	}))
 	s.taskRunner.Register(taskKindIssueVerify, func(_ context.Context, t *task.Task) error {
 		p, err := decodeTaskPayload(t.Payload)

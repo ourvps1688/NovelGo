@@ -2,7 +2,7 @@
 // 非阻断：绝不拦截重写动作；可关：会话级消隐；判定失败静默不渲染（降级最高纪律）。
 // 挂点：①创作自由区 ChatPanel 重写动作处；②创作旅程 JourneyCreate 重写卡（T4.2 复用本组件）。
 // 原「质检 rewrite_handoff 提示处（SignabilityAuditView）」挂点随 R5-2 自动重写摘除已移除
-// （S5 不再自动重写，正文级问题改由工单面板手动触发 chapter-rewrite）。
+// （S5 不再自动重写，正文级问题一律由工单面板「去修复」发到 chat 人工处理）。
 import { Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { usePanelStore } from "@/stores/usePanelStore";

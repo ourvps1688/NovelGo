@@ -13,7 +13,7 @@ export interface AuditIssue {
   level: string;
   area: string;
   desc: string;
-  // 修复出口类型（契约 signability-audit.md 强制）：body=S3 章节重写 / ledger=自动修复。
+  // 修复出口类型（契约 signability-audit.md 强制）：body=整章重写 / ledger=台账·卷纲局部修补。
   // 旧版体检数据可能缺省，解析层保留该字段以对齐契约单源。
   fix_type?: string;
   // issue 三枚举（卷级作用域，可缺省）：target_scope=落点卷作用域（active_volume|frozen_volume|none）、

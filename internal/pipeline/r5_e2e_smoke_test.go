@@ -7,7 +7,7 @@ package pipeline
 //	写（S3 逐章推进 + 里程碑非阻塞 note）
 //	  → 检测任务（chapter / volume / book / structure 四 kind 各自独立启动）
 //	  → 质量档案 + 发现项工单沉淀
-//	  → 人工确认 / 去修复（工单执行体：正文级章节重写 + 台账级修复）
+//	  → 人工确认 / 去修复（chat 人工/AI 协作修复） / 标记已修复收口
 //	  → 显式复验（signability-verify 回执逐条落表）
 //	  → 回检测（同容器整批替换刷新，新一轮清单语义）
 //
@@ -54,8 +54,6 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 	// ── LLM 代跑 stub：按技能名回合法契约夹具。卷体检按轮次切换产出
 	// （首轮 needs_fix 两条；回检测 pass 零条），模拟修复后复检刷新。
 	var auditRound atomic.Int32
-	var mu sync.Mutex
-	var rewriteChapters []int64 // chapter-rewrite 派发定位到的章节（防并行写切片）
 	svc.skillRunner = func(_ context.Context, name string, input SkillInput) (SkillOutput, error) {
 		switch name {
 		case "signability-audit":
@@ -63,19 +61,11 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 				return SkillOutput{Text: "结论\n```json\n" + smokePassFixture + "\n```"}, nil
 			}
 			return SkillOutput{Text: "结论\n```json\n" + detectAuditFixture + "\n```"}, nil
-		case "signability-fix":
-			// 台账级 I2 的修复回执（契约 fixReceiptFormatLine 形状）。
-			return SkillOutput{Text: "已修复。\n```json\n{\"fixed\":[\"I2\"],\"skipped\":[]}\n```"}, nil
-		case "chapter-rewrite":
-			mu.Lock()
-			rewriteChapters = append(rewriteChapters, extractChapterIDFromPrompt(t, input.Prompt))
-			mu.Unlock()
-			return SkillOutput{Text: "已整章重写"}, nil
 		case "signability-verify":
 			return SkillOutput{Text: "```json\n" + smokeVerifyFixture + "\n```"}, nil
 		case "consistency-patrol":
 			return SkillOutput{Text: "```json\n" + detectAuditFixture + "\n```"}, nil
-		default: // blueprint-drift-check 等：无 JSON 回执 → 按零发现收口。
+		default: // 其余技能无 JSON 回执 → 按零发现收口。
 			return SkillOutput{Text: "ok"}, nil
 		}
 	}
@@ -95,16 +85,6 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 	t.Cleanup(swapEmitDetectDone(func(_ context.Context, p map[string]any) { detectCh <- p }))
 	patrolCh := make(chan map[string]any, 4)
 	t.Cleanup(swapEmitConsistencyPatrol(func(_ context.Context, p map[string]any) { patrolCh <- p }))
-	var fixStarts, fixDones atomic.Int32
-	var lastFixDone map[string]any
-	var fixDoneMu sync.Mutex
-	t.Cleanup(swapEmitFixStart(func(_ context.Context, _ map[string]any) { fixStarts.Add(1) }))
-	t.Cleanup(swapEmitFixDone(func(_ context.Context, p map[string]any) {
-		fixDones.Add(1)
-		fixDoneMu.Lock()
-		lastFixDone = p
-		fixDoneMu.Unlock()
-	}))
 
 	// ── 阶段 1：写（S3 逐章推进 5 章）——第 5 章触发里程碑复检建议（非阻塞 note）。
 	runID := startS3Run(t, svc, novelID, `{"s4_audited":true,"last_audit_chapter":0}`)
@@ -187,37 +167,27 @@ func TestR5E2ESmokeLoop(t *testing.T) {
 		require.Equal(t, IssueStatusPending, r.Status, "巡检工单不得自动流转（人工在环）")
 	}
 
-	// ── 阶段 3：人工确认 + 去修复（工单执行体，显式触发）。
+	// ── 阶段 3：人工确认 → 「去修复」把上下文发到 chat（人工/AI 协作）→ 「标记已修复」收口。
+	// 后台自动修复执行体已整体下线：本阶段零 LLM 修复派发、零 fix_start/fix_done 事件。
 	refs := []IssueTicketRef{{RunID: volRes.RunID, IssueKey: "I1"}, {RunID: volRes.RunID, IssueKey: "I2"}}
 	require.NoError(t, svc.ConfirmIssueTickets(ctx, novelID, refs))
-	require.NoError(t, svc.StartIssueFixTickets(ctx, novelID, refs))
-
-	// 正文级 I1（chapter_ids [1,2,3]）逐章重写；台账级 I2 走 signability-fix。
-	mu.Lock()
-	gotRewrites := append([]int64(nil), rewriteChapters...)
-	mu.Unlock()
-	require.Len(t, gotRewrites, 3, "正文级工单应按作用域逐章派发重写")
+	require.NoError(t, svc.StartManualIssueFixTickets(ctx, novelID, refs))
 	volRows, lerr = svc.store.ListIssues(ctx, novelID, volRes.RunID)
 	require.NoError(t, lerr)
 	for _, r := range volRows {
-		require.Equal(t, IssueStatusFixed, r.Status, "工单 %s 修复后应落 fixed", r.IssueKey)
+		require.Equal(t, IssueStatusFixing, r.Status, "「去修复」只置修复中，不自动改稿")
 	}
-	require.Equal(t, int32(1), fixStarts.Load())
-	require.Equal(t, int32(1), fixDones.Load())
-	fixDoneMu.Lock()
-	gotFixDone := lastFixDone
-	fixDoneMu.Unlock()
-	require.Equal(t, true, gotFixDone["ok"])
-	require.Equal(t, true, gotFixDone["tickets"], "fix_done 应带 tickets 标记（去工单面板复验）")
-	// 修复收口不动检测容器身份（出生即终态）。
+	require.NoError(t, svc.CloseIssueFixTickets(ctx, novelID, refs))
+	volRows, lerr = svc.store.ListIssues(ctx, novelID, volRes.RunID)
+	require.NoError(t, lerr)
+	for _, r := range volRows {
+		require.Equal(t, IssueStatusFixed, r.Status, "chat 修完点「标记已修复」后应落 fixed")
+	}
+	// 人工收口不动检测容器身份（出生即终态）。
 	volRun, gerr := svc.store.GetByRunID(ctx, volRes.RunID)
 	require.NoError(t, gerr)
 	require.Equal(t, detectContainerStage, volRun.CurrentStage)
-	require.Equal(t, StatusFinished, volRun.Status, "工单修复收口不得改写检测容器状态")
-	var fixedCtxt GateContext
-	require.NoError(t, json.Unmarshal([]byte(volRun.ContextJSON), &fixedCtxt))
-	require.Equal(t, 1, fixedCtxt.FixRounds, "工单修复收口令修复轮数 +1")
-	require.Contains(t, fixedCtxt.DriftReport, "蓝图巡检", "修复收口后蓝图巡检结论落 DriftReport")
+	require.Equal(t, StatusFinished, volRun.Status, "人工收口不得改写检测容器状态")
 
 	// ── 阶段 4：显式复验（signability-verify 回执逐条落表，审计 P0 异步派发）。
 	sum, err := svc.VerifyIssueTickets(ctx, novelID, refs)

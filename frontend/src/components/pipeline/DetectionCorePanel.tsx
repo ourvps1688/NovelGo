@@ -38,7 +38,7 @@ export default function DetectionCorePanel({ novelId }: Props) {
 
   // 全书一致性巡查报告（张力报告）：经 GetPatrolReport 双源合并取数
   // （活跃 run + structure 检测容器，按落库时间戳最新者胜）。取数失败静默
-  // （降级零提示），只读展示，绝不进自动修复路由。
+  // （降级零提示），只读展示，绝不触发自动改稿。
   const { data: patrolView } = useQuery({
     queryKey: patrolKeys.report(novelId),
     queryFn: async () => {
