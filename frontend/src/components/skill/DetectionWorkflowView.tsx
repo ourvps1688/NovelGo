@@ -7,6 +7,8 @@ import {
   Play,
   AlertTriangle,
   Loader2,
+  Send,
+  RotateCw,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,6 +23,7 @@ import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
 import { EventsOn } from "@/lib/wailsjs/runtime/runtime";
 import { useChapters } from "@/components/chapter/useChapters";
 import { useVolumes } from "@/components/volume/useVolumes";
+import { useChatLaunchStore } from "@/stores/useChatLaunchStore";
 import { useModels } from "@/components/settings/useModels";
 import { useSettings } from "@/components/settings/useSettings";
 import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
@@ -119,8 +122,9 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
         return null;
       }
     },
-    enabled:
-      kind === "chapter" && !!st?.last_run_at && !!effChapterId && archiveOpen,
+    // #113：质量档案由写后链路 L0 直接产出，不该等到「手动检测过一次」才可见；
+    // 只要有选中章就展示，发现项才不会在首章写完后长期藏在检测按钮后面。
+    enabled: kind === "chapter" && !!effChapterId && archiveOpen,
   });
 
   // 巡检·结构结果消费面：经 GetPatrolReport 双源合并取数（活跃 run + structure 检测容器，
@@ -248,6 +252,9 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     }
   }, [kind, running, queryClient]);
 
+  // #113：章节检测产物是质量档案（写后就有），即使从未手动启动过检测也可直接查看/
+  // 处理发现项；卷/结构仍按「有检测结果」才展示结果区。
+  const showChapterArchive = kind === "chapter" && effChapterId != null;
   const scopeReady =
     kind === "chapter"
       ? effChapterId != null
@@ -371,15 +378,17 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               handleStart();
             }}
           />
-        ) : st?.last_run_at ? (
+        ) : st?.last_run_at || showChapterArchive ? (
           kind === "volume" ? (
             // 卷体检与书体检跑同一 signability-audit 技能、产物形态一致：复用八维评估卡
             // （标注卷 scope 铭牌），修复此前卷体检不渲染评分/八维、只给通用工单预览的缺口。
-            <SignabilityAssessmentCard
-              status={st}
-              inlineIssues={inlineIssues}
-              scopeLabel={volumeName}
-            />
+            st ? (
+              <SignabilityAssessmentCard
+                status={st}
+                inlineIssues={inlineIssues}
+                scopeLabel={volumeName}
+              />
+            ) : null
           ) : (
             // 章节检测产物是质量档案（非评分报告/工单），形态本就不同：仅给跳转入口。
             <div className="mt-4 rounded-lg border bg-muted/30 p-3 max-w-3xl">
@@ -387,7 +396,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                 <span className="text-sm font-medium text-foreground">
                   {t("journey.quality.detect.resultTitle")}
                 </span>
-                {st.last_verdict ? (
+                {st?.last_verdict ? (
                   <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
                     {VERDICT_KEYS[st.last_verdict]
                       ? t(VERDICT_KEYS[st.last_verdict])
@@ -395,12 +404,14 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("journey.quality.detect.lastRun", {
-                  at: fmtTime(st.last_run_at),
-                  count: st.last_issue_count ?? 0,
-                })}
-              </p>
+              {st?.last_run_at ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {t("journey.quality.detect.lastRun", {
+                    at: fmtTime(st.last_run_at),
+                    count: st.last_issue_count ?? 0,
+                  })}
+                </p>
+              ) : null}
               <div className="mt-3 flex flex-col gap-3">
                 <button
                   type="button"
@@ -415,6 +426,20 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                   <ChapterQualityArchiveCard
                     archive={archive ?? null}
                     loading={archiveLoading}
+                    novelId={novelId}
+                    chapterId={effChapterId}
+                    onArchiveInvalidate={() => {
+                      void queryClient.invalidateQueries({
+                        queryKey: [
+                          "chapter-quality-archive",
+                          novelId,
+                          effChapterId,
+                        ],
+                      });
+                      void queryClient.invalidateQueries({
+                        queryKey: detectionKeys.list(novelId),
+                      });
+                    }}
                   />
                 ) : null}
               </div>
@@ -483,13 +508,30 @@ function levelBadgeClass(level: string): string {
   return "bg-muted text-muted-foreground";
 }
 
-function FindingRow({ f }: { f: quality.Finding }) {
+function FindingRow({
+  f,
+  selected,
+  onToggle,
+}: {
+  f: quality.Finding;
+  selected: boolean;
+  onToggle: () => void;
+}) {
   const { t } = useTranslation();
   const statusText = f.status
     ? t(`journey.quality.detect.findingStatus.${f.status}`, f.status)
     : "";
   return (
     <li className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs">
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        aria-label={t("journey.quality.detect.selectFinding", {
+          check: f.check,
+        })}
+        className="h-3.5 w-3.5 shrink-0 accent-primary"
+      />
       <span
         className={`rounded px-1.5 py-0.5 font-medium ${levelBadgeClass(f.level)}`}
       >
@@ -512,14 +554,109 @@ function FindingRow({ f }: { f: quality.Finding }) {
 }
 
 // 章节质量档案就地卡片：L0 指标 + L0/L1 发现清单（L1 状态徽章复用 VERDICT_KEYS）。
+// #113 闭环：章节检测只写质量档案、不落工单，历史上发现项永远「待处理」且无任何
+// 操作入口。这里提供「勾选发现项 → 发到中央 chat 人工协作改稿 → 重新检测本章」，
+// 复用工单面板唯一通道 useChatLaunchStore.send，不新增工单、不改表结构、不派发
+// 任何后台自动修复执行体（守「所有修复都走 chat」纪律）。
 function ChapterQualityArchiveCard({
   archive,
   loading,
+  novelId,
+  chapterId,
+  onArchiveInvalidate,
 }: {
   archive: pipeline.ChapterQualityArchive | null;
   loading: boolean;
+  novelId: number;
+  chapterId: number | null;
+  onArchiveInvalidate: () => void;
 }) {
   const { t } = useTranslation();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [rerunning, setRerunning] = useState(false);
+
+  const l0 = archive?.l0_findings ?? [];
+  const l1 = archive?.l1_findings ?? [];
+  const allFindings = useMemo(
+    () => [
+      ...l0.map((f) => ({ key: `l0:${f.id}`, f })),
+      ...l1.map((f) => ({ key: `l1:${f.id}`, f })),
+    ],
+    [l0, l1],
+  );
+  // 派生过滤而非 effect 清状态：切章/档案刷新后旧选中自动失效，
+  // 不会把上一章的发现项带进下一章的 chat 上下文（零 setState-in-effect）。
+  const selectedKeys = useMemo(() => {
+    const valid = new Set(allFindings.map(({ key }) => key));
+    return new Set([...selected].filter((k) => valid.has(k)));
+  }, [selected, allFindings]);
+
+  const toggle = useCallback((key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const onSendToChat = useCallback(() => {
+    const rows = allFindings.filter(({ key }) => selectedKeys.has(key));
+    if (rows.length === 0 || !archive) {
+      toastInfo(t("journey.quality.detect.selectFindingsHint"));
+      return;
+    }
+    const items = rows
+      .map(
+        ({ f }, i) =>
+          `${i + 1}. [${f.check}] ${f.desc}` +
+          (f.ledger_refs && f.ledger_refs.length > 0
+            ? `\n    ${t("journey.quality.detect.fixPromptLedger", {
+                list: f.ledger_refs.join(" · "),
+              })}`
+            : ""),
+      )
+      .join("\n\n");
+    const chapterText = archive.reading_number
+      ? t("sidebar.chapterN", { n: archive.reading_number })
+      : t("journey.quality.detect.currentChapter");
+    const content =
+      `${t("journey.quality.detect.fixPromptTitle", { chapter: chapterText })}\n\n` +
+      `${items}\n\n` +
+      `${t("journey.quality.detect.fixPromptWords", {
+        words:
+          archive.words_target_label ||
+          t("journey.quality.detect.wordsTargetFallback"),
+      })}\n` +
+      t("journey.quality.detect.fixPromptFooter");
+    const send = useChatLaunchStore.getState().send;
+    if (!send) {
+      toastError(t("journey.quality.detect.chatNotReady"));
+      return;
+    }
+    send(content);
+    toastSuccess(t("journey.quality.detect.fixSent", { count: rows.length }));
+    setSelected(new Set());
+  }, [allFindings, selectedKeys, archive, t]);
+
+  const onRerun = useCallback(async () => {
+    if (!novelId || chapterId == null || rerunning) return;
+    setRerunning(true);
+    try {
+      trackFeature(ACTION_FEATURE_KEYS.detect);
+      await RunDetectionTask(novelId, "chapter", chapterId);
+      onArchiveInvalidate();
+      toastSuccess(t("journey.quality.detect.rerunSent"));
+    } catch (err) {
+      toastError(toErrorMessage(err, t("signability.launchFailed")));
+    } finally {
+      setRerunning(false);
+    }
+  }, [novelId, chapterId, rerunning, onArchiveInvalidate, t]);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -556,6 +693,43 @@ function ChapterQualityArchiveCard({
         ) : null}
       </div>
 
+      {/* 生效字数口径（与检测 L0 / 修复处方 / 前后对比同源，杜绝两套数字） */}
+      {archive.words_target_label ? (
+        <div className="mt-2 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] text-muted-foreground">
+          {t("journey.quality.detect.wordsTarget")}：
+          {archive.words_target_label}
+        </div>
+      ) : null}
+
+      {/* 闭环操作条：勾选发现项 → 发到 chat → 改稿后重新检测 */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onSendToChat}
+          disabled={selectedKeys.size === 0}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Send className="h-3.5 w-3.5" />
+          {t("journey.quality.detect.sendToChat", { count: selectedKeys.size })}
+        </button>
+        <button
+          type="button"
+          onClick={() => void onRerun()}
+          disabled={rerunning || !novelId || chapterId == null}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {rerunning ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RotateCw className="h-3.5 w-3.5" />
+          )}
+          {t("journey.quality.detect.rerunChapter")}
+        </button>
+        <span className="text-[11px] text-muted-foreground">
+          {t("journey.quality.detect.closureHint")}
+        </span>
+      </div>
+
       {/* L0 指标 */}
       <div className="mt-3">
         <div className="text-xs font-medium text-muted-foreground">
@@ -589,10 +763,15 @@ function ChapterQualityArchiveCard({
         <div className="text-xs font-medium text-muted-foreground">
           {t("journey.quality.detect.l0Findings")}
         </div>
-        {archive.l0_findings && archive.l0_findings.length > 0 ? (
+        {l0.length > 0 ? (
           <ul className="mt-1 flex flex-col gap-1.5">
-            {archive.l0_findings.map((f) => (
-              <FindingRow key={f.id} f={f} />
+            {l0.map((f) => (
+              <FindingRow
+                key={f.id}
+                f={f}
+                selected={selectedKeys.has(`l0:${f.id}`)}
+                onToggle={() => toggle(`l0:${f.id}`)}
+              />
             ))}
           </ul>
         ) : (
@@ -612,10 +791,15 @@ function ChapterQualityArchiveCard({
               : archive.l1_status || t("journey.quality.detect.l1Status")}
           </span>
         </div>
-        {archive.l1_findings && archive.l1_findings.length > 0 ? (
+        {l1.length > 0 ? (
           <ul className="mt-1 flex flex-col gap-1.5">
-            {archive.l1_findings.map((f) => (
-              <FindingRow key={f.id} f={f} />
+            {l1.map((f) => (
+              <FindingRow
+                key={f.id}
+                f={f}
+                selected={selectedKeys.has(`l1:${f.id}`)}
+                onToggle={() => toggle(`l1:${f.id}`)}
+              />
             ))}
           </ul>
         ) : (

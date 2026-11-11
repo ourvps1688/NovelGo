@@ -1190,7 +1190,10 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 		}
 	}
 	stats := text.ComputeStats(proposed)
-	score, serr := review.ScoreChapter(ctx, tc.LLM, tc.ProviderName, tc.ModelID, proposed, outline, stats.WordCount)
+	// #113：判官 critique 与检测 L0 共用同一单章字数口径，避免前后对比里
+	// 出现「2000 字」这类与体检区间互斥的建议。
+	chapterWords := quality.NewStore(tc.DB, tc.LoggerOrDefault()).ChapterWords(ctx, tc.NovelID)
+	score, serr := review.ScoreChapter(ctx, tc.LLM, tc.ProviderName, tc.ModelID, proposed, outline, stats.WordCount, chapterWords.SystemLine())
 	if serr != nil {
 		tc.LoggerOrDefault().Warn("章节评分失败，放行不阻断", "err", serr)
 		return nil, nil

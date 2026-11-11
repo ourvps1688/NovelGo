@@ -61,16 +61,20 @@ func openingFindings(in L0Input, wordCount int) []Finding {
 		protagonists = dedupeTerms(in.Opening.ProtagonistNames)
 	}
 	keywordsArmed := len(premises)+len(cheats)+len(protagonists) > 0
-	if !keywordsArmed && in.Profile == nil {
+	_, _, wordsWindow := in.ChapterWords.EffectiveLengthWindow()
+	if !keywordsArmed && in.Profile == nil && !wordsWindow {
 		return nil
 	}
 	body := in.Text
 	if strings.TrimSpace(body) == "" {
 		return nil
 	}
-	// 窗口/区间 profile 化（P0-1）：profile 字段>0 取 profile，未设回落缺省常量。
+	// 窗口/区间：profile 已配且字段>0 取 profile，否则回落 P0-0 缺省常量。
+	// #113：调用方注入 ChapterWords 且给出有效区间时以单源为准（平台卡/题材卡
+	// 也能覆盖缺省七猫常量）；零值或 default 口径不覆盖，缺省逐字一致。
 	premiseWindow, cheatWindow, protagonistWindow := premiseWindowRunes, cheatWindowRunes, protagonistWindowRunes
 	chapterWindow, lenMin, lenMax := openingChapterWindow, openingLenMin, openingLenMax
+	windowName := "七猫区间"
 	if p := in.Profile; p != nil {
 		if p.PremiseWindow > 0 {
 			premiseWindow = p.PremiseWindow
@@ -90,6 +94,10 @@ func openingFindings(in L0Input, wordCount int) []Finding {
 		if p.ChapterLenMax > 0 {
 			lenMax = p.ChapterLenMax
 		}
+	}
+	if lo, hi, ok := in.ChapterWords.EffectiveLengthWindow(); ok {
+		lenMin, lenMax = lo, hi
+		windowName = in.ChapterWords.WindowName()
 	}
 	var out []Finding
 	if in.ReadingNumber == 1 && keywordsArmed {
@@ -111,14 +119,14 @@ func openingFindings(in L0Input, wordCount int) []Finding {
 		case wordCount < lenMin:
 			out = append(out, Finding{
 				Check: CheckOpeningLength,
-				Desc: fmt.Sprintf("黄金三章章长不适配：本章 %d 字，低于七猫区间 %d–%d 字（开篇过短易被判信息量不足/代入感弱）",
-					wordCount, lenMin, lenMax),
+				Desc: fmt.Sprintf("黄金三章章长不适配：本章 %d 字，低于%s %d–%d 字（开篇过短易被判信息量不足/代入感弱）",
+					wordCount, windowName, lenMin, lenMax),
 			})
 		case wordCount > lenMax:
 			out = append(out, Finding{
 				Check: CheckOpeningLength,
-				Desc: fmt.Sprintf("黄金三章章长不适配：本章 %d 字，超出七猫区间 %d–%d 字（开篇过长易被判节奏拖、卖点迟到）",
-					wordCount, lenMin, lenMax),
+				Desc: fmt.Sprintf("黄金三章章长不适配：本章 %d 字，超出%s %d–%d 字（开篇过长易被判节奏拖、卖点迟到）",
+					wordCount, windowName, lenMin, lenMax),
 			})
 		}
 	}

@@ -46,9 +46,9 @@ const (
 	CheckOpeningSlope     = "opening_slope"      // 开篇坡度不足：前 500 字张力未上扬（P0-2，曲线口径）
 )
 
-// DefaultTargetWords 是单章默认目标字数（与 identity 写作纪律同一口径：
-// 章纲/签约约束未给目标时默认 2000 字）。
-const DefaultTargetWords = 2000
+// DefaultTargetWords 定义已迁至 chapter_words.go（单章目标字数唯一真相源）。
+// 检测侧、写作侧 system 与前端质量档案一律经 ResolveChapterWords 解析，
+// 禁止在此另立数字；本注释保留以指明旧引用位置。
 
 // shortWordRatio 是字数不达标红线：实际字数低于目标该比例视为偏短
 // （与 identity 写作纪律「低于目标 70% 视为不达标」同一口径）。
@@ -115,8 +115,14 @@ type L0Input struct {
 	Text string
 	// ReadingNumber 是本章全局阅读序号（>0 时写入发现作用域 ChapterIDs）。
 	ReadingNumber int
-	// TargetWords 是本章目标字数（0=DefaultTargetWords；有章纲/签约约束时由调用方带入）。
+	// TargetWords 是本章目标字数（0=由 ChapterWords 解析；显式 >0 时优先，
+	// 保留既有调用方自定义目标的兼容通道）。
 	TargetWords int
+	// ChapterWords 是本章目标字数的唯一真相源解析结果（#113）。
+	// 零值（Source==""）= 逐字保持缺省行为（DefaultTargetWords + 缺省章长常量）；
+	// 由调用方经 Store.ChapterWords 注入后，word_count 与 opening_length 同区间，
+	// 与写作侧 system / 复验处方 / 前后对比不再出现两套数字。
+	ChapterWords ChapterWordsTarget
 	// Baseline 是文风八键基线（voice 台账 metrics）；空=无基线零漂移发现（不造默认基线）。
 	Baseline map[string]float64
 	// Genre 是活动题材（AI 味题材豁免，见 text 的 exemptInWebNovel）；空=保守不豁免。
@@ -160,7 +166,13 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 
 	target := in.TargetWords
 	if target <= 0 {
-		target = DefaultTargetWords
+		target = in.ChapterWords.EffectiveTarget()
+	}
+	// 目标字数来源标注：仅当调用方注入了非默认口径时追加，避免正文里
+	// 出现「低于目标 2000 字」这类与平台区间互斥的孤立数字（缺省逐字一致）。
+	targetNote := ""
+	if in.ChapterWords.Source != "" && in.ChapterWords.Source != "default" {
+		targetNote = fmt.Sprintf("（%s）", in.ChapterWords.Label)
 	}
 
 	var raw []Finding
@@ -172,8 +184,8 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 	} else if float64(st.WordCount) < float64(target)*shortWordRatio {
 		raw = append(raw, Finding{
 			Check: CheckWordCount,
-			Desc: fmt.Sprintf("本章 %d 字，低于目标 %d 字的 %.0f%%（偏短），建议扩写至目标量",
-				st.WordCount, target, shortWordRatio*100),
+			Desc: fmt.Sprintf("本章 %d 字，低于目标 %d 字的 %.0f%%（偏短），建议扩写至目标量%s",
+				st.WordCount, target, shortWordRatio*100, targetNote),
 		})
 	}
 

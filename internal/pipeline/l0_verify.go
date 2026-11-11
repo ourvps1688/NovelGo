@@ -289,9 +289,12 @@ func (s *Service) tryL0Verify(ctx context.Context, novelID int64, runID string, 
 				})
 			}
 		}
+		// #113：word_count 判定与检测侧同源；处方区间（hasWindow）的 #105
+		// 确定性判定仍在上方独立完成，不受此处影响。
 		_, fs := quality.RunL0Checks(quality.L0Input{
 			Text:             content,
 			ReadingNumber:    readingNumber,
+			ChapterWords:     quality.NewStore(db, logger).ChapterWords(ctx, novelID),
 			Baseline:         baseline,
 			Genre:            genre,
 			TailHookRequired: cfg.TailHookRequired,

@@ -48,7 +48,7 @@ func buildSystemPrompt() string {
 	b.WriteString("\n评分原则：\n")
 	b.WriteString("1. 总分 overall 是各维度的综合，不要无脑给满分；明显质量问题必须扣分。\n")
 	b.WriteString("2. critique 必须具体、可执行：指出问题出现在哪类内容，建议如何改，不要空泛夸奖。\n")
-	b.WriteString("3. 字数达标度：若章节明显过短或大量注水凑字数，该项应明显偏低。\n")
+	b.WriteString("3. 字数达标度：以本章注入的「单章字数口径」为唯一判定基准，禁止自行假设 2000 字或其它默认目标；明显过短或大量注水凑字数时该项应明显偏低。\n")
 	b.WriteString("4. 只评正文本身的写作质量，不评价是否契合用户个人口味。\n\n")
 	b.WriteString("严格只输出一个 JSON 对象（不要包含 ```json 代码围栏或任何额外文字），结构如下：\n")
 	b.WriteString(`{
@@ -61,9 +61,15 @@ func buildSystemPrompt() string {
 }
 
 // buildUserPrompt 构造用户消息：章节大纲（如有）+ 正文 + 字数信息。
-func buildUserPrompt(content, outline string, wordCount int) string {
+// wordsLine 可选（#113）：注入本书生效的单章字数口径，让判官 critique 与检测 L0
+// 用同一个数字，杜绝「体检说 1500 字、修复前后对比又说 2000 字」。
+func buildUserPrompt(content, outline string, wordCount int, wordsLine ...string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "本章正文（中文字数约 %d）：\n\n", wordCount)
+	if len(wordsLine) > 0 && wordsLine[0] != "" {
+		b.WriteString(wordsLine[0])
+		b.WriteString("\n")
+	}
 	b.WriteString("===== 正文开始 =====\n")
 	b.WriteString(content)
 	b.WriteString("\n===== 正文结束 =====\n")
@@ -76,14 +82,15 @@ func buildUserPrompt(content, outline string, wordCount int) string {
 
 // ScoreChapter 调用 LLM 对章节正文评分。
 // outline 可为空（新建章节尚无 id 时）；wordCount 由调用方用 text.ComputeStats 计算。
+// wordsLine 可选（#113）：本书生效的单章字数口径行，注入 user 消息供判官对照。
 // 评分失败时返回 error，调用方应放行（不阻断写作），由门禁决定降级行为。
-func ScoreChapter(ctx context.Context, client LLMClient, provider, model string, content, outline string, wordCount int) (ScoreResult, error) {
+func ScoreChapter(ctx context.Context, client LLMClient, provider, model string, content, outline string, wordCount int, wordsLine ...string) (ScoreResult, error) {
 	if client == nil {
 		return ScoreResult{}, fmt.Errorf("review: nil LLM client")
 	}
 	messages := []map[string]any{
 		{"role": "system", "content": buildSystemPrompt()},
-		{"role": "user", "content": buildUserPrompt(content, outline, wordCount)},
+		{"role": "user", "content": buildUserPrompt(content, outline, wordCount, wordsLine...)},
 	}
 	raw, err := client.GenerateText(ctx, provider, messages, model)
 	if err != nil {

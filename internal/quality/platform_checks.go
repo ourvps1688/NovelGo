@@ -42,8 +42,15 @@ func platformFindings(in L0Input, wordCount int, curve []TensionPoint) []Finding
 			out = append(out, *f)
 		}
 		// 黄金三章（1..OpeningChapterWindow）由 opening_length 覆盖，此处只查其余章（零重叠）。
+		// #113：章长区间以 ChapterWords 单源为准（浅拷贝，不污染 profile 其他字段），
+		// 与 opening_length / word_count 同口径；无注入时逐字保持既有行为。
 		if p.OpeningChapterWindow > 0 && in.ReadingNumber > p.OpeningChapterWindow {
-			if f := chapterLengthFitFinding(wordCount, p); f != nil {
+			lengthProfile := *p
+			if lo, hi, ok := in.ChapterWords.EffectiveLengthWindow(); ok {
+				lengthProfile.ChapterLenMin, lengthProfile.ChapterLenMax = lo, hi
+				lengthProfile.Title = in.ChapterWords.ShortTitle()
+			}
+			if f := chapterLengthFitFinding(wordCount, &lengthProfile); f != nil {
 				out = append(out, *f)
 			}
 		}

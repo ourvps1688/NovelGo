@@ -344,8 +344,12 @@ type ChapterQualityArchive struct {
 	L0Findings    []quality.Finding `json:"l0_findings"`
 	L1Findings    []quality.Finding `json:"l1_findings"`
 	L1Status      string            `json:"l1_status"`
-	CheckedAt     *time.Time        `json:"checked_at,omitempty"`
-	Exists        bool              `json:"exists"`
+	// WordsTargetLabel 是本书生效的单章字数口径文案（#113 单源解析结果），
+	// 供前端在档案卡片显式展示，避免用户面对两套数字无所适从。
+	// 用已渲染字符串而非结构体，避免 Wails 生成物新增类型带来的同步噪声。
+	WordsTargetLabel string     `json:"words_target_label"`
+	CheckedAt        *time.Time `json:"checked_at,omitempty"`
+	Exists           bool       `json:"exists"`
 }
 
 // GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单）。
@@ -361,14 +365,15 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 	}
 	at := row.CheckedAt
 	out = &ChapterQualityArchive{
-		ChapterID:     row.ChapterID,
-		ReadingNumber: row.ReadingNumber,
-		L0Metrics:     quality.ParseL0Metrics(row.L0Metrics),
-		L0Findings:    quality.ParseFindings(row.L0Findings),
-		L1Findings:    quality.ParseFindings(row.L1Findings),
-		L1Status:      row.L1Status,
-		CheckedAt:     &at,
-		Exists:        true,
+		ChapterID:        row.ChapterID,
+		ReadingNumber:    row.ReadingNumber,
+		L0Metrics:        quality.ParseL0Metrics(row.L0Metrics),
+		L0Findings:       quality.ParseFindings(row.L0Findings),
+		L1Findings:       quality.ParseFindings(row.L1Findings),
+		L1Status:         row.L1Status,
+		WordsTargetLabel: s.qualityStore.ChapterWords(ctx, novelID).Label,
+		CheckedAt:        &at,
+		Exists:           true,
 	}
 	return out, nil
 }

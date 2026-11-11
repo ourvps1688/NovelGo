@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/quality"
 )
 
 // effectiveConstraint 把题材卡（创作约束）与平台卡（平台约束）之间冲突的"节奏时序"参数
@@ -99,28 +100,48 @@ func atoiSafe(s string) int {
 
 // BuildEffectiveConstraint 生成「签约约束解析（已去冲突）」单表。
 // 返回空串表示无题材卡/平台卡，调用方据此跳过注入（零成本）。
-func BuildEffectiveConstraint(prefItems []preference.PreferenceItem) string {
+//
+// #113：可选 words 参数是「单章字数口径」的单源解析结果（由 NovelProfile 从
+// quality.Store.ChapterWords 取得）；传入时字数行按该结果生成，与检测侧 L0
+// 共用同一次决策。不传时退回从 prefItems 自行解析（既有单测的调用形态），
+// 文案逐字一致。
+func BuildEffectiveConstraint(prefItems []preference.PreferenceItem, words ...quality.ChapterWordsTarget) string {
 	v := parseConstraints(prefItems)
 	if !v.hasPlatform && !v.hasGenreFloor {
 		return ""
+	}
+
+	var w quality.ChapterWordsTarget
+	if len(words) > 0 && words[0].Source != "" {
+		w = words[0]
+	} else {
+		contents := make([]string, 0, len(prefItems))
+		for _, it := range prefItems {
+			contents = append(contents, it.Content)
+		}
+		w = quality.ResolveChapterWords(nil, contents)
 	}
 
 	var b strings.Builder
 	b.WriteString("【签约约束解析（已去冲突，节奏以本表为准）】\n")
 	b.WriteString("题材卡约束内容调性/禁忌，平台卡约束节奏时序；二者冲突时平台卡赢在节奏时序，题材卡赢在内容禁忌。\n")
 
-	// 单章字数（唯一真正冲突的数值旋钮）。
+	// 单章字数（唯一真正冲突的数值旋钮）：数值一律取自 ChapterWordsTarget，
+	// 禁止在此另写 1000/1500/2000 等数字。
 	b.WriteString("- 单章字数：")
-	switch {
-	case v.hasPlatChapter:
-		fmt.Fprintf(&b, "目标 %d–%d 字（平台卡为准）", v.platChapterMin, v.platChapterMax)
-		if v.hasGenreFloor && v.genreFloor > v.platChapterMax {
+	switch w.Source {
+	case "platform_profile":
+		fmt.Fprintf(&b, "目标 %d–%d 字（%s，检测与写作同源）", w.Min, w.Max, w.ShortTitle())
+	case "platform_card":
+		fmt.Fprintf(&b, "目标 %d–%d 字（平台卡为准）", w.Min, w.Max)
+		if v.hasGenreFloor && v.genreFloor > w.Max {
 			fmt.Fprintf(&b, "；题材卡下限≥%d字与平台上限冲突，以平台为准（签约节奏优先）", v.genreFloor)
 		}
-	case v.hasGenreFloor:
-		fmt.Fprintf(&b, "题材卡为准，单章不少于 %d 字", v.genreFloor)
+		b.WriteString("；检测与写作同源")
+	case "genre_card":
+		fmt.Fprintf(&b, "题材卡为准，单章不少于 %d 字", w.Target)
 	default:
-		b.WriteString("系统默认 2000 字")
+		fmt.Fprintf(&b, "系统默认 %d 字", quality.DefaultTargetWords)
 	}
 	b.WriteString("\n")
 	// 明确覆盖题材卡自身的字数下限行，避免 LLM 仍按旧卡折算。

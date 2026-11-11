@@ -311,6 +311,8 @@ func (s *Service) l0RuleSweep(ctx context.Context, novelID int64) string {
 		}
 	}
 	genre := s.novelGenre(ctx, novelID)
+	// #113 单章字数口径单源（与写后链路、写作侧 system 同一次解析）。
+	chapterWords := s.qualityStore.ChapterWords(ctx, novelID)
 
 	checked, findings := 0, 0
 	byCheck := map[string]int{}
@@ -323,6 +325,7 @@ func (s *Service) l0RuleSweep(ctx context.Context, novelID int64) string {
 		metrics, fs := quality.RunL0Checks(quality.L0Input{
 			Text:             text,
 			ReadingNumber:    ch.ReadingNumber,
+			ChapterWords:     chapterWords,
 			Baseline:         baseline,
 			Genre:            genre,
 			TailHookRequired: cfg.TailHookRequired,

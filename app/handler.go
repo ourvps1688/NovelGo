@@ -504,7 +504,12 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	})
 	// 注入章节 CI 检测执行器（R5-3 T1.2）：检测任务 chapter kind 经 chapterci 子 Agent
 	// 跑 L1 增量检查并落质量档案（与写后章节 CI 同一执行体）。
+	// #113：显式重跑前先按当前落盘正文重算 L0（写后链路之外的兜底），与写作侧共用
+	// 「单章字数口径」单源；失败仅告警，不阻断 L1（降级语义同章节 CI）。
 	a.pipeline.SetChapterCIRunner(func(ctx context.Context, novelID, chapterID int64) error {
+		if rerr := mcp_tools.RecalcChapterL0FromDisk(ctx, a.db, a.logger, novelID, chapterID); rerr != nil {
+			a.logger.Warn("章节检测：L0 重算失败（非阻断，继续 L1）", "err", rerr, "novelID", novelID, "chapterID", chapterID)
+		}
 		return mcp_tools.RunChapterCIForChapter(ctx, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
 		}, a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID)

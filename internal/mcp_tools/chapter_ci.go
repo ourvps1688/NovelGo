@@ -22,6 +22,7 @@ import (
 
 	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/chapter"
+	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/novelgo/novelgo/internal/structure"
@@ -80,12 +81,41 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 // 题材卡参数（R2b-3）：章尾钩子必需/禁忌清单取本书检查器配置，未配置/读取失败回落缺省
 // （=现行行为，逐字一致）。
 func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content string) {
+	findings, err := recalcChapterL0(ctx, tc, chapterID, content)
+	if err != nil {
+		tc.LoggerOrDefault().Warn("章节 CI L0 落档案失败（非阻断）", "err", err, "novelID", tc.NovelID, "chapterID", chapterID)
+	}
+	readingNumber, _ := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).
+		GetReadingNumberByID(ctx, nil, tc.NovelID, chapterID)
+	// P0-2 情绪账：L0 基线张力曲线随写后链路自动落库（纯确定性毫秒级）。
+	// L0 行整体重算、既有 L1 行一并作废（正文已变）；失败仅告警，不阻断写入主链路。
+	if terr := quality.NewStore(tc.DB, tc.LoggerOrDefault()).
+		RefreshTensionCurve(ctx, tc.NovelID, chapterID, readingNumber, content); terr != nil {
+		tc.LoggerOrDefault().Warn("章节 CI 张力曲线落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
+	}
+	// P0-2 情绪账：曲线四查发现落工单（E 系，tension 容器；四查过滤在落单侧）。
+	// 按章整批替换：零发现=清该章旧工单；未装配落单钩子=降级不落（零提示零报错）。
+	if tensionTicketLander != nil {
+		if _, terr := tensionTicketLander(ctx, tc.DB, tc.NovelID, readingNumber, findings); terr != nil {
+			tc.LoggerOrDefault().Warn("章节 CI 情绪账工单落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
+		}
+	}
+}
+
+// recalcChapterL0 是 L0 重算的单一实现：按正文跑确定性检查并覆盖该章 L0 档案
+// （UpsertL0 只写 L0 列，L1 列不动）。写后链路与显式「重新检测本章」共用，
+// 保证两处的字数口径、检查器配置、题材/台账投影完全一致。
+func recalcChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content string) ([]quality.Finding, error) {
 	readingNumber, _ := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).
 		GetReadingNumberByID(ctx, nil, tc.NovelID, chapterID)
 	cfg := chapterCICheckerConfig(ctx, tc)
+	// #113 单章字数口径单源：平台 profile / 偏好卡 → 一次解析，检测侧 L0 与
+	// 写作侧 system 共用同一结果，杜绝「体检 1000–1500、修复对比 2000」。
+	chapterWords := quality.NewStore(tc.DB, tc.LoggerOrDefault()).ChapterWords(ctx, tc.NovelID)
 	metrics, findings := quality.RunL0Checks(quality.L0Input{
 		Text:             content,
 		ReadingNumber:    readingNumber,
+		ChapterWords:     chapterWords,
 		Baseline:         chapterCIVoiceBaseline(ctx, tc),
 		Genre:            novelGenre(ctx, tc),
 		TailHookRequired: cfg.TailHookRequired,
@@ -104,22 +134,28 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 		L0Findings:    quality.MarshalFindings(findings),
 		CheckedAt:     time.Now(),
 	})
+	return findings, err
+}
+
+// RecalcChapterL0FromDisk 按「当前已落盘的章节正文」重算并覆盖该章 L0 档案。
+// #113：RunDetectionTask("chapter") 历史上只跑 L1，L0 只能靠写后链路刷新——
+// 显式「重新检测本章」若不重算 L0，改稿后的字数/开篇/钩子发现会停留在旧值，
+// 闭环看到的仍是修改前的问题。故在章节检测执行器派发前调用本函数。
+//
+// 边界：只动 L0 列；**不**刷新张力曲线、**不**重复落情绪账工单
+// （E 系工单可能已被人工收口，重跑检测不得把它们唤醒）；
+// 读正文/落库失败仅返回 error 由调用方告警，绝不阻断后续 L1 检测。
+func RecalcChapterL0FromDisk(ctx context.Context, db *gorm.DB, logger *slog.Logger, novelID, chapterID int64) error {
+	if db == nil {
+		return fmt.Errorf("章节检测 L0 重算：db 未注入")
+	}
+	content, err := git.ReadFile(novelID, git.ChapterPath(chapterID))
 	if err != nil {
-		tc.LoggerOrDefault().Warn("章节 CI L0 落档案失败（非阻断）", "err", err, "novelID", tc.NovelID, "chapterID", chapterID)
+		return fmt.Errorf("章节检测 L0 重算读正文：%w", err)
 	}
-	// P0-2 情绪账：L0 基线张力曲线随写后链路自动落库（纯确定性毫秒级）。
-	// L0 行整体重算、既有 L1 行一并作废（正文已变）；失败仅告警，不阻断写入主链路。
-	if terr := quality.NewStore(tc.DB, tc.LoggerOrDefault()).
-		RefreshTensionCurve(ctx, tc.NovelID, chapterID, readingNumber, content); terr != nil {
-		tc.LoggerOrDefault().Warn("章节 CI 张力曲线落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
-	}
-	// P0-2 情绪账：曲线四查发现落工单（E 系，tension 容器；四查过滤在落单侧）。
-	// 按章整批替换：零发现=清该章旧工单；未装配落单钩子=降级不落（零提示零报错）。
-	if tensionTicketLander != nil {
-		if _, terr := tensionTicketLander(ctx, tc.DB, tc.NovelID, readingNumber, findings); terr != nil {
-			tc.LoggerOrDefault().Warn("章节 CI 情绪账工单落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
-		}
-	}
+	tc := ToolContext{DB: db, NovelID: novelID, Logger: logger, ToolID: "pipeline-detect"}
+	_, err = recalcChapterL0(ctx, tc, chapterID, content)
+	return err
 }
 
 // chapterCIVoiceBaseline 装配 Voice 台账基线指标（voice.MergeMetrics，与 app 层

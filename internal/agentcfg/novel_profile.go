@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/novelgo/novelgo/internal/preference"
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/setting"
 )
 
@@ -66,10 +67,17 @@ func NovelProfile(ctx context.Context, db *gorm.DB, novelID int64) (string, erro
 	}
 
 	var b strings.Builder
+	// #113 单章字数口径（唯一真相源）：平台 profile / 偏好卡 / 默认只解析一次，
+	// 无条件注入一条权威行，让写作、修复、复验、前后对比与检测 L0 用同一数字。
+	// 放在最前，避免被后面的偏好自由文本里旧卡自带的数字盖过。
+	chapterWords := quality.NewStore(db, slog.Default()).ChapterWords(ctx, novelID)
+	b.WriteString("【单章字数口径（检测与写作同源）】\n")
+	b.WriteString(chapterWords.SystemLine())
+	b.WriteString("\n")
 	// 先注入「签约约束解析（去冲突）」单表：题材卡与平台卡冲突的节奏时序数值在此解析为权威值，
 	// 让 LLM 每轮读到的是已合并结论而非多卡自行调和（冲突主因：题材≥3500字 vs 平台1200–2000字）。
 	// 无题材/平台卡时返回空串，不增加任何成本。
-	if ec := BuildEffectiveConstraint(prefItems); ec != "" {
+	if ec := BuildEffectiveConstraint(prefItems, chapterWords); ec != "" {
 		b.WriteString(ec)
 		b.WriteString("\n")
 	}
