@@ -2875,6 +2875,7 @@ export namespace pipeline {
 	    l1_findings: quality.Finding[];
 	    l1_status: string;
 	    words_target_label: string;
+	    prescriptions: string[];
 	    // Go type: time
 	    checked_at?: any;
 	    exists: boolean;
@@ -2892,6 +2893,7 @@ export namespace pipeline {
 	        this.l1_findings = this.convertValues(source["l1_findings"], quality.Finding);
 	        this.l1_status = source["l1_status"];
 	        this.words_target_label = source["words_target_label"];
+	        this.prescriptions = source["prescriptions"];
 	        this.checked_at = this.convertValues(source["checked_at"], null);
 	        this.exists = source["exists"];
 	    }

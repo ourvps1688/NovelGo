@@ -2232,6 +2232,7 @@
         "fixPromptTitle": "Please address the following chapter check findings for {{chapter}}; we will collaborate on the edits in chat:",
         "fixPromptLedger": "Linked ledger: {{list}}",
         "fixPromptWords": "Active chapter length target: {{words}} (detection, fixes and before/after comparison all use this; do not estimate with other numbers).",
+        "acceptanceTitle": "【本章验收条件】 (deterministic acceptance criteria from the detector; satisfy each one, do not substitute other numbers or ignore the avoid notes):",
         "fixPromptFooter": "Explain each issue and your proposed edit, and confirm with me before rewriting. I will re-check this chapter afterwards.",
         "findingStatus": {
           "pending": "Pending",

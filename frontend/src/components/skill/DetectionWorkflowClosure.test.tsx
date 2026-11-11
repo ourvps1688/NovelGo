@@ -110,4 +110,23 @@ describe("#113 章节质量档案闭环", () => {
       'this.words_target_label = source["words_target_label"]',
     );
   });
+
+  it("#114 验收处方随 chat 消息发出（含确定性标记），DTO 与双语键齐备", () => {
+    const c = read("components/skill/DetectionWorkflowView.tsx");
+    expect(c).toContain("archive.prescriptions");
+    expect(c).toContain("acceptanceTitle");
+    expect(c).toContain("criteriaBlock");
+    expect(c).toContain("startsWith(`[${f.check}]`)");
+    const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
+    const en = JSON.parse(read("i18n/locales/en.json"));
+    expect(zh.journey.quality.detect.acceptanceTitle).toContain(
+      "【本章验收条件】",
+    );
+    expect(en.journey.quality.detect.acceptanceTitle).toContain(
+      "【本章验收条件】",
+    );
+    const models = read("lib/wailsjs/go/models.ts");
+    expect(models).toContain("prescriptions: string[]");
+    expect(models).toContain('this.prescriptions = source["prescriptions"]');
+  });
 });

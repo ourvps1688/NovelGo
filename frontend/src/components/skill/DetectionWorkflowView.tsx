@@ -623,6 +623,17 @@ function ChapterQualityArchiveCard({
     const chapterText = archive.reading_number
       ? t("sidebar.chapterN", { n: archive.reading_number })
       : t("journey.quality.detect.currentChapter");
+    // #114：把选中发现对应的确定性验收处方一并发出——阈值/实测值/目标/
+    // 位置/避免动作与检测侧同源，LLM 不再只拿到一句人读描述凭语感重写。
+    const criteria = (archive.prescriptions ?? [])
+      .filter((line) => rows.some(({ f }) => line.startsWith(`[${f.check}]`)))
+      .filter((line, i, arr) => arr.indexOf(line) === i);
+    const criteriaBlock =
+      criteria.length > 0
+        ? `\n${t("journey.quality.detect.acceptanceTitle")}\n${criteria
+            .map((line) => `- ${line}`)
+            .join("\n")}\n`
+        : "";
     const content =
       `${t("journey.quality.detect.fixPromptTitle", { chapter: chapterText })}\n\n` +
       `${items}\n\n` +
@@ -631,6 +642,7 @@ function ChapterQualityArchiveCard({
           archive.words_target_label ||
           t("journey.quality.detect.wordsTargetFallback"),
       })}\n` +
+      criteriaBlock +
       t("journey.quality.detect.fixPromptFooter");
     const send = useChatLaunchStore.getState().send;
     if (!send) {

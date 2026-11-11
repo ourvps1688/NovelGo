@@ -1193,7 +1193,15 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 	// #113：判官 critique 与检测 L0 共用同一单章字数口径，避免前后对比里
 	// 出现「2000 字」这类与体检区间互斥的建议。
 	chapterWords := quality.NewStore(tc.DB, tc.LoggerOrDefault()).ChapterWords(ctx, tc.NovelID)
-	score, serr := review.ScoreChapter(ctx, tc.LLM, tc.ProviderName, tc.ModelID, proposed, outline, stats.WordCount, chapterWords.SystemLine())
+	// #114：判官不再「每轮换一套新意见」。把上一章档案里尚未消除的发现
+	// 投影成确定性验收处方（阈值/位置/目标/避免动作与检测侧同源），
+	// 用本轮 proposed 正文重算实测值后注入 critique 输入。
+	var chapterID int64
+	if ch != nil {
+		chapterID = ch.ID
+	}
+	prescriptions := prescriptionLinesForChapter(ctx, tc, chapterID, proposed, chapterWords, stats.WordCount)
+	score, serr := review.ScoreChapterWithPrescriptions(ctx, tc.LLM, tc.ProviderName, tc.ModelID, proposed, outline, stats.WordCount, chapterWords.SystemLine(), prescriptions)
 	if serr != nil {
 		tc.LoggerOrDefault().Warn("章节评分失败，放行不阻断", "err", serr)
 		return nil, nil

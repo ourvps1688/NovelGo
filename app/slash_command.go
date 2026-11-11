@@ -89,10 +89,13 @@ func (a *App) resolveSlashCommand(novelID int64, name string) (inject string, lo
 var writingBundleSkills = []string{"reader-immersion", "scene-beats", "plot-hook"}
 
 const (
-	writingBundleSkillCap = 1500 // 单技能注入上限（rune）
-	// #111 P1：整块帽按 6×1500 同步扩容。固定 3 技法已占 4273 rune，旧 5000 帽
-	// 只剩 727，任何条件技能（最短 1273）都会被 break，条件化将永远不生效。
-	// 单技能帽保持 1500 不变；异常时仍可单条开关回退到固定 3 个（≤5000）。
+	// #114：单技能帽 1500 会把 reader-immersion 的 6 条自检清单、scene-beats 的
+	// 平台数字/章尾钩子模板整段截掉，恰好截掉「可执行」部分。仅对固定 3 技法
+	// 放宽到 2400（三者完整合计 4942 rune）；条件化技法仍守 1500，保证整块
+	// 9000 帽下仍能注入 2 个条件技能（#111 P1 条件化扩容契约不被挤掉）。
+	writingBundleSkillCap     = 1500 // 条件化技法单技能上限（rune）
+	writingBundleCoreSkillCap = 2400 // 固定 3 技法单技能上限（rune）
+	// #111 P1：整块帽按 6×1500 同步扩容，勿回退到 5000。
 	writingBundleBlockCap = 9000
 
 	// #111 P1：chat 意图注入预算。auto 放宽到 3 但受同类去重与单轮总 rune 帽约束，
@@ -226,6 +229,16 @@ func (a *App) buildAutoSkillInjectWithNames(ctx context.Context, novelID int64, 
 	return strings.TrimSpace(b.String()), names
 }
 
+// isCoreWritingSkill 固定 3 技法判定（#114 核心技法适用较宽的单技能帽）。
+func isCoreWritingSkill(name string) bool {
+	for _, n := range writingBundleSkills {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 // buildWritingSkillBundle 把写章技法正文按确定性顺序注入（去重、双封顶、如实标注节选）。
 // 明确声明为「本轮必须落实的硬约束」，避免模型把总调度提醒读成可选建议后跳过编排。
 func (a *App) buildWritingSkillBundle(ctx context.Context, novelID int64, message string, already []string) (string, []string) {
@@ -248,10 +261,14 @@ func (a *App) buildWritingSkillBundle(ctx context.Context, novelID int64, messag
 		if !ok || strings.TrimSpace(sk.Content) == "" {
 			continue
 		}
+		cap := writingBundleSkillCap
+		if isCoreWritingSkill(name) {
+			cap = writingBundleCoreSkillCap
+		}
 		runes := []rune(sk.Content)
 		truncated := false
-		if len(runes) > writingBundleSkillCap {
-			runes = runes[:writingBundleSkillCap]
+		if len(runes) > cap {
+			runes = runes[:cap]
 			truncated = true
 		}
 		if total+len(runes) > writingBundleBlockCap {

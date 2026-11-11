@@ -106,6 +106,9 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	if !strings.HasPrefix(input.Message, "/") {
 		autoInject, activeSkills = a.buildAutoSkillInjectWithNames(ctx, input.NovelID, input.Message, input.ProviderName, input.ModelID)
 	}
+	// #114：改稿轮确定性注入验收硬约束（按消息标记，不经技能意图路由）。
+	// 与 autoInject 共用 PersistTurnMessages 的同一通道，无标记时为空串。
+	autoInject += buildAcceptanceGuard(input.Message)
 	if injectName != "" {
 		activeSkills = append([]string{injectName}, activeSkills...)
 	}

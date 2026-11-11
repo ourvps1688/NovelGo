@@ -125,17 +125,17 @@ func chapterLengthFitFinding(wordCount int, p *PlatformProfile) *Finding {
 	return nil
 }
 
-// beatDensityFinding 爽点密度（每章）：情绪峰段数（climax，张力曲线口径）< 下限 → 发现。
-// qimao BeatDensityMin=1.0 校准语义 = 每章 ≥1 情绪峰（BeatType==climax）。
+// beatDensityFinding 爽点密度（每章）：爽点段数（climax 或 #114 结构峰，
+// beatPeakCount 单源）< 下限 → 发现。qimao BeatDensityMin=1.0 校准语义 = 每章 ≥1 爽点。
 // 与 tension_checks.beatGapFinding 组成配置互斥对（min>0 本检查，未配置 beat_gap 兜底）。
 func beatDensityFinding(curve []TensionPoint, min float64) *Finding {
-	n := climaxBeatCount(curve)
+	n := beatPeakCount(curve)
 	if float64(n) >= min {
 		return nil
 	}
 	return &Finding{
 		Check: CheckBeatDensity,
-		Desc: fmt.Sprintf("爽点密度不足：全章情绪峰 %d 处，低于下限 %.1f 处/章（张力曲线口径）——爽点稀疏易被判平淡/看点不足",
+		Desc: fmt.Sprintf("爽点密度不足：全章情绪峰/结构峰 %d 处，低于下限 %.1f 处/章（张力曲线口径，climax 或结构峰）——请安排对抗升级/反转并配具体动作与短句节奏；不要靠堆直白情绪词或感叹号凑数",
 			n, min),
 	}
 }

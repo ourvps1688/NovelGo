@@ -13,7 +13,10 @@ package quality
 // 契约要点（勿改）：
 //   - 曲线行按 (novel_id, chapter_id, source, seg) 唯一，整章按来源先删后插（幂等）；
 //   - 正文变化（写后链路）→ L0 行整体重算、既有 L1 行一并作废（旧内容标注不再可信）；
-//   - 四指标口径为常量启发式（饱和点常量），实证调参前不动；宁缺勿错：空正文空曲线。
+//   - 四指标口径为常量启发式（饱和点常量），实证调参前不动；宁缺勿错：空正文空曲线；
+//   - #114：新增「结构信号」（具体动作细节 / 对抗密度 / 短句节奏），作为情绪峰与
+//     张力的第二通路。原 emotion 数值逐字不变（图表/存档兼容），但 climax 之外的
+//     show-not-tell 写法不再必然被判「无爽点 / 拖沓」——这是与去 AI 味同源的口径。
 
 import (
 	"context"
@@ -65,6 +68,31 @@ const (
 	tensionConflictBeatAt  = 0.5  // 冲突词归一密度 ≥ 该值判 conflict
 	tensionDialogueBeatAt  = 0.45 // 对话比 ≥ 该值判 dialogue
 )
+
+// #114 结构信号（show-not-tell 通路）：不再把「堆直白情绪词 + 感叹号」当作
+// 达成情绪峰/张力的唯一手段——那与去 AI 味的 tell-not-show 硬约束数学互斥
+// （冷峻克制文风 emotion 恒为基线 8.0，必然报爽点断档 + 拖沓段）。
+// 结构信号 = 对抗密度 + 具体动作/身体细节密度 + 短句节奏，三者都是去 AI 味
+// 明确推荐的写法；零信号时为 0，原 tension/emotion 逐字保持缺省行为。
+const (
+	tensionActionCap        = 3.0 // 动作细节密度满刻度（次/百字）
+	tensionShortRatioCap    = 0.6 // 短句占比满刻度（≤18 rune 的句子）
+	tensionShortSentenceMax = 18  // 短句判定长度（rune）
+	// structuralPeakAt 按「一段 400 字里一处明确的对抗升级」标定（实测
+	// 真实章节基线 0.30 / 平铺 0.25 / 合理对抗段 0.40+），旧 0.62 只有
+	// 高密度堆词才可达，会把改稿再次锁进「怎么改都不达标」的死循环。
+	structuralPeakAt       = 0.40
+	tensionStructuralBoost = 0.35 // 结构信号对 tension 的最大加成比例
+)
+
+// tensionActionWords 是具体动作 / 身体细节信号词（show-not-tell 口径，保守表）。
+// 与 deai-flavor 的「用动作或场景细节替代直白情绪」同源，禁止在此塞回情绪词。
+var tensionActionWords = []string{
+	"攥", "按住", "抬手", "抬眼", "抬头", "低头", "转身", "侧身", "退后", "上前",
+	"指尖", "指节", "喉结", "脚步", "掌心", "后背", "膝盖", "屏息", "摸到", "碰到",
+	"抓住", "松开", "顿住", "停住", "僵住", "别开", "侧过", "半晌", "没接", "没答",
+	"没动", "没回头", "咬住", "攥紧", "蹭过", "压低", "靠在", "蹲下", "站起",
+}
 
 // tensionConflictWords 是冲突/对抗信号词（保守表：多字词为主，宁缺勿错）。
 var tensionConflictWords = []string{
@@ -128,12 +156,15 @@ func (ChapterTension) TableName() string { return "chapter_tension" }
 
 // 四指标 JSON 键（稳定契约：L0 写、诊断/前端读，禁两处各写一份）。
 const (
-	tensionMetricDialogue    = "dialogue_ratio"   // 对话比 0-1
-	tensionMetricConflict    = "conflict_density" // 冲突词密度（次/百字）
-	tensionMetricSentenceVar = "sentence_len_var" // 句长方差（rune²）
-	tensionMetricExcl        = "excl_density"     // 感叹/反问密度（个/百字）
-	tensionMetricEmotion     = "emotion_density"  // 情绪词密度（次/百字）
-	tensionMetricRunes       = "runes"            // 段长度（rune）
+	tensionMetricDialogue    = "dialogue_ratio"       // 对话比 0-1
+	tensionMetricConflict    = "conflict_density"     // 冲突词密度（次/百字）
+	tensionMetricSentenceVar = "sentence_len_var"     // 句长方差（rune²）
+	tensionMetricExcl        = "excl_density"         // 感叹/反问密度（个/百字）
+	tensionMetricEmotion     = "emotion_density"      // 情绪词密度（次/百字）
+	tensionMetricRunes       = "runes"                // 段长度（rune）
+	tensionMetricAction      = "action_density"       // #114 具体动作细节密度（次/百字）
+	tensionMetricShortRatio  = "short_sentence_ratio" // #114 短句占比 0-1
+	tensionMetricStructural  = "structural_signal"    // #114 结构信号 0-1（爽点第二通路）
 )
 
 // validTensionSource 判断曲线来源枚举值是否合法。
@@ -264,6 +295,9 @@ func BuildTensionCurve(text string) []TensionPoint {
 				tensionMetricExcl:        round1(st.exclPer),
 				tensionMetricEmotion:     round1(st.emotionPer),
 				tensionMetricRunes:       float64(st.runes),
+				tensionMetricAction:      round1(st.actionPer),
+				tensionMetricShortRatio:  round1(st.shortRatio),
+				tensionMetricStructural:  round1(structuralSignal(st)),
 			},
 		})
 	}
@@ -278,6 +312,8 @@ type tensionSegStats struct {
 	exclPer     float64 // 感叹/反问密度（个/百字）
 	sentenceVar float64 // 句长方差（rune²）
 	emotionPer  float64 // 情绪词密度（次/百字）
+	actionPer   float64 // #114 具体动作/身体细节密度（次/百字）
+	shortRatio  float64 // #114 短句占比 0-1
 }
 
 // computeTensionSegStats 计算单段指标（纯确定性）。
@@ -324,21 +360,14 @@ func computeTensionSegStats(seg string) tensionSegStats {
 	st.exclPer = per100(excl)
 	st.conflictPer = per100(conflict)
 	st.emotionPer = per100(emotion)
-	st.sentenceVar = sentenceLenVariance(seg)
+	st.actionPer = per100(countTensionHits(seg, tensionActionWords))
+	st.sentenceVar, st.shortRatio = sentenceLenStats(seg)
 	return st
 }
 
-// countTensionHits 统计信号词出现次数（同一位置多词各计，密度近似口径）。
-func countTensionHits(seg string, words []string) int {
-	n := 0
-	for _, w := range words {
-		n += strings.Count(seg, w)
-	}
-	return n
-}
-
-// sentenceLenVariance 句长方差（rune，按句末标点/换行切分，总体方差；无句返回 0）。
-func sentenceLenVariance(seg string) float64 {
+// sentenceLenStats 返回句长方差与短句占比（一次切分，避免两处各切一遍）。
+// variance 保持既有总体方差口径（无信号段逐字一致），ratio 是 #114 结构信号输入。
+func sentenceLenStats(seg string) (float64, float64) {
 	var lens []float64
 	cur := 0
 	for _, r := range seg {
@@ -359,11 +388,15 @@ func sentenceLenVariance(seg string) float64 {
 		lens = append(lens, float64(cur))
 	}
 	if len(lens) == 0 {
-		return 0
+		return 0, 0
 	}
 	mean := 0.0
+	short := 0
 	for _, v := range lens {
 		mean += v
+		if v <= tensionShortSentenceMax {
+			short++
+		}
 	}
 	mean /= float64(len(lens))
 	sum := 0.0
@@ -371,16 +404,63 @@ func sentenceLenVariance(seg string) float64 {
 		d := v - mean
 		sum += d * d
 	}
-	return sum / float64(len(lens))
+	return sum / float64(len(lens)), float64(short) / float64(len(lens))
 }
 
-// tensionScore 四指标 → 张力（0-100）：饱和归一加权，基线 tensionBase。
+// structuralSignal 结构信号（0-1）：对抗 0.40 + 具体动作细节 0.35 + 短句节奏 0.25。
+// 三项都是去 AI 味明确推荐的写法；与「堆直白情绪词/感叹号」通路互不依赖。
+func structuralSignal(st tensionSegStats) float64 {
+	cn := clamp01(st.conflictPer / tensionConflictCap)
+	an := clamp01(st.actionPer / tensionActionCap)
+	sr := clamp01(st.shortRatio / tensionShortRatioCap)
+	return clamp01(0.40*cn + 0.35*an + 0.25*sr)
+}
+
+// structuralPeakCount 统计结构峰段数（#114 爽点判定的第二通路）。
+// 仅看 L0 基线段指标；手工构造/无指标的段不计（宁缺勿错，旧测试逐字兼容）。
+func structuralPeakCount(curve []TensionPoint) int {
+	n := 0
+	for _, pt := range curve {
+		if pt.Metrics[tensionMetricStructural] >= structuralPeakAt {
+			n++
+		}
+	}
+	return n
+}
+
+// beatPeakCount 是「爽点段数」单源（#114）：climax 段与结构峰段按段去重计数，
+// 供 beat_density / beat_gap / 图表标记共用，杜绝两处各算一套导致判定漂移。
+func beatPeakCount(curve []TensionPoint) int {
+	n := 0
+	for _, pt := range curve {
+		if NormalizeBeatType(pt.BeatType) == BeatTypeClimax ||
+			pt.Metrics[tensionMetricStructural] >= structuralPeakAt {
+			n++
+		}
+	}
+	return n
+}
+
+// countTensionHits 统计信号词出现次数（同一位置多词各计，密度近似口径）。
+func countTensionHits(seg string, words []string) int {
+	n := 0
+	for _, w := range words {
+		n += strings.Count(seg, w)
+	}
+	return n
+}
+
+// tensionScore 四指标 → 张力（0-100）：饱和归一加权 + #114 结构信号加成。
+// 结构信号为 0 时与原计算逐字一致；有具体动作/对抗/短句节奏时抬升张力，
+// 让 show-not-tell 的段落不再被固定判为 tension<25 的「拖沓段」。
 func tensionScore(st tensionSegStats) float64 {
 	dn := clamp01(st.dialogue / tensionDialogueCap)
 	cn := clamp01(st.conflictPer / tensionConflictCap)
 	en := clamp01(st.exclPer / tensionExclCap)
 	vn := clamp01(st.sentenceVar / tensionSentenceVarCap)
-	return round1(tensionBase + (100-tensionBase)*clamp01(0.30*dn+0.30*cn+0.20*en+0.20*vn))
+	base := tensionBase + (100-tensionBase)*clamp01(0.30*dn+0.30*cn+0.20*en+0.20*vn)
+	boost := (100 - tensionBase) * tensionStructuralBoost * structuralSignal(st)
+	return round1(math.Min(100, base+boost))
 }
 
 // emotionScore 情绪词/感叹密度 → 情绪强度（0-100）：基线 tensionBase。

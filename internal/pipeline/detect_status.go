@@ -347,9 +347,12 @@ type ChapterQualityArchive struct {
 	// WordsTargetLabel 是本书生效的单章字数口径文案（#113 单源解析结果），
 	// 供前端在档案卡片显式展示，避免用户面对两套数字无所适从。
 	// 用已渲染字符串而非结构体，避免 Wails 生成物新增类型带来的同步噪声。
-	WordsTargetLabel string     `json:"words_target_label"`
-	CheckedAt        *time.Time `json:"checked_at,omitempty"`
-	Exists           bool       `json:"exists"`
+	WordsTargetLabel string `json:"words_target_label"`
+	// Prescriptions 是每条发现的可执行验收条件（#114 单源，与发现清单同序），
+	// 每行以 [check] 开头供前端按 Finding.Check 对齐；不新增 Wails 类型。
+	Prescriptions []string   `json:"prescriptions"`
+	CheckedAt     *time.Time `json:"checked_at,omitempty"`
+	Exists        bool       `json:"exists"`
 }
 
 // GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单）。
@@ -375,6 +378,20 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 		CheckedAt:        &at,
 		Exists:           true,
 	}
+	// #114：处方与检测同源。曲线取 L0 基线行（判定用的就是 source=l0 的那条），
+	// 不取会被 L1 人工标注覆盖的生效曲线；读失败降级为空处方，不影响档案展示。
+	var l0rows []quality.ChapterTension
+	if rows, rerr := s.qualityStore.ListTensionCurve(ctx, novelID, chapterID); rerr == nil {
+		for _, r := range rows {
+			if r.Source == quality.TensionSourceL0 {
+				l0rows = append(l0rows, r)
+			}
+		}
+	}
+	curve := quality.TensionPointsFromRows(l0rows)
+	all := append(append([]quality.Finding{}, out.L0Findings...), out.L1Findings...)
+	out.Prescriptions = quality.RenderPrescriptions(quality.BuildPrescriptions(
+		all, curve, out.L0Metrics.WordCount, s.qualityStore.ChapterWords(ctx, novelID)))
 	return out, nil
 }
 

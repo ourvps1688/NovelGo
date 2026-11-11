@@ -2192,6 +2192,7 @@
         "fixPromptTitle": "请按以下章节体检发现处理{{chapter}}，由你我在聊天中协作改稿：",
         "fixPromptLedger": "关联台账：{{list}}",
         "fixPromptWords": "本章生效字数口径：{{words}}（检测、修复与前后对比一律以此为准，勿另按其它数字估算）。",
+        "acceptanceTitle": "【本章验收条件】（以下为检测器的确定性判定口径，请逐条改到达标；不要按其它数字自行估算，也不要采用与「避免」项冲突的写法）：",
         "fixPromptFooter": "请逐条说明问题与改法，改稿时先确认我的意见；完成后我会重新检测本章查看新档案。",
         "findingStatus": {
           "pending": "待处理",

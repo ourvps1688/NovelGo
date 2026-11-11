@@ -288,6 +288,10 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 		})
 	}
 
+	// #114 冲突预检：给曲线类发现追加与去 AI 味/字数约束共存时的可执行边界，
+	// 避免一轮里同时要求「堆情绪词抬张力」和「不要直白情绪词」。
+	raw = reconcileFindingConflicts(raw)
+
 	// C 系顺编 + 作用域回填（一次运行内不撞号）。
 	out := make([]Finding, 0, len(raw))
 	for i, f := range raw {

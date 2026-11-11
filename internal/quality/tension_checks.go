@@ -52,20 +52,20 @@ func pacingDragFinding(curve []TensionPoint) *Finding {
 	}
 	return &Finding{
 		Check: CheckPacingDrag,
-		Desc: fmt.Sprintf("拖沓段：seg %d–%d 连续 %d 段张力平坦（tension<%.0f）——中段平缓易致读者弃书，建议压缩冗余或插入对抗/反转",
-			start, end, run, tensionFlatBelow),
+		Desc: fmt.Sprintf("拖沓段：seg %d–%d 连续 %d 段张力平坦（tension<%.0f）——中段平缓易致读者弃书；请在 seg %d–%d 用具体动作细节、对抗升级或短句节奏替换冗余描述，使这些段中至少一段 tension≥%.0f",
+			start, end, run, tensionFlatBelow, start, end, tensionFlatBelow),
 	}
 }
 
 // beatGapFinding 爽点断档：段数 ≥3 且章内无情绪峰（climax）→ 发现。
 // 仅在未配置爽点密度下限时兜底（与 beat_density 配对互斥）。
 func beatGapFinding(curve []TensionPoint) *Finding {
-	if len(curve) < pacingDragMinRun || climaxBeatCount(curve) > 0 {
+	if len(curve) < pacingDragMinRun || beatPeakCount(curve) > 0 {
 		return nil
 	}
 	return &Finding{
 		Check: CheckBeatGap,
-		Desc: fmt.Sprintf("爽点断档：全章 %d 段无情绪峰（climax 为 0）——缺少高光/爽点易被判平淡，建议安排至少一处情绪高潮（未配置爽点密度下限时的兜底口径）",
+		Desc: fmt.Sprintf("爽点断档：全章 %d 段无情绪峰/结构峰（爽点 0 处）——缺少高光易被判平淡，请安排至少一处对抗升级、反转或情绪高潮；用具体动作与短句节奏呈现即可，不必堆直白情绪词（未配置爽点密度下限时的兜底口径）",
 			len(curve)),
 	}
 }
@@ -77,14 +77,22 @@ func openingSlopeFinding(curve []TensionPoint) *Finding {
 	if len(segs) < 2 {
 		return nil
 	}
-	rise := segs[len(segs)-1].Tension - segs[0].Tension
+	// #114：取窗口内「后续段最高张力 - 首段」，与下文可执行指令方向一致。
+	// 旧口径取末段（可能恰好回落）会误报；旧建议「前置异常抬升开篇张力」只抬首段，
+	// 反而缩小升幅，与公式方向相反——已改为「首段之后继续加压」。
+	rise := segs[1].Tension - segs[0].Tension
+	for _, pt := range segs[1:] {
+		if pt.Tension-segs[0].Tension > rise {
+			rise = pt.Tension - segs[0].Tension
+		}
+	}
 	if rise >= openingSlopeMinRise {
 		return nil
 	}
 	return &Finding{
 		Check: CheckOpeningSlope,
-		Desc: fmt.Sprintf("开篇坡度不足：前 %d 字 %d 段张力仅上扬 %.1f（<%.1f）——开篇平缓缺抓力，建议前置对抗/异常事件抬升开篇张力",
-			openingSlopeWindowRunes, len(segs), rise, openingSlopeMinRise),
+		Desc: fmt.Sprintf("开篇坡度不足：前 %d 字 %d 段最高仅上扬 %.1f（<%.1f）——请在首段之后安排对抗升级/反转/关键信息揭露，让后续段 tension 比首段高至少 %.1f；不要只在首段堆冲突（抬高首段反而缩小升幅）",
+			openingSlopeWindowRunes, len(segs), rise, openingSlopeMinRise, openingSlopeMinRise),
 	}
 }
 
@@ -156,7 +164,9 @@ func MarkTensionCurve(curve []TensionPoint) TensionMarkers {
 		m.DragStartSeg, m.DragEndSeg = start, end
 	}
 	for _, pt := range curve {
-		if NormalizeBeatType(pt.BeatType) == BeatTypeClimax {
+		// #114：图表标记与爽点判定同源（climax 或结构峰），避免「图上没标、判定却算」。
+		if NormalizeBeatType(pt.BeatType) == BeatTypeClimax ||
+			pt.Metrics[tensionMetricStructural] >= structuralPeakAt {
 			m.ClimaxSegs = append(m.ClimaxSegs, pt.Seg)
 		}
 	}
