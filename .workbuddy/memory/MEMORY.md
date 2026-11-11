@@ -21,6 +21,13 @@
 - 手动重检跑 L1 前经 app/handler.go `RecalcChapterL0FromDisk` 按落盘正文重算 L0（与写后链路共用 recalcChapterL0），不刷新张力曲线/不重复落 E 系工单，失败仅告警。
 - **#105** word_count=纯汉字+英文词(text.ComputeStats)，不含标点/换行/@偏移/台账/任务卡/证据片段；字数类必走 tryL0Verify 本地确定性判定（CheckOpeningLength、parseChapterLengthWindow 取处方区间、过滤 RunL0Checks profile 口径）；不可读/无区间→回落 LLM。
 
+## #114 验收处方单源 / 判定器同源（P0）
+- 根因：chapter_quality(L0/L1) 与 chapter_score_events(前后对比) 双链独立，判官看不到 finding；Finding.Status 恒 pending、L0 整行覆盖无稳定 key；emotionScore 靠直白情绪词/感叹号，与去 AI 味数学互斥；开篇坡度公式「末−首」与文案「抬首段」反向。非供应商能力问题，技能只是次要放大器。
+- **单源** `quality.Prescription`（prescription.go）：`AcceptanceMarker=【本章验收条件】`，阈值全引用检测侧常量；`BuildPrescriptions/RenderPrescriptions` 投影「判定式/实测/目标/位置/动作/避免」。档案 DTO `Prescriptions []string`（取 source=l0 基线曲线）→ 前端按 `[check]` 对齐勾选；判官 `ScoreChapterWithPrescriptions` 逐条核验；改稿 `buildAcceptanceGuard` 按标记确定性注入 system-reminder（5 条：逐条复述/只定点改/严禁 full_replace/不换数字/逐条回报），不经技能路由、不新增后台执行体。
+- 判定器：tension.go 加结构信号第二通路（action_density/short_sentence_ratio，structuralPeakAt=0.40、cap=3.0），`beatPeakCount` 单源；reconcile.go 冲突预检给曲线类追加「禁堆情绪词/禁单纯扩写」；platform_checks/tension_checks 文案给可达成目标；MarkTensionCurve 与 beatGap 同源。
+- 技法帽：核心 3 技法 2400 / 条件化 1500 / 整块 9000（writingBundleCoreSkillCap），勿回退到 1500 或 5000。
+- 契约：prescription_test.go（show-not-tell 可达、阈值同源、冲突预检、坡度方向）、prescription_wiring_test.go（静态接线 + 零自动修复）、DetectionWorkflowClosure.test.tsx（处方字段/双语标记/models.ts）。p0 golden 五构造器零改动、Finding.Status 与表结构不动。**P1/P2 仍是方案未实施**：稳定 finding key、resolved/persisted/new、前后对比关联、轮次保护、turn_id、供应商可观测。
+
 ## 复验 / 状态机
 - VerifyIssueTickets 经 payload IssueKeys 透传、禁回扫 verifying；L0 快路径命中仍回落 LLM；重新 verifying 清 note；预算 120min/15min/2 turns/10k；rejected 3 次→skipped。
 - RAG-Verify：SearchBatch 切片（章 topK=2+台账 #id 定点+窗口回退），单工单 4500/单批 12000 帽，批量 4+批间并发 2，工具零暴露/输出≤3 句；语料帽与书长无关；截断抢救 parseVerifyReceipt partial+salvageVerifyEntries。
