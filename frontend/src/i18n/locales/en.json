@@ -2234,6 +2234,13 @@
         "fixPromptWords": "Active chapter length target: {{words}} (detection, fixes and before/after comparison all use this; do not estimate with other numbers).",
         "acceptanceTitle": "【本章验收条件】 (deterministic acceptance criteria from the detector; satisfy each one, do not substitute other numbers or ignore the avoid notes):",
         "fixPromptFooter": "Explain each issue and your proposed edit, and confirm with me before rewriting. I will re-check this chapter afterwards.",
+        "findingCounts": {
+          "resolved": "{{count}} resolved this round",
+          "persisted": "{{count}} still open",
+          "new": "{{count}} new"
+        },
+        "roundGuardHint": "These criteria have stayed unresolved for 3 consecutive rounds ({{keys}}): this may be a detector threshold conflict, not something another rewrite will fix. Choose one of exempt / adjust the threshold / change approach before editing; the system never changes thresholds or dispatches fixes automatically.",
+        "fixPromptRoundGuard": "Note: these criteria have stayed unresolved for 3 consecutive rounds ({{keys}}). Please confirm with me whether this is a detector threshold conflict or an insufficient edit, and pick one of exempt / adjust the threshold / change approach before writing; do not keep replacing the whole chapter.",
         "findingStatus": {
           "pending": "Pending",
           "fixed": "Fixed",
@@ -2258,6 +2265,12 @@
           "historyTitle": "Before/after fix comparison",
           "historyEmpty": "No score history for this chapter",
           "attempt": "Attempt {{n}}",
+          "findingDiff": {
+            "resolved": "{{count}} L0/L1 findings resolved",
+            "persisted": "{{count}} still open",
+            "new": "{{count}} new",
+            "noSnapshot": "No finding snapshot in historical data"
+          },
           "judgeTitle": "6-dim judge scores",
           "auditTitle": "8-dim audit stars",
           "contributed": "from {{dims}}",

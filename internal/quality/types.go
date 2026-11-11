@@ -93,6 +93,10 @@ type ChapterQuality struct {
 	L1Status string `gorm:"column:l1_status;not null" json:"l1_status"`
 	// Round 是记录/流转时的修复轮数（与 GateContext.FixRounds 同语义）。
 	Round int `gorm:"column:round;not null;default:0" json:"round"`
+	// FindingRound 是 #114 P1 跨轮发现对齐快照（JSON：FindingRound）。
+	// UpsertL0/UpsertL1 覆盖旧发现前由 Store 写入 resolved/persisted/new 与连续
+	// 未消除轮数；旧行为空串，读侧按「无快照」降级，不影响任何既有消费方。
+	FindingRound string `gorm:"column:finding_round;type:text" json:"finding_round"`
 	// CheckedAt 是最近一次检查落档时间（L0/L1 谁后写谁更新）。
 	CheckedAt time.Time `gorm:"column:checked_at" json:"checked_at"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`

@@ -83,14 +83,33 @@ export default function ScoreTrendPanel({
   const auditLabel = (key: string): string =>
     t(`signability.dimensions.${key}`);
 
-  // 历史事件：接口正序返回，展示倒序（最新在上）；attempt 序号按正序编
+  // 历史事件：接口正序返回，展示倒序（最新在上）；attempt 序号按正序编。
+  // #114 P1：相邻两次评分的 finding key 快照做集合差，回答「这次重写消掉哪几条」。
   const events = useMemo(() => {
     const list = [...(history ?? [])];
-    const asc = list.map((e, i) => ({
-      e,
-      attempt: i + 1,
-      delta: i > 0 ? e.overall - list[i - 1].overall : 0,
-    }));
+    const asc = list.map((e, i) => {
+      const prev = i > 0 ? list[i - 1] : null;
+      const prevKeys = prev?.finding_keys;
+      const curKeys = e.finding_keys;
+      // 旧数据/快照回填一律降级为「无快照」，绝不把空集反推成「全部消掉」。
+      const hasSnapshot =
+        i > 0 && Array.isArray(prevKeys) && Array.isArray(curKeys);
+      const prevSet = new Set(prevKeys ?? []);
+      const curSet = new Set(curKeys ?? []);
+      const findingDiff = hasSnapshot
+        ? {
+            resolved: [...prevSet].filter((k) => !curSet.has(k)).length,
+            persisted: [...curSet].filter((k) => prevSet.has(k)).length,
+            new: [...curSet].filter((k) => !prevSet.has(k)).length,
+          }
+        : null;
+      return {
+        e,
+        attempt: i + 1,
+        delta: i > 0 ? e.overall - list[i - 1].overall : 0,
+        findingDiff,
+      };
+    });
     return asc.reverse();
   }, [history]);
 
@@ -317,7 +336,7 @@ export default function ScoreTrendPanel({
           </p>
         ) : (
           <ul className="mt-1.5 flex flex-col gap-2">
-            {events.map(({ e, attempt, delta }) => (
+            {events.map(({ e, attempt, delta, findingDiff }) => (
               <li key={e.id} className="rounded border bg-card px-2.5 py-2">
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span className="text-[11px] text-muted-foreground">
@@ -357,6 +376,43 @@ export default function ScoreTrendPanel({
                 {e.critique ? (
                   <p className="mt-1.5 text-xs leading-relaxed text-foreground/80">
                     {e.critique}
+                  </p>
+                ) : null}
+                {/* #114 P1：本次重写消掉/仍在/新增的 L0/L1 发现（快照同源） */}
+                {findingDiff ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {findingDiff.resolved > 0 ? (
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+                        {t(
+                          "journey.quality.detect.scoreTrend.findingDiff.resolved",
+                          { count: findingDiff.resolved },
+                        )}
+                      </span>
+                    ) : null}
+                    {findingDiff.persisted > 0 ? (
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground/80">
+                        {t(
+                          "journey.quality.detect.scoreTrend.findingDiff.persisted",
+                          { count: findingDiff.persisted },
+                        )}
+                      </span>
+                    ) : null}
+                    {findingDiff.new > 0 ? (
+                      <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive">
+                        {t(
+                          "journey.quality.detect.scoreTrend.findingDiff.new",
+                          {
+                            count: findingDiff.new,
+                          },
+                        )}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : attempt > 1 ? (
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    {t(
+                      "journey.quality.detect.scoreTrend.findingDiff.noSnapshot",
+                    )}
                   </p>
                 ) : null}
                 {/* 6 维判官分 ↔ 8 维体检星同源对照 */}

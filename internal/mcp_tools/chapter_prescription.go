@@ -34,3 +34,25 @@ func prescriptionLinesForChapter(ctx context.Context, tc ToolContext, chapterID 
 	curve := quality.BuildTensionCurve(proposed)
 	return quality.RenderPrescriptions(quality.BuildPrescriptions(findings, curve, wordCount, words))
 }
+
+// findingKeysForChapter 返回评分时注入判官的那一组未消除发现的稳定 key 快照。
+// 必须在审批/落盘「之前」取：ScheduleChapterCI 会在落盘后重算 L0，届时档案
+// 已不是判官看到的那一轮。口径与处方装配同源于 FindingKeys，零新增算法。
+// 读档案失败/新章无 id/零发现 → nil（旧数据语义：无快照，不反推）。
+func findingKeysForChapter(ctx context.Context, tc ToolContext, chapterID int64) []string {
+	if chapterID <= 0 || tc.DB == nil {
+		return nil
+	}
+	logger := tc.LoggerOrDefault()
+	if logger == nil {
+		logger = slog.Default()
+	}
+	row, err := quality.NewStore(tc.DB, logger).GetByChapter(ctx, tc.NovelID, chapterID)
+	if err != nil || row == nil {
+		return nil
+	}
+	return quality.FindingKeys(
+		quality.ParseFindings(row.L0Findings),
+		quality.ParseFindings(row.L1Findings),
+	)
+}

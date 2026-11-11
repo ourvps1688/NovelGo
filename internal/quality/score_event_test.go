@@ -15,7 +15,7 @@ func TestChapterScoreEventSchema(t *testing.T) {
 	require.True(t, db.Migrator().HasTable("chapter_score_events"))
 	for _, col := range []string{
 		"novel_id", "chapter_id", "reading_number",
-		"overall", "dimensions", "verdict", "critique", "source", "created_at",
+		"overall", "dimensions", "verdict", "critique", "finding_keys", "source", "created_at",
 	} {
 		require.True(t, db.Migrator().HasColumn(&ChapterScoreEvent{}, col), "缺列 %s", col)
 	}
@@ -76,6 +76,16 @@ func TestAppendScoreEventValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Equal(t, ScoreSourceFullReplace, list[0].Source, "空 source 规范化")
+}
+
+// TestMarshalParseFindingKeys 发现 key 快照往返 + 坏数据宁缺勿错（旧行空串=无快照）。
+func TestMarshalParseFindingKeys(t *testing.T) {
+	assert.Empty(t, MarshalFindingKeys(nil))
+	assert.Nil(t, ParseFindingKeys(""))
+	assert.Nil(t, ParseFindingKeys("{bad json"))
+
+	keys := []string{"l0|tail_hook|#0", "l1|reader_state|#0"}
+	assert.Equal(t, keys, ParseFindingKeys(MarshalFindingKeys(keys)))
 }
 
 // TestMarshalParseScoreDims 分维序列化往返 + 坏数据宁缺勿错。

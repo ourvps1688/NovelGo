@@ -52,6 +52,10 @@ type ScoreEventView struct {
 	// （1-5 星 + 贡献源，同源展示）。旧快照回填无分维（两者为空/nil）。
 	JudgeDims map[string]int              `json:"judge_dims"`
 	AuditDims []review.JudgeAuditDimScore `json:"audit_dims"`
+	// FindingKeys 是 #114 P1 本轮评分时注入判官的未消除发现稳定 key 快照。
+	// 相邻两次事件做集合差即可回答「这次重写消掉哪几条、还剩哪几条」；
+	// 旧数据/旧快照回填为 nil，前端不得把空快照反推成「全部消掉」。
+	FindingKeys []string `json:"finding_keys"`
 }
 
 // ScoreTrend 是全书评分趋势视图数据包（P0-3）。
@@ -175,14 +179,15 @@ func (s *Service) GetChapterScoreHistory(ctx context.Context, novelID, chapterID
 	for _, ev := range events {
 		judgeDims := quality.ParseScoreDims(ev.Dimensions)
 		v := ScoreEventView{
-			ID:        ev.ID,
-			Overall:   ev.Overall,
-			Verdict:   ev.Verdict,
-			Critique:  ev.Critique,
-			Source:    ev.Source,
-			CreatedAt: ev.CreatedAt.Format("2006-01-02 15:04:05"),
-			JudgeDims: judgeDims,
-			AuditDims: review.JudgeToAuditScores(judgeDims),
+			ID:          ev.ID,
+			Overall:     ev.Overall,
+			Verdict:     ev.Verdict,
+			Critique:    ev.Critique,
+			Source:      ev.Source,
+			CreatedAt:   ev.CreatedAt.Format("2006-01-02 15:04:05"),
+			JudgeDims:   judgeDims,
+			AuditDims:   review.JudgeToAuditScores(judgeDims),
+			FindingKeys: quality.ParseFindingKeys(ev.FindingKeys),
 		}
 		views = append(views, v)
 	}

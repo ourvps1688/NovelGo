@@ -350,9 +350,16 @@ type ChapterQualityArchive struct {
 	WordsTargetLabel string `json:"words_target_label"`
 	// Prescriptions 是每条发现的可执行验收条件（#114 单源，与发现清单同序），
 	// 每行以 [check] 开头供前端按 Finding.Check 对齐；不新增 Wails 类型。
-	Prescriptions []string   `json:"prescriptions"`
-	CheckedAt     *time.Time `json:"checked_at,omitempty"`
-	Exists        bool       `json:"exists"`
+	Prescriptions []string `json:"prescriptions"`
+	// #114 P1 跨轮对齐结果（全用基础类型，避免 Wails 生成物新增结构体噪声）：
+	// 本轮消掉/仍在/新增的条数，以及连续 FindingGuardRounds 轮未消除的稳定 key。
+	// 旧档案无快照时三者恒 0、GuardKeys 为空，前端按「无对比数据」降级。
+	ResolvedCount  int        `json:"resolved_count"`
+	PersistedCount int        `json:"persisted_count"`
+	NewCount       int        `json:"new_count"`
+	GuardKeys      []string   `json:"guard_keys"`
+	CheckedAt      *time.Time `json:"checked_at,omitempty"`
+	Exists         bool       `json:"exists"`
 }
 
 // GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单）。
@@ -392,6 +399,12 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 	all := append(append([]quality.Finding{}, out.L0Findings...), out.L1Findings...)
 	out.Prescriptions = quality.RenderPrescriptions(quality.BuildPrescriptions(
 		all, curve, out.L0Metrics.WordCount, s.qualityStore.ChapterWords(ctx, novelID)))
+	// #114 P1：把写侧算好的跨轮三态直接透出（读侧不重算、不猜上一轮）。
+	round := quality.ParseFindingRound(row.FindingRound)
+	out.ResolvedCount = len(round.Resolved)
+	out.PersistedCount = len(round.Persisted)
+	out.NewCount = len(round.New)
+	out.GuardKeys = round.GuardKeys()
 	return out, nil
 }
 

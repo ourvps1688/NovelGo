@@ -249,6 +249,10 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     if (wasRunning && !running) {
       queryClient.invalidateQueries({ queryKey: ["chapter-quality-archive"] });
       queryClient.invalidateQueries({ queryKey: ["chapter-tension-curve"] });
+      // #114 P1：评分趋势/前后对比原本零失效通道（staleTime 30s +
+      // refetchOnWindowFocus:false），改稿后不刷就永远停在旧数据。
+      queryClient.invalidateQueries({ queryKey: ["score-trend"] });
+      queryClient.invalidateQueries({ queryKey: ["score-history"] });
     }
   }, [kind, running, queryClient]);
 
@@ -438,6 +442,13 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                       });
                       void queryClient.invalidateQueries({
                         queryKey: detectionKeys.list(novelId),
+                      });
+                      // #114 P1：点「重新检测本章」即时刷新评分趋势与前后对比。
+                      void queryClient.invalidateQueries({
+                        queryKey: ["score-trend"],
+                      });
+                      void queryClient.invalidateQueries({
+                        queryKey: ["score-history"],
                       });
                     }}
                   />
@@ -634,6 +645,19 @@ function ChapterQualityArchiveCard({
             .map((line) => `- ${line}`)
             .join("\n")}\n`
         : "";
+    // #114 P1.5：连续 N 轮未消除的条件不再让模型「再改一次」，先请人工判定
+    // 是判定器阈值冲突还是改动不足（纯本地确定性，零后台派发）。
+    const guardKeys = archive.guard_keys ?? [];
+    const guardedChecks = guardKeys
+      .map((key) => key.split("|")[1])
+      .filter(Boolean);
+    const hitGuard = rows.some(({ f }) => guardedChecks.includes(f.check));
+    const guardBlock =
+      hitGuard && guardKeys.length > 0
+        ? `\n${t("journey.quality.detect.fixPromptRoundGuard", {
+            keys: guardKeys.join(" · "),
+          })}\n`
+        : "";
     const content =
       `${t("journey.quality.detect.fixPromptTitle", { chapter: chapterText })}\n\n` +
       `${items}\n\n` +
@@ -643,6 +667,7 @@ function ChapterQualityArchiveCard({
           t("journey.quality.detect.wordsTargetFallback"),
       })}\n` +
       criteriaBlock +
+      guardBlock +
       t("journey.quality.detect.fixPromptFooter");
     const send = useChatLaunchStore.getState().send;
     if (!send) {
@@ -713,6 +738,35 @@ function ChapterQualityArchiveCard({
         </div>
       ) : null}
 
+      {/* #114 P1：跨轮对齐结果——本轮消掉/仍在/新增；旧档案无快照时三者恒 0 */}
+      {archive.resolved_count > 0 ||
+      archive.persisted_count > 0 ||
+      archive.new_count > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {archive.resolved_count > 0 ? (
+            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+              {t("journey.quality.detect.findingCounts.resolved", {
+                count: archive.resolved_count,
+              })}
+            </span>
+          ) : null}
+          {archive.persisted_count > 0 ? (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-foreground/80">
+              {t("journey.quality.detect.findingCounts.persisted", {
+                count: archive.persisted_count,
+              })}
+            </span>
+          ) : null}
+          {archive.new_count > 0 ? (
+            <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive">
+              {t("journey.quality.detect.findingCounts.new", {
+                count: archive.new_count,
+              })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* 闭环操作条：勾选发现项 → 发到 chat → 改稿后重新检测 */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
@@ -741,6 +795,15 @@ function ChapterQualityArchiveCard({
           {t("journey.quality.detect.closureHint")}
         </span>
       </div>
+
+      {/* #114 P1.5 轮次保护：连续 N 轮未消除，升级为人工判定，不再「再改一次」 */}
+      {(archive.guard_keys ?? []).length > 0 ? (
+        <p className="mt-2 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
+          {t("journey.quality.detect.roundGuardHint", {
+            keys: (archive.guard_keys ?? []).join(" · "),
+          })}
+        </p>
+      ) : null}
 
       {/* L0 指标 */}
       <div className="mt-3">

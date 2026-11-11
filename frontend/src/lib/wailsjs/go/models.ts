@@ -2876,6 +2876,10 @@ export namespace pipeline {
 	    l1_status: string;
 	    words_target_label: string;
 	    prescriptions: string[];
+	    resolved_count: number;
+	    persisted_count: number;
+	    new_count: number;
+	    guard_keys: string[];
 	    // Go type: time
 	    checked_at?: any;
 	    exists: boolean;
@@ -2894,6 +2898,10 @@ export namespace pipeline {
 	        this.l1_status = source["l1_status"];
 	        this.words_target_label = source["words_target_label"];
 	        this.prescriptions = source["prescriptions"];
+	        this.resolved_count = source["resolved_count"];
+	        this.persisted_count = source["persisted_count"];
+	        this.new_count = source["new_count"];
+	        this.guard_keys = source["guard_keys"];
 	        this.checked_at = this.convertValues(source["checked_at"], null);
 	        this.exists = source["exists"];
 	    }
@@ -3239,6 +3247,7 @@ export namespace pipeline {
 	    created_at: string;
 	    judge_dims: Record<string, number>;
 	    audit_dims: review.JudgeAuditDimScore[];
+	    finding_keys: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ScoreEventView(source);
@@ -3254,6 +3263,7 @@ export namespace pipeline {
 	        this.created_at = source["created_at"];
 	        this.judge_dims = source["judge_dims"];
 	        this.audit_dims = this.convertValues(source["audit_dims"], review.JudgeAuditDimScore);
+	        this.finding_keys = source["finding_keys"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

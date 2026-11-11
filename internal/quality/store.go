@@ -61,18 +61,33 @@ func (s *Store) Upsert(ctx context.Context, e *ChapterQuality) error {
 	return nil
 }
 
+// withFindingRound 在覆盖旧发现「之前」推进 #114 P1 跨轮对齐快照。
+// 读旧行失败按「无上一轮」降级，绝不阻断 L0/L1 落档（宁缺勿错）。
+func (s *Store) withFindingRound(ctx context.Context, e *ChapterQuality, scope string, incoming []Finding) {
+	old, err := s.GetByChapter(ctx, e.NovelID, e.ChapterID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("读取上一轮质量档案失败，按首轮对齐", "err", err)
+		}
+		old = nil
+	}
+	e.FindingRound = MarshalFindingRound(NextFindingRound(old, scope, incoming))
+}
+
 // UpsertL0 只写 L0 侧字段（reading_number/l0_metrics/l0_findings/round/checked_at），
 // 不动 L1 列——L0 同步落档与 L1 异步落档分阶段写入，互不覆盖。
 // 行不存在时创建（此时 L1 侧为空清单 + pending）。
+// #114 P1：覆盖前先按稳定 key 对齐上一轮，产出 resolved/persisted/new 写 finding_round。
 func (s *Store) UpsertL0(ctx context.Context, e *ChapterQuality) error {
 	if err := normalize(e); err != nil {
 		return fmt.Errorf("quality store: upsert L0: %w", err)
 	}
+	s.withFindingRound(ctx, e, "l0", ParseFindings(e.L0Findings))
 	if err := s.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "novel_id"}, {Name: "chapter_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"reading_number", "l0_metrics", "l0_findings", "round", "checked_at", "updated_at",
+				"reading_number", "l0_metrics", "l0_findings", "finding_round", "round", "checked_at", "updated_at",
 			}),
 		}).
 		Create(e).Error; err != nil {
@@ -84,15 +99,17 @@ func (s *Store) UpsertL0(ctx context.Context, e *ChapterQuality) error {
 // UpsertL1 只写 L1 侧字段（l1_findings/l1_status/round/checked_at），
 // 不动 L0 列——L0 同步落档与 L1 异步落档分阶段写入，互不覆盖。
 // 行不存在时创建（此时 L0 侧为空）。
+// #114 P1：与 UpsertL0 同一轮时用其 PrevKeys 重算全量差，不开第二轮。
 func (s *Store) UpsertL1(ctx context.Context, e *ChapterQuality) error {
 	if err := normalize(e); err != nil {
 		return fmt.Errorf("quality store: upsert L1: %w", err)
 	}
+	s.withFindingRound(ctx, e, "l1", ParseFindings(e.L1Findings))
 	if err := s.DB.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "novel_id"}, {Name: "chapter_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"l1_findings", "l1_status", "round", "checked_at", "updated_at",
+				"l1_findings", "l1_status", "finding_round", "round", "checked_at", "updated_at",
 			}),
 		}).
 		Create(e).Error; err != nil {

@@ -130,3 +130,73 @@ describe("#113 章节质量档案闭环", () => {
     expect(models).toContain('this.prescriptions = source["prescriptions"]');
   });
 });
+
+describe("#114 P1 跨轮对齐与前后对比", () => {
+  it("档案卡片展示 resolved/persisted/new 三态与轮次保护提示，仍零自动修复", () => {
+    const c = read("components/skill/DetectionWorkflowView.tsx");
+    for (const sym of [
+      "archive.resolved_count",
+      "archive.persisted_count",
+      "archive.new_count",
+      "archive.guard_keys",
+      "roundGuardHint",
+      "fixPromptRoundGuard",
+    ]) {
+      expect(c, `missing: ${sym}`).toContain(sym);
+    }
+    for (const banned of [
+      "StartIssueFixTickets",
+      "StartManualIssueFixTickets",
+      "onAutoFix",
+      "autoFix",
+    ]) {
+      expect(c, ` banned: ${banned}`).not.toContain(banned);
+    }
+  });
+
+  it("评分趋势/前后对比两个 queryKey 有失效通道（改稿后不再停在旧数据）", () => {
+    const c = read("components/skill/DetectionWorkflowView.tsx");
+    expect(c).toContain('["score-trend"]');
+    expect(c).toContain('["score-history"]');
+  });
+
+  it("前后对比按相邻事件 finding key 快照做集合差，旧数据降级不反推", () => {
+    const c = read("components/skill/ScoreTrendPanel.tsx");
+    expect(c).toContain("e.finding_keys");
+    expect(c).toContain("prev?.finding_keys");
+    expect(c).toContain("hasSnapshot");
+    expect(c).toContain("findingDiff.resolved");
+    expect(c).toContain("findingDiff.noSnapshot");
+  });
+
+  it("Wails 生成物透出三态计数、guard_keys 与 finding_keys 字段", () => {
+    const models = read("lib/wailsjs/go/models.ts");
+    for (const sym of [
+      "resolved_count: number;",
+      "persisted_count: number;",
+      "new_count: number;",
+      "guard_keys: string[];",
+      "finding_keys: string[];",
+    ]) {
+      expect(models, `missing: ${sym}`).toContain(sym);
+    }
+    expect(models).toContain('this.resolved_count = source["resolved_count"]');
+    expect(models).toContain('this.guard_keys = source["guard_keys"]');
+    expect(models).toContain('this.finding_keys = source["finding_keys"]');
+  });
+
+  it("双语键齐全：三态计数、轮次保护、快照差", () => {
+    const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
+    const en = JSON.parse(read("i18n/locales/en.json"));
+    for (const locale of [zh, en]) {
+      const d = locale.journey.quality.detect;
+      for (const k of ["resolved", "persisted", "new"]) {
+        expect(d.findingCounts[k]).toBeTruthy();
+        expect(d.scoreTrend.findingDiff[k]).toBeTruthy();
+      }
+      expect(d.roundGuardHint).toBeTruthy();
+      expect(d.fixPromptRoundGuard).toBeTruthy();
+      expect(d.scoreTrend.findingDiff.noSnapshot).toBeTruthy();
+    }
+  });
+});

@@ -41,6 +41,11 @@ type ChapterScoreEvent struct {
 	Verdict string `gorm:"column:verdict" json:"verdict"`
 	// Critique 是本次判官的可执行修改意见。
 	Critique string `gorm:"column:critique;type:text" json:"critique"`
+	// FindingKeys 是 #114 P1 本轮评分时注入判官的未消除发现稳定 key 快照
+	// （JSON：[]string，口径同 quality.FindingKeys）。append-only 历史轴使前端
+	// 能对相邻两次评分做 resolved/persisted/new 对比；旧行空串=无快照，禁止
+	// 反推成「全部消掉」。零新增查询：装配处方时已读过同一份档案。
+	FindingKeys string `gorm:"column:finding_keys;type:text" json:"finding_keys"`
 	// Source 是写入通道（ScoreSource*）。
 	Source    string    `gorm:"column:source;not null" json:"source"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
@@ -71,6 +76,30 @@ func ParseScoreDims(s string) map[string]int {
 		return nil
 	}
 	return m
+}
+
+// MarshalFindingKeys 序列化一轮发现稳定 key 快照；空清单/失败返回空串（宁缺勿错）。
+func MarshalFindingKeys(keys []string) string {
+	if len(keys) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(keys)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+// ParseFindingKeys 解析发现 key 快照；空串/坏数据返回 nil（旧数据天然兼容）。
+func ParseFindingKeys(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var keys []string
+	if err := json.Unmarshal([]byte(s), &keys); err != nil {
+		return nil
+	}
+	return keys
 }
 
 // normalizeScoreEvent 校验评分历史行（宁缺勿错）：novel_id/chapter_id 缺失拒收。

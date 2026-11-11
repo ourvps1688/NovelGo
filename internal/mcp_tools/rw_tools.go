@@ -496,6 +496,9 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	// 拒绝消息带命中句上下文与「只改命中句、不要重写整章」引导，避免整章重写
 	// 反复命中导致连续失败 10 次中断对话。
 	var pendingScore *review.ScoreResult
+	// #114 P1：评分时判官看到的那一组未消除发现 key 快照（落盘前取，
+	// ScheduleChapterCI 之后档案会被重算）。随评分事件一起 append-only 落库。
+	var pendingFindingKeys []string
 	if !ref.IsOutline {
 		if issues := text.BlockingIssuesForGenre(proposed, novelGenre(ctx, tc)); len(issues) > 0 {
 			return &ToolResult{Success: false, Error: text.BlockingErrorMessage(issues)}, nil
@@ -507,6 +510,9 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 			return failRes, nil
 		} else {
 			pendingScore = scored
+			if scored != nil && ch != nil {
+				pendingFindingKeys = findingKeysForChapter(ctx, tc, ch.ID)
+			}
 		}
 	}
 
@@ -598,7 +604,7 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 			if ref.IsNew {
 				source = quality.ScoreSourceNew
 			}
-			persistChapterScore(ctx, tc, ch, proposed, pendingScore, source)
+			persistChapterScore(ctx, tc, ch, proposed, pendingScore, source, pendingFindingKeys)
 		}
 	}
 	emitFileChanged(ctx, tc.NovelID, physical)
@@ -1240,7 +1246,8 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 // 供「修复前后对比」与逐章趋势消费）。source 是写入通道（quality.ScoreSource*）。
 // content 是刚评分的正文：同步刷新 L0 基线张力曲线（P0-2 情绪账，评分链路自动落库，
 // 与写后链路同口径幂等；不动 L1 行——L1 作废属写后链路语义）。
-func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, content string, scored *review.ScoreResult, source string) {
+// findingKeys 是 #114 P1 评分时注入判官的未消除发现 key 快照（nil=无快照）。
+func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapter, content string, scored *review.ScoreResult, source string, findingKeys []string) {
 	if ch == nil || scored == nil {
 		return
 	}
@@ -1267,6 +1274,7 @@ func persistChapterScore(ctx context.Context, tc ToolContext, ch *chapter.Chapte
 		Dimensions:    quality.MarshalScoreDims(scored.Dimensions),
 		Verdict:       scored.Verdict,
 		Critique:      scored.Critique,
+		FindingKeys:   quality.MarshalFindingKeys(findingKeys),
 		Source:        source,
 		CreatedAt:     now,
 	}

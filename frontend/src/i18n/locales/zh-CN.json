@@ -2194,6 +2194,13 @@
         "fixPromptWords": "本章生效字数口径：{{words}}（检测、修复与前后对比一律以此为准，勿另按其它数字估算）。",
         "acceptanceTitle": "【本章验收条件】（以下为检测器的确定性判定口径，请逐条改到达标；不要按其它数字自行估算，也不要采用与「避免」项冲突的写法）：",
         "fixPromptFooter": "请逐条说明问题与改法，改稿时先确认我的意见；完成后我会重新检测本章查看新档案。",
+        "findingCounts": {
+          "resolved": "本轮消掉 {{count}} 条",
+          "persisted": "仍在 {{count}} 条",
+          "new": "新增 {{count}} 条"
+        },
+        "roundGuardHint": "以下验收条件已连续 3 轮未消除（{{keys}}）：这可能是判定器阈值冲突，不是「再改一次」能解决的。请先人工选择「豁免 / 调整阈值 / 换思路」之一，再决定是否继续改稿；系统不会自动改阈值或派发修复。",
+        "fixPromptRoundGuard": "注意：以下验收条件已连续 3 轮未消除（{{keys}}）。请先与我确认是判定器阈值冲突还是改动不足，并从「豁免 / 调整阈值 / 换思路」中选一条再动笔，不要重复整章推翻重写。",
         "findingStatus": {
           "pending": "待处理",
           "fixed": "已修复",
@@ -2218,6 +2225,12 @@
           "historyTitle": "修复前后对比",
           "historyEmpty": "本章暂无评分历史",
           "attempt": "第 {{n}} 次",
+          "findingDiff": {
+            "resolved": "消掉 {{count}} 条 L0/L1",
+            "persisted": "仍在 {{count}} 条",
+            "new": "新增 {{count}} 条",
+            "noSnapshot": "历史数据无发现快照"
+          },
           "judgeTitle": "6 维判官分",
           "auditTitle": "8 维体检星",
           "contributed": "来自 {{dims}}",
