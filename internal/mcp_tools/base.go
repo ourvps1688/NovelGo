@@ -45,6 +45,9 @@ type SubAgentRequest struct {
 	NovelID     int64
 	ToolID      string // run_subagent 的 tool call ID，子 Agent 事件路由用
 	Instruction string
+	// MaxTurns 可选轮次上限（0 = 沿用 RunSubAgent 默认 100 轮）。#115 P0：
+	// 单章 L1 复核是只读短任务，后台链路用它避免多轮检索拖到十几分钟。
+	MaxTurns int
 }
 
 // RunSubAgentFunc 由 agent 包注入，避免循环依赖。

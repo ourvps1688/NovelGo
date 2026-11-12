@@ -84,6 +84,18 @@ func (a *App) GetChapterScoreHistory(novelID int64, chapterID int64) ([]pipeline
 	return a.pipeline.GetChapterScoreHistory(a.ctx, novelID, chapterID)
 }
 
+// RescoreChapter 显式重判分（#115 P0）：用户点「重新判分」时用当前落盘正文调用一次
+// 判官，追加 source=rescore 的评分历史。人工在环、零自动派发，不改正文、不触发审批、
+// 不放宽 edit 评分门禁；模型与 chat / 后台子 Agent 同源（每次现取设置，切换即生效）。
+func (a *App) RescoreChapter(novelID int64, chapterID int64) (*pipeline.ScoreEventView, error) {
+	if a.db == nil || a.llmClient == nil {
+		return nil, fmt.Errorf("创作服务未初始化")
+	}
+	s := a.settingsSnapshot()
+	provider, modelID := a.parseModelKey(s.SelectedModelKey)
+	return pipeline.RescoreChapter(a.ctx, a.db, a.llmClient, a.logger, provider, modelID, novelID, chapterID)
+}
+
 // GetChapterTensionCurve 返回单章张力曲线视图（P0-2 情绪账）：生效曲线段
 // （L1 标注优先于 L0 基线）+ 图表标记位（拖沓段/情绪峰/开篇窗口，与曲线三查同源），
 // 供前端情绪曲线 SVG 可视化消费。

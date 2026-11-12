@@ -9,6 +9,7 @@ import {
   Loader2,
   Send,
   RotateCw,
+  X,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -17,6 +18,7 @@ import {
   ListDetectionTaskStatuses,
   ListIssueTickets,
   RunDetectionTask,
+  CancelDetectionTask,
 } from "@/lib/wailsjs/go/app/App";
 import { detectionKeys, patrolKeys } from "@/lib/queryKeys";
 import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
@@ -281,6 +283,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
             msg = t("journey.quality.detect.chapterDoneFailedReceipt");
           } else if (p.reason === "llm") {
             msg = t("journey.quality.detect.chapterDoneFailedLLM");
+          } else if (p.reason === "timeout") {
+            msg = t("journey.quality.detect.chapterDoneFailedTimeout");
           }
           toastError(msg, CHAPTER_DETECT_TOAST_ID);
           return;
@@ -295,6 +299,34 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
       off?.();
     };
   }, [novelId, kind, queryClient, t]);
+
+  // #115 P0：章节 L1 是多轮只读工具循环，复用 agent 层本就 emit 的 agent:0
+  // 工具事件显示真实阶段（零后端改动）。按 sub_task_id 过滤，避免与 statesync /
+  // editorfeedback 等同样走 agent:0 的后台链路串台；只数 selected 阶段，一次工具
+  // 调用算一步，不重复计数，也不显示模型输出内容。
+  const [detectStep, setDetectStep] = useState(0);
+  const [detectTool, setDetectTool] = useState("");
+  useEffect(() => {
+    if (!novelId || kind !== "chapter") return;
+    const off = EventsOn(
+      "agent:0",
+      (p: { sub_task_id?: string; tool_name?: string; phase?: string }) => {
+        if (p?.sub_task_id !== "pipeline-detect") return;
+        if (p.phase !== "selected" || !p.tool_name) return;
+        setDetectStep((n) => n + 1);
+        setDetectTool(p.tool_name);
+      },
+    );
+    return () => {
+      off?.();
+    };
+  }, [novelId, kind]);
+  useEffect(() => {
+    if (!running) {
+      setDetectStep(0);
+      setDetectTool("");
+    }
+  }, [running]);
 
   // 进行态 true→false 边沿仅作兜底（事件丢失/旧进程）：刷新同一份视图清单，
   // 不弹 toast——边沿区分不了「完成/取消/失败」，误报不如不报。
@@ -319,6 +351,20 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
         : true;
   const effScope: number | null =
     kind === "chapter" ? effChapterId : kind === "volume" ? effVolumeId : null;
+
+  // #115 P0：章节检测视图此前没有取消入口（只在旅程质量页的任务卡里有），
+  // 单章 L1 跑十几分钟时用户只能干等。这里补一个就地取消，复用既有
+  // CancelDetectionTask（ctx 级联会中断在飞的 LLM 请求并即时注销进行态）。
+  const handleCancelDetect = useCallback(async () => {
+    if (!novelId) return;
+    try {
+      await CancelDetectionTask(novelId, "chapter", effScope);
+      invalidateChapterViews(queryClient, novelId);
+      toastInfo(t("journey.quality.detect.cancelled"));
+    } catch (err) {
+      toastError(toErrorMessage(err, t("journey.quality.detect.cancelFailed")));
+    }
+  }, [novelId, effScope, queryClient, t]);
 
   const handleStart = useCallback(async () => {
     if (!novelId) {
@@ -536,11 +582,24 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
           </div>
         )}
         {running ? (
-          <p className="flex flex-wrap items-center gap-1.5 text-xs text-primary/80 mb-2">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            <span>{t("journey.quality.detect.running")}</span>
-            <DetectRunningHint status={st} />
-          </p>
+          <div className="mb-2 flex flex-col gap-1">
+            <p className="flex flex-wrap items-center gap-1.5 text-xs text-primary/80">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>{t("journey.quality.detect.running")}</span>
+              <DetectRunningHint status={st} />
+              {detectStep > 0 ? (
+                <span className="text-muted-foreground">
+                  {t("journey.quality.detect.progress", {
+                    step: detectStep,
+                    tool: detectTool,
+                  })}
+                </span>
+              ) : null}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              {t("journey.quality.detect.etaHint")}
+            </p>
+          </div>
         ) : null}
         <div className="flex items-center gap-2">
           <button
@@ -559,6 +618,16 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               ? t("journey.quality.detect.running")
               : t("journey.quality.detect.start")}
           </button>
+          {running ? (
+            <button
+              type="button"
+              onClick={handleCancelDetect}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <X className="w-4 h-4" />
+              {t("journey.quality.detect.cancel")}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

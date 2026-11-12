@@ -32,6 +32,10 @@ import (
 var (
 	chapterCIMu     sync.Mutex
 	chapterCITimers = map[string]*time.Timer{}
+	// chapterCIMaxTurns 是单章 L1 复核的工具循环上限（#115 P0）。真实语料实测收敛约
+	// 8 轮，留 12 轮余量；旧的 100 轮通用上限让一次检测可跑 36 次 LLM 调用 / 15 分钟。
+	// 以 var 暴露便于按平台/模型调参与测试收缩。
+	chapterCIMaxTurns = 12
 )
 
 // TensionTicketLanderFunc 把一章的曲线四查发现落成/刷新 pipeline 情绪账工单
@@ -238,6 +242,7 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 		NovelID:     novelID,
 		Instruction: instruction,
 		ToolID:      toolID,
+		MaxTurns:    chapterCIMaxTurns,
 	})
 
 	// 落档案公共路径：readingNumber 取不到按 0（发现不带作用域，降级不阻断）。
@@ -400,6 +405,7 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 	b.WriteString("检查项：continuity 一致性/连贯、pacing 节奏、foreshadow 伏笔 lifecycle、" +
 		"reader_state 读者认知态、task_card 任务卡兑现、immersion_anchor 代入感锚点。\n")
 	b.WriteString("只报告不改写：不调用任何写工具、不评分、不给 verdict；零发现报空清单。\n")
+	fmt.Fprintf(&b, "收敛要求（#115 P0）：本次复核最多 %d 轮工具调用，请一次读齐所需材料，勿反复检索同一来源；到上限前必须直接输出最终回执。\n", chapterCIMaxTurns)
 	if segHints != "" {
 		fmt.Fprintf(&b, "情绪曲线标注：本章按每约 400 字分段，段号对照（seg（字区间，L0 基线标注））：%s。\n", segHints)
 	} else {

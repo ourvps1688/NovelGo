@@ -2242,6 +2242,10 @@
         "chapterDoneFailedModel": "L0 was recalculated; L1 did not run because the model is missing or invalid. Check the model in Settings and retry (previous results were kept)",
         "chapterDoneFailedLLM": "L0 was recalculated; the L1 review call failed. Check the model/provider and retry (previous results were kept)",
         "chapterDoneFailedReceipt": "L0 was recalculated; the L1 receipt could not be parsed. Re-check later (previous results were kept)",
+        "chapterDoneFailedTimeout": "The L1 review timed out (8 min) and was stopped; previous results were kept. L0 was recalculated from the saved text — retry later or switch models",
+        "progress": "· step {{step}}: {{tool}}",
+        "etaHint": "The L1 review makes several model calls and usually takes 3–8 min. It stops automatically on timeout, keeps previous results, and can be cancelled anytime.",
+        "cancelFailed": "Could not cancel the check; please retry",
         "closureHint": "Select findings, send to chat to revise, then re-check here; the system never rewrites automatically",
         "chatNotReady": "Chat panel is not ready yet; open it first",
         "fixSent": "Sent {{count}} findings to the chat panel",
@@ -2284,6 +2288,11 @@
           "chartHint": "Click a chart point to switch chapter and view its before/after fix history",
           "historyTitle": "Before/after fix comparison",
           "historyEmpty": "No score history for this chapter",
+          "historyHint": "Partial edits and re-checks do not trigger scoring; click Rescore to record a comparison for the current text",
+          "rescore": "Rescore",
+          "rescorePending": "Scoring…",
+          "rescoreDone": "Rescore complete: {{score}} points, one comparison record added",
+          "rescoreFailed": "Rescore failed",
           "attempt": "Attempt {{n}}",
           "findingDiff": {
             "resolved": "{{count}} L0/L1 findings resolved",
@@ -2297,6 +2306,7 @@
           "sources": {
             "new": "New chapter",
             "full_replace": "Full rewrite",
+            "rescore": "Manual rescore",
             "snapshot": "Historical snapshot"
           },
           "judgeDims": {

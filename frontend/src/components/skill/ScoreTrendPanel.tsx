@@ -3,14 +3,17 @@
 // 直通展示、不硬编码映射），叠加逐章分数/未修复发现趋势曲线与单章「修复前后」历史
 // （append-only 评分明细 chapter_score_events，旧章回落 quality_score 快照）。
 // 回答「这次重写到底提分了没有」：历史卡逐次 attempt 给 overall+delta+来源徽章。
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2, Star, TrendingUp } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Loader2, RefreshCw, Star, TrendingUp } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GetChapterScoreHistory,
   GetScoreTrend,
+  RescoreChapter,
 } from "@/lib/wailsjs/go/app/App";
+import { toastError, toastSuccess } from "@/utils/toast";
+import { toErrorMessage } from "@/utils/error";
 import { VERDICT_KEYS } from "./verdictKeys";
 
 interface Props {
@@ -20,10 +23,12 @@ interface Props {
   onSelectChapter: (chapterId: number) => void;
 }
 
-// 评分明细来源徽章：new=新写首评 / full_replace=全文重写后重评 / snapshot=旧数据回填快照
+// 评分明细来源徽章：new=新写首评 / full_replace=全文重写后重评 /
+// rescore=用户显式重判分（#115 P0）/ snapshot=旧数据回填快照
 const SOURCE_CLS: Record<string, string> = {
   new: "bg-primary/10 text-primary",
   full_replace: "bg-muted text-foreground/80",
+  rescore: "bg-primary/10 text-primary",
   snapshot: "bg-muted text-muted-foreground",
 };
 
@@ -50,6 +55,39 @@ export default function ScoreTrendPanel({
   onSelectChapter,
 }: Props) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [rescorePending, setRescorePending] = useState(false);
+
+  // #115 P0：局部改稿与重新检测都不经过评分门禁，历史轴会停在唯一那次
+  // full_replace。这里给一个人工在环的显式入口：点一次才调用判官、追加一条
+  // source=rescore 记录，零自动派发、不改正文、不阻断任何写作路径。
+  const handleRescore = async () => {
+    if (!novelId || !chapterId || rescorePending) return;
+    setRescorePending(true);
+    try {
+      const view = await RescoreChapter(novelId, chapterId);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["score-history", novelId, chapterId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["score-trend", novelId] }),
+      ]);
+      toastSuccess(
+        t("journey.quality.detect.scoreTrend.rescoreDone", {
+          score: view?.overall ?? 0,
+        }),
+      );
+    } catch (err) {
+      toastError(
+        toErrorMessage(
+          err,
+          t("journey.quality.detect.scoreTrend.rescoreFailed"),
+        ),
+      );
+    } finally {
+      setRescorePending(false);
+    }
+  };
 
   const { data: trend, isLoading: trendLoading } = useQuery({
     queryKey: ["score-trend", novelId],
@@ -322,8 +360,28 @@ export default function ScoreTrendPanel({
 
       {/* 单章修复前后历史（append-only 明细，最新在上） */}
       <div className="mt-3">
-        <p className="text-xs font-medium text-foreground">
-          {t("journey.quality.detect.scoreTrend.historyTitle")}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium text-foreground">
+            {t("journey.quality.detect.scoreTrend.historyTitle")}
+          </p>
+          <button
+            type="button"
+            disabled={!chapterId || rescorePending}
+            onClick={handleRescore}
+            className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {rescorePending ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            {rescorePending
+              ? t("journey.quality.detect.scoreTrend.rescorePending")
+              : t("journey.quality.detect.scoreTrend.rescore")}
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {t("journey.quality.detect.scoreTrend.historyHint")}
         </p>
         {historyLoading ? (
           <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">

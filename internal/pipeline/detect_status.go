@@ -208,7 +208,13 @@ func (s *Service) anyDetectRunning(kind string, novelID int64) bool {
 // 挂 detectTaskTimeout 硬上限，并把 cancel 存入 detectCancelFns（key=detectKey），
 // 供 CancelDetectionTask 按 key 取出触发。返回派生 ctx 供执行体使用。
 func (s *Service) beginDetectCtx(kind string, novelID int64, scopeID *int64) context.Context {
-	ctx, cancel := context.WithTimeout(s.appCtx, detectTaskTimeout)
+	// #115 P0：章节检测用更短的专属上限；其余三类仍走 60min 通用兜底。
+	// 取两者较小值，保证测试把 detectTaskTimeout 缩短时依旧能触发 deadline。
+	timeout := detectTaskTimeout
+	if kind == DetectionKindChapter && chapterDetectTimeout < timeout {
+		timeout = chapterDetectTimeout
+	}
+	ctx, cancel := context.WithTimeout(s.appCtx, timeout)
 	s.detectCancelFns.Store(detectKey(kind, novelID, scopeID), cancel)
 	return ctx
 }

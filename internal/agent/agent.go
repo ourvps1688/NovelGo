@@ -123,6 +123,11 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 	}
 	msgs = append(msgs, map[string]any{"role": "user", "content": req.Instruction})
 
+	// #115 P0：允许后台链路按任务特性限轮，避免 100 轮通用上限拖垮单章检测。
+	maxTurns := 100
+	if req.MaxTurns > 0 {
+		maxTurns = req.MaxTurns
+	}
 	subOpts := RunOptions{
 		TurnID:          parentOpts.TurnID,
 		SessionID:       parentOpts.SessionID,
@@ -134,7 +139,7 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		SubTaskID:       req.ToolID,
 		EventSeq:        parentOpts.EventSeq,
 		EventPrefix:     parentOpts.EventPrefix,
-		MaxTurns:        100,
+		MaxTurns:        maxTurns,
 		Model:           parentOpts.Model,
 		ProviderName:    parentOpts.ProviderName,
 		ReasoningEffort: parentOpts.ReasoningEffort,

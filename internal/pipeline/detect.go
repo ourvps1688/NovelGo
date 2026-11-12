@@ -228,6 +228,13 @@ const detectContainerStage = "detect"
 // 以 var 暴露便于测试收缩与后续按 kind 细分。
 var detectTaskTimeout = 60 * time.Minute
 
+// chapterDetectTimeout 是「章节检测」专属硬超时（#115 P0）：L1 chapterci 子 Agent
+// 是多轮工具循环，实测一次可跑 36 次 LLM 调用 / 近 15 分钟，60min 的通用上限形同虚设，
+// 用户只能干等「检测中… 已运行 N 分钟」。章节是单章只读复核，8 分钟足够收敛；
+// 超时会发 ok=false/reason=timeout 的完成事件并保留上一轮 L1，绝不静默。
+// 以 var 暴露便于测试收缩，也便于后续按平台/模型调参。
+var chapterDetectTimeout = 8 * time.Minute
+
 // verifyCallTimeout 是「单轮复验执行体」的硬超时上限（对应审计 P0）：复验已改为按 run
 // 后台逐工单顺序复验，整体墙钟随工单数线性增长——本应给较宽的安全兜底，防止慢供应商/
 // 卡死导致复验无限期挂起。此前取 15min 对 20+ 工单远远不够：整轮会被腰斩（在跑工单拿到
@@ -386,12 +393,19 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 		ok := true
 		reason := ""
 		cancelled := false
+		timedOut := false
 		defer func() {
 			// 先注销进行态（撤销派生 ctx / 删 cancel 登记），再广播完成：
 			// 前端收到事件时状态行已可刷新为「未运行」。用 appCtx 而非已撤销的 ctx。
 			s.endDetectCtx(DetectionKindChapter, novelID, &chapterID)
 			if cancelled {
 				return // 取消由 CancelDetectionTask 的 EvDetectCancelled 负责
+			}
+			if timedOut {
+				// #115 P0：硬超时必须如实回执，不能像取消那样静默；失败不写 L1，
+				// 上一轮 checked 档案保持不动（chapter_ci 的失败保留语义）。
+				ok = false
+				reason = "timeout"
 			}
 			payload := map[string]any{
 				"novel_id":   novelID,
@@ -406,11 +420,19 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 		}()
 		err := runner(ctx, novelID, chapterID)
 		// 必须在 endDetectCtx 调 cancel() 之前判定，否则所有正常收口都会被误判为取消。
-		cancelled = ctx.Err() != nil
+		// #115 P0：显式区分用户取消（context.Canceled，取消事件另发）与硬超时
+		// （context.DeadlineExceeded，必须发完成事件），旧代码一律判 cancelled 会让
+		// 超时收口既不发完成也不发取消，前端永远停在「检测中」。
+		ctxErr := ctx.Err()
+		cancelled = errors.Is(ctxErr, context.Canceled)
+		timedOut = errors.Is(ctxErr, context.DeadlineExceeded)
 		if err != nil && !cancelled {
 			ok = false
 			reason = chapterDetectFailureReason(err)
 			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "reason", reason, "err", err)
+		}
+		if timedOut {
+			s.logger.Warn("检测任务：章节检测硬超时，已保留上一轮 L1 档案", "novel_id", novelID, "chapter_id", chapterID)
 		}
 	}()
 	res.Dispatched = true

@@ -33,8 +33,9 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 		}},
 		{"detect.go", []string{
 			"AlreadyRunning bool", "tryBeginDetect(", "res.AlreadyRunning = true",
-			"emitChapterDetectDone(s.appCtx", "cancelled = ctx.Err() != nil",
+			"emitChapterDetectDone(s.appCtx", "errors.Is(ctxErr, context.Canceled)",
 			"chapterDetectFailureReason(", `payload["reason"]`,
+			"chapterDetectTimeout", `reason = "timeout"`,
 		}},
 		{"../../app/handler.go", []string{
 			"a.runBackgroundSubAgent", "classifyChapterDetectError(",
@@ -44,6 +45,7 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 		}},
 		{"detect_status.go", []string{
 			"func (s *Service) tryBeginDetect(", "LoadOrStore(", "prescriptionCurveForChapter(ctx, s, novelID, chapterID)",
+			"chapterDetectTimeout < timeout",
 		}},
 		{"chapter_prescription_curve.go", []string{
 			"git.ReadFile", "git.ChapterPath", "quality.BuildTensionCurve", "TensionSourceL0",
@@ -57,15 +59,18 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 		{"../../frontend/src/components/skill/DetectionWorkflowView.tsx", []string{
 			"pipeline:chapter_detect_done", "invalidateChapterViews", "already_running",
 			"chapterDoneToast", "chapterDoneFailed", "chapterDoneFailedModel",
-			"CHAPTER_DETECT_TOAST_ID", "toastError(",
+			"CHAPTER_DETECT_TOAST_ID", "toastError(", "chapterDoneFailedTimeout",
+			"agent:0", "CancelDetectionTask", "detectStep", "etaHint",
 		}},
 		{"../../frontend/src/i18n/locales/zh-CN.json", []string{
 			"alreadyRunning", "chapterDoneToast", "chapterDoneFailed",
 			"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt",
+			"chapterDoneFailedTimeout", "etaHint", "progress",
 		}},
 		{"../../frontend/src/i18n/locales/en.json", []string{
 			"alreadyRunning", "chapterDoneToast", "chapterDoneFailed",
 			"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt",
+			"chapterDoneFailedTimeout", "etaHint", "progress",
 		}},
 		{"../../frontend/src/lib/wailsjs/go/models.ts", []string{"already_running"}},
 	}

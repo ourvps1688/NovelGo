@@ -2202,6 +2202,10 @@
         "chapterDoneFailedModel": "L0 已按新正文更新；L1 未运行：模型未配置或已失效，请在设置中检查模型后重试（已保留上一轮结果）",
         "chapterDoneFailedLLM": "L0 已按新正文更新；L1 智能复核调用失败，请检查模型与供应商状态后重试（已保留上一轮结果）",
         "chapterDoneFailedReceipt": "L0 已按新正文更新；L1 回执格式异常，请稍后重新检测（已保留上一轮结果）",
+        "chapterDoneFailedTimeout": "L1 智能复核超时（8 分钟），已自动结束并保留上一轮结果；L0 已按新正文更新，可稍后重试或换个模型",
+        "progress": "· 第 {{step}} 步：{{tool}}",
+        "etaHint": "L1 智能复核会多轮调用模型，通常 3–8 分钟；超时会自动结束并保留上一轮结果，可随时取消。",
+        "cancelFailed": "取消检测失败，请稍后重试",
         "closureHint": "勾选发现项 → 发到聊天改稿 → 回来重新检测；系统不会自动改稿",
         "chatNotReady": "聊天窗口尚未就绪，请先打开聊天面板",
         "fixSent": "已将 {{count}} 项发现发到聊天窗口",
@@ -2244,6 +2248,11 @@
           "chartHint": "点击曲线节点切换章节，查看该章修复前后历史",
           "historyTitle": "修复前后对比",
           "historyEmpty": "本章暂无评分历史",
+          "historyHint": "局部改稿与重新检测不会自动评分；点「重新判分」记录当前正文的分数对比",
+          "rescore": "重新判分",
+          "rescorePending": "判分中…",
+          "rescoreDone": "重判分完成：{{score}} 分，已追加一条对比记录",
+          "rescoreFailed": "重判分失败",
           "attempt": "第 {{n}} 次",
           "findingDiff": {
             "resolved": "消掉 {{count}} 条 L0/L1",
@@ -2257,6 +2266,7 @@
           "sources": {
             "new": "新写评分",
             "full_replace": "全文重写",
+            "rescore": "重新判分",
             "snapshot": "历史快照"
           },
           "judgeDims": {

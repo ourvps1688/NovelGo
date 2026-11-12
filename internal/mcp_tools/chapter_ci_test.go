@@ -147,6 +147,9 @@ func TestRunChapterCIReceiptLanded(t *testing.T) {
 		assert.Contains(t, req.Instruction, quality.L1ReceiptFormatLine(), "指令内联回执契约格式串")
 		assert.Contains(t, req.Instruction, "continuity", "指令含检查项枚举")
 		assert.Contains(t, req.Instruction, "情绪曲线标注", "指令含情绪曲线标注段")
+		assert.True(t, req.MaxTurns > 0 && req.MaxTurns < 100,
+			"#115 P0：单章 L1 必须限轮，不能沿用 100 轮通用上限")
+		assert.Contains(t, req.Instruction, "收敛要求", "指令须提示模型按时收口")
 		return "小结\n```json\n{\"findings\":[{\"id\":\"L1-1\",\"check\":\"continuity\",\"desc\":\"与前章矛盾\",\"chapter_ids\":[4,5]}],\"summary\":\"1 项\"}\n```\n", nil
 	}
 	err := mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 5)

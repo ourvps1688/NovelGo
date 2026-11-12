@@ -318,6 +318,8 @@ export function RecordRetconEdit(arg1:number,arg2:string):Promise<retcon.RetconC
 
 export function RejectRetconCase(arg1:number,arg2:string,arg3:string):Promise<retcon.RetconCase>;
 
+export function RescoreChapter(arg1:number,arg2:number):Promise<pipeline.ScoreEventView>;
+
 export function ResumePipeline(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RetryStartup():Promise<void>;

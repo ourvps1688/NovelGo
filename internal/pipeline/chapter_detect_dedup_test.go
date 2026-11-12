@@ -149,3 +149,28 @@ func TestChapterDetectCancelSkipsDoneEvent(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// TestChapterDetectTimeoutEmitsDoneEvent #115 P0：章节专属硬超时到点时，收口必须
+// 如实发 ok=false/reason=timeout 的完成事件并注销进行态。旧代码把 DeadlineExceeded
+// 一并判成 cancelled，完成/取消事件都不发，前端会永远停在「检测中… 已运行 N 分钟」。
+func TestChapterDetectTimeoutEmitsDoneEvent(t *testing.T) {
+	old := chapterDetectTimeout
+	chapterDetectTimeout = 40 * time.Millisecond
+	t.Cleanup(func() { chapterDetectTimeout = old })
+
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.SetChapterCIRunner(func(ctx context.Context, _, _ int64) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	done := make(chan map[string]any, 1)
+	t.Cleanup(swapEmitChapterDetectDone(func(_ context.Context, p map[string]any) { done <- p }))
+	cid := int64(77)
+	_, err := svc.RunDetectionTask(context.Background(), 8, DetectionKindChapter, &cid)
+	require.NoError(t, err)
+	p := waitForChapterDetectDone(t, done)
+	assert.Equal(t, false, p["ok"], "超时不是成功")
+	assert.Equal(t, "timeout", p["reason"], "超时必须带可执行的分类码")
+	assert.False(t, svc.isDetectRunning(DetectionKindChapter, 8, &cid), "超时也要注销进行态")
+}

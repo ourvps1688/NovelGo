@@ -574,6 +574,10 @@ export function RejectRetconCase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RejectRetconCase'](arg1, arg2, arg3);
 }
 
+export function RescoreChapter(arg1, arg2) {
+  return window['go']['app']['App']['RescoreChapter'](arg1, arg2);
+}
+
 export function ResumePipeline(arg1, arg2, arg3) {
   return window['go']['app']['App']['ResumePipeline'](arg1, arg2, arg3);
 }

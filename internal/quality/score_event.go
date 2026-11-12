@@ -20,10 +20,13 @@ import (
 //     口径（1-5 星）用 review.JudgeToAuditScores（映射契约单源），本表只存原始分；
 //   - 降级宁缺勿错：追加失败仅告警，不影响写作主流程。
 
-// 评分事件的来源（写入通道，均为评分门禁触发）。
+// 评分事件的来源（写入通道）。前两者由成章写评分门禁触发，rescore 由用户在
+// 「修复前后对比」里显式点「重新判分」触发（#115 P0）：局部改稿不自动评分，
+// 也不会自动跑 LLM；显式入口让每次改稿都能留下一条可对比的分数记录。
 const (
 	ScoreSourceNew         = "new"          // chapters/new.md 新建章节
 	ScoreSourceFullReplace = "full_replace" // 已有正文全文替换（含修复后重写）
+	ScoreSourceRescore     = "rescore"      // 用户显式重判分（当前落盘正文）
 )
 
 // ChapterScoreEvent 是一次成章写评分的明细历史行（append-only）。
