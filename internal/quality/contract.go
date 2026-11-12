@@ -84,6 +84,10 @@ func L1ReceiptFormatLine() string {
 // l1JSONBlockRe 匹配 ```json 或裸 ``` 围栏内的 JSON 块（回执在最终回复末尾）。
 var l1JSONBlockRe = regexp.MustCompile("(?s)```(?:json)?[ \t]*\n?(\\{.*?\\})\n?```")
 
+// ErrL1ReceiptNotFound 是「输出里没有可解析的 L1 回执块」的可判定哨兵。
+// 上层据此把章节检测失败归类为 receipt（模型输出格式问题），与供应商调用失败区分开。
+var ErrL1ReceiptNotFound = errors.New("quality contract: 未找到可解析的 L1 回执 JSON 块")
+
 // ParseL1Receipt 从 LLM 输出提取末尾 ```json 回执块并解析（多个块时取最后一个可解析的）。
 // 降级纪律：找不到回执块 / 解析失败 → 返回 error，由调用方静默降级（零提示零报错）。
 func ParseL1Receipt(out string) (*L1Receipt, error) {
@@ -95,7 +99,7 @@ func ParseL1Receipt(out string) (*L1Receipt, error) {
 		}
 		return &r, nil
 	}
-	return nil, errors.New("quality contract: 未找到可解析的 L1 回执 JSON 块")
+	return nil, ErrL1ReceiptNotFound
 }
 
 // ToFindings 把回执发现投影为档案发现：Level 恒 warning（P1）、Status 恒 pending

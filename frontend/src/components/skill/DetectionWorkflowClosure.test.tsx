@@ -304,3 +304,41 @@ describe("#114 P1 跨轮对齐与前后对比", () => {
     }
   });
 });
+
+describe("#115 P0 章节检测失败反馈可理解、不叠加", () => {
+  it("失败走告警态并按 reason 给可执行文案，完成/发起提示共用同一 toast id", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    for (const want of [
+      "CHAPTER_DETECT_TOAST_ID",
+      "chapterDoneFailedModel",
+      "chapterDoneFailedLLM",
+      "chapterDoneFailedReceipt",
+      "p.reason",
+      "toastError(msg, CHAPTER_DETECT_TOAST_ID)",
+      "toastSuccess(",
+    ]) {
+      expect(view, `missing: ${want}`).toContain(want);
+    }
+    const toast = read("utils/toast.ts");
+    expect(toast).toContain("id?: string");
+    expect(toast).toContain("...(id ? { id } : {})");
+  });
+
+  it("中英文案不再指向日志，且四类失败文案齐全", () => {
+    const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
+    const en = JSON.parse(read("i18n/locales/en.json"));
+    for (const locale of [zh, en]) {
+      const d = locale.journey.quality.detect;
+      for (const k of [
+        "chapterDoneFailed",
+        "chapterDoneFailedModel",
+        "chapterDoneFailedLLM",
+        "chapterDoneFailedReceipt",
+      ]) {
+        expect(d[k], `missing: ${k}`).toBeTruthy();
+      }
+      expect(d.chapterDoneFailed).not.toMatch(/日志|logs/);
+      expect(d.chapterDoneFailed).toMatch(/L0/);
+    }
+  });
+});

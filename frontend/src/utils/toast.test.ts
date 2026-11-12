@@ -11,7 +11,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { toast } from "sonner";
-import { toastError } from "./toast";
+import { toastError, toastSuccess } from "./toast";
 
 describe("toastError", () => {
   beforeEach(() => {
@@ -63,5 +63,22 @@ describe("toastError", () => {
     const action = call[1].action;
     action.onClick();
     expect(writeText).toHaveBeenCalledWith("clipboard test");
+  });
+
+  it("#115 P0 同一 id 让完成反馈原地替换发起提示", () => {
+    toastSuccess("started", "chapter-detect");
+    expect(toast.success).toHaveBeenCalledWith("started", {
+      id: "chapter-detect",
+    });
+    toastError("failed", "chapter-detect");
+    expect(toast.error).toHaveBeenCalledWith(
+      "failed",
+      expect.objectContaining({ id: "chapter-detect" }),
+    );
+  });
+
+  it("未传 id 时保持原有调用形态", () => {
+    toastSuccess("plain");
+    expect(toast.success).toHaveBeenCalledWith("plain");
   });
 });

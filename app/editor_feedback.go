@@ -1,11 +1,9 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
-	"github.com/novelgo/novelgo/internal/agent"
 	"github.com/novelgo/novelgo/internal/mcp_tools"
 	"github.com/novelgo/novelgo/internal/quality"
 )
@@ -78,9 +76,9 @@ func (a *App) RecordEditorFeedback(input EditorFeedbackInput) (*EditorFeedbackRe
 		Logger:     a.logger,
 	}
 	if a.agent != nil {
-		tc.RunSubAgent = func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
-			return a.agent.RunSubAgent(ctx, agent.RunOptions{}, req)
-		}
+		// #115 P0：与 chapterci / statesync 共用后台子 Agent 模型单源，
+		// 空 RunOptions 会让 agent.Run 在入口直接失败（Model=nil）。
+		tc.RunSubAgent = a.runBackgroundSubAgent
 	}
 	res, err := (&mcp_tools.RecordEditorFeedbackTool{}).Execute(a.ctx, args, tc)
 	if err != nil {

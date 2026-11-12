@@ -37,6 +37,11 @@ func (a *App) SaveSettings(input SaveSettingsInput) error {
 func (a *App) settingsSnapshot() config.AppSettings {
 	a.settingsMu.Lock()
 	defer a.settingsMu.Unlock()
+	if a.settings == nil {
+		// 后台子 Agent 可能在初始化完成前被触发；返回零值让 parseModelKey
+		// 回退到首个可用 provider，而不是空指针崩溃。
+		return config.AppSettings{}
+	}
 	return *a.settings
 }
 

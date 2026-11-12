@@ -95,7 +95,30 @@ func TestChapterDetectDoneReportsFailure(t *testing.T) {
 	require.True(t, res.Dispatched)
 	p := waitForChapterDetectDone(t, done)
 	assert.Equal(t, false, p["ok"], "执行体失败必须如实回执 ok=false")
+	assert.Equal(t, "unknown", p["reason"], "无分类码时给稳定的 unknown 兜底")
 	assert.False(t, svc.isDetectRunning(DetectionKindChapter, 3, &cid), "失败也要注销进行态")
+}
+
+// typedDetectFailure 模拟 app 层附了稳定分类码的失败（pipeline 不 import app）。
+type typedDetectFailure struct{ code string }
+
+func (e typedDetectFailure) Error() string        { return "章节检测失败" }
+func (e typedDetectFailure) DetectReason() string { return e.code }
+
+func TestChapterDetectDoneCarriesFailureReason(t *testing.T) {
+	db := newTestDB(t)
+	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())
+	svc.SetChapterCIRunner(func(_ context.Context, _, _ int64) error {
+		return typedDetectFailure{code: "model"}
+	})
+	done := make(chan map[string]any, 1)
+	t.Cleanup(swapEmitChapterDetectDone(func(_ context.Context, p map[string]any) { done <- p }))
+	cid := int64(11)
+	_, err := svc.RunDetectionTask(context.Background(), 4, DetectionKindChapter, &cid)
+	require.NoError(t, err)
+	p := waitForChapterDetectDone(t, done)
+	assert.Equal(t, false, p["ok"])
+	assert.Equal(t, "model", p["reason"], "app 层分类码必须透到完成事件")
 }
 
 func TestChapterDetectCancelSkipsDoneEvent(t *testing.T) {

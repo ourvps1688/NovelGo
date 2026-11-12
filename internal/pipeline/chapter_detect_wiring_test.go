@@ -34,6 +34,13 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 		{"detect.go", []string{
 			"AlreadyRunning bool", "tryBeginDetect(", "res.AlreadyRunning = true",
 			"emitChapterDetectDone(s.appCtx", "cancelled = ctx.Err() != nil",
+			"chapterDetectFailureReason(", `payload["reason"]`,
+		}},
+		{"../../app/handler.go", []string{
+			"a.runBackgroundSubAgent", "classifyChapterDetectError(",
+		}},
+		{"../../app/background_agent.go", []string{
+			"ProviderModel(", "a.agent.RunSubAgent(ctx, opts, req)", "DetectReason() string",
 		}},
 		{"detect_status.go", []string{
 			"func (s *Service) tryBeginDetect(", "LoadOrStore(", "prescriptionCurveForChapter(ctx, s, novelID, chapterID)",
@@ -49,13 +56,16 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 		}},
 		{"../../frontend/src/components/skill/DetectionWorkflowView.tsx", []string{
 			"pipeline:chapter_detect_done", "invalidateChapterViews", "already_running",
-			"chapterDoneToast", "chapterDoneFailed",
+			"chapterDoneToast", "chapterDoneFailed", "chapterDoneFailedModel",
+			"CHAPTER_DETECT_TOAST_ID", "toastError(",
 		}},
 		{"../../frontend/src/i18n/locales/zh-CN.json", []string{
 			"alreadyRunning", "chapterDoneToast", "chapterDoneFailed",
+			"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt",
 		}},
 		{"../../frontend/src/i18n/locales/en.json", []string{
 			"alreadyRunning", "chapterDoneToast", "chapterDoneFailed",
+			"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt",
 		}},
 		{"../../frontend/src/lib/wailsjs/go/models.ts", []string{"already_running"}},
 	}
@@ -65,6 +75,23 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 			assert.Contains(t, src, want, "%s 缺少接线 %q", c.path, want)
 		}
 	}
+}
+
+// TestChapterDetectFailureFeedbackIsActionable #115 P0：失败提示必须用户可执行，
+// 不能把用户指向看不到的日志，也不能用成功 toast 显示失败。
+func TestChapterDetectFailureFeedbackIsActionable(t *testing.T) {
+	zh := readChapterDetectSource(t, "../../frontend/src/i18n/locales/zh-CN.json")
+	en := readChapterDetectSource(t, "../../frontend/src/i18n/locales/en.json")
+	assert.NotContains(t, zh, "详情见日志", "用户没有日志入口，不得把原因甩给日志")
+	assert.NotContains(t, en, "see logs", "en 文案同样不得指向日志")
+	for _, key := range []string{"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt"} {
+		assert.Contains(t, zh, key)
+		assert.Contains(t, en, key)
+	}
+	ci := readChapterDetectSource(t, "../mcp_tools/chapter_ci.go")
+	assert.NotContains(t, ci, "record.L1Status = quality.L1StatusSkipped",
+		"L1 失败不得把上一轮 checked 发现项清空")
+	assert.Contains(t, ci, "保留上一轮 L1")
 }
 
 func TestChapterDetectP3NeverAutoFixes(t *testing.T) {

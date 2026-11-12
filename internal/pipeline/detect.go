@@ -345,6 +345,21 @@ func (s *Service) RunDetectionTask(ctx context.Context, novelID int64, kind stri
 	}
 }
 
+// chapterDetectReasoner 由 app 层的失败包装实现（DetectReason() 返回稳定分类码）。
+// pipeline 不 import app / agent（避免成环），只按接口取码；绝不解析 err 文本或透传 LLM 原文。
+type chapterDetectReasoner interface{ DetectReason() string }
+
+func chapterDetectFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	var r chapterDetectReasoner
+	if errors.As(err, &r) && r.DetectReason() != "" {
+		return r.DetectReason()
+	}
+	return "unknown"
+}
+
 // dispatchChapterDetect 章节检测分流：经注入的 chapterCIRunner 跑 L1 增量检查
 // （落质量档案），异步执行不阻塞调用方。未注入执行器时降级跳过（零提示零报错，
 // 回执 Dispatched=false 如实标记）。派发即登记检测进行态（T1.3），收口注销。
@@ -369,6 +384,7 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 	ctx := s.beginDetectCtx(DetectionKindChapter, novelID, &chapterID)
 	go func() {
 		ok := true
+		reason := ""
 		cancelled := false
 		defer func() {
 			// 先注销进行态（撤销派生 ctx / 删 cancel 登记），再广播完成：
@@ -377,18 +393,24 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 			if cancelled {
 				return // 取消由 CancelDetectionTask 的 EvDetectCancelled 负责
 			}
-			emitChapterDetectDone(s.appCtx, map[string]any{
+			payload := map[string]any{
 				"novel_id":   novelID,
 				"chapter_id": chapterID,
 				"ok":         ok,
-			})
+			}
+			if !ok {
+				// #115 P0：失败带稳定分类码，前端给可执行的错误反馈而不是「详情见日志」。
+				payload["reason"] = reason
+			}
+			emitChapterDetectDone(s.appCtx, payload)
 		}()
 		err := runner(ctx, novelID, chapterID)
 		// 必须在 endDetectCtx 调 cancel() 之前判定，否则所有正常收口都会被误判为取消。
 		cancelled = ctx.Err() != nil
 		if err != nil && !cancelled {
 			ok = false
-			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "err", err)
+			reason = chapterDetectFailureReason(err)
+			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "reason", reason, "err", err)
 		}
 	}()
 	res.Dispatched = true

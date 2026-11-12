@@ -227,36 +227,58 @@ func TestRunChapterCILandsTensionCurve(t *testing.T) {
 	assert.Len(t, rows2, len(rows), "空曲线不动既有 L1 行")
 }
 
-// TestRunChapterCIDegradesToSkipped 降级逐字一致：回执坏/派发失败 → skipped，零提示零报错。
-func TestRunChapterCIDegradesToSkipped(t *testing.T) {
+// TestRunChapterCIFailurePreservesL1Archive #115 P0：失败绝不覆盖上一轮 L1 结果。
+// 旧实现把 l1_status 打成 skipped 并把 l1_findings 覆盖成空，用户点「重新检测」
+// 反而丢掉上一轮有效发现；检测失败不等于上一轮结果作废。
+func TestRunChapterCIFailurePreservesL1Archive(t *testing.T) {
 	db, _, ctx := setupCIEnv(t)
 	seedCIChapter(t, db, 5)
 	store := quality.NewStore(db, ciLogger())
 
-	// 回执坏：返回 error（调用方可忽略），档案记 skipped。
+	// 先跑一次成功检测，留下一份有效的 checked 档案作为基线。
+	good := func(context.Context, mcp_tools.SubAgentRequest) (string, error) {
+		return "```json\n{\"findings\":[{\"id\":\"L1-1\",\"check\":\"continuity\",\"desc\":\"上一轮有效发现\",\"chapter_ids\":[5]}],\"summary\":\"ok\"}\n```", nil
+	}
+	require.NoError(t, mcp_tools.RunChapterCIForChapter(ctx, good, nil, db, ciLogger(), "seed", 1, 5))
+	before, berr := store.GetByChapter(ctx, 1, 5)
+	require.NoError(t, berr)
+	require.NotNil(t, before)
+	require.Equal(t, quality.L1StatusChecked, before.L1Status)
+	require.NotEmpty(t, before.L1Findings)
+	wantFindings, wantCheckedAt, wantRound := before.L1Findings, before.CheckedAt, before.Round
+
+	assertPreserved := func(phase string) {
+		t.Helper()
+		got, gerr := store.GetByChapter(ctx, 1, 5)
+		require.NoError(t, gerr)
+		require.NotNil(t, got)
+		assert.Equal(t, quality.L1StatusChecked, got.L1Status, phase+": 状态不得回退为 skipped")
+		assert.Equal(t, wantFindings, got.L1Findings, phase+": 发现项不得被清空")
+		assert.Equal(t, wantRound, got.Round, phase+": 不得空推轮次")
+		assert.True(t, got.CheckedAt.Equal(wantCheckedAt), phase+": 不得把失败伪装成一次新检查")
+	}
+
+	// 回执坏：返回 error，但档案保持上一轮结果。
 	bad := func(context.Context, mcp_tools.SubAgentRequest) (string, error) { return "没有回执块", nil }
-	err := mcp_tools.RunChapterCIForChapter(ctx, bad, nil, db, ciLogger(), "tool-1", 1, 5)
-	require.Error(t, err)
-	got, gerr := store.GetByChapter(ctx, 1, 5)
-	require.NoError(t, gerr)
-	require.NotNil(t, got)
-	assert.Equal(t, quality.L1StatusSkipped, got.L1Status)
-	assert.Empty(t, got.L1Findings)
+	require.Error(t, mcp_tools.RunChapterCIForChapter(ctx, bad, nil, db, ciLogger(), "tool-1", 1, 5))
+	assertPreserved("回执坏")
 
-	// 派发失败：同样 skipped。
+	// 派发失败：同样保持。
 	boom := func(context.Context, mcp_tools.SubAgentRequest) (string, error) { return "", context.DeadlineExceeded }
-	err = mcp_tools.RunChapterCIForChapter(ctx, boom, nil, db, ciLogger(), "tool-1", 1, 5)
-	require.Error(t, err)
-	got, gerr = store.GetByChapter(ctx, 1, 5)
-	require.NoError(t, gerr)
-	require.NotNil(t, got)
-	assert.Equal(t, quality.L1StatusSkipped, got.L1Status)
+	require.Error(t, mcp_tools.RunChapterCIForChapter(ctx, boom, nil, db, ciLogger(), "tool-1", 1, 5))
+	assertPreserved("派发失败")
 
-	// runSub 为 nil：不派发不落档（静默）。
-	require.NoError(t, mcp_tools.RunChapterCIForChapter(ctx, nil, nil, db, ciLogger(), "tool-1", 1, 999))
+	// 无档案章节失败：不凭空造一行 skipped。
+	require.Error(t, mcp_tools.RunChapterCIForChapter(ctx, boom, nil, db, ciLogger(), "tool-1", 1, 999))
 	gotNil, gerr := store.GetByChapter(ctx, 1, 999)
 	require.NoError(t, gerr)
-	assert.Nil(t, gotNil, "未派发不得造档案行")
+	assert.Nil(t, gotNil, "失败不得凭空造档案行")
+
+	// runSub 为 nil：不派发不落档（静默）。
+	require.NoError(t, mcp_tools.RunChapterCIForChapter(ctx, nil, nil, db, ciLogger(), "tool-1", 1, 998))
+	gotNil2, gerr2 := store.GetByChapter(ctx, 1, 998)
+	require.NoError(t, gerr2)
+	assert.Nil(t, gotNil2, "未派发不得造档案行")
 }
 
 // TestRunChapterCIEmptyFindingsChecked 零发现回执=已查零发现（"[]" 与未查语义区分）。

@@ -221,9 +221,11 @@ func runChapterL1(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 // 还是 agent.RunSubAgent）；skillStore 用于注入 chapter-ci 技能方法论（可空，降级为
 // 内联最小指令）；db 是质量档案存储。返回派发/回执错误（非阻断调用方可忽略）。
 //
-// 落档案口径（降级逐字一致）：
+// 落档案口径（#115 P0：失败绝不覆盖上一轮结果）：
 //   - 回执解析成功 → UpsertL1（findings + l1_status=checked）；
-//   - 派发失败 / 回执坏 → UpsertL1（l1_status=skipped），零提示零报错。
+//   - 派发失败 / 回执坏 → 不写 L1，保留上一轮 checked 发现项与状态，仅记日志并返回错误。
+//     UpsertL1 的 DoUpdates 含 l1_findings，旧实现会把有效发现清空并把状态打成 skipped，
+//     用户点「重新检测」反而丢数据；检测失败不等于上一轮结果作废。
 func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillStore *skill.Store,
 	db *gorm.DB, logger *slog.Logger, toolID string, novelID, chapterID int64) error {
 	if runSub == nil {
@@ -249,19 +251,15 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 
 	if err != nil {
 		if logger != nil {
-			logger.Warn("chapter-ci 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)
+			logger.Warn("chapter-ci 子 Agent 派发失败（非阻断，保留上一轮 L1）", "err", err, "novelID", novelID, "chapterID", chapterID)
 		}
-		record.L1Status = quality.L1StatusSkipped
-		upsertL1(ctx, db, logger, record, novelID, chapterID)
 		return err
 	}
 	receipt, perr := quality.ParseL1Receipt(report)
 	if perr != nil {
 		if logger != nil {
-			logger.Warn("chapter-ci 回执解析失败（非阻断，降级跳过）", "err", perr, "novelID", novelID, "chapterID", chapterID)
+			logger.Warn("chapter-ci 回执解析失败（非阻断，保留上一轮 L1）", "err", perr, "novelID", novelID, "chapterID", chapterID)
 		}
-		record.L1Status = quality.L1StatusSkipped
-		upsertL1(ctx, db, logger, record, novelID, chapterID)
 		return perr
 	}
 	record.L1Status = quality.L1StatusChecked

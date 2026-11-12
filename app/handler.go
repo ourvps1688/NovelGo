@@ -506,9 +506,8 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	pipeline.SetEventBus(wailsEmitter{})
 	// 注入 S0 对齐所需的 statesync 子 Agent 执行器：经由 agent.RunSubAgent 派发（mcp_tools 提供指令构造）。
 	a.pipeline.SetStateSyncRunner(func(ctx context.Context, novelID, chapterID int64) error {
-		return mcp_tools.RunStateSyncForChapter(ctx, a.db, a.skill, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
-			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
-		}, a.logger, "pipeline-s0-align", novelID, chapterID)
+		return mcp_tools.RunStateSyncForChapter(ctx, a.db, a.skill, a.runBackgroundSubAgent,
+			a.logger, "pipeline-s0-align", novelID, chapterID)
 	})
 	// 注入章节 CI 检测执行器（R5-3 T1.2）：检测任务 chapter kind 经 chapterci 子 Agent
 	// 跑 L1 增量检查并落质量档案（与写后章节 CI 同一执行体）。
@@ -518,9 +517,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		if rerr := mcp_tools.RecalcChapterL0FromDisk(ctx, a.db, a.logger, novelID, chapterID); rerr != nil {
 			a.logger.Warn("章节检测：L0 重算失败（非阻断，继续 L1）", "err", rerr, "novelID", novelID, "chapterID", chapterID)
 		}
-		return mcp_tools.RunChapterCIForChapter(ctx, func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
-			return a.agent.RunSubAgent(c, agent.RunOptions{}, req)
-		}, a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID)
+		// #115 P0：失败附可读分类码，完成事件透给前端（不传 LLM 原文、不让用户翻日志）。
+		return classifyChapterDetectError(mcp_tools.RunChapterCIForChapter(ctx, a.runBackgroundSubAgent,
+			a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID))
 	})
 	// 注入编辑反馈工单落单器（P1-1 反馈回流）：record_editor_feedback 拆解出的 F 系
 	// issue 经此落成 pipeline 工单（feedback 容器）走既有修复闭环。mcp_tools 不能反向

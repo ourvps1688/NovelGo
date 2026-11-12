@@ -50,6 +50,10 @@ type DetectKind = "chapter" | "volume" | "structure";
 const SELECT_CLS =
   "w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
+// #115 P0：章节检测「已发起 → 完成 / 失败」共用同一 toast id，完成反馈原地替换
+// 发起提示；失败改用告警态并给出可执行原因，不再两条绿色提示叠加。
+const CHAPTER_DETECT_TOAST_ID = "chapter-detect";
+
 function fmtTime(v?: unknown): string {
   if (!v) return "";
   const d = new Date(String(v));
@@ -259,15 +263,31 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     if (!novelId || kind !== "chapter") return;
     const off = EventsOn(
       "pipeline:chapter_detect_done",
-      (p: { novel_id?: number; chapter_id?: number; ok?: boolean }) => {
+      (p: {
+        novel_id?: number;
+        chapter_id?: number;
+        ok?: boolean;
+        reason?: string;
+      }) => {
         if (p.novel_id !== novelId) return;
         invalidateChapterViews(queryClient, novelId);
+        if (p.ok === false) {
+          // L0 已按落盘正文重算；L1 失败时档案保留上一轮结果，故提示要说明
+          // 「已有更新」与「哪一步没完成」，并给出可执行的下一步。
+          let msg = t("journey.quality.detect.chapterDoneFailed");
+          if (p.reason === "model") {
+            msg = t("journey.quality.detect.chapterDoneFailedModel");
+          } else if (p.reason === "receipt") {
+            msg = t("journey.quality.detect.chapterDoneFailedReceipt");
+          } else if (p.reason === "llm") {
+            msg = t("journey.quality.detect.chapterDoneFailedLLM");
+          }
+          toastError(msg, CHAPTER_DETECT_TOAST_ID);
+          return;
+        }
         toastSuccess(
-          t(
-            p.ok === false
-              ? "journey.quality.detect.chapterDoneFailed"
-              : "journey.quality.detect.chapterDoneToast",
-          ),
+          t("journey.quality.detect.chapterDoneToast"),
+          CHAPTER_DETECT_TOAST_ID,
         );
       },
     );
@@ -323,6 +343,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
               ? "journey.quality.detect.alreadyRunning"
               : "journey.quality.detect.rerunSent",
           ),
+          CHAPTER_DETECT_TOAST_ID,
         );
       } else {
         queryClient.invalidateQueries({
@@ -730,7 +751,10 @@ function ChapterQualityArchiveCard({
       trackFeature(ACTION_FEATURE_KEYS.detect);
       await RunDetectionTask(novelId, "chapter", chapterId);
       onArchiveInvalidate();
-      toastSuccess(t("journey.quality.detect.rerunSent"));
+      toastSuccess(
+        t("journey.quality.detect.rerunSent"),
+        CHAPTER_DETECT_TOAST_ID,
+      );
     } catch (err) {
       toastError(toErrorMessage(err, t("signability.launchFailed")));
     } finally {
