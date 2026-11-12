@@ -26,15 +26,23 @@
 - **单源** `quality.Prescription`（prescription.go）：`AcceptanceMarker=【本章验收条件】`，阈值全引用检测侧常量；`BuildPrescriptions/RenderPrescriptions` 投影「判定式/实测/目标/位置/动作/避免」。档案 DTO `Prescriptions []string`（取 source=l0 基线曲线）→ 前端按 `[check]` 对齐勾选；判官 `ScoreChapterWithPrescriptions` 逐条核验；改稿 `buildAcceptanceGuard` 按标记确定性注入 system-reminder（5 条：逐条复述/只定点改/严禁 full_replace/不换数字/逐条回报），不经技能路由、不新增后台执行体。
 - 判定器：tension.go 加结构信号第二通路（action_density/short_sentence_ratio，structuralPeakAt=0.40、cap=3.0），`beatPeakCount` 单源；reconcile.go 冲突预检给曲线类追加「禁堆情绪词/禁单纯扩写」；platform_checks/tension_checks 文案给可达成目标；MarkTensionCurve 与 beatGap 同源。
 - 技法帽：核心 3 技法 2400 / 条件化 1500 / 整块 9000（writingBundleCoreSkillCap），勿回退到 1500 或 5000。
-- 契约：prescription_test.go（show-not-tell 可达、阈值同源、冲突预检、坡度方向）、prescription_wiring_test.go（静态接线 + 零自动修复）、DetectionWorkflowClosure.test.tsx（处方字段/双语标记/models.ts）。p0 golden 五构造器零改动、Finding.Status 语义不动（P1 另加列，仍未写 fixed/skipped）。**P2 仍是方案未实施**：turn_id、供应商可观测；P1 已落地见下节。
+- 契约：prescription_test.go（show-not-tell 可达、阈值同源、冲突预检、坡度方向）、prescription_wiring_test.go（静态接线 + 零自动修复）、DetectionWorkflowClosure.test.tsx（处方字段/双语标记/models.ts）。p0 golden 五构造器零改动、Finding.Status 语义不动（P1 另加列，仍未写 fixed/skipped）。P1/P2 均已落地，见下两节。
 
 ## #114 P1 跨轮对齐 / 前后对比（勿回退）
 - **身份单源** `quality.FindingKeys(l0,l1)` = `scope|check|归一化 LedgerRefs|同组序号`；绝不进 key：顺编 ID、Desc 全文、实测数字、Status/ChapterIDs。`DiffFindingKeys` 出 `resolved/persisted/new`。
 - `chapter_quality.finding_round` JSON 列（AutoMigrate 加列、零版本化迁移）：`UpsertL0/UpsertL1` 覆盖前经 `withFindingRound`→`NextFindingRound` 写三态 + `RepeatCount`；`PendingL1` 让同轮 L1 收口沿用同一 `PrevKeys`（否则 L0 的 resolved 被吞）；同轮用 `carryRepeatCount` 只增删不累加，否则轮次保护永远触发不了。`FindingGuardRounds=3`→`GuardKeys`。旧档案空串按当前行作基线。
 - `chapter_score_events.finding_keys` 快照列：必须在审批/落盘**之前**取（`findingKeysForChapter`→`pendingFindingKeys`→`persistChapterScore`），因 `ScheduleChapterCI` 之后档案已重算；`ScoreEventView.FindingKeys` 透出，相邻事件做集合差，**空快照禁止反推成「全部消掉」**。
 - DTO `ChapterQualityArchive` 加 4 个基础类型字段（resolved/persisted/new_count + guard_keys）；`models.ts` 只手工补 10 行。前端两处 invalidate `["score-trend"]`/`["score-history"]`（此前零失效通道）。卡片三态 badge + guard 提示 + chat 消息「豁免/调整阈值/换思路」人工决策文本，仍零自动修复。
-- **未做**：P1.5「局部 patch 也评分」（会让每次 search_replace 都调判官 LLM，与省 token 冲突）；P2。p0 golden 与 Finding.Status 不动。
+- **未做**：P1.5「局部 patch 也评分」（会让每次 search_replace 都调判官 LLM，与省 token 冲突）。p0 golden 与 Finding.Status 不动；P2 见下节。
 - 契约：finding_key_test / finding_round_test / finding_round_store_test / finding_round_wiring_test（静态全链 + banned）/ DetectionWorkflowClosure.test.tsx P1 describe。vitest 默认 fork 并发在沙箱里会随机 worker 超时，`--maxWorkers=2` 全量干净通过（51 文件 / 414 用例）；`--minWorkers` 非 vitest4 参数。
+
+## #114 P2 本轮身份 / 供应商失败信号（勿回退）
+- `skill_invocations` 加 `turn_id`+`finding_keys`（AutoMigrate，零版本化迁移）：turn_id 复用 `session.NextTurn` 既有 int，不发明新 ID；finding_keys 复用 P1 `quality.MarshalFindingKeys` JSON 快照，仅带 `【本章目标发现项】` 的改稿轮非空。单源 `activity.WithTurnFindingKeys` 在 `app/chat.go` 一次性下沉 ctx，`RecordSkillInvocation` 读取 → 13 处埋点零改签名；pipeline/mcp_tools 天然零值，归属仍靠 RunID/ChapterID/NovelID。`SummarizeSkillInvocations` **保持 `Group("skill, channel")` 不动**，只加 `MAX(turn_id)` + 相关子查询取最近非空 finding_keys（否则破 3 行聚合断言）。
+- `quality.FindingKeysMarker=【本章目标发现项】` 须字面出现在中英 locale；`ChapterQualityArchive.FindingKeys=round.CurrentKeys`；前端按选中 check 过滤拼 `- l0|...`/`- l1|...`；`parseTargetFindingKeys` 只认两前缀 + 去重、不自行造 key；`buildAcceptanceGuard` 逐字不动。
+- `llm_signal_daily`（date×provider×model×task_kind×signal，`clause.OnConflict` 原子累加，AutoMigrate 注册）只记标识/计数，**不记正文或错误原文、纯本地不上传**。`internal/llm` 包级可替换 sink `SetLLMSignalSink/RecordLLMSignal` 四信号 `truncated_by_length`/`tool_args_invalid`/`empty_stream`/`breaker_open`；**保留**全部 logger.Warn，不改 Retryable/Hard/重试矩阵/ProviderBreaker 状态机。`CallOptions.TaskKind` 仅供失败分类（agent.go `llm.NormalizeTaskKind(opts.AgentType)`；GenerateText 用 `TaskKindGenerate`），`buildPayload` 显式取字段故不进请求体；`parseSSE(ch,resp,providerName,model,taskKind)` 已同步 stream_test.go helper。
+- 消费面：`LLMSignalPanel` 挂 `SkillMatrixView`（queryKey 首段 `feature-usage` 命中 queryErrorToast 静默白名单、`staleTime:0`，异步落库无写侧事件可订阅）+ `DetectionWorkflowView` 两处 `invalidateQueries(["feature-usage"])` 补齐零失效通道；`GetLLMSignalStats` 只读出口；生产 sink 在 `app/handler.go` 用 `context.Background()` best-effort。`SkillUsagePanel` 加 lastTurn/findingKeys 两列。
+- 零自动修复 / 零新执行体 / 零上传；`Finding.Status`、p0 golden 五构造器、判定阈值全不动。**未做**：P1.5 局部 patch 也评分（省 token 取舍）。
+- 契约：`activity/llm_signal_test.go`、`skill_invocation_context_test.go`、`llm/signal_test.go`、`app/finding_keys_message_test.go`、`migrate/llm_signal_test.go`、`quality/observability_wiring_test.go`（跨包静态全链 + banned）、`DetectionWorkflowClosure.test.tsx` P2 describe。全量 E2E `TestRewriteVoiceABE2E` 是真实 LLM 用例、供应商不可达时设计内 Skip；干净全量口径 `go test -tags webkit2_41 ./... -skip '^TestRewriteVoiceABE2E$' -count=1`。
 
 ## 复验 / 状态机
 - VerifyIssueTickets 经 payload IssueKeys 透传、禁回扫 verifying；L0 快路径命中仍回落 LLM；重新 verifying 清 note；预算 120min/15min/2 turns/10k；rejected 3 次→skipped。
