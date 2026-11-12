@@ -4,9 +4,10 @@
 //   pipeline:consistency_patrol — 巡检·结构完成 {novel_id}（既有通道）
 //   pipeline:detect_cancelled   — 检测任务被取消（B5）{novel_id, kind}：即时刷新状态行（进行态已注销）
 // 事件到达=结果已更新：检测状态查询失效（状态行刷新）+ 该 kind 记「新结果」，
-// 用户点「查看结果」后消隐。章节检测无完成事件（直写质量档案），进行态由
-// 检测状态轮询收口即可见，结果跳转不依赖事件。降级零提示：事件缺失/载荷
-// 不符（无 kind 等）一律静默忽略。
+// 用户点「查看结果」后消隐。章节检测结果直写质量档案，走独立的
+// pipeline:chapter_detect_done（#114 P3，由 DetectionWorkflowView 消费），
+// 不进本 hook 的「新结果」徽标；进行态由检测状态轮询收口即可见。
+// 降级零提示：事件缺失/载荷不符（无 kind 等）一律静默忽略。
 import { useCallback, useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { EventsOn } from "@/lib/wailsjs/runtime/runtime";

@@ -105,6 +105,17 @@ func (s *Service) beginDetect(kind string, novelID int64, scopeID *int64, runID 
 	s.detectRunning.Store(detectKey(kind, novelID, scopeID), detectRunInfo{runID: runID, startedAt: time.Now()})
 }
 
+// tryBeginDetect 原子抢占检测进行态（#114 P3 章节 in-flight 防重）：已在飞返回
+// false，调用方据此合并重复点击，绝不覆盖首个执行体的 startedAt / runID。
+// 只用于无 run 容器、也无队列 dedup 的章节检测；卷/书/结构仍走 beginDetect
+// （容器复用语义 + 队列自身去重，逐字不动）。
+func (s *Service) tryBeginDetect(kind string, novelID int64, scopeID *int64, runID string) bool {
+	_, loaded := s.detectRunning.LoadOrStore(
+		detectKey(kind, novelID, scopeID),
+		detectRunInfo{runID: runID, startedAt: time.Now()})
+	return !loaded
+}
+
 // endDetect 按 key 注销检测进行态（章节检测收口用：无 runID 可寻址）。
 func (s *Service) endDetect(kind string, novelID int64, scopeID *int64) {
 	s.detectRunning.Delete(detectKey(kind, novelID, scopeID))
@@ -389,17 +400,10 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 		CheckedAt:        &at,
 		Exists:           true,
 	}
-	// #114：处方与检测同源。曲线取 L0 基线行（判定用的就是 source=l0 的那条），
-	// 不取会被 L1 人工标注覆盖的生效曲线；读失败降级为空处方，不影响档案展示。
-	var l0rows []quality.ChapterTension
-	if rows, rerr := s.qualityStore.ListTensionCurve(ctx, novelID, chapterID); rerr == nil {
-		for _, r := range rows {
-			if r.Source == quality.TensionSourceL0 {
-				l0rows = append(l0rows, r)
-			}
-		}
-	}
-	curve := quality.TensionPointsFromRows(l0rows)
+	// #114 P3：处方曲线与 L0 判定同源——按当前落盘正文现场 BuildTensionCurve，
+	// 不再读可能停留在上一次评分时点的 DB source=l0 旧快照（详见
+	// chapter_prescription_curve.go）。读盘失败才降级回 DB 基线行。
+	curve := prescriptionCurveForChapter(ctx, s, novelID, chapterID)
 	all := append(append([]quality.Finding{}, out.L0Findings...), out.L1Findings...)
 	out.Prescriptions = quality.RenderPrescriptions(quality.BuildPrescriptions(
 		all, curve, out.L0Metrics.WordCount, s.qualityStore.ChapterWords(ctx, novelID)))

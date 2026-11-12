@@ -306,6 +306,9 @@ type DetectionTaskResult struct {
 	// Dispatched=true 执行体已派发（队列或 legacy 直跑）；false=降级未执行
 	// （如未注入章节检测执行器）——降级零提示零报错，回执如实标记。
 	Dispatched bool `json:"dispatched"`
+	// AlreadyRunning=true 表示同章已有检测在飞、本次点击已合并（#114 P3 防重）。
+	// 仅 chapter 分支会置位；前端据此给「检测进行中」而不是「已启动」反馈。
+	AlreadyRunning bool `json:"already_running,omitempty"`
 }
 
 // RunDetectionTask 统一检测任务入口（契约 0.1/0.2）：按 kind 分流——
@@ -345,6 +348,12 @@ func (s *Service) RunDetectionTask(ctx context.Context, novelID int64, kind stri
 // dispatchChapterDetect 章节检测分流：经注入的 chapterCIRunner 跑 L1 增量检查
 // （落质量档案），异步执行不阻塞调用方。未注入执行器时降级跳过（零提示零报错，
 // 回执 Dispatched=false 如实标记）。派发即登记检测进行态（T1.3），收口注销。
+//
+// #114 P3：章节检测既无 run 容器也无队列 dedup，连点会并发跑多个执行体、
+// 共用同一个 detect:chapter:<novel>:<chapter> 进行态键互相覆盖（用户实感
+// 「点三次才生效」）。现以 tryBeginDetect 原子抢占进行态，同章在飞时合并点击
+// 并如实回执 AlreadyRunning；收口额外发 chapter_detect_done 完成事件，让前端
+// 不必等 3s 轮询的 running 边沿就能刷新档案。零新增执行体、零自动修复。
 func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTaskResult {
 	res := &DetectionTaskResult{Kind: DetectionKindChapter, NovelID: novelID, ScopeID: &chapterID}
 	if s.chapterCIRunner == nil {
@@ -352,12 +361,33 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 		return res
 	}
 	runner := s.chapterCIRunner
-	s.beginDetect(DetectionKindChapter, novelID, &chapterID, "")
+	if !s.tryBeginDetect(DetectionKindChapter, novelID, &chapterID, "") {
+		s.logger.Info("检测任务：同章检测进行中，本次点击合并（in-flight 防重）", "novel_id", novelID, "chapter_id", chapterID)
+		res.AlreadyRunning = true
+		return res
+	}
 	ctx := s.beginDetectCtx(DetectionKindChapter, novelID, &chapterID)
 	go func() {
-		// 收口注销：撤销超时/取消派生 ctx + 注销检测进行态（T1.3）。
-		defer s.endDetectCtx(DetectionKindChapter, novelID, &chapterID)
-		if err := runner(ctx, novelID, chapterID); err != nil && ctx.Err() == nil {
+		ok := true
+		cancelled := false
+		defer func() {
+			// 先注销进行态（撤销派生 ctx / 删 cancel 登记），再广播完成：
+			// 前端收到事件时状态行已可刷新为「未运行」。用 appCtx 而非已撤销的 ctx。
+			s.endDetectCtx(DetectionKindChapter, novelID, &chapterID)
+			if cancelled {
+				return // 取消由 CancelDetectionTask 的 EvDetectCancelled 负责
+			}
+			emitChapterDetectDone(s.appCtx, map[string]any{
+				"novel_id":   novelID,
+				"chapter_id": chapterID,
+				"ok":         ok,
+			})
+		}()
+		err := runner(ctx, novelID, chapterID)
+		// 必须在 endDetectCtx 调 cancel() 之前判定，否则所有正常收口都会被误判为取消。
+		cancelled = ctx.Err() != nil
+		if err != nil && !cancelled {
+			ok = false
 			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "err", err)
 		}
 	}()

@@ -22,6 +22,12 @@ const (
 	// EvDetectDone 检测任务（卷体检/书体检，R5-3 T1.2）完成：{novel_id, run_id, kind, verdict, issue_count}。
 	// 纯增量通道：既有事件协议零改动；巡检·结构沿用 EvConsistencyPatrol 既有通道。
 	EvDetectDone = "pipeline:detect_done"
+	// EvChapterDetectDone 章节检测收口（#114 P3）：{novel_id, chapter_id, ok}。
+	// 独立通道而非复用 EvDetectDone——后者 payload 带 verdict/issue_count，且被
+	// useDetectionFeedback 当作「卷/书新结果」徽标源；章节结果直写质量档案，
+	// 前端只需失效档案/曲线/评分/账本并给一次即时反馈。
+	// 取消（CancelDetectionTask）不发本事件，仍走 EvDetectCancelled。
+	EvChapterDetectDone = "pipeline:chapter_detect_done"
 )
 
 // eventBus 是流水线事件总线的注入实现，默认丢弃（NopEmitter），
@@ -129,6 +135,12 @@ func EmitRewriteBacklog(ctx context.Context, p map[string]any) {
 // （发现项工单面板）并刷新检测状态（R5-3 T1.2/T2.2）。
 func EmitDetectDone(ctx context.Context, p map[string]any) {
 	eventBus.Emit(ctx, EvDetectDone, p)
+}
+
+// EmitChapterDetectDone 广播章节检测收口（#114 P3）：结果已写入质量档案，
+// 通知前端刷新档案/曲线/评分/账本并给一次即时反馈。零写操作、零自动修复。
+func EmitChapterDetectDone(ctx context.Context, p map[string]any) {
+	eventBus.Emit(ctx, EvChapterDetectDone, p)
 }
 
 // EvDetectCancelled 检测任务被用户取消（B5）：{novel_id, kind, scope_id}。

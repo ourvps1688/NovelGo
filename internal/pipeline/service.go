@@ -2731,6 +2731,7 @@ var (
 	emitFixDoneSlot           = newEmitterSlot(EmitFixDone)
 	emitRewriteBacklogSlot    = newEmitterSlot(EmitRewriteBacklog)
 	emitDetectDoneSlot        = newEmitterSlot(EmitDetectDone)
+	emitChapterDetectDoneSlot = newEmitterSlot(EmitChapterDetectDone)
 	emitVerifyProgressSlot    = newEmitterSlot(EmitVerifyProgress)
 	emitVerifyDoneSlot        = newEmitterSlot(EmitVerifyDone)
 )
@@ -2749,6 +2750,9 @@ func emitPatrolProgress(ctx context.Context, p map[string]any) {
 func emitFixDone(ctx context.Context, p map[string]any)        { emitFixDoneSlot.emit(ctx, p) }
 func emitRewriteBacklog(ctx context.Context, p map[string]any) { emitRewriteBacklogSlot.emit(ctx, p) }
 func emitDetectDone(ctx context.Context, p map[string]any)     { emitDetectDoneSlot.emit(ctx, p) }
+func emitChapterDetectDone(ctx context.Context, p map[string]any) {
+	emitChapterDetectDoneSlot.emit(ctx, p)
+}
 func emitVerifyProgress(ctx context.Context, p map[string]any) { emitVerifyProgressSlot.emit(ctx, p) }
 func emitVerifyDone(ctx context.Context, p map[string]any)     { emitVerifyDoneSlot.emit(ctx, p) }
 
@@ -2780,6 +2784,9 @@ func swapEmitRewriteBacklog(f func(context.Context, map[string]any)) func() {
 }
 func swapEmitDetectDone(f func(context.Context, map[string]any)) func() {
 	return emitDetectDoneSlot.swap(f)
+}
+func swapEmitChapterDetectDone(f func(context.Context, map[string]any)) func() {
+	return emitChapterDetectDoneSlot.swap(f)
 }
 func swapEmitVerifyProgress(f func(context.Context, map[string]any)) func() {
 	return emitVerifyProgressSlot.swap(f)

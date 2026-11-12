@@ -56,6 +56,21 @@ function fmtTime(v?: unknown): string {
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
 }
 
+// #114 P3：章节检测「启动 / 收口 / 重新检测 / 轮询边沿」共用同一份失效清单。
+// 旧链路底部按钮只失效状态列表，档案要等 3s 轮询观测到 running true→false
+// 才刷新，点完零反馈 → 用户连点三次。零自动派发，只做缓存失效。
+function invalidateChapterViews(
+  queryClient: ReturnType<typeof useQueryClient>,
+  novelId: number,
+) {
+  void queryClient.invalidateQueries({ queryKey: ["chapter-quality-archive"] });
+  void queryClient.invalidateQueries({ queryKey: ["chapter-tension-curve"] });
+  void queryClient.invalidateQueries({ queryKey: ["score-trend"] });
+  void queryClient.invalidateQueries({ queryKey: ["score-history"] });
+  void queryClient.invalidateQueries({ queryKey: ["feature-usage"] });
+  void queryClient.invalidateQueries({ queryKey: detectionKeys.list(novelId) });
+}
+
 interface Props {
   novelId: number;
   kind: DetectKind;
@@ -178,8 +193,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   // P0-A/B 检测完成反馈闭环（volume）：完成事件到达即失效重拉内联工单——
   // 修复「旧缓存 × 新 last_run_id 过滤必空」缺陷（状态轮询先翻新 last_run_id，
   // 与旧缓存求交集必为空，落库的发现项界面上一条不显）；并弹一次性完成 toast
-  // （P0-B：verdict + 发现数）。chapter 无完成事件（见下方进行态边沿兜底），
-  // structure 走上方巡检事件；kind 不符静默忽略。
+  // （P0-B：verdict + 发现数）。chapter 走独立的 pipeline:chapter_detect_done
+  // （见下方 #114 P3）、structure 走上方巡检事件；kind 不符静默忽略。
   useEffect(() => {
     if (!novelId) return;
     const off = EventsOn(
@@ -238,25 +253,40 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     };
   }, [novelId, queryClient]);
 
-  // chapter 无完成事件（结果直写质量档案）：以进行态 true→false 边沿兜底刷新
-  // 质量档案缓存，修掉与内联工单同款的「完成后陈旧」缺口。不弹 toast——
-  // 边沿区分不了「完成/取消/失败」（取消有 detect_cancelled 但无结果），误报不如不报。
+  // #114 P3：章节检测收口发 pipeline:chapter_detect_done（带 ok），前端即时
+  // 失效档案/曲线/评分/账本并给一次完成反馈，不必等 3s 轮询边沿。
+  useEffect(() => {
+    if (!novelId || kind !== "chapter") return;
+    const off = EventsOn(
+      "pipeline:chapter_detect_done",
+      (p: { novel_id?: number; chapter_id?: number; ok?: boolean }) => {
+        if (p.novel_id !== novelId) return;
+        invalidateChapterViews(queryClient, novelId);
+        toastSuccess(
+          t(
+            p.ok === false
+              ? "journey.quality.detect.chapterDoneFailed"
+              : "journey.quality.detect.chapterDoneToast",
+          ),
+        );
+      },
+    );
+    return () => {
+      off?.();
+    };
+  }, [novelId, kind, queryClient, t]);
+
+  // 进行态 true→false 边沿仅作兜底（事件丢失/旧进程）：刷新同一份视图清单，
+  // 不弹 toast——边沿区分不了「完成/取消/失败」，误报不如不报。
   const prevRunningRef = useRef(running);
   useEffect(() => {
     if (kind !== "chapter") return;
     const wasRunning = prevRunningRef.current;
     prevRunningRef.current = running;
     if (wasRunning && !running) {
-      queryClient.invalidateQueries({ queryKey: ["chapter-quality-archive"] });
-      queryClient.invalidateQueries({ queryKey: ["chapter-tension-curve"] });
-      // #114 P1：评分趋势/前后对比原本零失效通道（staleTime 30s +
-      // refetchOnWindowFocus:false），改稿后不刷就永远停在旧数据。
-      queryClient.invalidateQueries({ queryKey: ["score-trend"] });
-      queryClient.invalidateQueries({ queryKey: ["score-history"] });
-      // #114 P2：改稿/重检后刷新技能账本与供应商指标（本轮注入了什么、对应哪条发现）。
-      queryClient.invalidateQueries({ queryKey: ["feature-usage"] });
+      invalidateChapterViews(queryClient, novelId);
     }
-  }, [kind, running, queryClient]);
+  }, [kind, running, novelId, queryClient]);
 
   // #113：章节检测产物是质量档案（写后就有），即使从未手动启动过检测也可直接查看/
   // 处理发现项；卷/结构仍按「有检测结果」才展示结果区。
@@ -282,8 +312,23 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     setLaunching(true);
     try {
       trackFeature(ACTION_FEATURE_KEYS.detect);
-      await RunDetectionTask(novelId, kind, effScope);
-      queryClient.invalidateQueries({ queryKey: detectionKeys.list(novelId) });
+      const res = await RunDetectionTask(novelId, kind, effScope);
+      if (kind === "chapter") {
+        // #114 P3：与卡片内「重新检测本章」同款即时反馈（档案失效 + toast），
+        // 消掉「点完没反应→连点三次」；后端同章在飞时合并并回执 already_running。
+        invalidateChapterViews(queryClient, novelId);
+        toastSuccess(
+          t(
+            res?.already_running
+              ? "journey.quality.detect.alreadyRunning"
+              : "journey.quality.detect.rerunSent",
+          ),
+        );
+      } else {
+        queryClient.invalidateQueries({
+          queryKey: detectionKeys.list(novelId),
+        });
+      }
       // 不再强制跳转到共享「检测核心」页：结果在本页就地内联展示（见下方结果区）。
     } catch (err) {
       toastError(toErrorMessage(err, t("signability.launchFailed")));
@@ -435,27 +480,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                     novelId={novelId}
                     chapterId={effChapterId}
                     onArchiveInvalidate={() => {
-                      void queryClient.invalidateQueries({
-                        queryKey: [
-                          "chapter-quality-archive",
-                          novelId,
-                          effChapterId,
-                        ],
-                      });
-                      void queryClient.invalidateQueries({
-                        queryKey: detectionKeys.list(novelId),
-                      });
-                      // #114 P1：点「重新检测本章」即时刷新评分趋势与前后对比。
-                      void queryClient.invalidateQueries({
-                        queryKey: ["score-trend"],
-                      });
-                      void queryClient.invalidateQueries({
-                        queryKey: ["score-history"],
-                      });
-                      // #114 P2：重检后同步刷新技能账本与供应商指标。
-                      void queryClient.invalidateQueries({
-                        queryKey: ["feature-usage"],
-                      });
+                      // #114 P3：与底部「启动检测」、收口事件共用同一份失效清单。
+                      invalidateChapterViews(queryClient, novelId);
                     }}
                   />
                 ) : null}

@@ -26,7 +26,13 @@ func TestPrescriptionWiredEndToEnd(t *testing.T) {
 		want []string
 	}{
 		{"../pipeline/detect_status.go", []string{
-			"Prescriptions []string", "BuildPrescriptions", "TensionSourceL0", "RenderPrescriptions",
+			"Prescriptions []string", "BuildPrescriptions", "RenderPrescriptions",
+			"prescriptionCurveForChapter(ctx, s, novelID, chapterID)",
+		}},
+		// #114 P3：处方曲线必须与 L0 判定同源（按落盘正文现场算），
+		// 只在读盘失败时降级回 DB 的 source=l0 旧行。
+		{"../pipeline/chapter_prescription_curve.go", []string{
+			"git.ReadFile", "git.ChapterPath", "quality.BuildTensionCurve", "TensionSourceL0",
 		}},
 		{"../review/score.go", []string{
 			"ScoreChapterWithPrescriptions", "buildUserPromptWithPrescriptions", AcceptanceMarker, "逐条核验",

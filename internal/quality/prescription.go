@@ -104,14 +104,25 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 		}
 
 	case CheckBeatGap, CheckBeatDensity:
+		// #114 P3：只给「安排一处对抗升级」这种语感级指令，LLM 不知道改哪一段、
+		// 差多少、判定式长什么样，改完判定器仍看不见 → 反复重写整章。
+		// 现在把段级实测信号、离达标最近的段位、最弱段和可执行数字一并交出去。
+		diagnosis, where := beatSegmentDiagnostics(curve)
 		return Prescription{
-			Criterion: fmt.Sprintf("全章爽点段数 ≥1（climax 或结构信号 ≥ %.2f 的结构峰）", structuralPeakAt),
-			Current: fmt.Sprintf("爽点 %d 处（climax %d / 结构峰 %d）",
-				beatPeakCount(curve), climaxBeatCount(curve), structuralPeakCount(curve)),
-			Target: "≥1 处爽点",
-			Where:  "建议中后段（章内任一 400 字段落）",
-			Do:     "安排一处对抗升级/反转，并用具体动作与短句节奏呈现",
-			Avoid:  "不要靠堆直白情绪词或感叹号凑情绪峰（会触发去 AI 味）",
+			Criterion: fmt.Sprintf(
+				"全章爽点段数 ≥1（该段 emotion ≥ %.0f 判 climax，或 structure ≥ %.2f 判结构峰）；structure = 0.40×min(冲突/%.1f,1) + 0.35×min(动作/%.2f,1) + 0.25×min(短句/%.2f,1)",
+				tensionEmotionClimaxAt, structuralPeakAt, tensionConflictCap, tensionActionCap, tensionShortRatioCap),
+			Current: fmt.Sprintf("爽点 %d 处（climax %d / 结构峰 %d）；%s；阈值 %.2f",
+				beatPeakCount(curve), climaxBeatCount(curve), structuralPeakCount(curve),
+				diagnosis, structuralPeakAt),
+			Target: fmt.Sprintf("该段 structure ≥ %.2f 或 emotion ≥ %.0f（全章 ≥1 处爽点）",
+				structuralPeakAt, tensionEmotionClimaxAt),
+			Where: where,
+			Do: fmt.Sprintf(
+				"定点只改目标段（不要整章重写）：写一处明确的对抗升级/反转，段落里给足 ≥%d 处具体动作或身体细节（动作密度 ≥ %.2f 次/百字），并把 ≤%d 字短句占比提到 ≥ %.2f；改完重新检测看 structure 数值是否过线",
+				beatActionHitsNeeded(), tensionActionCap,
+				tensionShortSentenceMax, tensionShortRatioCap),
+			Avoid: "不要靠堆直白情绪词或感叹号凑情绪峰（会触发去 AI 味）；不要靠堆武侠冲突词，非武侠题材该词表恒 0，只能靠动作细节 + 短句节奏抬 structure",
 		}
 
 	case CheckOpeningSlope:
@@ -163,6 +174,45 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 			Avoid:     "不要整体推翻重写无关段落",
 		}
 	}
+}
+
+// beatActionHitsNeeded 把动作密度帽换算成「一个 400 字 beat 段要写几处具体动作」。
+// 数字直接由检测侧常量派生，禁止再写一份口径。
+func beatActionHitsNeeded() int {
+	n := int(float64(tensionSegTargetRunes) / 100.0 * tensionActionCap)
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// beatSegmentDiagnostics 给出爽点类处方的段级实测口径：
+//   - 「离达标最近」= structure 最高的段（改这一段最省字，避免整章重写）；
+//   - 「最弱」= tension 最低的段（拖沓/平坦的直观位置）；
+//   - 同时列出动作/短句/冲突密度，让 LLM 看得见「差在哪一项、差多少」。
+//
+// 曲线为空时不臆造段位，返回可降级文案。
+func beatSegmentDiagnostics(curve []TensionPoint) (string, string) {
+	if len(curve) == 0 {
+		return "曲线为空（重新检测本章后可见段级信号）", "全章（任一 400 字 beat 段）"
+	}
+	best, weakest := curve[0], curve[0]
+	for _, pt := range curve[1:] {
+		if pt.Metrics[tensionMetricStructural] > best.Metrics[tensionMetricStructural] {
+			best = pt
+		}
+		if pt.Tension < weakest.Tension {
+			weakest = pt
+		}
+	}
+	diagnosis := fmt.Sprintf(
+		"离达标最近 seg %d：structure %.2f（动作 %.2f/百字、短句占比 %.2f、冲突 %.2f/百字）；张力最弱 seg %d：tension %.1f",
+		best.Seg, best.Metrics[tensionMetricStructural], best.Metrics[tensionMetricAction],
+		best.Metrics[tensionMetricShortRatio], best.Metrics[tensionMetricConflict],
+		weakest.Seg, weakest.Tension)
+	where := fmt.Sprintf("seg %d（字 %d–%d，约 %.0f 字）", best.Seg, best.StartRune, best.EndRune,
+		best.Metrics[tensionMetricRunes])
+	return diagnosis, where
 }
 
 // curveRange 把段序区间映射成「seg a–b（字 x–y）」的可读位置。

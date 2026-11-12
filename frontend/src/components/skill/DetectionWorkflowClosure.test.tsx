@@ -266,4 +266,41 @@ describe("#114 P1 跨轮对齐与前后对比", () => {
       expect(panel, `must not contain: ${banned}`).not.toContain(banned);
     }
   });
+
+  it("#114 P3 启动检测点一次生效：档案失效、完成事件与防重回执", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    for (const want of [
+      "invalidateChapterViews",
+      "pipeline:chapter_detect_done",
+      "chapterDoneToast",
+      "chapterDoneFailed",
+      "already_running",
+      'queryKey: ["chapter-quality-archive"]',
+      'queryKey: ["score-trend"]',
+      'queryKey: ["feature-usage"]',
+    ]) {
+      expect(view, `missing: ${want}`).toContain(want);
+    }
+    const models = read("lib/wailsjs/go/models.ts");
+    expect(models).toContain("already_running");
+    const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
+    const en = JSON.parse(read("i18n/locales/en.json"));
+    for (const locale of [zh, en]) {
+      for (const k of [
+        "alreadyRunning",
+        "chapterDoneToast",
+        "chapterDoneFailed",
+      ]) {
+        expect(locale.journey.quality.detect[k], `missing: ${k}`).toBeTruthy();
+      }
+    }
+    for (const banned of [
+      "StartIssueFixTickets",
+      "StartManualIssueFixTickets",
+      "autoFix",
+      "onAutoFix",
+    ]) {
+      expect(view, `must not contain: ${banned}`).not.toContain(banned);
+    }
+  });
 });

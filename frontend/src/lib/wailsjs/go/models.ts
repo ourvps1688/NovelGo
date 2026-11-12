@@ -2996,6 +2996,7 @@ export namespace pipeline {
 	    scope_id?: number;
 	    run_id?: string;
 	    dispatched: boolean;
+	    already_running?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DetectionTaskResult(source);
@@ -3008,6 +3009,7 @@ export namespace pipeline {
 	        this.scope_id = source["scope_id"];
 	        this.run_id = source["run_id"];
 	        this.dispatched = source["dispatched"];
+	        this.already_running = source["already_running"];
 	    }
 	}
 	export class DetectionTaskStatus {
