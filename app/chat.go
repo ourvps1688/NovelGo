@@ -79,6 +79,10 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("获取 turn ID 失败: %w", err)
 	}
+	// #114 P2：把本轮 turn 与改稿目标发现项一次性绑进 ctx，分散在 slash /
+	// chat_intent / writing_bundle / always 等 13 个埋点零改签名即可透出
+	// 「本轮注入了什么、对应哪条发现」。无验收标记时 findingKeys 为空串。
+	ctx = activity.WithTurnFindingKeys(ctx, turnID, findingKeysJSONFromMessage(input.Message))
 
 	// 5. 提交用户在对话间隙的手动编辑（git 收尾已下沉到 commit.Service，best-effort 不阻塞对话）
 	s := a.settingsSnapshot()

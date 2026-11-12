@@ -44,11 +44,35 @@ export namespace activity {
 	        this.count = source["count"];
 	    }
 	}
+	export class LLMSignalStat {
+	    provider: string;
+	    model: string;
+	    task_kind: string;
+	    signal: string;
+	    count: number;
+	    last_date: string;
+
+	    static createFrom(source: any = {}) {
+	        return new LLMSignalStat(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.provider = source["provider"];
+	        this.model = source["model"];
+	        this.task_kind = source["task_kind"];
+	        this.signal = source["signal"];
+	        this.count = source["count"];
+	        this.last_date = source["last_date"];
+	    }
+	}
 	export class SkillInvocationStat {
 	    skill: string;
 	    channel: string;
 	    count: number;
 	    last_seen: string;
+	    last_turn_id: number;
+	    finding_keys: string;
 
 	    static createFrom(source: any = {}) {
 	        return new SkillInvocationStat(source);
@@ -60,6 +84,8 @@ export namespace activity {
 	        this.channel = source["channel"];
 	        this.count = source["count"];
 	        this.last_seen = source["last_seen"];
+	        this.last_turn_id = source["last_turn_id"];
+	        this.finding_keys = source["finding_keys"];
 	    }
 	}
 
@@ -2880,6 +2906,7 @@ export namespace pipeline {
 	    persisted_count: number;
 	    new_count: number;
 	    guard_keys: string[];
+	    finding_keys: string[];
 	    // Go type: time
 	    checked_at?: any;
 	    exists: boolean;
@@ -2902,6 +2929,7 @@ export namespace pipeline {
 	        this.persisted_count = source["persisted_count"];
 	        this.new_count = source["new_count"];
 	        this.guard_keys = source["guard_keys"];
+	        this.finding_keys = source["finding_keys"];
 	        this.checked_at = this.convertValues(source["checked_at"], null);
 	        this.exists = source["exists"];
 	    }

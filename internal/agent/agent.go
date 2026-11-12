@@ -273,6 +273,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 
 		callOpts := &llm.CallOptions{}
 		callOpts.SessionID = opts.SessionID // 会话标识，供需要会话感知的服务商（如 OpenCode Go 的 x-opencode-session）使用
+		// #114 P2：任务类型只用于失败信号分类（观测），不参与请求体/重试/熔断。
+		callOpts.TaskKind = llm.NormalizeTaskKind(opts.AgentType)
 		if opts.ReasoningEffort != "" {
 			callOpts.ReasoningEffort = &opts.ReasoningEffort
 		}

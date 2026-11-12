@@ -5,6 +5,7 @@ import { ExternalLink, Check, X, Loader2 } from "lucide-react";
 import type { skill } from "@/lib/wailsjs/go/models";
 import { useSkills } from "./useSkills";
 import SkillUsagePanel from "./SkillUsagePanel";
+import LLMSignalPanel from "./LLMSignalPanel";
 import BlueprintTaskPanel from "./BlueprintTaskPanel";
 import EditorFeedbackPanel from "./EditorFeedbackPanel";
 import {
@@ -130,6 +131,8 @@ export default function SkillMatrixView({
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto overscroll-contain px-6 py-4">
         <SkillUsagePanel novelId={novelId} />
+        {/* #114 P2：供应商失败信号本地指标（只读），零派发零自动修复。 */}
+        <LLMSignalPanel novelId={novelId} />
         {/* #111 P2：两个显式工作流入口——S2 全书蓝图与编辑反馈录入，
             均为用户点按钮才触发，零自动派发 / 零自动修复。 */}
         <BlueprintTaskPanel novelId={novelId} />

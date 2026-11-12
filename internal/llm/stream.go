@@ -205,7 +205,12 @@ func (c *Client) ChatStream(
 	// 熔断拦截（P1）：LLM 调用入口共用同一 ProviderBreaker 单例——pipeline 已熔断时
 	// chat 也立即跳过，避免同一 provider 被两条路径同时狂打（假阳性）。命中即快速失败
 	// （Retryable=false，agent 层不重试）。
+	// #114 P2：任务类型只用于失败信号分类；此处不改动任何熔断/重试语义。
+	taskKind := TaskKindFromOptions(opts)
 	if breakerBlockedProvider(providerName) {
+		RecordLLMSignal(LLMSignalSample{
+			Provider: providerName, Model: model, TaskKind: taskKind, Signal: SignalBreakerOpen,
+		})
 		ch := make(chan StreamEvent, 1)
 		ch <- StreamEvent{Type: EventError, Error: breakerOpenError(providerName)}
 		close(ch)
@@ -296,7 +301,7 @@ func (c *Client) ChatStream(
 		resp.Body = io.NopCloser(wd.wrapBody(resp.Body))
 		// parseSSE 返回是否发生过错误事件：仅当流完全正常结束（无 EventError）时
 		// 才喂入熔断器的成功探针（Half-Open 回 Closed），空闲超时等软错误不回血。
-		hadError := c.parseSSE(ch, resp, providerName)
+		hadError := c.parseSSE(ch, resp, providerName, model, taskKind)
 		if !hadError {
 			ProviderBreaker.RecordSuccess(providerName)
 		}
@@ -434,7 +439,7 @@ func mergeSystemMessages(messages []map[string]any) []map[string]any {
 // parseSSE 解析 SSE 流，产出 StreamEvent。返回 hadError：本次流是否产生过任何 EventError
 // （空闲超时 / tool_args_invalid / empty_stream 均计）。仅当流完全正常结束（hadError=false）
 // 时，调用方才喂入 provider 熔断器的成功探针——软错误不回血，避免误 healed 未恢复的供应商。
-func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerName string) bool {
+func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerName, model, taskKind string) bool {
 	hadError := false
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 行最长 2MB
@@ -504,6 +509,13 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerNa
 		// finish_reason=="length" 表示输出被预算截断（可能致 tool arguments JSON 不完整）。
 		// 放在 delta 提取之前，确保无 delta 的收尾 chunk 也能被追踪到。
 		if fr, ok := choice["finish_reason"].(string); ok && fr == "length" {
+			// #114 P2：只记一次「输出预算截断」，不重复计数、不改判定/重试语义。
+			if !diag.truncatedByLength {
+				RecordLLMSignal(LLMSignalSample{
+					Provider: providerName, Model: model, TaskKind: taskKind,
+					Signal: SignalTruncatedByLength,
+				})
+			}
 			diag.truncatedByLength = true
 		}
 		delta, ok := choice["delta"].(map[string]any)
@@ -667,6 +679,11 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerNa
 
 	// tool arguments 解析失败：全丢弃（不发送成功的 tool call），发 EventError（tool_args_invalid）
 	if len(invalidToolErrors) > 0 {
+		// #114 P2：工具参数解析失败信号（保留下方 Warn 与 EventError，零行为变更）。
+		RecordLLMSignal(LLMSignalSample{
+			Provider: providerName, Model: model, TaskKind: taskKind,
+			Signal: SignalToolArgsInvalid,
+		})
 		errMsg := buildToolArgsInvalidMsg(invalidToolErrors)
 		// 若工具参数存在但 JSON 校验失败，且流被 max_tokens 截断
 		// （finish_reason=="length"，思考模型的推理 token 也计入预算），升级为明确提示，
@@ -701,6 +718,11 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerNa
 		// 零产出检测：流结束但未收到任何有效内容（content 或 tool call 收尾）。
 		// 填充 HTTP 快照后通过 LogValuer 输出结构化诊断，区分限流软拒绝 / 推理失控 / 非标准格式。
 		if !diag.hasContent && !diag.hasToolCalls {
+			// #114 P2：零有效产出信号（保留下方 Warn 与 EventError，零行为变更）。
+			RecordLLMSignal(LLMSignalSample{
+				Provider: providerName, Model: model, TaskKind: taskKind,
+				Signal: SignalEmptyStream,
+			})
 			diag.statusCode = resp.StatusCode
 			diag.contentType = resp.Header.Get("Content-Type")
 			diag.contentLength = resp.Header.Get("Content-Length")

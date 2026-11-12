@@ -344,6 +344,14 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// 技能装配统一账本（#111 P0）：app / pipeline / mcp_tools / agentcfg 六条注入通道
 	// 经包级 sink 记账（只记标识与字符数、纯本地不上传）；未注入时全链路 no-op。
 	activity.SetSkillInvocationSink(a.activity.AddSkillInvocation)
+	// #114 P2 供应商可观测：llm 包只发标识信号，落库适配器在此注入（纯本地、
+	// 只记标识与计数）。用 Background 保证 best-effort 记账不受请求取消影响。
+	llm.SetLLMSignalSink(func(s llm.LLMSignalSample) {
+		if a.activity == nil {
+			return
+		}
+		a.activity.AddLLMSignal(context.Background(), s.Provider, s.Model, s.TaskKind, s.Signal)
+	})
 
 	// 4. 加载运行时配置
 	settings, err := config.LoadSettings(db)

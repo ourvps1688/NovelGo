@@ -354,12 +354,16 @@ type ChapterQualityArchive struct {
 	// #114 P1 跨轮对齐结果（全用基础类型，避免 Wails 生成物新增结构体噪声）：
 	// 本轮消掉/仍在/新增的条数，以及连续 FindingGuardRounds 轮未消除的稳定 key。
 	// 旧档案无快照时三者恒 0、GuardKeys 为空，前端按「无对比数据」降级。
-	ResolvedCount  int        `json:"resolved_count"`
-	PersistedCount int        `json:"persisted_count"`
-	NewCount       int        `json:"new_count"`
-	GuardKeys      []string   `json:"guard_keys"`
-	CheckedAt      *time.Time `json:"checked_at,omitempty"`
-	Exists         bool       `json:"exists"`
+	ResolvedCount  int      `json:"resolved_count"`
+	PersistedCount int      `json:"persisted_count"`
+	NewCount       int      `json:"new_count"`
+	GuardKeys      []string `json:"guard_keys"`
+	// FindingKeys 是本轮全部发现的稳定 key（P1 单源 quality.FindingKeys），供前端
+	// 把选中项对应的 key 拼进改稿消息，再由 app 侧绑进技能账本（#114 P2）。
+	// 旧档案无快照时为空，前端按「无可关联标识」降级。
+	FindingKeys []string   `json:"finding_keys"`
+	CheckedAt   *time.Time `json:"checked_at,omitempty"`
+	Exists      bool       `json:"exists"`
 }
 
 // GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单）。
@@ -405,6 +409,7 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 	out.PersistedCount = len(round.Persisted)
 	out.NewCount = len(round.New)
 	out.GuardKeys = round.GuardKeys()
+	out.FindingKeys = round.CurrentKeys
 	return out, nil
 }
 

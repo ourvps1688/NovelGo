@@ -22,6 +22,12 @@ import (
 // Level、ChapterIDs（随章节移动变化）、时间戳。固定阈值也不必进——它们只影响
 // 文案措辞，不影响「是不是同一条问题」。
 
+// FindingKeysMarker 是 #114 P2 改稿消息里「本轮目标发现项」块的标记。
+// 前端把 P1 单源生成的稳定 key 逐行列出，app 侧据此把本轮目标绑定进技能账本
+// （skill_invocations.finding_keys），用于回答「本轮注入了什么、对应哪条发现」。
+// 与 AcceptanceMarker 同纪律：中英双语 locale 都必须字面包含该标记。
+const FindingKeysMarker = "【本章目标发现项】"
+
 // findingFeature 返回归一化命中特征；无台账引用时为空串。
 func findingFeature(f Finding) string {
 	if len(f.LedgerRefs) == 0 {

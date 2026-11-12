@@ -199,4 +199,71 @@ describe("#114 P1 跨轮对齐与前后对比", () => {
       expect(d.scoreTrend.findingDiff.noSnapshot).toBeTruthy();
     }
   });
+
+  it("#114 P2 改稿消息透出 P1 单源稳定 key，不自行造 key", () => {
+    const c = read("components/skill/DetectionWorkflowView.tsx");
+    expect(c).toContain("archive.finding_keys");
+    expect(c).toContain("findingKeysTitle");
+    expect(c).toContain("targetKeys");
+    expect(c).toContain("keysBlock");
+    expect(c).toContain('queryKey: ["feature-usage"]');
+    const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
+    const en = JSON.parse(read("i18n/locales/en.json"));
+    for (const locale of [zh, en]) {
+      expect(locale.journey.quality.detect.findingKeysTitle).toContain(
+        "【本章目标发现项】",
+      );
+    }
+  });
+
+  it("#114 P2 技能账本与供应商指标都有可见消费面", () => {
+    const view = read("components/skill/SkillMatrixView.tsx");
+    expect(view).toContain("LLMSignalPanel");
+    const panel = read("components/skill/LLMSignalPanel.tsx");
+    expect(panel).toContain("GetLLMSignalStats");
+    expect(panel).toContain('["feature-usage"');
+    expect(panel).toContain("llm-signal-panel");
+    expect(panel).toContain("staleTime: 0");
+    const usage = read("components/skill/SkillUsagePanel.tsx");
+    expect(usage).toContain("last_turn_id");
+    expect(usage).toContain("finding_keys");
+    const models = read("lib/wailsjs/go/models.ts");
+    expect(models).toContain("export class LLMSignalStat");
+    expect(models).toContain("last_turn_id: number;");
+    expect(models).toContain("finding_keys: string;");
+    expect(read("lib/wailsjs/go/app/App.d.ts")).toContain("GetLLMSignalStats");
+    const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
+    const en = JSON.parse(read("i18n/locales/en.json"));
+    for (const locale of [zh, en]) {
+      for (const k of [
+        "title",
+        "hint",
+        "provider",
+        "model",
+        "taskKind",
+        "signal",
+        "count",
+        "lastDate",
+        "times",
+      ]) {
+        expect(locale.skillMatrix.signals[k], `missing: ${k}`).toBeTruthy();
+      }
+      expect(locale.skillMatrix.usage.lastTurn).toBeTruthy();
+      expect(locale.skillMatrix.usage.findingKeys).toBeTruthy();
+    }
+  });
+
+  it("#114 P2 可观测面板零自动修复、零渲染期时钟", () => {
+    const panel = read("components/skill/LLMSignalPanel.tsx");
+    for (const banned of [
+      "StartIssueFixTickets",
+      "StartManualIssueFixTickets",
+      "autoFix",
+      "onAutoFix",
+      "Date.now()",
+      "new Date()",
+    ]) {
+      expect(panel, `must not contain: ${banned}`).not.toContain(banned);
+    }
+  });
 });

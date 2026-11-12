@@ -125,6 +125,7 @@ func Run(db *gorm.DB, log *slog.Logger) error {
 		&activity.FeatureUsage{},
 		&activity.ExecStat{},
 		&activity.SkillInvocation{},
+		&activity.LLMSignalDaily{},
 		&volume.Volume{},
 		&volume.VolumeSnapshot{},
 		&retcon.RetconCase{},

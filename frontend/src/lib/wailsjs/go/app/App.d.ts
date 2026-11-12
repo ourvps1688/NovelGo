@@ -198,6 +198,8 @@ export function GetFileDiff(arg1:number,arg2:string,arg3:string):Promise<git.Fil
 
 export function GetLLMConfig():Promise<llm.LLMConfigView>;
 
+export function GetLLMSignalStats(arg1:number):Promise<Array<activity.LLMSignalStat>>;
+
 export function GetLocationRelations(arg1:number):Promise<Array<location.LocationRelation>>;
 
 export function GetLocations(arg1:number):Promise<Array<location.Location>>;

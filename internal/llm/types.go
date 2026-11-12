@@ -77,6 +77,7 @@ type CallOptions struct {
 	ThinkingEnabled *bool    // 不传从 ModelInfo 判断
 	ToolChoice      any      // OpenAI tool_choice payload; nil = provider default
 	SessionID       string   // 会话标识（如 NovelGo session_id），仅需要会话感知的服务商消费；空=无会话上下文（hook 内部兜底）
+	TaskKind        string   // #114 P2 观测用任务类型（agent.RunOptions.AgentType 同名）；只用于失败信号分类，不参与请求体/重试/熔断
 }
 
 // StreamEventType 流式事件的类型。

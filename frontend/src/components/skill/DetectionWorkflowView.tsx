@@ -253,6 +253,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
       // refetchOnWindowFocus:false），改稿后不刷就永远停在旧数据。
       queryClient.invalidateQueries({ queryKey: ["score-trend"] });
       queryClient.invalidateQueries({ queryKey: ["score-history"] });
+      // #114 P2：改稿/重检后刷新技能账本与供应商指标（本轮注入了什么、对应哪条发现）。
+      queryClient.invalidateQueries({ queryKey: ["feature-usage"] });
     }
   }, [kind, running, queryClient]);
 
@@ -449,6 +451,10 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                       });
                       void queryClient.invalidateQueries({
                         queryKey: ["score-history"],
+                      });
+                      // #114 P2：重检后同步刷新技能账本与供应商指标。
+                      void queryClient.invalidateQueries({
+                        queryKey: ["feature-usage"],
                       });
                     }}
                   />
@@ -658,6 +664,17 @@ function ChapterQualityArchiveCard({
             keys: guardKeys.join(" · "),
           })}\n`
         : "";
+    // #114 P2：把选中项对应的 P1 单源稳定 key 一并发出，app 侧据此把本轮
+    // 目标发现项绑进技能账本；不自行造 key、不作为给模型的修改指令。
+    const targetKeys = (archive.finding_keys ?? []).filter((key) =>
+      rows.some(({ f }) => key.split("|")[1] === f.check),
+    );
+    const keysBlock =
+      targetKeys.length > 0
+        ? `\n${t("journey.quality.detect.findingKeysTitle")}\n${targetKeys
+            .map((key) => `- ${key}`)
+            .join("\n")}\n`
+        : "";
     const content =
       `${t("journey.quality.detect.fixPromptTitle", { chapter: chapterText })}\n\n` +
       `${items}\n\n` +
@@ -668,6 +685,7 @@ function ChapterQualityArchiveCard({
       })}\n` +
       criteriaBlock +
       guardBlock +
+      keysBlock +
       t("journey.quality.detect.fixPromptFooter");
     const send = useChatLaunchStore.getState().send;
     if (!send) {

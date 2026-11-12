@@ -32,3 +32,34 @@ func buildAcceptanceGuard(message string) string {
 	b.WriteString("</system-reminder>\n")
 	return b.String()
 }
+
+// findingKeysJSONFromMessage 把改稿消息里的【本章目标发现项】块解析成 P1 单源
+// 稳定 key 的 JSON 快照（quality.MarshalFindingKeys），供技能账本落库。
+// 无标记或无可识别 key 时返回空串——旧消息/普通对话天然兼容，零行为变更。
+func findingKeysJSONFromMessage(message string) string {
+	return quality.MarshalFindingKeys(parseTargetFindingKeys(message))
+}
+
+// parseTargetFindingKeys 只收形如 `- l0|check|feature#n` / `- l1|...` 的行：
+// 前缀必须是 P1 单源的作用域，避免把处方块、轮次保护块里的普通列表行误收。
+// 不自行生成或改写 key（身份口径单源，见 finding_round_wiring_test.go）。
+func parseTargetFindingKeys(message string) []string {
+	if !strings.Contains(message, quality.FindingKeysMarker) {
+		return nil
+	}
+	var keys []string
+	seen := make(map[string]bool)
+	for _, raw := range strings.Split(message, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		key := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+		if (!strings.HasPrefix(key, "l0|") && !strings.HasPrefix(key, "l1|")) || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
+	}
+	return keys
+}

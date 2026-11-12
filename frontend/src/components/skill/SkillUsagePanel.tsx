@@ -16,6 +16,22 @@ interface UsageRow {
   channels: string[];
   count: number;
   lastSeen: string;
+  // #114 P2：最近一次关联的 chat turn 与该轮目标发现项稳定 key 快照。
+  lastTurnID: number;
+  findingKeys: string;
+}
+
+// finding_keys 是 P1 单源生成的 JSON 数组；坏数据/旧行按原串展示，不抛异常。
+function formatFindingKeys(raw: string): string {
+  if (!raw) return "";
+  try {
+    const keys = JSON.parse(raw) as unknown;
+    return Array.isArray(keys)
+      ? keys.filter((k): k is string => typeof k === "string").join(" · ")
+      : raw;
+  } catch {
+    return raw;
+  }
 }
 
 // 技能装配用量面板（#111 P0）：把统一账本 skill_invocations 消费掉，
@@ -44,10 +60,16 @@ export default function SkillUsagePanel({ novelId }: Props) {
         channels: [],
         count: 0,
         lastSeen: "",
+        lastTurnID: 0,
+        findingKeys: "",
       };
       row.channels.push(stat.channel);
       row.count += Number(stat.count ?? 0);
       if (stat.last_seen > row.lastSeen) row.lastSeen = stat.last_seen;
+      const turn = Number(stat.last_turn_id ?? 0);
+      if (turn > row.lastTurnID) row.lastTurnID = turn;
+      if (!row.findingKeys && stat.finding_keys)
+        row.findingKeys = stat.finding_keys;
       grouped.set(stat.skill, row);
     }
     return [...grouped.values()].sort(
@@ -102,6 +124,12 @@ export default function SkillUsagePanel({ novelId }: Props) {
                 <th className="px-3 py-2 font-medium">
                   {t("skillMatrix.usage.lastSeen")}
                 </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("skillMatrix.usage.lastTurn")}
+                </th>
+                <th className="px-3 py-2 font-medium">
+                  {t("skillMatrix.usage.findingKeys")}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -120,6 +148,12 @@ export default function SkillUsagePanel({ novelId }: Props) {
                   </td>
                   <td className="px-3 py-1.5 text-muted-foreground">
                     {row.lastSeen.slice(0, 16)}
+                  </td>
+                  <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
+                    {row.lastTurnID > 0 ? `#${row.lastTurnID}` : "—"}
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground">
+                    {formatFindingKeys(row.findingKeys) || "—"}
                   </td>
                 </tr>
               ))}

@@ -1838,7 +1838,20 @@
       "times": "{{count}} times",
       "empty": "No usage records yet",
       "idleTitle": "No records in 30 days",
-      "idleHint": "These skills have no channel records; add a mount point or mark them deprecated."
+      "idleHint": "These skills have no channel records; add a mount point or mark them deprecated.",
+      "lastTurn": "Last turn",
+      "findingKeys": "Linked findings"
+    },
+    "signals": {
+      "title": "Provider failure signals (last 30 days)",
+      "hint": "Output truncation, invalid tool arguments, empty streams and breaker skips grouped by provider x model x task type. Identifiers and counts only, stored locally never uploaded. Use this to tell input/detector issues from model capability.",
+      "provider": "Provider",
+      "model": "Model",
+      "taskKind": "Task type",
+      "signal": "Signal",
+      "count": "Count",
+      "lastDate": "Last date",
+      "times": "{{count}} times"
     }
   },
   "signability": {
@@ -2233,6 +2246,7 @@
         "fixPromptLedger": "Linked ledger: {{list}}",
         "fixPromptWords": "Active chapter length target: {{words}} (detection, fixes and before/after comparison all use this; do not estimate with other numbers).",
         "acceptanceTitle": "【本章验收条件】 (deterministic acceptance criteria from the detector; satisfy each one, do not substitute other numbers or ignore the avoid notes):",
+        "findingKeysTitle": "【本章目标发现项】 (stable detector identifiers used to align this turn's skill injections with cross-round convergence; do not edit or renumber):",
         "fixPromptFooter": "Explain each issue and your proposed edit, and confirm with me before rewriting. I will re-check this chapter afterwards.",
         "findingCounts": {
           "resolved": "{{count}} resolved this round",

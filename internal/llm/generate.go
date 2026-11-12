@@ -27,6 +27,11 @@ func (c *Client) GenerateText(
 
 	// 熔断拦截（P1）：与 ChatStream 共用同一 ProviderBreaker，pipeline 已熔断时同步跳过。
 	if breakerBlockedProvider(providerName) {
+		// #114 P2：GenerateText 不经 agent.RunOptions，任务类型用 generate 兜底。
+		RecordLLMSignal(LLMSignalSample{
+			Provider: providerName, Model: model,
+			TaskKind: TaskKindGenerate, Signal: SignalBreakerOpen,
+		})
 		return "", breakerOpenError(providerName)
 	}
 

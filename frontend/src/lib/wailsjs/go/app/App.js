@@ -334,6 +334,10 @@ export function GetLLMConfig() {
   return window['go']['app']['App']['GetLLMConfig']();
 }
 
+export function GetLLMSignalStats(arg1) {
+  return window['go']['app']['App']['GetLLMSignalStats'](arg1);
+}
+
 export function GetLocationRelations(arg1) {
   return window['go']['app']['App']['GetLocationRelations'](arg1);
 }
