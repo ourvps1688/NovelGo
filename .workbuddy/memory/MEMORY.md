@@ -3,7 +3,7 @@
 ## 环境 / 闸门 / 提交
 - 派生 sigpanic/goink（AGPL-3.0）：README/NOTICE/About 保留 "Based on Goink by 响滩 (sigpanic)"、"This is a modified version of Goink..."。模块 github.com/novelgo/novelgo；dev DB=build/bin/novel-agent.db；origin=ourvps1688/NovelGo。
 - CGO：PATH += `Program Files/Go/bin`, `tools/mingw64/bin`, `go/bin`；CGO_ENABLED=1；CGO_CFLAGS=-IC:/tools/sqlite3-headers；LOCALAPPDATA/GOCACHE/GOLANGCI_LINT_CACHE=C:\Users\Administrator\AppData\Local\go-build。go build/vet/test `-tags webkit2_41`；golangci-lint `--build-tags webkit2_41`；全量 test 加 `-skip '^TestRewriteVoiceABE2E$' -count=1`。
-- 前端闸 format:check/i18n:check/lint/build 用 `npm --prefix frontend`；**test 必须 `cd frontend && ./node_modules/.bin/vitest run --maxWorkers=2`**；set -o pipefail；vite build `CODEBUDDY_SAFE_DELETE_ENABLED=0`；i18n 禁 JSX 中文硬编码；lint 167 warning/0 error 属基线。
+- 前端闸 **六道**：`format:check / i18n:check / theme:check / lint / build / vitest`（`npm --prefix frontend` 除 test 外）；**test 必须 `cd frontend && ./node_modules/.bin/vitest run --maxWorkers=2`**（根目录 npm --prefix 假红）；set -o pipefail；vite build `CODEBUDDY_SAFE_DELETE_ENABLED=0`；i18n 禁 JSX 中文硬编码；**theme:check 禁 Tailwind 调色板色（emerald/amber/blue…）**，一律用 `text-primary`/`text-destructive`/`text-muted-foreground` 等语义类（CI Frontend Checks 第 6 步会拦）；lint 167 warning/0 error 属基线。
 - push `GIT_SSH_COMMAND="ssh -F /c/Users/Administrator/.ssh/config" git push origin master`；代码 + 单独 chore(memory) 双提交；`rev-list --left-right --count origin/master...HEAD`=0 0；Wails 生成物噪声 `git checkout --`（新绑定行手工补回）。pre-commit 需完整 Go 环境、禁 --no-verify；纯 memory 提交 3 条 CI、代码 4 条。
 - 无 sqlite3 CLI→node:sqlite；p0 golden `-run TestP0BaselineRegen -p0-update`。CI 单平台红标先匿名 jobs API 看 job 级结论；#415/#418/#435 外部偶发。Windows-only 静态断言须归一 CRLF；**禁加 `*.go text eol=lf`**。
 
