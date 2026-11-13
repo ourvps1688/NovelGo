@@ -329,10 +329,15 @@ func dedupeTerms(terms []string) []string {
 }
 
 // aiFlavorFinding 把一条去 AI 味命中投影为 C 系发现（rule 入 desc 供 Summary 归因）。
+// #120：advisory 现在与 blocking 同源返回「命中片段 + 所在句」，这里必须一并透出，
+// 处方才能给出真实位置；旧实现只有 rule/Message，LLM 拿不到原文只能猜（连挂 20 轮）。
 func aiFlavorFinding(it text.DeslopIssue) Finding {
 	desc := "AI 味套话 [" + it.Rule + "]：" + it.Message
 	if it.Matched != "" {
 		desc += "（命中：" + it.Matched + "）"
+	}
+	if it.Context != "" && it.Context != it.Matched {
+		desc += "（所在句：" + it.Context + "）"
 	}
 	return Finding{Check: CheckAIFlavor, Desc: desc}
 }

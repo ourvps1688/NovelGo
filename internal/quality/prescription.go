@@ -93,14 +93,23 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 		}
 
 	case CheckPacingDrag:
+		// #120：#114 P3 给 beat_density/beat_gap 与 opening_slope 都补了段级实测 +
+		// 可执行数字，唯独拖沓段还是语感级指令，模型拿不到「改哪一段、差多少」，
+		// 真实第5章 seg 3–5 连挂 9 轮。现与那两处同源，复用同一批检测侧常量。
 		start, end, run := longestFlatRun(curve)
+		diagnosis, targetWhere := dragSegmentDiagnostics(curve, start, end)
 		return Prescription{
-			Criterion: fmt.Sprintf("连续 ≥%d 段 tension < %.0f", pacingDragMinRun, tensionFlatBelow),
-			Current:   fmt.Sprintf("seg %d–%d 连续 %d 段 tension < %.0f", start, end, run, tensionFlatBelow),
-			Target:    fmt.Sprintf("连续平坦段 < %d 段（至少把其中一段抬到 tension ≥ %.0f）", pacingDragMinRun, tensionFlatBelow),
-			Where:     curveRange(curve, start, end),
-			Do:        "在该区间用具体动作细节、对抗升级或短句节奏替换冗余描述",
-			Avoid:     "不要堆直白情绪词或感叹号（与去 AI 味互斥）",
+			Criterion: fmt.Sprintf("连续 ≥%d 段 tension < %.0f；tension = 基线 %.0f + 四指标加权 + 结构信号（structure ≥ %.2f 判结构峰）",
+				pacingDragMinRun, tensionFlatBelow, tensionBase, structuralPeakAt),
+			Current: fmt.Sprintf("seg %d–%d 连续 %d 段 tension < %.0f；%s",
+				start, end, run, tensionFlatBelow, diagnosis),
+			Target: fmt.Sprintf("连续平坦段 < %d 段（只需把其中一段抬到 tension ≥ %.0f）", pacingDragMinRun, tensionFlatBelow),
+			Where:  fmt.Sprintf("%s；优先改 %s", curveRange(curve, start, end), targetWhere),
+			Do: fmt.Sprintf(
+				"定点只改目标段（不要整章重写）：写一处对抗升级/反转，段落里给足 ≥%d 处具体动作或身体细节（动作密度 ≥ %.2f 次/百字），并把 ≤%d 字短句占比提到 ≥ %.2f；改完重新检测看该段 tension 是否过 %.0f",
+				beatActionHitsNeeded(), tensionActionCap,
+				tensionShortSentenceMax, tensionShortRatioCap, tensionFlatBelow),
+			Avoid: "不要堆直白情绪词或感叹号（与去 AI 味互斥）；不要靠堆武侠冲突词，非武侠题材该词表恒 0，只能靠动作细节 + 短句节奏抬 structure",
 		}
 
 	case CheckBeatGap, CheckBeatDensity:
@@ -149,13 +158,16 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 		}
 
 	case CheckAIFlavor:
+		// #120：判定是「全章存在性/密度」而非「单处」，旧处方却让 LLM 以为改掉
+		// 一个片段就达标，且 Where 指向当时根本不存在的命中标注（advisory 旧实现
+		// Matched/Context 全空）。现与 deslop.go 的逐处命中透出同源，明确清零口径。
 		return Prescription{
-			Criterion: "命中 internal/text/deslop.go 的 blocking/advisory 规则",
-			Current:   "见发现描述中的命中片段",
-			Target:    "该片段不再命中任一 deslop 规则",
-			Where:     "发现描述标注的命中处",
-			Do:        "改写为具体动作或场景细节（show-not-tell）",
-			Avoid:     "不要用另一句套话替换套话，也不要新增直白情绪词/感叹号",
+			Criterion: "全章正文任一处命中 internal/text/deslop.go 的 blocking/advisory 规则即报（同一规则多处命中仍算该规则命中）",
+			Current:   f.Desc,
+			Target:    "该规则在全章清零（不是只改这一处：别处还有命中，重新检测仍会报）",
+			Where:     "发现描述里的「（命中：…）」与「（所在句：…）」逐处定位",
+			Do:        "逐处只改命中句：把套话换成具体动作、物件或台词，其余正文原样保留；改完重新检测确认该规则整章清零，不要整章重写",
+			Avoid:     "不要用另一句套话替换套话，不要在别处改用同义表达（会重新命中）；不要新增直白情绪词/感叹号",
 		}
 
 	case "reader_state", "continuity", "foreshadow", "pacing", "immersion_anchor", "task_card":
@@ -217,6 +229,36 @@ func beatSegmentDiagnostics(curve []TensionPoint) (string, string) {
 	where := fmt.Sprintf("seg %d（字 %d–%d，约 %.0f 字）", best.Seg, best.StartRune, best.EndRune,
 		best.Metrics[tensionMetricRunes])
 	return diagnosis, where
+}
+
+// dragSegmentDiagnostics 给拖沓段处方的段级实测口径：列出平坦 run 内每段
+// tension/structure/动作/短句实测，并在其中挑出「离达标最近」的段（structure
+// 最高）作为优先改写目标。LLM 因此看得见差在哪一项、改哪一段最省字，而不是
+// 只知道「seg 3–5 太平」然后整章加散点动作。
+func dragSegmentDiagnostics(curve []TensionPoint, start, end int) (string, string) {
+	var segs []TensionPoint
+	for _, pt := range curve {
+		if pt.Seg >= start && pt.Seg <= end {
+			segs = append(segs, pt)
+		}
+	}
+	if len(segs) == 0 {
+		return "曲线为空（重新检测本章后可见段级信号）", fmt.Sprintf("seg %d–%d", start, end)
+	}
+	best := segs[0]
+	parts := make([]string, 0, len(segs))
+	for _, pt := range segs {
+		parts = append(parts, fmt.Sprintf(
+			"seg %d tension %.1f / structure %.2f（动作 %.2f/百字、短句占比 %.2f）",
+			pt.Seg, pt.Tension, pt.Metrics[tensionMetricStructural],
+			pt.Metrics[tensionMetricAction], pt.Metrics[tensionMetricShortRatio]))
+		if pt.Metrics[tensionMetricStructural] > best.Metrics[tensionMetricStructural] {
+			best = pt
+		}
+	}
+	where := fmt.Sprintf("seg %d（字 %d–%d，约 %.0f 字）", best.Seg, best.StartRune, best.EndRune,
+		best.Metrics[tensionMetricRunes])
+	return strings.Join(parts, "；"), where
 }
 
 // curveRange 把段序区间映射成「seg a–b（字 x–y）」的可读位置。

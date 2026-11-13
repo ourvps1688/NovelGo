@@ -124,10 +124,14 @@ func TestAdvisoryIssues_FlagsDensity(t *testing.T) {
 		t.Errorf("expected negation-flip for %q", flip)
 	}
 
-	// tell-not-show
-	tell := "他知道这一切都来不及了。"
+	// tell-not-show：#120 与规则注释「单处可留，复现时改」同源，需 ≥2 处才提示。
+	// 单处常是角色的正当经验判断（真实第5章误报连挂 16 轮）。
+	tell := "他知道这一切都来不及了。她意识到门已经从外面锁死。"
 	if !hasRule(AdvisoryIssues(tell), "tell-not-show") {
-		t.Errorf("expected tell-not-show for %q", tell)
+		t.Errorf("expected tell-not-show for repeated occurrences %q", tell)
+	}
+	if hasRule(AdvisoryIssues("他知道这一切都来不及了。"), "tell-not-show") {
+		t.Error("single tell-not-show occurrence should stay allowed (advisoryMinHits)")
 	}
 
 	// 从 blocking 降级的合法常用语：advisory 提示但不硬拒
@@ -157,6 +161,52 @@ func TestAdvisoryIssues_CleanNotFlagged(t *testing.T) {
 	clean := "他把信折好。门没锁。她笑了。雨从下午下到天黑。"
 	if issues := AdvisoryIssues(clean); len(issues) > 0 {
 		t.Errorf("clean prose flagged: %+v", issues)
+	}
+}
+
+// TestAdvisoryIssuesLocatesEveryHit #120：advisory 必须与 blocking 同源给出
+// 「命中片段 + 所在句」，否则 L0 发现描述里没有原文、验收处方的「位置」是空指。
+// 同时保持「一条规则一条 issue」，让 #114 的 FindingKeys 同组序号不因改一处而漂移。
+func TestAdvisoryIssuesLocatesEveryHit(t *testing.T) {
+	body := "他知道门没锁。她意识到屋里没人。"
+	issues := AdvisoryIssues(body)
+	var got *DeslopIssue
+	count := 0
+	for i := range issues {
+		if issues[i].Rule == "tell-not-show" {
+			got = &issues[i]
+			count++
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected tell-not-show issue, got %+v", issues)
+	}
+	if count != 1 {
+		t.Errorf("one rule must yield one issue, got %d", count)
+	}
+	if got.Matched == "" || got.Context == "" {
+		t.Errorf("advisory issue must carry Matched and Context: %+v", *got)
+	}
+	for _, want := range []string{"他知道门没锁", "她意识到屋里没人"} {
+		if !strings.Contains(got.Context, want) {
+			t.Errorf("context must list every hit sentence %q, got %q", want, got.Context)
+		}
+	}
+}
+
+// TestAdvisoryIssuesRealProseWhiteDescription #120 真实语料回归：
+// 第5章《无档》两处被旧口径连报 20/16 轮的正当白描，不得再误伤；
+// 明确的抽象程度状语指纹仍必须报。
+func TestAdvisoryIssuesRealProseWhiteDescription(t *testing.T) {
+	white := "内环的风从码头那头刮过来，带着清洁剂的味，闻着比枪油还生。\n这十五公里，他知道自己这两条腿值多少。"
+	for _, it := range AdvisoryIssues(white) {
+		if it.Rule == "universal-adverb" || it.Rule == "tell-not-show" {
+			t.Errorf("clean white description wrongly flagged as %s: %+v", it.Rule, it)
+		}
+	}
+	cliche := "她带着一丝不易察觉的笑意，把表推回来半寸。"
+	if !hasRule(AdvisoryIssues(cliche), "universal-adverb") {
+		t.Errorf("expected universal-adverb for %q", cliche)
 	}
 }
 

@@ -157,13 +157,24 @@ var advisoryRegexRules = []struct {
 
 	{"negation-flip", regexp.MustCompile(`不是[^。！？\n]{1,10}(而)?是`), "「不是A而是B」是常见 AI 否定铺垫翻转句式，直接写肯定内容或用具象动作承担对比"},
 	{"negation-parade", regexp.MustCompile(`没有[^。！？\n]{0,8}没有`), "「没有X没有Y」否定铺排是 AI 句式，压成一次直述或只留一项"},
-	{"universal-adverb", regexp.MustCompile(`，带着|带着(一丝|一抹|几分)`), "「，带着…」万能状语是 AI 套路，删掉状语或换具体动作"},
+	// #120：旧口径把「逗号 + 带着 + 具体物件/气味」这种正当白描一律判成万能状语
+	// （真实第5章「风…带着清洁剂的味」连挂 20 轮）。真正的 AI 指纹是后面接
+	// 抽象程度名词的状语，故只保留「带着一丝/一抹/几分」。
+	{"universal-adverb", regexp.MustCompile(`带着(一丝|一抹|几分)`), "「带着一丝/一抹/几分」抽象程度状语是 AI 套路，删掉状语或换具体动作"},
 	{"tell-not-show", regexp.MustCompile(`(他|她)(知道|感到|意识到|明白)`), "「他知道/感到/意识到」是 tell-not-show，用行为展示认知而非告知"},
 
 	// 从 blocking 降级（避免过度拒稿）：古风/历史题材真人常用连词，统一硬拒会误伤该类题材
 	{"god-view-soft", regexp.MustCompile(`殊不知|仿佛预示着`), "「殊不知/仿佛预示着」在古风/历史题材为真人自然连词，叙述中偶用可留；成片复现时改用具体动作或对话承担转折"},
 	// 从 blocking 降级：可能落在角色真实情绪顿悟点，不再硬拒，改为写后自检提示
 	{"epiphany-soft", regexp.MustCompile(`这一刻(终于|，)?(他|她)?(终于)?明白`), "「这一刻（终于）明白」可能落在真实情绪点；写后自检时确认是否可用动作/场景收束，避免升华式套话"},
+}
+
+// advisoryMinHits 是与上方规则注释「单处可留，复现时改」「少量可保留；
+// 成片出现则…」同源的密度门槛：命中数不足该值的规则不报（未列出 = 单处即报）。
+// #120：tell-not-show 单处常是角色的正当经验判断（真实第5章「他知道自己这两条
+// 腿值多少」），旧实现用布尔存在性判定，一处即报，与规则设计口径相反。
+var advisoryMinHits = map[string]int{
+	"tell-not-show": 2,
 }
 
 var (
@@ -189,10 +200,31 @@ var (
 func AdvisoryIssues(s string) []DeslopIssue {
 	var issues []DeslopIssue
 
+	// #120：旧实现只做布尔 MatchString，Matched/Context 全空，导致 L0 发现描述
+	// 里没有命中片段，而验收处方却写「位置：发现描述标注的命中处」——LLM 只能
+	// 猜位置、停下来等人贴原文（真实第5章 ai_flavor 连挂 20 轮）。现与 blocking
+	// 同源：逐处取实际命中 + 所在句，聚合成「一条规则一条 issue」，既让处方有
+	// 精确定位，又保持 FindingKeys 的「同组序号」稳定（避免改一处后 key 漂移）。
 	for _, r := range advisoryRegexRules {
-		if r.re.MatchString(s) {
-			issues = append(issues, DeslopIssue{Rule: r.rule, Message: r.message})
+		locs := r.re.FindAllStringIndex(s, -1)
+		minHits := advisoryMinHits[r.rule]
+		if minHits < 1 {
+			minHits = 1
 		}
+		if len(locs) < minHits {
+			continue
+		}
+		var matched, contexts []string
+		for _, loc := range locs {
+			matched = append(matched, truncate(s[loc[0]:loc[1]], 16))
+			contexts = append(contexts, contextAround(s, loc[0], loc[1]))
+		}
+		issues = append(issues, DeslopIssue{
+			Rule:    r.rule,
+			Matched: strings.Join(dedupeStrings(matched), " / "),
+			Context: strings.Join(dedupeStrings(contexts), "\n"),
+			Message: r.message,
+		})
 	}
 
 	if c := countAny(s, microActionWords); c >= 3 {
@@ -216,6 +248,22 @@ func AdvisoryIssues(s string) []DeslopIssue {
 			Message: "弱化副词（微微/淡淡/缓缓/轻轻）密度超过每千字3个，孤立自然使用可保留，成串时替换"})
 	}
 	return issues
+}
+
+// dedupeStrings 归一化命中片段/所在句：去空去重、保持首次出现顺序（确定性）。
+// 同一句里多处命中会产出相同上下文，合并后 LLM 不会收到重复指令。
+func dedupeStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 func countAny(s string, words []string) int {

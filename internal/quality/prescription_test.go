@@ -131,6 +131,48 @@ func TestReconcileFindingConflicts(t *testing.T) {
 		"无互斥项时逐字保持缺省行为")
 }
 
+// TestPacingDragPrescriptionIsExecutable #120：#114 P3 补过 beat/opening 的
+// 段级实测，拖沓段曾是唯一只给语感指令的曲线类处方（真实第5章 seg 3–5 挂 9 轮）。
+func TestPacingDragPrescriptionIsExecutable(t *testing.T) {
+	curve := []TensionPoint{
+		{Seg: 0, StartRune: 0, EndRune: 399, Tension: 30,
+			Metrics: map[string]float64{tensionMetricStructural: 0.50}},
+		{Seg: 1, StartRune: 400, EndRune: 799, Tension: 12,
+			Metrics: map[string]float64{tensionMetricStructural: 0.22, tensionMetricAction: 0.20, tensionMetricShortRatio: 0.18, tensionMetricRunes: 400}},
+		{Seg: 2, StartRune: 800, EndRune: 1199, Tension: 10,
+			Metrics: map[string]float64{tensionMetricStructural: 0.31, tensionMetricAction: 0.40, tensionMetricShortRatio: 0.25, tensionMetricRunes: 400}},
+		{Seg: 3, StartRune: 1200, EndRune: 1599, Tension: 14,
+			Metrics: map[string]float64{tensionMetricStructural: 0.18, tensionMetricAction: 0.10, tensionMetricShortRatio: 0.12, tensionMetricRunes: 400}},
+	}
+	start, end, run := longestFlatRun(curve)
+	require.Equal(t, 3, run, "测试曲线须构造出连续 3 段平坦")
+
+	line := RenderPrescriptions(BuildPrescriptions(
+		[]Finding{{Check: CheckPacingDrag}}, curve, 3000, ChapterWordsTarget{}))[0]
+	for _, want := range []string{
+		fmt.Sprintf("seg %d–%d", start, end),
+		"优先改 seg 2", // structure 最高的段 = 最省字的改写目标
+		"处具体动作", "不要整章重写", "只需把其中一段", "structure",
+		fmt.Sprintf("%.0f", tensionFlatBelow),
+	} {
+		assert.Contains(t, line, want, "拖沓段处方必须给段级实测与可执行数字：%q", want)
+	}
+}
+
+// TestAIFlavorPrescriptionRequiresFullChapterClear #120：判定是全章存在性/密度，
+// 处方必须要求整章清零并指向 desc 里的真实命中句，不能让 LLM 以为改一处就达标。
+func TestAIFlavorPrescriptionRequiresFullChapterClear(t *testing.T) {
+	f := Finding{Check: CheckAIFlavor,
+		Desc: "AI 味套话 [universal-adverb]：抽象程度状语（命中：带着一丝）（所在句：她带着一丝笑意，把表推回来。）"}
+	line := RenderPrescriptions(BuildPrescriptions(
+		[]Finding{f}, nil, 3000, ChapterWordsTarget{}))[0]
+	for _, want := range []string{
+		"全章清零", "逐处只改命中句", "命中：", "所在句：", "不要整章重写", f.Desc,
+	} {
+		assert.Contains(t, line, want, "去 AI 味处方必须同源透出命中位置：%q", want)
+	}
+}
+
 func TestOpeningSlopeDirectionMatchesPrescription(t *testing.T) {
 	// #116：写作规范「第一句出事 / 冷开场」让首段高压，必须达标——旧判定
 	// 只认「后段 − 首段 ≥5.0」，越合规越被报，正是反复改稿消不掉的根因。
