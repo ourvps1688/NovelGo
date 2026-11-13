@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // 台账对账检查项标识（Check 字段取值，封闭枚举）。
@@ -120,16 +122,7 @@ func labelsPreview(labels []string) string {
 		if len([]rune(lb)) < reconcileMinLabelRunes {
 			continue
 		}
-		return oneLine(truncateRunes(lb, 30))
+		return oneLine(text.TruncateRunes(lb, 30))
 	}
 	return "无标签"
-}
-
-// truncateRunes 按 rune 截断（超长加省略号）。
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }

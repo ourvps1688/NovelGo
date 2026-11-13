@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // titleFallbackRunes 是 Title 缺省时从 Description 截取的 rune 数。
@@ -87,7 +89,7 @@ func (s *Service) CreateCandidate(ctx context.Context, in CreateInput) (*RetconC
 	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
-		title = truncateRunes(strings.TrimSpace(in.Description), titleFallbackRunes)
+		title = text.TruncateRunes(strings.TrimSpace(in.Description), titleFallbackRunes)
 	}
 	if title == "" {
 		return nil, errors.New("retcon: title/description 至少填一项")
@@ -322,13 +324,4 @@ func (s *Service) commitCanon(ctx context.Context, cur *RetconCase) error {
 	}
 	_, err := s.commitSnapshot(ctx, cur.NovelID, *cur.VolumeID)
 	return err
-}
-
-// truncateRunes 截取前 n 个 rune（超出加省略号）。
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }

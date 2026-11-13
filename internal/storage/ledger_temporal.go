@@ -12,6 +12,8 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
+
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // ── temporal/history 写路径（WBS 2.6 / G3）────────────────────────────
@@ -458,17 +460,9 @@ func ledgerLabel(db *gorm.DB, sch *schema.Schema, row reflect.Value) string {
 		if s == "" {
 			continue
 		}
-		return truncateRunes(s, 120)
+		return text.TruncateRunes(s, 120)
 	}
 	return ""
-}
-
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }
 
 // ── 写入与 source 判定 ───────────────────────────────────────────────

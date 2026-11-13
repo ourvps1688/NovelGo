@@ -12,6 +12,10 @@ import (
 	"github.com/novelgo/novelgo/internal/config"
 )
 
+// DefaultStatDays 是本地统计查询的默认窗口（天）。
+// #117 P0：此前 5 处各自硬编码 30，改窗口容易漏改。
+const DefaultStatDays = 30
+
 // Store 负责每日统计的尽力记录；写入失败只告警，不向业务调用方返回错误。
 type Store struct {
 	db     *gorm.DB
@@ -133,7 +137,7 @@ func (s *Store) AddFeatureUsage(ctx context.Context, featureKey string) {
 // days 非正时按 30 天；查询失败返回错误，由调用方静默降级为空表。
 func (s *Store) ListFeatureUsage(ctx context.Context, days int) ([]FeatureUsageStat, error) {
 	if days <= 0 {
-		days = 30
+		days = DefaultStatDays
 	}
 	since := s.now().AddDate(0, 0, -(days - 1)).Format(time.DateOnly)
 	var stats []FeatureUsageStat
@@ -173,7 +177,7 @@ func (s *Store) AddExecStat(ctx context.Context, stat ExecStat) {
 // 查询失败返回错误，由调用方静默降级为空表。
 func (s *Store) SummarizeExecStats(ctx context.Context, days int) ([]ExecStatSummary, error) {
 	if days <= 0 {
-		days = 30
+		days = DefaultStatDays
 	}
 	// 窗口起点=近 days 天前的本地零点（含今天），时间值绑定避免驱动格式差异。
 	dayStart := s.now().AddDate(0, 0, -(days - 1))

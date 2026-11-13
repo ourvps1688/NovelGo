@@ -100,7 +100,7 @@ func (s *Store) AddSkillInvocation(ctx context.Context, inv SkillInvocation) {
 // 空 skill 的通道级事件不参与技能用量统计。
 func (s *Store) SummarizeSkillInvocations(ctx context.Context, days int) ([]SkillInvocationStat, error) {
 	if days <= 0 {
-		days = 30
+		days = DefaultStatDays
 	}
 	dayStart := s.now().AddDate(0, 0, -(days - 1))
 	since := time.Date(dayStart.Year(), dayStart.Month(), dayStart.Day(), 0, 0, 0, 0, dayStart.Location())

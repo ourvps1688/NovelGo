@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // deltaSummaryBudgetBytes 是差异摘要文本的预算上限：超限按行截断并标注。
@@ -33,7 +35,7 @@ func FormatDelta(d *Delta) string {
 			for _, field := range sortedFieldNames(ch.Fields) {
 				fd := ch.Fields[field]
 				fmt.Fprintf(&b, "  ~ #%d %s: %s → %s\n", ch.ID, field,
-					truncateRunes(formatVal(fd.Old), maxValRunes), truncateRunes(formatVal(fd.New), maxValRunes))
+					text.TruncateRunes(formatVal(fd.Old), maxValRunes), text.TruncateRunes(formatVal(fd.New), maxValRunes))
 			}
 		}
 	}
@@ -73,13 +75,4 @@ func formatVal(v any) string {
 		return fmt.Sprintf("%q", s)
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-// truncateRunes 截取前 n 个 rune（超出加省略号）。
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }

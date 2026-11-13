@@ -61,3 +61,26 @@ func ComputeStats(s string) Stats {
 
 	return st
 }
+
+// TruncateRunes 按 rune 边界把 s 截到至多 n 个 rune，超出时追加省略号。
+// #117 P0：此前 retcon / snapshot / storage / structure 各持一份逐字相同的
+// 私有实现，统一收到纯文本层单源；app/chapter_precontext.go 的变体追加
+// 「（已截断）」标注、语义不同，刻意不并入。
+func TruncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// ContainsAny 判断 text 是否含 signals 中任一非空信号词。
+// #117 P0：此前 quality 与 structure 各持一份逐字相同的私有实现。
+func ContainsAny(text string, signals []string) bool {
+	for _, s := range signals {
+		if s != "" && strings.Contains(text, s) {
+			return true
+		}
+	}
+	return false
+}

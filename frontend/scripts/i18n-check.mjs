@@ -341,6 +341,36 @@ if (hardcodedFindings.length > 0) {
   console.log('  ✅ No hardcoded Chinese found in source files\n')
 }
 
+// Check 5 (advisory only): possibly unreferenced i18n keys
+// #117 P0：此前护栏只查双语一致性/重复 key，死文案会持续累积。
+// 动态拼接的 key（t(`prefix.${x}`) / t('prefix.' + x)）无法静态识别，
+// 因此显式登记这些前缀；新增动态组时把前缀补进 DYNAMIC_KEY_PREFIXES。
+// 故意只报告、不 error()：静态分析存在假阳性，不能让护栏把 CI 变红。
+console.log('📋 Reporting possibly unreferenced keys (advisory, never fails CI)...')
+const DYNAMIC_KEY_PREFIXES = [
+  'journey.quality.detect.findingStatus',
+  'journey.quality.detect.scoreTrend.sources',
+  'journey.quality.detect.scoreTrend.judgeDims',
+  'pipeline.issueTags.direction',
+  'pipeline.issueTags.scope',
+  'pipeline.issueTags.dimension',
+  'pipeline.tickets.status',
+  'pipeline.retcon.status',
+  'signability.dimensions',
+  'chapterManagement.blockerKind',
+  'chat.skillPicker.source',
+  'bookpitch.stage',
+]
+const sourceText = sourceFiles.map(f => readFileSync(f, 'utf-8')).join('\n')
+const fullPathMisses = [...zhKeys].filter(k => !sourceText.includes(k))
+const orphanCandidates = fullPathMisses.filter(k => !DYNAMIC_KEY_PREFIXES.some(p => k.startsWith(p)))
+console.log(`  ℹ️ ${zhKeys.size} leaf keys / ${fullPathMisses.length} full-path misses / ${orphanCandidates.length} candidates after dynamic-key exclusion`)
+if (orphanCandidates.length > 0) {
+  console.log(`  ⚠️ candidates (first 20): ${orphanCandidates.slice(0, 20).join(', ')}`)
+  console.log('  ⚠️ advisory only — confirm dynamic template keys before deleting')
+}
+console.log()
+
 // ── Summary ──
 if (hasErrors) {
   console.log('\n❌ i18n check FAILED — fix the errors above before merging.')

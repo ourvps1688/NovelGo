@@ -55,7 +55,7 @@ type skillEffectSnapshot struct {
 // 由调用方静默降级为空表。空 skill / 空 finding_keys 的装配事件不参与。
 func (s *Store) SummarizeSkillEffects(ctx context.Context, days int) ([]SkillEffectStat, error) {
 	if days <= 0 {
-		days = 30
+		days = DefaultStatDays
 	}
 	dayStart := s.now().AddDate(0, 0, -(days - 1))
 	since := time.Date(dayStart.Year(), dayStart.Month(), dayStart.Day(), 0, 0, 0, 0, dayStart.Location())

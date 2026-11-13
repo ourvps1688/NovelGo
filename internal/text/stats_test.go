@@ -1,6 +1,7 @@
 package text
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -116,5 +117,48 @@ func TestComputeStats_LargeText(t *testing.T) {
 	}
 	if s.LineCount != 1001 { // 1000 个 \n → 1001 行
 		t.Errorf("expected 1001 lines, got %d", s.LineCount)
+	}
+}
+
+// TestSharedHelpersSingleSource #117 P0：TruncateRunes / ContainsAny 是全库唯一
+// 实现，禁止各包再复制一份私有副本（app/chapter_precontext.go 的变体追加
+// 「（已截断）」标注、语义不同，刻意保留）。
+func TestSharedHelpersSingleSource(t *testing.T) {
+	if got := TruncateRunes("一二三四五", 3); got != "一二三…" {
+		t.Errorf("TruncateRunes: got %q", got)
+	}
+	if got := TruncateRunes("abc", 5); got != "abc" {
+		t.Errorf("TruncateRunes should keep short input: got %q", got)
+	}
+	if !ContainsAny("他忽然停下脚步", []string{"", "停下"}) {
+		t.Error("ContainsAny should ignore empty signals and hit non-empty ones")
+	}
+	if ContainsAny("他忽然停下脚步", []string{"", "奔跑"}) {
+		t.Error("ContainsAny should return false when nothing hits")
+	}
+	for _, f := range []string{
+		"../retcon/service.go",
+		"../snapshot/format.go",
+		"../storage/ledger_temporal.go",
+		"../structure/ledger_check.go",
+		"../structure/plan_check.go",
+		"../quality/l0.go",
+		"../quality/tension.go",
+	} {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		src := strings.ReplaceAll(string(raw), "\r\n", "\n")
+		if strings.Contains(src, "func truncateRunes(") || strings.Contains(src, "func containsAny(") {
+			t.Errorf("%s 又复制了私有小工具，请使用 text.TruncateRunes / text.ContainsAny", f)
+		}
+	}
+	pre, err := os.ReadFile("../../app/chapter_precontext.go")
+	if err != nil {
+		t.Fatalf("read chapter_precontext.go: %v", err)
+	}
+	if !strings.Contains(string(pre), "func truncateRunes(") {
+		t.Error("app/chapter_precontext.go 的「（已截断）」变体是有意保留的独立语义，不得误删")
 	}
 }

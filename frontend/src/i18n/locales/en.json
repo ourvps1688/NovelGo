@@ -1973,20 +1973,10 @@
     "title": "Detection Core",
     "detectCoreHint": "Detection tasks can be launched anytime, independent of the writing pipeline. Findings are collected as tickets; fixing is always manual.",
     "fromSignabilityHint": "You entered Detection Core from the Signability workflow. Detection Core is a hub summarizing every detection: the Issues tickets below collect findings from all detections across the book (including the signability book detection you just ran) — confirm, fix, and re-verify them here. The Consistency Patrol (Tension Report) is a separate structure detection module that only reports forward-adaptation drift tensions; it is unrelated to the signability assessment.",
-    "autoRun": "Auto Run",
-    "alignFull": "Full Align",
-    "alignFullHint": "Run full alignment on the imported book: build volume, backfill ledger, and run a whole-book signability audit",
     "empty": "No pipeline run is in progress.",
     "presetHint": "Orchestration preset: a one-click shell chaining writing → detection. Detection entries live in the Quality journey; running detection only or the preset only are both legitimate. The preset orchestrates but does not replace the detection core.",
     "start": "Start Pipeline",
     "continue": "Continue",
-    "checkProgress": "Check Writing Progress",
-    "reaudit": "Run Audit / Re-check",
-    "reauditHint": "Run a signability audit / re-check on current progress. Results are summarized in the detection summary card; you decide whether to proceed.",
-    "hint": {
-      "s1": "Incubating blueprint — finish the outline and settings on the left, then click Continue.",
-      "s3": "Writing chapter by chapter — keep writing according to the volume outline. Every 5 chapters, or when crossing into a new volume, the system suggests an audit re-check (non-blocking; writing is never interrupted). Click \"Check Writing Progress\" to trigger that check, or use \"Run Audit / Re-check\" anytime."
-    },
     "issueTags": {
       "direction": {
         "forward_fix": "Forward fix",
@@ -2164,10 +2154,6 @@
       "auditClean": "Ledger consistent: no structural contradictions ({{n}} warnings, they do not block freezing).",
       "auditErrors": "Found {{n}} structural contradictions (freeze will be rejected):",
       "auditWarnings": "Suspicious but legal (warnings, do not block freezing):"
-    },
-    "ended": {
-      "finished": "Pipeline finished.",
-      "aborted": "Pipeline aborted."
     }
   },
   "journey": {

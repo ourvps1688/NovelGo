@@ -29,7 +29,8 @@ type fallbackCase struct {
 }
 
 // fallbackDataset 是人工编纂的模糊消息集，每个都对应一个明确意图但用口语化、不含 cue 的方式表达。
-// 覆盖全部 17 个内置技能 + 若干负面（不应命中）样本。
+// 覆盖 17 个 chat 可路由技能（#117 口径修正：builtin 现值 23 个，其余 6 个
+// internalOnly 技能由流水线直接派发、不进 LLM 意图兜底分母）+ 若干负面（不应命中）样本。
 var fallbackDataset = []fallbackCase{
 	// worldbuilding-design
 	{msg: "我想搭一套自洽的力量强弱逻辑和进阶路线，前后别矛盾", expect: "worldbuilding-design"},

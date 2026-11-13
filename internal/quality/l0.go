@@ -416,16 +416,6 @@ func dropSubsumedForms(matched []string) []string {
 	return out
 }
 
-// containsAny 文本含任一信号词（与 structure 同名小工具各包自持，不跨包导出）。
-func containsAny(text string, signals []string) bool {
-	for _, s := range signals {
-		if s != "" && strings.Contains(text, s) {
-			return true
-		}
-	}
-	return false
-}
-
 // powerHit 是战斗结果动词在正文中的一处命中（字节位置）。
 type powerHit struct {
 	pos  int
@@ -478,11 +468,11 @@ func powerOutcomeFinding(body string, hit powerHit, levels []PowerLevelRef) *Fin
 			}
 			window := body[start:end]
 			switch {
-			case containsAny(window, powerDominanceSignals):
+			case text.ContainsAny(window, powerDominanceSignals):
 				return &Finding{Check: CheckPowerCrush,
 					Desc: fmt.Sprintf("正文出现低境界碾压高境界描写：「%s」（rank %d）碾压「%s」（rank %d）（战力/境界数值序违例，请补代价改写或调整境界表）",
 						name, lo.Rank, hname, hi.Rank)}
-			case containsAny(window, powerCostSignals):
+			case text.ContainsAny(window, powerCostSignals):
 				return nil // 有代价的越级胜利不违例（规则只管「无代价」）
 			default:
 				return &Finding{Check: CheckPowerUpset,

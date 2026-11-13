@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -157,4 +158,19 @@ func TestBuildAutoSkillInject_InternalOnlyRedirect(t *testing.T) {
 	}
 	require.Contains(t, inject, "工单面板")
 	require.NotContains(t, inject, "【写章技法", "内部工作流消息不得误触发写章技法包")
+}
+
+// TestWritingBundleCapObservability #117 P0：整块帽只跳过当前技能（continue），
+// 不得回退成 break 把后面更短的条件技法一并挡掉；截断/跳过必须留下本地可观测记录。
+func TestWritingBundleCapObservability(t *testing.T) {
+	raw, err := os.ReadFile("slash_command.go")
+	require.NoError(t, err)
+	src := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	require.Contains(t, src, "if total+len(runes) > writingBundleBlockCap {")
+	require.NotContains(t, src, "if total+len(runes) > writingBundleBlockCap {\n\t\t\tbreak",
+		"整块帽不得回退成 break（会让一个超帽技能挡掉后续所有条件技法）")
+	require.Contains(t, src, `"写章技法因整块帽跳过"`)
+	require.Contains(t, src, `"写章技法按单技能帽截断"`)
+	require.Contains(t, src, "raw_runes", "必须记录原始长度，否则截断比例不可观测")
+	require.Contains(t, src, "writingBundleBlockCap = 9000", "三个帽数值不得回退")
 }

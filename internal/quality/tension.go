@@ -30,6 +30,8 @@ import (
 	"unicode"
 
 	"gorm.io/gorm"
+
+	"github.com/novelgo/novelgo/internal/text"
 )
 
 // 曲线来源（source 枚举，禁造值）。
@@ -513,7 +515,7 @@ func hasTensionHookSignal(seg string) bool {
 		strings.HasSuffix(trimmed, "…") || strings.HasSuffix(trimmed, "……") {
 		return true
 	}
-	return containsAny(seg, tailHookSignals)
+	return text.ContainsAny(seg, tailHookSignals)
 }
 
 // clamp01 截断到 [0,1]。

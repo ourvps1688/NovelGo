@@ -1,5 +1,7 @@
 # NovelGo 流水线闭环补全 — 开发计划（A+B 方案）
 
+> **【已作废 · 2026-11-13 · 历史快照，勿作为施工依据】** 本文写于 2026-10，其中 `signability-fix` / `blueprint-fix` / `chapter-rewrite` / `blueprint-drift-check` 等**后台自动派发修复链已整体下线**。当前总纪律是「**所有修复都走 chat、零自动修复、零自动派发执行体**」，检测四 kind 独立启动 → 发现项 → 人工确认 → chat 人工修复 → 显式复验。文中所有「待新增／待改动／待派发」只反映当时状态；现行 builtin 技能 23 个，`StartPipeline` / `PipelineWizard` / `SignabilityAuditView` 已禁用。**勿按本文恢复任何技能、执行体或后台修复链。** 现状以 `docs/TECHNICAL_STATUS_AND_GUARDRAILS.md` 与 `AGENTS.md` 为准。
+>
 > 配套设计评审结论：当前流水线「骨架」已成型，但**蓝图阶段缺判→修闭环**、**审计非确定性（仅抽样）且缺读者视角维度**、**针对性修复停留在改章症状层、无法真正协调蓝图/角色/弧线/时间线/读者视角**。
 > 本文档把评审结论落为可执行计划：A 方案补蓝图判→修闭环，B 方案把审计升 8 维（含读者视角）+ 全台账一致性核查，并把修复升级为「蓝图驱动向下传播」。
 > 约定同 `pipeline-development-plan.md`：界面中文、文案必须进 i18n；前端改后需 `npm run build` + 重启 `wails dev`；Go 提交前过 gofmt + golangci-lint + `prettier --check` + `i18n:check`。

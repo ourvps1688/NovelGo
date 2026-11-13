@@ -266,13 +266,23 @@ func (a *App) buildWritingSkillBundle(ctx context.Context, novelID int64, messag
 			cap = writingBundleCoreSkillCap
 		}
 		runes := []rune(sk.Content)
+		rawRunes := len(runes)
 		truncated := false
 		if len(runes) > cap {
 			runes = runes[:cap]
 			truncated = true
+			// #117 P0：此前截断只在注入文本里加一句「技法节选」，账本只记截断后
+			// runes，三个帽的实际效果完全不可观测。补纯本地 Debug（无新表、不上传）。
+			a.logger.Debug("写章技法按单技能帽截断", "skill", name,
+				"raw_runes", rawRunes, "kept_runes", cap, "cap", cap)
 		}
 		if total+len(runes) > writingBundleBlockCap {
-			break
+			// #117 P0：旧 break 会让一个超帽技能把后面所有更短的条件技法一并挡掉；
+			// 改为 continue，只跳过当前技能，让余下候选继续按帽竞争。
+			a.logger.Debug("写章技法因整块帽跳过", "skill", name,
+				"raw_runes", rawRunes, "kept_runes", len(runes),
+				"total_before", total, "cap", writingBundleBlockCap)
+			continue
 		}
 		if len(names) > 0 {
 			b.WriteString("\n\n")

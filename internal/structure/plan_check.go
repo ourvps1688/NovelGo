@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	textutil "github.com/novelgo/novelgo/internal/text"
 )
 
 // 写前对账检查项标识单源（发现 Check 字段取自此，禁两处各写一份）。
@@ -176,7 +178,7 @@ func CheckChapterPlan(in PlanCheckInput) []StructFinding {
 				if text == "" {
 					continue
 				}
-				if hitName := matchPlanNames(text, names); hitName != "" && containsAny(text, planDeathSignals) {
+				if hitName := matchPlanNames(text, names); hitName != "" && textutil.ContainsAny(text, planDeathSignals) {
 					add(CheckPlanAlive,
 						fmt.Sprintf("%s 计划让「%s」在承诺窗口内死亡，违反书写不变量「%s」（第 %d 章前不死，请改写计划）",
 							f.Name, hitName, pin.Statement, params.BeforeReadingNumber),
@@ -284,8 +286,8 @@ func pitIntent(text string, idx, titleLen int) string {
 		end = len(text)
 	}
 	window := text[start:end]
-	harvest := containsAny(window, planHarvestSignals)
-	bury := containsAny(window, planBurySignals)
+	harvest := textutil.ContainsAny(window, planHarvestSignals)
+	bury := textutil.ContainsAny(window, planBurySignals)
 	switch {
 	case harvest && !bury:
 		return "收"
@@ -376,16 +378,6 @@ func dropSubsumedPlanForms(matched []string) []string {
 		}
 	}
 	return out
-}
-
-// containsAny 文本含任一信号词。
-func containsAny(text string, signals []string) bool {
-	for _, s := range signals {
-		if s != "" && strings.Contains(text, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // dedupePlanTerms 归一化词表：TrimSpace 去空去重保序（与 L0 dedupeTerms 同口径，

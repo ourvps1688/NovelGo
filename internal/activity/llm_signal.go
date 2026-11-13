@@ -79,7 +79,7 @@ func normalizeLLMSignalKey(s string) string {
 // 由调用方静默降级为空表。
 func (s *Store) SummarizeLLMSignals(ctx context.Context, days int) ([]LLMSignalStat, error) {
 	if days <= 0 {
-		days = 30
+		days = DefaultStatDays
 	}
 	dayStart := s.now().AddDate(0, 0, -(days - 1))
 	since := dayStart.Format(time.DateOnly)
