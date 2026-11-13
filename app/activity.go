@@ -39,6 +39,16 @@ func (a *App) GetSkillUsage(days int) ([]activity.SkillInvocationStat, error) {
 	return a.activity.SummarizeSkillInvocations(a.ctx, days)
 }
 
+// GetSkillEffectStats 返回近 days 天技能参与改稿轮的发现收敛统计
+// （#116：把「注入了」与「改后消掉没有」关联起来，纯本地只读、不上传）。
+// days 非正时按 30 天。失败返回错误，由前端静默降级为空表。
+func (a *App) GetSkillEffectStats(days int) ([]activity.SkillEffectStat, error) {
+	if a.activity == nil {
+		return []activity.SkillEffectStat{}, nil
+	}
+	return a.activity.SummarizeSkillEffects(a.ctx, days)
+}
+
 // GetLLMSignalStats 返回近 days 天（含今天）按 provider×model×task_kind×signal
 // 聚合的 LLM 失败信号次数（#114 P2 供应商可观测，纯本地不上传）。
 // days 非正时按 30 天。失败返回错误，由前端静默降级为空表。

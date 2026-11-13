@@ -132,18 +132,33 @@ func TestReconcileFindingConflicts(t *testing.T) {
 }
 
 func TestOpeningSlopeDirectionMatchesPrescription(t *testing.T) {
-	// 首段高、后续回落 → 报（旧取末段口径也会报）；首段低、后续抬升 → 不报。
-	down := []TensionPoint{
+	// #116：写作规范「第一句出事 / 冷开场」让首段高压，必须达标——旧判定
+	// 只认「后段 − 首段 ≥5.0」，越合规越被报，正是反复改稿消不掉的根因。
+	coldOpen := []TensionPoint{
 		{Seg: 0, StartRune: 0, Tension: 60},
-		{Seg: 1, StartRune: 400, Tension: 50},
-		{Seg: 2, StartRune: 800, Tension: 55},
+		{Seg: 1, StartRune: 400, Tension: 30},
 	}
+	assert.Nil(t, openingSlopeFinding(coldOpen), "冷开场首段高压由峰值通路达标，不得再与写作规范冲突")
+
+	// 首段铺垫、后续继续加压 → 升幅通路达标。
 	up := []TensionPoint{
 		{Seg: 0, StartRune: 0, Tension: 20},
 		{Seg: 1, StartRune: 400, Tension: 80},
 		{Seg: 2, StartRune: 800, Tension: 30},
 	}
-	require.NotNil(t, openingSlopeFinding(down))
-	assert.Contains(t, openingSlopeFinding(down).Desc, "不要只在首段堆冲突")
 	assert.Nil(t, openingSlopeFinding(up))
+
+	// 全程平坦 → 报；判定文案与处方须同向且带可执行数字/段位。
+	flat := []TensionPoint{
+		{Seg: 0, StartRune: 0, EndRune: 390, Tension: 10},
+		{Seg: 1, StartRune: 400, EndRune: 790, Tension: 12},
+	}
+	f := openingSlopeFinding(flat)
+	require.NotNil(t, f)
+	assert.Contains(t, f.Desc, "不要只在首段堆冲突")
+	line := RenderPrescriptions(BuildPrescriptions(
+		[]Finding{{Check: CheckOpeningSlope}}, flat, 1200, ChapterWordsTarget{}))[0]
+	assert.Contains(t, line, "峰值 tension ≥", "处方须与双通路判定同源")
+	assert.Contains(t, line, "目标段 seg ", "处方须给出段位")
+	assert.Contains(t, line, "处具体动作", "处方须给出可执行数字")
 }

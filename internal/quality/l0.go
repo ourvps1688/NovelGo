@@ -288,6 +288,11 @@ func RunL0Checks(in L0Input) (L0Metrics, []Finding) {
 		})
 	}
 
+	// #116 开篇去重：平台 profile 已武装且命中 opening_hook 时，开篇吸引力由
+	// 该检查单点负责，不再叠加曲线坡度——两者同管开篇，旧链路一个要求首段
+	// 最炸、一个要求首段低，互相拆台正是「改 8 轮仍报」的结构性来源。
+	raw = dedupeOpeningFindings(raw)
+
 	// #114 冲突预检：给曲线类发现追加与去 AI 味/字数约束共存时的可执行边界，
 	// 避免一轮里同时要求「堆情绪词抬张力」和「不要直白情绪词」。
 	raw = reconcileFindingConflicts(raw)

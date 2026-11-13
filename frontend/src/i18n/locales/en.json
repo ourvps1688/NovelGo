@@ -1852,6 +1852,20 @@
       "count": "Count",
       "lastDate": "Last date",
       "times": "{{count}} times"
+    },
+    "effects": {
+      "title": "Skill effect (last 30 days)",
+      "hint": "Links each skill's rewrite turns to whether their target findings were resolved. Resolved / persisted come from the latest quality snapshot per chapter: a latest-round approximation, not full history. Older chapters without a snapshot are excluded, never inferred as fully resolved. Read-only, local only, no auto-fix, never uploaded.",
+      "skill": "Skill",
+      "channel": "Channel",
+      "rounds": "Rewrite turns",
+      "resolved": "Resolved",
+      "persisted": "Still present",
+      "rate": "Resolution rate",
+      "roundsTimes": "{{count}} turns",
+      "itemTimes": "{{count}} items",
+      "rateValue": "{{value}}%",
+      "noSnapshot": "—"
     }
   },
   "signability": {
@@ -2264,6 +2278,14 @@
           "new": "{{count}} new"
         },
         "roundGuardHint": "These criteria have stayed unresolved for 3 consecutive rounds ({{keys}}): this may be a detector threshold conflict, not something another rewrite will fix. Choose one of exempt / adjust the threshold / change approach before editing; the system never changes thresholds or dispatches fixes automatically.",
+        "roundGuardExempt": "Exempt these",
+        "roundGuardExemptDone": "Exempted {{count}} checks: hidden from selection on this device only; the detector still runs unchanged, and no thresholds or records were modified.",
+        "roundGuardUndo": "Undo exemption",
+        "roundGuardExemptNote": "{{count}} checks exempted on this device",
+        "roundGuardChangeApproach": "Change approach (send to chat)",
+        "roundGuardChangeTitle": "[Unresolved for multiple rounds] {{chapter}}: stop retrying the same edit for these criteria:",
+        "roundGuardChangeBody": "Decide whether the detector criterion genuinely conflicts with this chapter's prose or the edits were insufficient. Propose a different approach, or tell me a human should adjust the threshold / exempt it. Do not rewrite the whole chapter or change any detector numbers on your own. Confirm the plan with me first.",
+        "roundGuardChangeSent": "Change-approach request sent to chat",
         "fixPromptRoundGuard": "Note: these criteria have stayed unresolved for 3 consecutive rounds ({{keys}}). Please confirm with me whether this is a detector threshold conflict or an insufficient edit, and pick one of exempt / adjust the threshold / change approach before writing; do not keep replacing the whole chapter.",
         "findingStatus": {
           "pending": "Pending",

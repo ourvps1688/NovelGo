@@ -66,6 +66,26 @@ export namespace activity {
 	        this.last_date = source["last_date"];
 	    }
 	}
+	export class SkillEffectStat {
+	    skill: string;
+	    channel: string;
+	    rounds: number;
+	    resolved: number;
+	    persisted: number;
+
+	    static createFrom(source: any = {}) {
+	        return new SkillEffectStat(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.skill = source["skill"];
+	        this.channel = source["channel"];
+	        this.rounds = source["rounds"];
+	        this.resolved = source["resolved"];
+	        this.persisted = source["persisted"];
+	    }
+	}
 	export class SkillInvocationStat {
 	    skill: string;
 	    channel: string;

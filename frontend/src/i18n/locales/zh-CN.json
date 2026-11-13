@@ -1812,6 +1812,20 @@
       "count": "次数",
       "lastDate": "最近日期",
       "times": "{{count}} 次"
+    },
+    "effects": {
+      "title": "技能效果（近 30 天）",
+      "hint": "把「技能参与过的改稿轮」与「该轮目标发现项是否消掉」关联：已消除/仍在按最新一轮质量检测快照统计。口径是最近一轮近似，不是逐轮历史；无快照的旧档案不计入，也不会被反推成全部消掉。纯本地只读，不自动修复、不上传。",
+      "skill": "技能",
+      "channel": "通道",
+      "rounds": "改稿轮",
+      "resolved": "已消除",
+      "persisted": "仍在",
+      "rate": "收敛率",
+      "roundsTimes": "{{count}} 轮",
+      "itemTimes": "{{count}} 项",
+      "rateValue": "{{value}}%",
+      "noSnapshot": "—"
     }
   },
   "signability": {
@@ -2224,6 +2238,14 @@
           "new": "新增 {{count}} 条"
         },
         "roundGuardHint": "以下验收条件已连续 3 轮未消除（{{keys}}）：这可能是判定器阈值冲突，不是「再改一次」能解决的。请先人工选择「豁免 / 调整阈值 / 换思路」之一，再决定是否继续改稿；系统不会自动改阈值或派发修复。",
+        "roundGuardExempt": "豁免这些项",
+        "roundGuardExemptDone": "已豁免 {{count}} 项：仅在本机不再显示与勾选，检测器仍照常判定、阈值与档案均不变。",
+        "roundGuardUndo": "撤销豁免",
+        "roundGuardExemptNote": "本机已豁免 {{count}} 个检查项",
+        "roundGuardChangeApproach": "换思路（发到聊天）",
+        "roundGuardChangeTitle": "【连续未消除，请换思路】{{chapter}} 以下验收条件已连续多轮未消除，不要再逐字重试同一改法：",
+        "roundGuardChangeBody": "请判断是判定式与本章正文确实冲突、还是改动不足：给出一种与之前不同的写法，或直接说明该由人工调整阈值 / 豁免；不要整章重写，也不要自行改动判定数字。改法请先与我确认。",
+        "roundGuardChangeSent": "已把「换思路」请求发到聊天",
         "fixPromptRoundGuard": "注意：以下验收条件已连续 3 轮未消除（{{keys}}）。请先与我确认是判定器阈值冲突还是改动不足，并从「豁免 / 调整阈值 / 换思路」中选一条再动笔，不要重复整章推翻重写。",
         "findingStatus": {
           "pending": "待处理",

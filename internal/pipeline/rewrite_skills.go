@@ -13,13 +13,17 @@ package pipeline
 //   - auditDimSkillRoutes 键 ⊆ review.AuditDimOrder（签约体检八维）；
 //   - issueDimSkillRoutes 键 ⊆ issue dimension 枚举（contract.go 四维台账归属）；
 //   - 技能名必须存在于 skill.BuiltinFS（builtin/*.md）。
+//
+// #116 退役状态：后台自动重写整链已下线，本文件的「低分维 → 方法论」映射
+// 在生产代码中**没有调用者**（仅契约测试保留历史口径）。因此这里不再写
+// 技能账本——旧埋点会让从未注入过任何提示词的死链在 skill_invocations 里
+// 留下 rewrite_method 记录，把「技能用量」污染成假数据。禁止重新接入自动派发。
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"github.com/novelgo/novelgo/internal/activity"
 	"github.com/novelgo/novelgo/internal/review"
 	"github.com/novelgo/novelgo/internal/skill"
 )
@@ -129,12 +133,6 @@ func rewriteMethodBlock(dims []AuditDimScore, issueDim string) string {
 		}
 		total += len([]rune(seg))
 		written++
-		// #111 P0 统一账本：重写方法论正文注入逐技能记账（解决子 Agent 初始 prompt
-		// 不落库导致 exec_run_stats 看不到 8 个重写技法的口径缺口）。
-		activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
-			Skill: e.name, Channel: "rewrite_method", Mount: "rewrite_method",
-			Runes: len([]rune(seg)),
-		})
 	}
 	if written == 0 {
 		return ""

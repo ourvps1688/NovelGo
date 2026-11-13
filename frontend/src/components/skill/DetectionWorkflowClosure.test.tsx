@@ -366,3 +366,55 @@ describe("#115 判官 verdict 本地化与非错误语义", () => {
     );
   });
 });
+
+// #116 轮次保护必须给真实人工出口：连续 3 轮未消除时不能再只显示一句提示，
+// 让用户原地「再改一次」空转 21 轮。豁免是纯展示层、换思路仍走中央 chat。
+describe("#116 轮次保护的人工出口与零自动修复", () => {
+  it("档案卡片提供豁免/撤销/换思路三个可点入口并过滤豁免项", () => {
+    const c = read("components/skill/DetectionWorkflowView.tsx");
+    for (const want of [
+      "onExemptGuard",
+      "onUndoExempt",
+      "onChangeApproach",
+      "GUARD_EXEMPT_STORAGE_KEY",
+      "readGuardExemptions",
+      "!exemptedChecks.has(f.check)",
+      "roundGuardExempt",
+      "roundGuardChangeApproach",
+    ]) {
+      expect(c, `missing: ${want}`).toContain(want);
+    }
+    expect(c).toContain("useChatLaunchStore.getState().send");
+    for (const banned of [
+      "StartIssueFixTickets",
+      "StartManualIssueFixTickets",
+      "onAutoFix",
+      "autoFix",
+      "UpdateIssueStatus",
+    ]) {
+      expect(c, `不得复活自动修复: ${banned}`).not.toContain(banned);
+    }
+  });
+
+  it("中英双语文案齐全，换思路消息不误触发验收硬约束", () => {
+    const keys = [
+      "roundGuardExempt",
+      "roundGuardExemptDone",
+      "roundGuardUndo",
+      "roundGuardExemptNote",
+      "roundGuardChangeApproach",
+      "roundGuardChangeTitle",
+      "roundGuardChangeBody",
+      "roundGuardChangeSent",
+    ];
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      for (const k of keys) {
+        expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
+      }
+      expect(d.roundGuardChangeTitle).not.toContain("【本章验收条件】");
+      expect(d.roundGuardChangeBody).toMatch(/阈值|threshold/);
+    }
+  });
+});

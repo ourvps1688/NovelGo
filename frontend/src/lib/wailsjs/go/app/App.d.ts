@@ -242,6 +242,8 @@ export function GetSessions(arg1:app.GetSessionsInput):Promise<storage.PageResul
 
 export function GetSettings():Promise<config.AppSettings>;
 
+export function GetSkillEffectStats(arg1:number):Promise<Array<activity.SkillEffectStat>>;
+
 export function GetSkillUsage(arg1:number):Promise<Array<activity.SkillInvocationStat>>;
 
 export function GetStartupState():Promise<app.StartupState>;

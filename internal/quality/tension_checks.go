@@ -18,7 +18,12 @@ import "fmt"
 const (
 	pacingDragMinRun        = 3   // 拖沓段判定：连续平坦段最少段数
 	openingSlopeWindowRunes = 500 // 开篇坡度窗口（rune）
-	openingSlopeMinRise     = 5.0 // 开篇坡度最小升幅（窗口首→末段 tension）
+	openingSlopeMinRise     = 5.0 // 开篇坡度最小升幅（窗口首→后续段 tension）
+	// #116：开篇窗口张力峰值下限，直接复用「不平坦」同一口径（不在别处另写数字）。
+	// 与写作规范同向：「第一句出事 / 冷开场 / 前 500 字爆点」让首段高压，
+	// 由峰值通路直接达标；旧口径只认「首段低、后段更高」与之相反，
+	// 真实 31 章曲线 25 章（80.6%）不达标、单条发现连续 21 轮未消除。
+	openingPressureMin = tensionFlatBelow
 )
 
 // tensionFindings 是曲线检查统一入口：拖沓段/爽点断档兜底/开篇坡度。
@@ -70,29 +75,47 @@ func beatGapFinding(curve []TensionPoint) *Finding {
 	}
 }
 
-// openingSlopeFinding 开篇坡度：前 openingSlopeWindowRunes 字内段数 ≥2 且
-// 首→末段 tension 升幅 < openingSlopeMinRise → 发现。
-func openingSlopeFinding(curve []TensionPoint) *Finding {
-	segs := openingSlopeSegs(curve)
-	if len(segs) < 2 {
-		return nil
+// openingSlopeMetrics 是开篇窗口的「升幅 / 峰值 / 窗口段」单源：判定、
+// 验收处方、图表摘要、写前硬约束都引用同一份口径，杜绝两套数字。
+func openingSlopeMetrics(curve []TensionPoint) (rise, peak float64, segs []TensionPoint) {
+	segs = openingSlopeSegs(curve)
+	if len(segs) == 0 {
+		return 0, 0, segs
 	}
-	// #114：取窗口内「后续段最高张力 - 首段」，与下文可执行指令方向一致。
-	// 旧口径取末段（可能恰好回落）会误报；旧建议「前置异常抬升开篇张力」只抬首段，
-	// 反而缩小升幅，与公式方向相反——已改为「首段之后继续加压」。
-	rise := segs[1].Tension - segs[0].Tension
-	for _, pt := range segs[1:] {
-		if pt.Tension-segs[0].Tension > rise {
-			rise = pt.Tension - segs[0].Tension
+	peak = segs[0].Tension
+	for _, pt := range segs {
+		if pt.Tension > peak {
+			peak = pt.Tension
+		}
+		if d := pt.Tension - segs[0].Tension; d > rise {
+			rise = d
 		}
 	}
-	if rise >= openingSlopeMinRise {
+	return rise, peak, segs
+}
+
+// openingSlopeOK 是达标判定单源：峰值通路（冷开场/第一句出事）或
+// 升幅通路（首段铺垫、后续继续加压），任一达标即不报。
+func openingSlopeOK(rise, peak float64) bool {
+	return peak >= openingPressureMin || rise >= openingSlopeMinRise
+}
+
+// openingSlopeFinding 开篇加压不足：窗口内段数 ≥2 且「全程平坦（峰值 <
+// openingPressureMin）+ 没有继续加压（升幅 < openingSlopeMinRise）」才报。
+// #116 与写作规范同向：旧公式只认「后段 − 首段 ≥5.0」，而平台技能与
+// opening_hook 都要求首段最炸，写作越合规越被报；且 500 rune 窗口按 400 rune
+// 分段在真实语料恒 2 段，#114 把「末段」改「max」在真实语料上差异 0 章。
+func openingSlopeFinding(curve []TensionPoint) *Finding {
+	rise, peak, segs := openingSlopeMetrics(curve)
+	if len(segs) < 2 || openingSlopeOK(rise, peak) {
 		return nil
 	}
 	return &Finding{
 		Check: CheckOpeningSlope,
-		Desc: fmt.Sprintf("开篇坡度不足：前 %d 字 %d 段最高仅上扬 %.1f（<%.1f）——请在首段之后安排对抗升级/反转/关键信息揭露，让后续段 tension 比首段高至少 %.1f；不要只在首段堆冲突（抬高首段反而缩小升幅）",
-			openingSlopeWindowRunes, len(segs), rise, openingSlopeMinRise, openingSlopeMinRise),
+		Desc: fmt.Sprintf("开篇坡度不足：前 %d 字 %d 段峰值 tension %.1f（<%.0f）、最高升幅 %.1f（<%.1f）——开篇窗口全程平坦。请在 seg 0 之后定点写一处对抗升级/反转，给足 ≥%d 处具体动作（动作密度 ≥ %.2f 次/百字）或把 ≤%d 字短句占比提到 ≥ %.2f，或让后段 tension 比首段高 ≥ %.1f；「第一句出事 / 冷开场」已满足峰值口径，不要只在首段堆冲突词（既不能解决全程平坦，又会触发去 AI 味）",
+			openingSlopeWindowRunes, len(segs), peak, openingPressureMin, rise, openingSlopeMinRise,
+			beatActionHitsNeeded(), tensionActionCap, tensionShortSentenceMax, tensionShortRatioCap,
+			openingSlopeMinRise),
 	}
 }
 
@@ -174,4 +197,28 @@ func MarkTensionCurve(curve []TensionPoint) TensionMarkers {
 		m.OpeningSegs = append(m.OpeningSegs, pt.Seg)
 	}
 	return m
+}
+
+// dedupeOpeningFindings 是 #116 开篇检查去重（纯清单后处理，不改任何判定式）：
+// opening_hook 命中时开篇吸引力已有可执行处方，抑制同轮 opening_slope。
+// 两者同管开篇，旧链路一个要求首段最炸、一个要求首段低，互相拆台正是
+// 「按最佳实践写却反复被报」的结构性来源。未命中时清单逐字不变。
+func dedupeOpeningFindings(raw []Finding) []Finding {
+	hasHook := false
+	for _, f := range raw {
+		if f.Check == CheckOpeningHook {
+			hasHook = true
+			break
+		}
+	}
+	if !hasHook {
+		return raw
+	}
+	out := make([]Finding, 0, len(raw))
+	for _, f := range raw {
+		if f.Check != CheckOpeningSlope {
+			out = append(out, f)
+		}
+	}
+	return out
 }

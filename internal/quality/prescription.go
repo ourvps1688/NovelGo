@@ -126,22 +126,26 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 		}
 
 	case CheckOpeningSlope:
-		segs := openingSlopeSegs(curve)
-		rise := 0.0
+		// #116：与 openingSlopeFinding 同函数同源（峰值/升幅双通路），并补段位
+		// 与可执行数字。旧处方只给「安排对抗升级」这种语感动词，LLM 不知道改
+		// 哪一段、差多少，判定器也看不见 → 开篇坡度单条连续 21 轮未消除。
+		rise, peak, segs := openingSlopeMetrics(curve)
+		where := fmt.Sprintf("前 %d 字（窗口 %d 段）", openingSlopeWindowRunes, len(segs))
 		if len(segs) >= 2 {
-			for _, pt := range segs[1:] {
-				if pt.Tension-segs[0].Tension > rise {
-					rise = pt.Tension - segs[0].Tension
-				}
-			}
+			where = fmt.Sprintf("%s；目标段 %s", where,
+				curveRange(curve, segs[0].Seg, segs[len(segs)-1].Seg))
 		}
 		return Prescription{
-			Criterion: fmt.Sprintf("前 %d 字内「后续段最高 tension − 首段 tension」≥ %.1f", openingSlopeWindowRunes, openingSlopeMinRise),
-			Current:   fmt.Sprintf("最高升幅 %.1f（窗口 %d 段）", rise, len(segs)),
-			Target:    fmt.Sprintf("升幅 ≥ %.1f", openingSlopeMinRise),
-			Where:     fmt.Sprintf("前 %d 字（seg 0 之后）", openingSlopeWindowRunes),
-			Do:        "在首段之后安排对抗升级/反转/关键信息揭露抬升后段张力",
-			Avoid:     "不要只在首段堆冲突（抬高首段反而缩小升幅）",
+			Criterion: fmt.Sprintf("前 %d 字内峰值 tension ≥ %.0f 或后段比首段升幅 ≥ %.1f（任一达标即不报）",
+				openingSlopeWindowRunes, openingPressureMin, openingSlopeMinRise),
+			Current: fmt.Sprintf("峰值 %.1f（目标 %.0f）、最高升幅 %.1f（目标 %.1f）；窗口 %d 段",
+				peak, openingPressureMin, rise, openingSlopeMinRise, len(segs)),
+			Target: fmt.Sprintf("峰值 tension ≥ %.0f 或 升幅 ≥ %.1f", openingPressureMin, openingSlopeMinRise),
+			Where:  where,
+			Do: fmt.Sprintf(
+				"定点只改开篇窗口（不要整章重写）：在 seg 0 之后写一处对抗升级/反转，给足 ≥%d 处具体动作（动作密度 ≥ %.2f 次/百字）或把 ≤%d 字短句占比提到 ≥ %.2f；「第一句出事 / 冷开场」已满足峰值口径，不必再往首段堆冲突词；改完重新检测看峰值/升幅数值是否过线",
+				beatActionHitsNeeded(), tensionActionCap, tensionShortSentenceMax, tensionShortRatioCap),
+			Avoid: "不要只在首段堆冲突（不能解决全程平坦，且会触发去 AI 味）；不要靠堆直白情绪词或感叹号抬张力",
 		}
 
 	case CheckAIFlavor:

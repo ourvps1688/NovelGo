@@ -61,7 +61,7 @@ func RenderTensionBlock(rows []ChapterTension) string {
 
 	var b strings.Builder
 	b.WriteString("【情绪曲线摘要】各章张力曲线合并快照（L0 基线与 L1 标注同段取 L1，tension/emotion 0-100；" +
-		"供节奏/爽点维度举证参照，不替代逐章通读）：\n")
+		"开篇坡度只取 L0 基线、按峰值/升幅双通路与检测判定同源；供节奏/爽点维度举证参照，不替代逐章通读）：\n")
 	shown := refs
 	truncated := 0
 	if len(refs) > tensionBlockMaxChapters {
@@ -69,7 +69,16 @@ func RenderTensionBlock(rows []ChapterTension) string {
 		truncated = len(refs) - tensionBlockMaxChapters
 	}
 	for _, ref := range shown {
-		b.WriteString(tensionChapterLine(ref.reading, EffectiveTensionCurve(ref.rows)) + "\n")
+		// #116：坡度是 L0 确定性判定，摘要这一项不能吃 L1 主观标注（旧链路
+		// 用合并曲线算，l0/l1 两套数会让界面同时显示「不足」与「达标」）。
+		// 其余项仍按 EffectiveTensionCurve 的 dim4 举证口径不变。
+		var l0Rows []ChapterTension
+		for _, r := range ref.rows {
+			if r.Source == TensionSourceL0 {
+				l0Rows = append(l0Rows, r)
+			}
+		}
+		b.WriteString(tensionChapterLine(ref.reading, EffectiveTensionCurve(ref.rows), l0Rows) + "\n")
 	}
 	if truncated > 0 {
 		fmt.Fprintf(&b, "- …（余 %d 章略，体量封顶）\n", truncated)
@@ -78,9 +87,14 @@ func RenderTensionBlock(rows []ChapterTension) string {
 }
 
 // tensionChapterLine 渲染单章摘要行：tension 值串/情绪峰 segs/拖沓/开篇坡度。
-// rows 为该章合并后的有效曲线（EffectiveTensionCurve 语义，seg 升序）。
-func tensionChapterLine(reading int, rows []ChapterTension) string {
+// rows 为该章合并后的有效曲线（EffectiveTensionCurve 语义，seg 升序）；
+// slopeRows 是同章 L0 基线行（空时回落 rows），供坡度项与检测判定同源。
+func tensionChapterLine(reading int, rows, slopeRows []ChapterTension) string {
 	pts := TensionPointsFromRows(rows)
+	slopePts := pts
+	if len(slopeRows) > 0 {
+		slopePts = TensionPointsFromRows(slopeRows)
+	}
 	// tension 值串（每章 tensionBlockMaxSegs 段封顶）。
 	vals := make([]string, 0, len(pts))
 	for i, pt := range pts {
@@ -112,12 +126,12 @@ func tensionChapterLine(reading int, rows []ChapterTension) string {
 		dragText = fmt.Sprintf("seg %d–%d", s, e)
 	}
 
-	// 开篇坡度（窗口内首末段升幅；<2 窗口段 n/a）。
+	// 开篇加压（与 openingSlopeFinding 共用 openingSlopeMetrics / openingSlopeOK）。
+	// 显示「最高升幅」但达标判定同时看峰值，避免与写作规范方向相反。
 	slopeText := "n/a"
-	if segs := openingSlopeSegs(pts); len(segs) >= 2 {
-		rise := segs[len(segs)-1].Tension - segs[0].Tension
+	if rise, peak, segs := openingSlopeMetrics(slopePts); len(segs) >= 2 {
 		slopeText = fmt.Sprintf("%+.1f", rise)
-		if rise < openingSlopeMinRise {
+		if !openingSlopeOK(rise, peak) {
 			slopeText += "（不足）"
 		}
 	}

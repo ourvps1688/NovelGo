@@ -686,6 +686,22 @@ function FindingRow({
   );
 }
 
+// #116 轮次保护的人工出口：豁免是纯展示层决策（本机 localStorage），
+// 不改判定阈值、不改 DB、不派发任何修复；按 novel:chapter 分域，切章自动失效。
+const GUARD_EXEMPT_STORAGE_KEY = "novelgo:guard-exempt-findings";
+
+function readGuardExemptions(): Record<string, string[]> {
+  try {
+    const raw = window.localStorage.getItem(GUARD_EXEMPT_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, string[]>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 // 章节质量档案就地卡片：L0 指标 + L0/L1 发现清单（L1 状态徽章复用 VERDICT_KEYS）。
 // #113 闭环：章节检测只写质量档案、不落工单，历史上发现项永远「待处理」且无任何
 // 操作入口。这里提供「勾选发现项 → 发到中央 chat 人工协作改稿 → 重新检测本章」，
@@ -707,15 +723,23 @@ function ChapterQualityArchiveCard({
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rerunning, setRerunning] = useState(false);
+  const [guardExemptions, setGuardExemptions] =
+    useState<Record<string, string[]>>(readGuardExemptions);
+  const guardScope = `${novelId}:${chapterId ?? 0}`;
+  const exemptedChecks = useMemo(
+    () => new Set(guardExemptions[guardScope] ?? []),
+    [guardExemptions, guardScope],
+  );
 
   const l0 = archive?.l0_findings ?? [];
   const l1 = archive?.l1_findings ?? [];
   const allFindings = useMemo(
-    () => [
-      ...l0.map((f) => ({ key: `l0:${f.id}`, f })),
-      ...l1.map((f) => ({ key: `l1:${f.id}`, f })),
-    ],
-    [l0, l1],
+    () =>
+      [
+        ...l0.map((f) => ({ key: `l0:${f.id}`, f })),
+        ...l1.map((f) => ({ key: `l1:${f.id}`, f })),
+      ].filter(({ f }) => !exemptedChecks.has(f.check)),
+    [l0, l1, exemptedChecks],
   );
   // 派生过滤而非 effect 清状态：切章/档案刷新后旧选中自动失效，
   // 不会把上一章的发现项带进下一章的 chat 上下文（零 setState-in-effect）。
@@ -831,6 +855,91 @@ function ChapterQualityArchiveCard({
     }
   }, [novelId, chapterId, rerunning, onArchiveInvalidate, t]);
 
+  // #116：连续 N 轮未消除不再只能「再改一次」。两个真实人工出口：
+  // 豁免=本机展示层隐藏（判定器照常检测、阈值与 DB 零改动）；
+  // 换思路=把冲突证据发到中央 chat 由人决策，仍守「所有修复都走 chat」。
+  const guardChecks = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (archive?.guard_keys ?? [])
+            .map((key) => key.split("|")[1])
+            .filter(Boolean),
+        ),
+      ),
+    [archive],
+  );
+
+  const onExemptGuard = useCallback(() => {
+    if (guardChecks.length === 0) return;
+    setGuardExemptions((prev) => {
+      const next = {
+        ...prev,
+        [guardScope]: Array.from(
+          new Set([...(prev[guardScope] ?? []), ...guardChecks]),
+        ),
+      };
+      try {
+        window.localStorage.setItem(
+          GUARD_EXEMPT_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        // 纯展示层偏好，写入失败不阻断人工决策
+      }
+      return next;
+    });
+    toastInfo(
+      t("journey.quality.detect.roundGuardExemptDone", {
+        count: guardChecks.length,
+      }),
+    );
+  }, [guardChecks, guardScope, t]);
+
+  const onUndoExempt = useCallback(() => {
+    setGuardExemptions((prev) => {
+      const next = { ...prev };
+      delete next[guardScope];
+      try {
+        window.localStorage.setItem(
+          GUARD_EXEMPT_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        // 同上：偏好写入失败不阻断
+      }
+      return next;
+    });
+  }, [guardScope]);
+
+  const onChangeApproach = useCallback(() => {
+    const keys = archive?.guard_keys ?? [];
+    if (keys.length === 0) return;
+    const checks = Array.from(
+      new Set(keys.map((k) => k.split("|")[1]).filter(Boolean)),
+    );
+    const criteria = (archive?.prescriptions ?? []).filter((line) =>
+      checks.some((c) => line.startsWith(`[${c}]`)),
+    );
+    const chapterText = archive?.reading_number
+      ? t("sidebar.chapterN", { n: archive.reading_number })
+      : t("journey.quality.detect.currentChapter");
+    const content =
+      `${t("journey.quality.detect.roundGuardChangeTitle", { chapter: chapterText })}\n` +
+      keys.map((k) => `- ${k}`).join("\n") +
+      (criteria.length > 0
+        ? `\n${criteria.map((l) => `- ${l}`).join("\n")}`
+        : "") +
+      `\n${t("journey.quality.detect.roundGuardChangeBody")}`;
+    const send = useChatLaunchStore.getState().send;
+    if (!send) {
+      toastError(t("journey.quality.detect.chatNotReady"));
+      return;
+    }
+    send(content);
+    toastSuccess(t("journey.quality.detect.roundGuardChangeSent"));
+  }, [archive, t]);
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -933,13 +1042,53 @@ function ChapterQualityArchiveCard({
         </span>
       </div>
 
-      {/* #114 P1.5 轮次保护：连续 N 轮未消除，升级为人工判定，不再「再改一次」 */}
-      {(archive.guard_keys ?? []).length > 0 ? (
-        <p className="mt-2 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
-          {t("journey.quality.detect.roundGuardHint", {
-            keys: (archive.guard_keys ?? []).join(" · "),
-          })}
-        </p>
+      {/* #114 P1.5 轮次保护 / #116 真实人工出口：连续 N 轮未消除，升级为人工判定 */}
+      {(archive.guard_keys ?? []).length > 0 || exemptedChecks.size > 0 ? (
+        <div className="mt-2 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
+          {(archive.guard_keys ?? []).length > 0 ? (
+            <p>
+              {t("journey.quality.detect.roundGuardHint", {
+                keys: (archive.guard_keys ?? []).join(" · "),
+              })}
+            </p>
+          ) : null}
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {(archive.guard_keys ?? []).length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={onExemptGuard}
+                  className="rounded border border-border px-2 py-1 text-[11px] transition-colors hover:bg-muted"
+                >
+                  {t("journey.quality.detect.roundGuardExempt")}
+                </button>
+                <button
+                  type="button"
+                  onClick={onChangeApproach}
+                  className="rounded border border-border px-2 py-1 text-[11px] transition-colors hover:bg-muted"
+                >
+                  {t("journey.quality.detect.roundGuardChangeApproach")}
+                </button>
+              </>
+            ) : null}
+            {exemptedChecks.size > 0 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={onUndoExempt}
+                  className="rounded border border-border px-2 py-1 text-[11px] transition-colors hover:bg-muted"
+                >
+                  {t("journey.quality.detect.roundGuardUndo")}
+                </button>
+                <span className="text-muted-foreground">
+                  {t("journey.quality.detect.roundGuardExemptNote", {
+                    count: exemptedChecks.size,
+                  })}
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       {/* L0 指标 */}

@@ -74,6 +74,11 @@ func NovelProfile(ctx context.Context, db *gorm.DB, novelID int64) (string, erro
 	b.WriteString("【单章字数口径（检测与写作同源）】\n")
 	b.WriteString(chapterWords.SystemLine())
 	b.WriteString("\n")
+	// #116 写前硬约束：把 L0 确定性判定式在写章之前交给模型（与检测侧常量
+	// 同一份文本）。旧链路只在改稿消息里塞验收条件，写作时按技能/平台口径
+	// 写、检测时按另一套常量判，方向还相反，导致反复改稿消不掉问题。
+	b.WriteString(quality.WritingConstraints())
+	b.WriteString("\n")
 	// 先注入「签约约束解析（去冲突）」单表：题材卡与平台卡冲突的节奏时序数值在此解析为权威值，
 	// 让 LLM 每轮读到的是已合并结论而非多卡自行调和（冲突主因：题材≥3500字 vs 平台1200–2000字）。
 	// 无题材/平台卡时返回空串，不增加任何成本。

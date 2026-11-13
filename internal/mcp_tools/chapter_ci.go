@@ -220,6 +220,22 @@ func runChapterL1(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 	_ = RunChapterCIForChapter(ctx, tc.RunSubAgent, tc.SkillStore, tc.DB, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
 }
 
+// chapterCIFindings 读取本章当前档案的未消除发现，供写后自检技法定向（#116）。
+// 只读、零派发：读失败 / 新章尚无档案 → nil，调用方回落全量自检，绝不阻断 L1。
+func chapterCIFindings(ctx context.Context, db *gorm.DB, logger *slog.Logger, novelID, chapterID int64) []quality.Finding {
+	if db == nil {
+		return nil
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	row, err := quality.NewStore(db, logger).GetByChapter(ctx, novelID, chapterID)
+	if err != nil || row == nil {
+		return nil
+	}
+	return append(quality.ParseFindings(row.L0Findings), quality.ParseFindings(row.L1Findings)...)
+}
+
 // RunChapterCIForChapter 对指定章节执行 L1 增量检查（chapterci 子 Agent）并把回执
 // 落质量档案。runSub 为实际派发子 Agent 的函数（调用方决定用 ToolContext.RunSubAgent
 // 还是 agent.RunSubAgent）；skillStore 用于注入 chapter-ci 技能方法论（可空，降级为
@@ -236,7 +252,8 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 		return nil
 	}
 	instruction := buildChapterCIInstruction(skillStore, novelID, chapterID,
-		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID))
+		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID),
+		chapterCIFindings(ctx, db, logger, novelID, chapterID)...)
 	report, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "chapterci",
 		NovelID:     novelID,
@@ -355,14 +372,61 @@ var chapterCISelfCheckSkills = []string{"deai-flavor", "revision-pass", "dialogu
 
 const chapterCISelfCheckSkillCap = 1500 // 单技能自检正文上限（rune）
 
+// chapterCIFindingSkillRoutes 是 #116 写后自检「按本章发现定向」的单源映射。
+// 旧链路每章固定注入 4 个技法（实测 chapter_ci_selfcheck 42 万 rune、占技能
+// 字符 66%），但产出的 L1 发现维度（continuity/task_card/foreshadow）与这
+// 4 个技法并不对应，属于「写完之后反复自检」的固定开销。这里只改注入集合，
+// 不改检查项、不改回执契约、不新增任何执行体。
+var chapterCIFindingSkillRoutes = map[string][]string{
+	quality.CheckAIFlavor:     {"deai-flavor"},
+	quality.CheckOpeningSlope: {"revision-pass"},
+	quality.CheckOpeningHook:  {"revision-pass"},
+	quality.CheckPacingDrag:   {"revision-pass"},
+	quality.CheckBeatGap:      {"revision-pass"},
+	quality.CheckBeatDensity:  {"revision-pass"},
+	quality.CheckTailHook:     {"revision-pass"},
+	"continuity":              {"review"},
+	"foreshadow":              {"review"},
+	"reader_state":            {"review"},
+	"task_card":               {"review"},
+	"immersion_anchor":        {"dialogue-subtext", "review"},
+	"pacing":                  {"dialogue-subtext", "review"},
+}
+
+// chapterCIFindingSkills 按本章确定性/主观发现选自检技法。无发现项（新章、
+// 档案未落库、测试直接调用）时回落全量 4 个，保证首章首次检测仍有完整
+// 自检清单；命中但不落映射时给最小集 review。输出保持单源顺序（确定性）。
+func chapterCIFindingSkills(findings []quality.Finding) []string {
+	if len(findings) == 0 {
+		return chapterCISelfCheckSkills
+	}
+	seen := map[string]bool{}
+	for _, f := range findings {
+		for _, name := range chapterCIFindingSkillRoutes[f.Check] {
+			seen[name] = true
+		}
+	}
+	var out []string
+	for _, name := range chapterCISelfCheckSkills {
+		if seen[name] {
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"review"}
+	}
+	return out
+}
+
 // chapterCISelfCheckBlock 渲染写后自检块：按单源顺序取技能正文、单帽截断、
 // 如实标注节选；技能缺失/正文为空/ store 为 nil 一律返回空串（调用方逐字不变）。
-func chapterCISelfCheckBlock(skillStore *skill.Store, novelID, chapterID int64) string {
+// #116：findings 非空时按发现项定向注入，零发现时保持既有全量口径。
+func chapterCISelfCheckBlock(skillStore *skill.Store, novelID, chapterID int64, findings ...quality.Finding) string {
 	if skillStore == nil {
 		return ""
 	}
 	var b strings.Builder
-	for _, name := range chapterCISelfCheckSkills {
+	for _, name := range chapterCIFindingSkills(findings) {
 		sk, ok := skillStore.Get(0, name)
 		if !ok || strings.TrimSpace(sk.Content) == "" {
 			continue
@@ -395,8 +459,9 @@ func chapterCISelfCheckBlock(skillStore *skill.Store, novelID, chapterID int64) 
 // buildChapterCIInstruction 构造 L1 增量检查指令：小上下文范围 + 检查项 + 情绪曲线
 // 标注（P0-2，段号对照对齐分段）+ 回执契约，有 chapter-ci 技能时注入方法论正文（单源），
 // 无技能时内联最小指令（降级）。segHints 为空回落通用分段说明。
-// #111 P1 追加写后自检块；空块时输出与 P0 逐字一致，L1ReceiptFormatLine 契约不动。
-func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string) string {
+// #111 P1 追加写后自检块（#116 按本章发现定向）；空块时输出与 P0 逐字一致，
+// L1ReceiptFormatLine 契约不动。
+func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string, findings ...quality.Finding) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "章节（chapter_id=%d）正文刚刚修改并落盘。请对该章执行 L1 增量质检。\n", chapterID)
 	b.WriteString("检查范围（小上下文，严禁全书通读）：本章正文（read 路径 chapters/id_" +
@@ -427,8 +492,8 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 			})
 		}
 	}
-	// #111 P1：写后自检清单（非空才注入；skillStore 为 nil 时整块为空，逐字不变）。
-	b.WriteString(chapterCISelfCheckBlock(skillStore, novelID, chapterID))
+	// #111 P1 / #116：写后自检清单（非空才注入；skillStore 为 nil 时整块为空，逐字不变）。
+	b.WriteString(chapterCISelfCheckBlock(skillStore, novelID, chapterID, findings...))
 	b.WriteString("\n最终回复末尾必须附 ```json 代码块上报回执，格式：\n")
 	b.WriteString(quality.L1ReceiptFormatLine())
 	b.WriteString("\n")
