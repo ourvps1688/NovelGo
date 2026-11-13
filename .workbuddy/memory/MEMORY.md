@@ -26,6 +26,7 @@
 - **dev 运行期间禁跑 go build / 删 novelgo-res.syso**（FATAL .rsrc merge failure）；wails watcher 会在 Go 文件变动时重生成 3 个绑定文件，须先停 dev → `git checkout --` → 手工补最小行 → 再跑闸门。
 - 白屏真根因=SubagentCard `getAgentMeta` 未映射 statesync/chapterci 致 React19 卸载 #root（已修：类型放宽+🧩降级+双 ErrorBoundary）；浏览器直开 5173 白屏正常；render 禁 Date.now()/new Date()；ONNX 仅 bge-small-zh-v1.5。
 
-## 当前状态 / 待办（2026-11-13）
-- HEAD `c075ab1e`，工作树干净、origin/master...HEAD=0 0，CI 全绿，dev 冷启动正常。#116、#117 调研、#117 P0 清理均已完成。
-- **挂起**：①孤儿数据清理 SQL 待用户二次确认（先重跑备份+sha256，事务内 DELETE 三表再 VACUUM）；②#116 改动的**真实写作闭环实测未做**（写新章看 opening_slope 是否还报、技能字符是否下降、效果面板是否有数）；③#117 P1 技能治理（写后自检 65.8% 字符压成按 check 的 300–500 rune 短处方、技能正文与 L0 双口径、chapter_ci_selfcheck 用 context.Background() 致 finding_keys 恒空效果面板测不到大头）；④#117 P2 架构（写后维护/评分装配双轨、主 chat MaxTurns=100 分档、前端三处轮询收口）；⑤#115 局部 patch 不评分（P1.5）、chat 直接输入修复 beat_gap 不自动注入处方。
+## 当前状态 / 待办（2026-11-13 收口）
+- 工作树干净、origin/master...HEAD=0 0、CI 全绿、dev 双 200。#116、#117 调研、#117 P0 清理、**#116 写作实测第一轮**均已完成；实测硬结论见 11-13 日志（活跃书 opening_slope 已 0 报、定向自检/效果面板零真实样本、22:55 写作卡在写前对齐）。
+- **孤儿数据已清理（23:55 用户二次确认）**：先 `VACUUM INTO` 一致性备份 `build/bin/novel-agent.db.bak-20261113-2350`（sha256 `f06ab5bf…`），事务内删三表共 35,440 行（messages 19,388 / operation_log 15,745 / turn_commits 307），严格行数校验 + integrity_check=ok；VACUUM + WAL 截断后主库 418M→232M。`pipeline:`/`detect:` 子会话、活跃会话、按 novel_id 的 602 行孤儿全部保留。恢复=停 dev → 删 -wal/-shm → 备份覆盖主库 → 冷启动。
+- **挂起**：①#116 真实写作闭环**第二轮**（新二进制 23:23 后零运行样本，需用户在 dev 点一次「重新检测本章」或「撰写下一章」再采集现场 L0/处方/自检定向/收口耗时/verdict）；②#117 P1 技能治理（写后自检 65.9% 字符压成按 check 的 300–500 rune 短处方、技能正文与 L0 双口径、chapter_ci_selfcheck 用 context.Background() 致 finding_keys 恒空效果面板测不到大头）；③#117 P2 架构（写后维护/评分装配双轨、主 chat MaxTurns=100 分档、前端三处轮询收口）；④#115 局部 patch 不评分（P1.5）、chat 直接输入修复 beat_gap 不自动注入处方。
