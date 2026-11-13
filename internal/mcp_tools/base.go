@@ -48,6 +48,11 @@ type SubAgentRequest struct {
 	// MaxTurns 可选轮次上限（0 = 沿用 RunSubAgent 默认 100 轮）。#115 P0：
 	// 单章 L1 复核是只读短任务，后台链路用它避免多轮检索拖到十几分钟。
 	MaxTurns int
+	// Detached 标记「写后维护」的异步派发（statesync / chapterci 的 debounce 链）。
+	// #119 P0：这类子 Agent 不该继承主 chat 的流式事件前缀与前端可见性——主 ctx
+	// 超时后它们仍会往会话里写「正在思考」、把界面挂住，且结果无人收口。
+	// 前台 run_subagent 工具与手动重检保持 false，行为逐字不变。
+	Detached bool
 }
 
 // RunSubAgentFunc 由 agent 包注入，避免循环依赖。

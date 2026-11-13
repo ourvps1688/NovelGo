@@ -125,3 +125,21 @@ func TestChatTimeoutGuardWiring(t *testing.T) {
 	resetAt := strings.Index(seg, "responseBuffer.Reset()")
 	require.Greater(t, resetAt, saveAt, "草稿必须在 buffer Reset 之前保存")
 }
+
+// #119 P0：写章档预算放宽后文案不再写死 30；写后维护子 Agent 不进前端可见流。
+func TestDeadlineMessageCoversBothTiersAndDetachedSubAgent(t *testing.T) {
+	msg := FriendlyError(context.DeadlineExceeded)
+	assert.Contains(t, msg, "30 分钟")
+	assert.Contains(t, msg, "60 分钟")
+	assert.Contains(t, msg, "章节列表", "正文可能已落盘，须提示先确认再重试")
+
+	b, err := os.ReadFile("agent.go")
+	require.NoError(t, err)
+	s := string(b)
+	for _, want := range []string{
+		"Detached bool", "req.Detached", "!opts.Detached", "background:",
+		`role == "assistant" && !opts.Detached`,
+	} {
+		assert.Contains(t, s, want, "agent.go 缺少后台子 Agent 接线 "+want)
+	}
+}

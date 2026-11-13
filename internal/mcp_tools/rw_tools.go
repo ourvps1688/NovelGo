@@ -614,6 +614,15 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 		"change_type": a.ChangeType,
 		"approved":    true,
 	}
+	// #119 P1：quality_report 在前端没有消费面，处方只拼进 critique 作者看不到。
+	// 与评分门禁同源重算一次（纯本地、毫秒级），把差额处方透出到工具结果，
+	// 让它在 chat 里可见、由作者决定是否补写；零派发、零自动改稿。
+	if !ref.IsOutline && (ref.IsNew || a.ChangeType == "full_replace") {
+		words := quality.NewStore(tc.DB, tc.LoggerOrDefault()).ChapterWords(ctx, tc.NovelID)
+		if p := wordShortfallPrescription(text.ComputeStats(proposed).WordCount, words); p != "" {
+			data["word_shortfall"] = p
+		}
+	}
 	if ref.IsNew {
 		activity.NewStore(tc.DB, tc.LoggerOrDefault()).AddActivity(ctx, activity.ActivityDelta{ChaptersCreated: 1})
 		data["chapter_id"] = ch.ID
@@ -1011,7 +1020,10 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 		stateSyncMu.Lock()
 		delete(stateSyncTimers, key)
 		stateSyncMu.Unlock()
-		runStateSync(context.WithoutCancel(ctx), tc, tc.NovelID, ch.ID)
+		// #119 P0：脱离主 ctx 取消，但自带独立预算，主轮结束后不再无限续命。
+		bgCtx, cancel := detachedPostWriteContext(ctx)
+		defer cancel()
+		runStateSync(bgCtx, tc, tc.NovelID, ch.ID)
 	})
 	stateSyncMu.Unlock()
 }
@@ -1134,7 +1146,12 @@ func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 	if tc.RunSubAgent == nil {
 		return
 	}
-	_ = RunStateSyncForChapter(ctx, tc.DB, tc.SkillStore, tc.RunSubAgent, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
+	_ = RunStateSyncForChapter(ctx, tc.DB, tc.SkillStore,
+		detachedPostWriteSubAgent(tc.RunSubAgent), tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
+	if ctx.Err() != nil {
+		tc.LoggerOrDefault().Warn("state-sync 写后维护超时收口（非阻断）",
+			"err", ctx.Err(), "novelID", novelID, "chapterID", chapterID)
+	}
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {
@@ -1160,6 +1177,8 @@ func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.C
 //   - failResult 非 nil：评分低于阈值且有重试余量，调用方应直接返回它（Success:false、
 //     ErrKindQuality），让 Agent 在既有对话循环里自动重写，不进入审批/落盘。
 //   - 其余情况 proceed：scored 非 nil 时由调用方在章节记录可知后落库（通过或超重试放行）。
+//   - #119 P1：字数不足属本地确定性判定，一律放行并把差额处方拼进 critique，
+//     不触发整章自动重写（改稿走 chat）；非字数质量问题仍按原门禁处理。
 //
 // 设计要点：复用 deslop 的「reject→重写」回路，但有独立的有界重试计数
 // （review.QualityAttempt，按章节/标题 key），不会吃掉全局连续失败中断配额
@@ -1214,6 +1233,18 @@ func (t *EditTool) maybeScoreChapter(ctx context.Context, tc ToolContext, ref gi
 	}
 
 	attempts := review.NewAttemptStore(tc.DB, tc.LoggerOrDefault())
+	// #119 P1：字数不足是本地确定性事实，不再交给评分门禁触发「整章退回重写」。
+	// 判官仍评分（保留修复前后对比数据链），但一律放行落盘；差额处方拼进
+	// critique，由作者在 chat 里定点补写——零自动修复、零新增执行体。
+	if shortfall := wordShortfallPrescription(stats.WordCount, chapterWords); shortfall != "" {
+		if cerr := attempts.Clear(ctx, tc.NovelID, key); cerr != nil {
+			tc.LoggerOrDefault().Warn("清理评分重试计数失败", "err", cerr)
+		}
+		score.Critique = shortfall + "\n\n" + score.Critique
+		tc.LoggerOrDefault().Warn("章节字数不足，放行不退回整章重写",
+			"word_count", stats.WordCount, "novelID", tc.NovelID, "key", key)
+		return &score, nil
+	}
 	if score.Overall >= cfg.ScoreThreshold {
 		// 通过：清理可能存在的脏重试计数
 		if cerr := attempts.Clear(ctx, tc.NovelID, key); cerr != nil {

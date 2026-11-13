@@ -36,10 +36,10 @@ type ChatResult struct {
 	FinalText string `json:"final_text"`
 }
 
-// mainChatTimeout 是单次主对话 LLM 调用的整体超时上限。
-// 目的：防止 provider 假死（连接挂起、长时间无 token 返回）时本 turn 永久阻塞 session
-// （此前只能杀进程才能恢复）。对正常长文本生成（通常数分钟）足够宽松；真正卡死会在该
-// 上限被安全中断，并回写为 interrupted 事件而非崩溃。
+// mainChatTimeout 是普通对话轮的整体超时上限（写章档见 chat_policy.go 的
+// writingChatTimeout）。目的：防止 provider 假死（连接挂起、长时间无 token 返回）
+// 时本 turn 永久阻塞 session（此前只能杀进程才能恢复）。真正卡死会在该上限被安全
+// 中断，并回写为 interrupted 事件而非崩溃。
 const mainChatTimeout = 30 * time.Minute
 
 // Chat 是对话入口。Wails 绑定，前端调用后同步执行，期间通过 EventsEmit 推流。
@@ -50,9 +50,10 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		return nil, fmt.Errorf("模型未找到: %s/%s", input.ProviderName, input.ModelID)
 	}
 
-	// 整体超时保护：在 app 生命周期 ctx 之上叠加 30 分钟上限，防止 provider 假死时
-	// 本 turn 永久阻塞（取消/超时都会让 agent.Run 返回，最终回写为 interrupted 事件）。
-	ctx, cancel := context.WithTimeout(a.ctx, mainChatTimeout)
+	// 整体超时保护：在 app 生命周期 ctx 之上叠加本轮预算上限（#119：写章 60min /
+	// 普通 30min），防止 provider 假死时本 turn 永久阻塞（取消/超时都会让 agent.Run
+	// 返回，最终回写为 interrupted 事件）。
+	ctx, cancel := context.WithTimeout(a.ctx, chatTimeoutForMessage(input.Message))
 	defer cancel()
 
 	// 2. 加载或创建 Session
@@ -87,7 +88,13 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 	// 5. 提交用户在对话间隙的手动编辑（git 收尾已下沉到 commit.Service，best-effort 不阻塞对话）
 	s := a.settingsSnapshot()
 	a.commitService.RecordUserChanges(ctx, input.NovelID, s.GitName, s.GitEmail, sess.SessionID, turnID)
-	defer a.commitService.RecordAIChanges(ctx, input.NovelID, s.GitName, s.GitEmail, sess.SessionID, turnID, model.Name)
+	// #119 P0：defer 在 Chat 返回时才执行，此时主 ctx 可能已因超时/取消失效；
+	// 用未取消 ctx + 短预算兜底，避免「写入 turn_commits 失败」这条观测缺口。
+	defer func() {
+		commitCtx, cancelCommit := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancelCommit()
+		a.commitService.RecordAIChanges(commitCtx, input.NovelID, s.GitName, s.GitEmail, sess.SessionID, turnID, model.Name)
+	}()
 
 	// 6. 解析 / 命令（skill 或 quick command），构建注入内容
 	var slashInject string

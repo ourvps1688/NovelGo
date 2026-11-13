@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,6 +21,21 @@ func TestChatMaxTurnsForWritingTurn(t *testing.T) {
 	// 写章要跑写前对齐+任务卡+大纲+审批+正文，不能压到 chapterci 的 12 轮量级。
 	assert.Greater(t, writingTurnMaxTurns, 20)
 	assert.Less(t, writingTurnMaxTurns, 100, "恒 100 轮不得回潮")
+}
+
+// #119 P0：写章轮预算必须与普通轮分档，且斜杠 /next 同样命中。
+func TestChatTimeoutForWritingTurn(t *testing.T) {
+	for _, msg := range []string{
+		"继续撰写第五章", "撰写下一章", "写下一章", "续写", "/next", "/next 写下一章",
+	} {
+		assert.Equal(t, writingChatTimeout, chatTimeoutForMessage(msg), "写章轮应给 60 分钟: %s", msg)
+	}
+	for _, msg := range []string{"你好", "帮我看看第四章", "总结一下", ""} {
+		assert.Equal(t, mainChatTimeout, chatTimeoutForMessage(msg), "普通轮保持 30 分钟: %s", msg)
+	}
+	assert.Equal(t, 60*time.Minute, writingChatTimeout)
+	assert.Equal(t, 30*time.Minute, mainChatTimeout)
+	assert.Greater(t, writingChatTimeout, mainChatTimeout)
 }
 
 func TestClipHistoricalToolContent(t *testing.T) {
@@ -53,6 +69,8 @@ func TestChatTimeoutOutcomeWiring(t *testing.T) {
 		"context.WithoutCancel(ctx)", "outcomeCtx", "cancelOutcome",
 		"chatMaxTurnsFor(activeSkills)", "clipHistoricalToolContent",
 		"toolTotal", "toolSeen", "final_text_runes", "timedOut",
+		// #119 P0：写章档超时 + auto-commit 不再复用过期 ctx。
+		"chatTimeoutForMessage(input.Message)", "commitCtx", "cancelCommit",
 	} {
 		assert.Contains(t, s, want, "chat.go 缺少接线 "+want)
 	}

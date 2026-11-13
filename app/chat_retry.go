@@ -27,7 +27,7 @@ import (
 
 // maxTurnRetries 是 turn 级自动重放上限（与 agent 内部单调用 8 次重试正交）。
 // 取 2：叠加 agent 内部重试后已能覆盖绝大多数「持续性中断后恢复」场景，又不至于在
-// 供应商彻底挂起时无限空转（受 mainChatTimeout=30min 兜底）。
+// 供应商彻底挂起时无限空转（受本轮预算兜底：普通 30min / 写章 60min，见 chat_policy.go）。
 const maxTurnRetries = 2
 
 const (

@@ -14,7 +14,12 @@ package app
 //
 // 纪律：零自动修复、零新增执行体、纯本地、零上传。
 
-import "github.com/novelgo/novelgo/internal/text"
+import (
+	"strings"
+	"time"
+
+	"github.com/novelgo/novelgo/internal/text"
+)
 
 const (
 	// 写章轮要跑写前对齐 → 任务卡 → 大纲 → 审批 → 正文，轮数不能压到
@@ -28,7 +33,26 @@ const (
 	toolHistoryClipRunes = 600
 
 	toolHistoryClipNote = "\n（历史工具结果已裁剪，如需完整内容请重新调用该工具）"
+
+	// #119 P0：写章轮含写前对齐 → 正文生成 → 评分门禁 → 审批 → 写后维护，
+	// 2026-11-14 02:01 实测正文已在 01:59:54 落盘、81 分通过，却因 30 分钟
+	// 硬上限在收口前 5 秒被判整轮失败。写章档给 60 分钟，普通对话仍 30 分钟。
+	writingChatTimeout = 60 * time.Minute
 )
+
+// chatTimeoutForMessage 按用户消息判定本轮整体预算档。
+// 复用 chapterWritingCues 的确定性写章意图判定（与前情注入同源），只决定
+// 「给多少时间」，不改变技能路由（路由仍由 buildAutoSkillInjectWithNames 单源负责）。
+func chatTimeoutForMessage(message string) time.Duration {
+	// 斜杠入口 /next 不含中文 cue，但同样是写章总调度，必须给同一档预算。
+	if strings.HasPrefix(strings.TrimSpace(message), "/next") {
+		return writingChatTimeout
+	}
+	if isChapterWritingIntent(message) {
+		return writingChatTimeout
+	}
+	return mainChatTimeout
+}
 
 // chatMaxTurnsFor 按本轮命中的技能判断轮数上限：命中写章总调度 next 用写章档。
 // activeSkills 已包含 slash 注入名（见 app/chat.go），因此 /next 同样命中。

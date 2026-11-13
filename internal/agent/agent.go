@@ -65,6 +65,9 @@ type RunOptions struct {
 	// RunningTokens 由调用方预计算的 token 预算（来自持久化的 token_count 累加）。
 	// 非空时 Run 直接复用，跳过对整段历史消息的重新 BPE 编码；为空则退回 InitRunningTokens。
 	RunningTokens map[string]int
+	// Detached 是写后维护子 Agent 的后台标记（#119 P0）：消息仍落库供审计，
+	// 但不进前端可见流；流式事件前缀由调用方置为独立命名空间。
+	Detached bool
 }
 
 // New 创建 Agent 实例。emitter 用于向前端推送对话流事件（agent:<turnID>），
@@ -140,6 +143,7 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		EventSeq:        parentOpts.EventSeq,
 		EventPrefix:     parentOpts.EventPrefix,
 		MaxTurns:        maxTurns,
+		Detached:        req.Detached,
 		Model:           parentOpts.Model,
 		ProviderName:    parentOpts.ProviderName,
 		ReasoningEffort: parentOpts.ReasoningEffort,
@@ -400,7 +404,23 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 							})
 						},
 						RunSubAgent: func(ctx context.Context, req mcp_tools.SubAgentRequest) (string, error) {
-							return a.RunSubAgent(ctx, opts, req)
+							if !req.Detached {
+								return a.RunSubAgent(ctx, opts, req)
+							}
+							// #119 P0：写后维护（statesync / chapterci 的 debounce 派发）
+							// 换独立事件前缀，前端不再收它的流式「正在思考」；模型与会话
+							// 归属仍沿用主轮，零新增执行体、零新会话。
+							bgOpts := RunOptions{
+								TurnID:          opts.TurnID,
+								SessionID:       opts.SessionID,
+								NovelID:         opts.NovelID,
+								ActiveVersion:   opts.ActiveVersion,
+								EventPrefix:     "background:",
+								Model:           opts.Model,
+								ProviderName:    opts.ProviderName,
+								ReasoningEffort: opts.ReasoningEffort,
+							}
+							return a.RunSubAgent(ctx, bgOpts, req)
 						},
 						SkillStore:    a.skillStore,
 						SearchService: a.searchService.Load(),
@@ -720,7 +740,9 @@ func (a *Agent) appendMsg(role, content, thinkingContent string, extra map[strin
 		ExtraMetadata:   extraJSON(extra),
 		Version:         opts.ActiveVersion,
 		ToAPI:           opts.AgentType == "main",
-		ToFrontend:      role == "assistant",
+		// #119 P0：写后维护的后台子 Agent 消息仍落库（审计可查），但不再推进
+		// 前端可见流，避免主 chat 结束后界面还挂着「正在思考」。
+		ToFrontend: role == "assistant" && !opts.Detached,
 	}
 	a.logger.Debug("appendMsg", "role", role, "agentType", opts.AgentType, "subTaskID", opts.SubTaskID, "turnID", opts.TurnID)
 

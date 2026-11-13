@@ -73,7 +73,10 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 		chapterCIMu.Lock()
 		delete(chapterCITimers, key)
 		chapterCIMu.Unlock()
-		runChapterL1(context.WithoutCancel(ctx), tc, tc.NovelID, ch.ID)
+		// #119 P0：脱离主 ctx 取消，但自带独立预算；超时不写 L1，保留上一轮结果。
+		bgCtx, cancel := detachedPostWriteContext(ctx)
+		defer cancel()
+		runChapterL1(bgCtx, tc, tc.NovelID, ch.ID)
 	})
 	chapterCIMu.Unlock()
 }
@@ -217,7 +220,12 @@ func runChapterL1(ctx context.Context, tc ToolContext, novelID, chapterID int64)
 	if tc.RunSubAgent == nil {
 		return
 	}
-	_ = RunChapterCIForChapter(ctx, tc.RunSubAgent, tc.SkillStore, tc.DB, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
+	_ = RunChapterCIForChapter(ctx, detachedPostWriteSubAgent(tc.RunSubAgent),
+		tc.SkillStore, tc.DB, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
+	if ctx.Err() != nil {
+		tc.LoggerOrDefault().Warn("chapter-ci 写后维护超时收口（非阻断，保留上一轮 L1）",
+			"err", ctx.Err(), "novelID", novelID, "chapterID", chapterID)
+	}
 }
 
 // chapterCIFindings 读取本章当前档案的未消除发现，供写后自检技法定向（#116）。
