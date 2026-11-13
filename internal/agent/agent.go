@@ -242,6 +242,26 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 		// 连续空闲超时计数（供应商半死连接）：单轮内连续命中 idleRetryCap 即放弃重试，
 		// 避免 8×9 分钟空转。非空闲错误会清零该计数。
 		idleTimeouts := 0
+		// #118 P1：本轮所有重试的累计耗时预算（见 shouldStopRetrying），
+		// 避免 9 分钟空闲 × N 把主 chat 30 分钟上限耗光后才报错。
+		retryWindowStart := time.Now()
+		// #118 P0：本轮是否已保存过中断草稿；重试多次只落一条，避免刷屏。
+		draftSaved := false
+		// #118 P0：统一出口兜底。超时/取消可命中任意一条 return（流中 ctx.Done /
+		// 退避期 ctx.Done / 失败兜底 / 用户停止），只依赖「重试前」那一个点不够。
+		// 只要 ctx 已失效且本轮还有未持久化的 partial 正文，就保底落一条草稿，
+		// 让超时文案「已存为草稿」在所有路径都成立。exitDraftHandled 只服务这一次
+		// defer；draftSaved 服务跨轮「重试前只存一次」，两者不可合并。
+		exitDraftHandled := false
+		defer func() {
+			if ctx.Err() == nil || exitDraftHandled || responseBuffer.Len() == 0 {
+				return
+			}
+			if a.saveInterruptedDraft(&opts, responseBuffer.String(), thinkingBuffer.String()) {
+				a.logger.Warn("超时出口保底保存草稿", "turnID", opts.TurnID,
+					"runes", len([]rune(responseBuffer.String())))
+			}
+		}()
 		// tool_args_invalid 首次提醒标志：同一 turn 内只加一次 reminder，
 		// 避免重试耗尽后 DB 残留多条孤立 user reminder 污染下轮 LLM 上下文
 		reminderAdded := false
@@ -255,7 +275,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 				modelMaxOut = 64000
 			}
 			projected := used + modelMaxOut
-			if float64(projected)/float64(opts.Model.ContextWindow) >= 0.85 {
+			// #118 P1：压缩提前到 60%（compressionBudgetRatio 是判定单源）。
+			// 旧 0.85 在 1M 窗口上要等 used≈73.9 万 tokens 才压，巨量 prompt
+			// 会让请求极慢、反复撞空闲看门狗，30 分钟主 ctx 内根本收不了口。
+			if float64(projected)/float64(opts.Model.ContextWindow) >= compressionBudgetRatio {
 				a.logger.Warn("token budget projected to exceed context, triggering compression",
 					"used", used,
 					"model_max_output", modelMaxOut,
@@ -527,8 +550,11 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 
 					// P2: 可恢复错误重试（不重试 ctx.Canceled / 不可恢复错误 / 非 *APIError）
 					// 连续空闲超时达上限的半死连接不再重试（idleRetryCap）。
-					idleExhausted := apiErr != nil && apiErr.Kind == "idle_timeout" && idleTimeouts >= idleRetryCap
-					if apiErr != nil && apiErr.Retryable && !idleExhausted && retryCount < maxRetries {
+					// 连续空闲超时/掉线达上限，或本轮重试累计耗时超预算 → 快速失败。
+					// #118 P1：旧判定只认 Kind=="idle_timeout"，漏掉「吐字节后掉线」
+					// （StatusCode==0 且 Retryable）这一路，会一路重试到硬超时。
+					stopRetry := shouldStopRetrying(apiErr, idleTimeouts, time.Since(retryWindowStart))
+					if apiErr != nil && apiErr.Retryable && !stopRetry && retryCount < maxRetries {
 						retryCount++
 						backoff := computeBackoff(retryCount, apiErr.RetryAfter)
 						a.logger.Warn("agent retrying llm call",
@@ -552,6 +578,15 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 						// 清空本轮 buffers，避免重试后 partial 内容重复累加。
 						// Reset 等价于恢复到本轮 streamLoop 开始状态（buffer 在 streamLoop 开始时必为空：
 						// 首次进入是外层 turn 顶部已确保空；重试进入是上次末已 Reset）。
+						// #118 P0：Reset 会把已吐出的半章正文整段丢掉，而超时常发生在
+						// 重试等待/下一次请求中。先在重试前保底落一条「仅前端可见、
+						// 不进 API 上下文」的草稿消息，用户可复制恢复；同轮只存一次。
+						if !draftSaved && responseBuffer.Len() > 0 {
+							if a.saveInterruptedDraft(&opts, responseBuffer.String(), thinkingBuffer.String()) {
+								exitDraftHandled = true
+							}
+							draftSaved = true
+						}
 						responseBuffer.Reset()
 						thinkingBuffer.Reset()
 						isThinking = false
@@ -584,6 +619,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					if responseBuffer.Len() > 0 || thinkingBuffer.Len() > 0 {
 						a.appendMsg("assistant", finalText, thinkingContent,
 							nil, &opts, runningTokens)
+						// 已由 appendMsg 持久化，统一出口 defer 不再重复落草稿。
+						exitDraftHandled = true
 					}
 					return AgentLoopResult{FinalText: finalText, ThinkingContent: thinkingContent, TurnCount: loopCount, ToolExecuted: toolExecuted}, event.Error
 				}
@@ -600,6 +637,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			if responseBuffer.Len() > 0 || thinkingBuffer.Len() > 0 {
 				a.appendMsg("assistant", responseBuffer.String(), thinkingBuffer.String(),
 					nil, &opts, runningTokens)
+				exitDraftHandled = true
 			} //此处持久化最终信息，主agent和subagent共享避免遗漏
 			normalEnd = true
 			break
@@ -612,6 +650,7 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 				"tool_calls":    buildToolCalls(toolOutputs),
 				"tool_displays": buildToolDisplay(toolOutputs),
 			}, &opts, runningTokens)
+		exitDraftHandled = true
 
 		// 2. tool 结果
 		for _, to := range toolOutputs {

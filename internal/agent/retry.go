@@ -2,6 +2,8 @@ package agent
 
 import (
 	"time"
+
+	"github.com/novelgo/novelgo/internal/llm"
 )
 
 // P2 可恢复错误重试配置
@@ -11,6 +13,16 @@ const (
 	// maxRetryAfter 限制服务商通过 Retry-After header 指定的等待时间上限。
 	// 避免服务商异常或恶意指定过长等待导致对话长时间挂起。
 	maxRetryAfter = 120 * time.Second
+
+	// #118 P1：压缩预算提前到 60%。旧值 0.85 意味着 1M 窗口要撑到 used≈73.9 万
+	// tokens 才压缩，巨量 prompt 让每次 LLM 请求极慢并反复撞空闲看门狗，
+	// 在 30 分钟主 chat 上限内根本收不了口（2026-11-14 00:38 实测）。
+	compressionBudgetRatio = 0.60
+
+	// #118 P1：单轮内「所有重试」的累计耗时预算。思考模型单次空闲预算 9 分钟，
+	// 旧逻辑允许 8 次重试，最坏可空转到主 ctx 30 分钟硬超时才报错；到点即放弃，
+	// 让超时/失败快速可见（草稿已在重试前保存）。
+	maxRetryWindow = 8 * time.Minute
 )
 
 // idleRetryCap 是单轮内「连续空闲超时（流式响应静默超过空闲预算，供应商半死连接）」
@@ -20,6 +32,25 @@ const (
 // 使死连接快速失败（与下游巡检/复验的优雅失败兜底联动，前端不再永久「运行中」）。
 // 取到 2：允许一次完整 9 分钟空闲（思考模型合法长静默）后给第二次机会，仅当第二次仍静默才放弃。
 var idleRetryCap = 2
+
+// shouldStopRetrying 是「是否放弃本轮 LLM 重试」的单源判定（#118 P1）。
+//
+// 旧实现只认 apiErr.Kind=="idle_timeout"，而 agent.go 把「吐字节后掉线」
+// （StatusCode==0 且 Retryable）也计入 idleTimeouts，导致该分支累加后仍一路
+// 重试到硬超时。这里同时覆盖两类半死连接，并加累计耗时预算：
+//   - elapsed >= maxRetryWindow：无论何种可恢复错误都停止重试；
+//   - 连续空闲/掉线达 idleRetryCap：快速失败，避免 9 分钟×N 空转；
+//   - 429/5xx 等带 HTTP 状态码的错误不受 idleTimeouts 影响，保留既有退避。
+func shouldStopRetrying(apiErr *llm.APIError, idleTimeouts int, elapsed time.Duration) bool {
+	if apiErr == nil {
+		return false
+	}
+	if elapsed >= maxRetryWindow {
+		return true
+	}
+	isIdleLike := apiErr.Kind == "idle_timeout" || (apiErr.Retryable && apiErr.StatusCode == 0)
+	return isIdleLike && idleTimeouts >= idleRetryCap
+}
 
 // backoffBase 退避基数（已含抖动，不再额外加 jitter）。
 // 8 次重试对应 2.347s / 4.618s / 8.283s / 16.742s / 31.189s / 48.631s / 60.473s / 60.218s。

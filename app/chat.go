@@ -211,13 +211,21 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 		Model:           model,
 		ProviderName:    input.ProviderName,
 		AgentType:       "main",
-		MaxTurns:        100,
+		MaxTurns:        chatMaxTurnsFor(activeSkills),
 		ReasoningEffort: input.ReasoningEffort,
 	}, input.ProviderName, runningTokens)
 
 	// 10. 最终回复已由 agent.Run() 内部 appendMsg 持久化，此处不重复存储
 	if runErr != nil {
-		a.logger.Error("对话失败", "err", runErr)
+		timedOut := errors.Is(runErr, context.DeadlineExceeded)
+		a.logger.Error("对话失败", "err", runErr,
+			"turn_id", turnID, "timed_out", timedOut,
+			"turn_count", result.TurnCount, "final_text_runes", len([]rune(result.FinalText)))
+		// #118 P0：ctx 此时可能已因 30 分钟上限/用户取消而失效，结局事件必须用
+		// 未取消 ctx（保留 value，去掉取消），否则 AppendMessage / EventsEmit 会
+		// 像 00:38 那样静默失败，DB 无痕、前端也收不到明确原因。
+		outcomeCtx, cancelOutcome := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancelOutcome()
 		eventType := session.EventSystemInterrupted
 		if errors.Is(runErr, context.Canceled) {
 			eventType = session.EventUserStopped
@@ -227,7 +235,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 				eventType = session.EventError
 			}
 		}
-		if err := a.session.AppendMessage(ctx, &session.Message{
+		if err := a.session.AppendMessage(outcomeCtx, &session.Message{
 			SessionID:  sess.SessionID,
 			TurnID:     turnID,
 			Role:       "system",
@@ -240,7 +248,7 @@ func (a *App) Chat(input ChatInput) (*ChatResult, error) {
 			a.logger.Warn("持久化结局事件消息失败", "err", err)
 		}
 		// 统一 emit 结局事件：session.EventType 既是 DB 标记又是实时载荷，前端按同一套映射设 status
-		wails.EventsEmit(ctx, "chat:turn_outcome", map[string]any{
+		wails.EventsEmit(outcomeCtx, "chat:turn_outcome", map[string]any{
 			"turn_id":    turnID,
 			"event_type": string(eventType),
 			"reason":     agent.FriendlyError(runErr),
@@ -324,6 +332,15 @@ func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int
 		return nil, nil, err
 	}
 	result := make([]map[string]any, 0, len(msgs))
+	// #118 P1：历史 tool 结果裁剪——只保留最近 toolHistoryKeepFull 条全文，更早的
+	// 截断到短摘要并标注「请重新调用」。DB 原值不动，只收敛送进 LLM 的上下文。
+	toolTotal := 0
+	for _, m := range msgs {
+		if m.Role == "tool" {
+			toolTotal++
+		}
+	}
+	toolSeen := 0
 	// tokens: 各角色 token 预算，优先累加持久化的 token_count，避免每轮重编码整段历史。
 	tokens := map[string]int{"system": 0, "user": 0, "assistant": 0, "tool": 0}
 	// validToolCallIDs: assistant 消息去重后的 tool_call id 集合
@@ -333,6 +350,7 @@ func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int
 	for _, m := range msgs {
 		api := m.ToAPIFormat(a.logger)
 		role, _ := api["role"].(string)
+		clipped := false
 
 		// assistant 消息：去重 tool_calls，保留首次出现的 id
 		if role == "assistant" {
@@ -363,6 +381,7 @@ func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int
 
 		// tool 消息：跳过没有对应 tool_call 的 orphan + 跳过重复 tool 消息
 		if role == "tool" {
+			toolSeen++
 			if id, ok := api["tool_call_id"].(string); ok && id != "" {
 				if !validToolCallIDs[id] {
 					a.logger.Warn("orphan tool message without matching tool_call, skipping",
@@ -376,14 +395,17 @@ func (a *App) loadAPIMessages(ctx context.Context, sessionID string, version int
 				}
 				seenToolMsgIDs[id] = true
 			}
+			// 后面还跟着 toolHistoryKeepFull 条更新的结果 ⇒ 属于老历史，可裁剪。
+			clipped = clipHistoricalToolContent(api, toolTotal-toolSeen >= toolHistoryKeepFull)
 		}
 
 		result = append(result, api)
 		// 仅对真正进入上下文的消息累加 token（与 InitRunningTokens 口径一致）。
-		// 优先用持久化的 token_count，升级前写入的 0 值回退到实时编码。
+		// 优先用持久化的 token_count，升级前写入的 0 值回退到实时编码；
+		// 被裁剪的消息必须按裁剪后的 api 重算，不能沿用原值高估预算。
 		if _, ok := tokens[m.Role]; ok {
 			n := m.TokenCount
-			if n == 0 {
+			if n == 0 || clipped {
 				n, _ = llm.CountMessageTokens(api)
 			}
 			tokens[m.Role] += n
