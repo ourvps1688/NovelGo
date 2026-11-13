@@ -2272,6 +2272,8 @@
         },
         "verdict": {
           "pass": "Pass",
+          "fail": "Not passed",
+          "revise": "Needs revision",
           "needs_fix": "Needs fix",
           "checked": "Checked",
           "pending": "Pending",
@@ -2280,6 +2282,7 @@
         },
         "scoreTrend": {
           "title": "Score Trend",
+          "verdictHint": "This is the judge's quality verdict for the chapter (pass / fail / revise), not a program error; see the critique below for unmet criteria.",
           "desc": "6-dim judge scores vs 8-dim audit stars from the same source — did this rewrite actually raise the score?",
           "empty": "No score data yet: no judge score records in this book.",
           "legendTitle": "Judge 6-dim → Audit 8-dim mapping",

@@ -342,3 +342,27 @@ describe("#115 P0 章节检测失败反馈可理解、不叠加", () => {
     }
   });
 });
+
+// #115：判官 verdict 是质量结论（pass/fail/revise），不是程序错误。
+// 面板曾缺 fail/revise 映射而裸显英文，用户误以为「代码失败」；锁住本地化与提示。
+describe("#115 判官 verdict 本地化与非错误语义", () => {
+  it("fail/revise 有映射、中英双语文案，徽章带非程序错误说明", () => {
+    const keys = read("components/skill/verdictKeys.ts");
+    for (const v of ["fail", "revise"]) {
+      expect(keys).toContain(`${v}: "journey.quality.detect.verdict.${v}"`);
+    }
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      expect(d.verdict.fail, `missing verdict.fail in ${f}`).toBeTruthy();
+      expect(d.verdict.revise, `missing verdict.revise in ${f}`).toBeTruthy();
+      expect(
+        d.scoreTrend.verdictHint,
+        `missing verdictHint in ${f}`,
+      ).toBeTruthy();
+    }
+    expect(read("components/skill/ScoreTrendPanel.tsx")).toContain(
+      "scoreTrend.verdictHint",
+    );
+  });
+});

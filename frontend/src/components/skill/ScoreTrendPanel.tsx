@@ -421,7 +421,10 @@ export default function ScoreTrendPanel({
                     {t(`journey.quality.detect.scoreTrend.sources.${e.source}`)}
                   </span>
                   {e.verdict ? (
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    <span
+                      title={t("journey.quality.detect.scoreTrend.verdictHint")}
+                      className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                    >
                       {VERDICT_KEYS[e.verdict]
                         ? t(VERDICT_KEYS[e.verdict])
                         : e.verdict}
