@@ -97,7 +97,7 @@ export default function SkillEffectPanel({ novelId }: Props) {
                       count: Number(row.rounds ?? 0),
                     })}
                   </td>
-                  <td className="px-3 py-1.5 tabular-nums text-emerald-600">
+                  <td className="px-3 py-1.5 tabular-nums text-primary">
                     {t("skillMatrix.effects.itemTimes", { count: resolved })}
                   </td>
                   <td className="px-3 py-1.5 tabular-nums text-destructive">
