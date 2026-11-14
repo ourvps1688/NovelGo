@@ -10,6 +10,7 @@ import {
   Send,
   RotateCw,
   X,
+  CheckCircle2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -330,6 +331,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
 
   // 进行态 true→false 边沿仅作兜底（事件丢失/旧进程）：刷新同一份视图清单，
   // 不弹 toast——边沿区分不了「完成/取消/失败」，误报不如不报。
+  // #127：再显式重拉质量档案，让下方「最近一次检测」结论条在事件丢失时也能
+  // 更新到最新 checked_at / 发现数；零发现同样可见，不依赖一次性 toast。
   const prevRunningRef = useRef(running);
   useEffect(() => {
     if (kind !== "chapter") return;
@@ -337,12 +340,19 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     prevRunningRef.current = running;
     if (wasRunning && !running) {
       invalidateChapterViews(queryClient, novelId);
+      void queryClient.refetchQueries({
+        queryKey: ["chapter-quality-archive"],
+      });
     }
   }, [kind, running, novelId, queryClient]);
 
   // #113：章节检测产物是质量档案（写后就有），即使从未手动启动过检测也可直接查看/
   // 处理发现项；卷/结构仍按「有检测结果」才展示结果区。
   const showChapterArchive = kind === "chapter" && effChapterId != null;
+  // #127：完成结论条的数据源就是质量档案本身（不依赖一次性完成事件），
+  // 事件丢失 / 切走页面再回来时也能看到最近一次 checked_at 与发现数。
+  const chapterFindingCount =
+    (archive?.l0_findings?.length ?? 0) + (archive?.l1_findings?.length ?? 0);
   const scopeReady =
     kind === "chapter"
       ? effChapterId != null
@@ -529,6 +539,31 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                     count: st.last_issue_count ?? 0,
                   })}
                 </p>
+              ) : null}
+              {/* #127：数据驱动的完成结论——一次性事件丢失、或本次零发现时仍明确可见；
+                  档案 checked_at / 发现数来自 DB，切章回来也能看到最近一次结果。 */}
+              {archive?.exists ? (
+                <div
+                  data-testid="chapter-detect-result"
+                  className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                  <span className="font-medium text-foreground">
+                    {t("journey.quality.detect.chapterResultDone")}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {t("journey.quality.detect.archiveCheckedAt", {
+                      at: fmtTime(archive.checked_at) || "—",
+                    })}
+                  </span>
+                  <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-foreground/80">
+                    {chapterFindingCount > 0
+                      ? t("journey.quality.detect.chapterResultFindings", {
+                          count: chapterFindingCount,
+                        })
+                      : t("journey.quality.detect.chapterResultNoFindings")}
+                  </span>
+                </div>
               ) : null}
               <div className="mt-3 flex flex-col gap-3">
                 <button

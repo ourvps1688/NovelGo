@@ -417,4 +417,39 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
       expect(d.roundGuardChangeBody).toMatch(/阈值|threshold/);
     }
   });
+
+  it("#127 章节检测完成反馈：数据驱动结论条 + 零发现明确 + 轮询边沿兜底", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain('data-testid="chapter-detect-result"');
+    expect(view).toContain("chapterFindingCount");
+    expect(view).toContain("archive?.exists");
+    expect(view).toContain("chapterResultDone");
+    expect(view).toContain("chapterResultFindings");
+    expect(view).toContain("chapterResultNoFindings");
+    // 一次性完成事件丢失时，running true→false 边沿必须显式重拉档案。
+    expect(view).toContain("queryClient.refetchQueries");
+    expect(view).toContain('queryKey: ["chapter-quality-archive"]');
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      for (const k of [
+        "chapterResultDone",
+        "chapterResultFindings",
+        "chapterResultNoFindings",
+      ]) {
+        expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
+      }
+      // #125 已把检测预算调到 12min，失败文案不得再写 8 分钟误导用户。
+      expect(d.chapterDoneFailedTimeout).not.toContain("8 分钟");
+      expect(d.chapterDoneFailedTimeout).not.toContain("8 min");
+    }
+    expect(
+      JSON.parse(read("i18n/locales/zh-CN.json")).journey.quality.detect
+        .chapterDoneFailedTimeout,
+    ).toContain("12 分钟");
+    expect(
+      JSON.parse(read("i18n/locales/en.json")).journey.quality.detect
+        .chapterDoneFailedTimeout,
+    ).toContain("12 min");
+  });
 });
