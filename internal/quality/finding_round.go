@@ -15,6 +15,13 @@ import (
 // 时序处理：一次「重新检测本章」会先 UpsertL0（重算 L0）再 UpsertL1（写回执），
 // 若两次各自开一轮，L0 的 resolved 会被 L1 那次覆盖掉。故 UpsertL0 开启一轮并
 // 置 PendingL1，UpsertL1 命中该标记时沿用同一份 PrevKeys 重算全量差，不开新轮。
+//
+// #124：同一轮内 L0 也可能被重算多次——写章每次 search_replace 各触发一次
+// recalcChapterL0，写后维护与手动重检又各自调 RecalcChapterL0FromDisk。若每次
+// 都开新轮，第二次重算的 PrevKeys 会取「发现项已被清空的旧行」，刚消掉的 key
+// 从 resolved 里消失、repeat_count 归零也无从体现（19:51 实测 resolved 正确，
+// 19:54 一次重复重算即被抹成 []）。故 L0 重复重算与本轮 L0 同键时也沿用
+// PrevKeys；L0 结果真变化时照常开新轮，连续未消除的轮次保护不受影响。
 
 // FindingGuardRounds 是同一 key 连续未消除触发「判定器冲突」提示的轮数。
 const FindingGuardRounds = 3
@@ -114,6 +121,8 @@ func carryRepeatCount(prev map[string]int, d FindingDiff) map[string]int {
 // NextFindingRound 在覆盖前推进一轮（纯函数）。
 //   - old == nil：首轮，全部 incoming 记 new；
 //   - scope "l0"：开启新轮，PrevKeys 取旧行完整 keys，PendingL1=true；
+//     例外（#124）：本轮 PendingL1 未收口且 incoming 与本轮 L0Keys 同键时，
+//     属同轮重复重算，沿用 PrevKeys 重算、不开新轮；
 //   - scope "l1"：若旧轮 PendingL1 则沿用 PrevKeys 重算（同一轮收口），否则新开一轮。
 //
 // incoming 是本阶段新写入的那一半清单（L0 或 L1），另一半从旧行沿用。
@@ -152,6 +161,12 @@ func NextFindingRound(old *ChapterQuality, scope string, incoming []Finding) Fin
 	case "l0":
 		curL0, curL1 = incoming, oldL1
 		l0Keys = FindingKeys(incoming, nil)
+		// #124：本轮 L1 尚未收口、且本次 L0 重算与本轮 L0 同键 ⇒ 同一轮内的
+		// 重复重算（写章每次 search_replace、写后维护、手动重检各会调一次）。
+		// 另开一轮会让 PrevKeys 取「已清空的旧行」，把刚消掉的 resolved 抹掉。
+		// L0 真变化时 equalKeys 为 false，照常开新轮，轮次保护不回潮。
+		sameRound = oldRound.PendingL1 && oldRound.Round > 0 &&
+			equalKeys(oldRound.L0Keys, l0Keys)
 	case "l1":
 		curL0, curL1 = oldL0, incoming
 		l0Keys = FindingKeys(oldL0, nil)
