@@ -1004,6 +1004,13 @@ var stateSyncDebouncer = newPostWriteDebouncer(stateSyncDebounce)
 
 const stateSyncDebounce = 6 * time.Second
 
+// stateSyncMaxTurns 是写后台账同步子 Agent 的工具循环上限（#125 方案 1）。
+// 此前请求不设 MaxTurns，走 RunSubAgent 默认 100 轮；2026-11-15 turn40 实测它
+// 跑了 11 轮、撞 10min 独立预算非阻断收口（台账同步未完成），且与 chapterci
+// 并发抢同一供应商近 9 分钟、反复读同一批材料。chapterci 已有 12 轮帽，这里对齐收紧。
+// 以 var 暴露便于按平台/模型调参与测试收缩。
+var stateSyncMaxTurns = 8
+
 func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter) {
 	if tc.RunSubAgent == nil || ch == nil {
 		return
@@ -1098,6 +1105,10 @@ func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, skillStore *skill.
 	)
 	// 本地派生在派发前完成：LLM 读到的台账已是最新，指令里给出派生名单供复核/补漏。
 	instruction += aliveDerivationNote(ctx, db, logger, novelID, chapterID)
+	// #125 方案 1：轮数帽要配收敛提示，否则到上限前仍会反复读同一来源（turn40 实测
+	// get_timeline 6 次 / get_story_arcs 5 次 / get_locations 5 次）。与 aliveDerivationNote
+	// 同为恒定后缀：技能块是否挂载都不改变 P0 主指令，降级纪律逐字保留。
+	instruction += fmt.Sprintf("收敛要求（#125）：本次同步最多 %d 轮工具调用，请一次读齐所需材料，勿反复检索同一来源；到上限前必须直接输出同步摘要。\n", stateSyncMaxTurns)
 	// #111 P0 统一账本：无任何技能注入时只记通道级事件（Skill 为空，不参与技能用量统计），
 	// 避免与 stateSyncSkillBlock 的具体技能记录重复计数。
 	if !skillMounted {
@@ -1111,6 +1122,7 @@ func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, skillStore *skill.
 		NovelID:     novelID,
 		Instruction: instruction,
 		ToolID:      toolID,
+		MaxTurns:    stateSyncMaxTurns, // #125 方案 1：不再沿用 RunSubAgent 默认 100 轮
 	}); err != nil {
 		if logger != nil {
 			logger.Warn("state-sync 子 Agent 派发失败（非阻断）", "err", err, "novelID", novelID, "chapterID", chapterID)

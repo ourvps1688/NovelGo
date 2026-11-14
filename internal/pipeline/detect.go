@@ -228,12 +228,18 @@ const detectContainerStage = "detect"
 // 以 var 暴露便于测试收缩与后续按 kind 细分。
 var detectTaskTimeout = 60 * time.Minute
 
-// chapterDetectTimeout 是「章节检测」专属硬超时（#115 P0）：L1 chapterci 子 Agent
-// 是多轮工具循环，实测一次可跑 36 次 LLM 调用 / 近 15 分钟，60min 的通用上限形同虚设，
-// 用户只能干等「检测中… 已运行 N 分钟」。章节是单章只读复核，8 分钟足够收敛；
+// chapterDetectTimeout 是「章节检测」专属硬超时（#115 P0 / #125 方案 3 调整）：
+// L1 chapterci 子 Agent 是多轮工具循环，实测一次可跑 36 次 LLM 调用 / 近 15 分钟，
+// 60min 的通用上限形同虚设，用户只能干等「检测中… 已运行 N 分钟」。章节是单章只读复核；
 // 超时会发 ok=false/reason=timeout 的完成事件并保留上一轮 L1，绝不静默。
+//
+// 2026-11-15 经用户批准由 8min 调整为 12min：8min 短于 thinkingIdleTimeout(9min)，
+// 慢供应商下硬墙会先于 idle 看门狗到期，来不及走完「一次 idle → 停止重试 → 收口」，
+// 三次手动重检样本有两次（15:28 / 20:02）在 8min 被腰斩。12min > 9min 让看门狗先触发，
+// 本预算只兜「活着但慢」的轮次，取值纪律与 verifyTicketTimeout 一致。
+// 注意写后维护是另一条独立的 10min 预算（postWriteSubAgentTimeout），不受此值影响。
 // 以 var 暴露便于测试收缩，也便于后续按平台/模型调参。
-var chapterDetectTimeout = 8 * time.Minute
+var chapterDetectTimeout = 12 * time.Minute
 
 // verifyCallTimeout 是「单轮复验执行体」的硬超时上限（对应审计 P0）：复验已改为按 run
 // 后台逐工单顺序复验，整体墙钟随工单数线性增长——本应给较宽的安全兜底，防止慢供应商/
