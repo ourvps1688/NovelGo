@@ -103,6 +103,8 @@ type idleWatchdog struct {
 	last     atomic.Int64 // 最近一次收到字节的 UnixNano
 	fired    atomic.Bool
 	gotBytes atomic.Bool // 本次请求是否曾收到过任何字节（零字节空转=死连接）
+	stopped  atomic.Bool // #122：请求已读完，巡检 goroutine 必须退出
+	done     chan struct{}
 	timeout  time.Duration
 	cancel   context.CancelFunc
 	logger   *slog.Logger
@@ -124,18 +126,45 @@ func idleTimeoutFor(p Provider, model string) time.Duration {
 	return streamIdleTimeout
 }
 
+// idleWatchdogPollInterval 是巡检间隔；生产 5s，契约测试通过
+// newIdleWatchdogWithPoll 注入更小值，不必真的等 5 秒。
+const idleWatchdogPollInterval = 5 * time.Second
+
 func newIdleWatchdog(cancel context.CancelFunc, logger *slog.Logger, timeout time.Duration) *idleWatchdog {
-	wd := &idleWatchdog{timeout: timeout, cancel: cancel, logger: logger}
+	return newIdleWatchdogWithPoll(cancel, logger, timeout, idleWatchdogPollInterval)
+}
+
+// newIdleWatchdogWithPoll 与 newIdleWatchdog 同语义，poll 可变仅用于契约测试。
+//
+// #122：旧实现只有「fired」一个退出条件，请求正常读完后巡检 goroutine 仍活着：
+// last 停在最后一个 chunk 的时刻，9 分钟后必然超时，于是给每个正常完成的请求
+// 补一条假的「llm stream idle watchdog fired」告警、误记一次 recordIdleFire，
+// 还把一个 goroutine 泄漏 9 分钟。2026-11-14 14 点一小时实测 43 条此类假告警。
+// 现在请求读完（正常/异常都必须）由调用方 defer wd.stop()，goroutine 立即退出；
+// 真·流静默（请求未结束）仍按原预算触发，logger.Warn / recordIdleFire 逐字不动。
+func newIdleWatchdogWithPoll(cancel context.CancelFunc, logger *slog.Logger, timeout, poll time.Duration) *idleWatchdog {
+	wd := &idleWatchdog{timeout: timeout, cancel: cancel, logger: logger, done: make(chan struct{})}
 	wd.last.Store(time.Now().UnixNano())
 	go func() {
-		ticker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(poll)
 		defer ticker.Stop()
-		for range ticker.C {
+		for {
+			select {
+			case <-wd.done:
+				return // 请求已收口：绝不补发假告警
+			case <-ticker.C:
+			}
 			if wd.fired.Load() {
 				return
 			}
 			last := time.Unix(0, wd.last.Load())
 			if time.Since(last) > wd.timeout {
+				// 与 stop() 的竞态边界：请求刚读完就不要再误报一次。
+				select {
+				case <-wd.done:
+					return
+				default:
+				}
 				if wd.fired.CompareAndSwap(false, true) {
 					if wd.logger != nil {
 						wd.logger.Warn("llm stream idle watchdog fired, canceling request",
@@ -149,6 +178,14 @@ func newIdleWatchdog(cancel context.CancelFunc, logger *slog.Logger, timeout tim
 		}
 	}()
 	return wd
+}
+
+// stop 在请求读完（正常或异常）后调用：关闭 done 让巡检 goroutine 立即退出。
+// 幂等；真超时已触发时也不回滚既有告警。
+func (wd *idleWatchdog) stop() {
+	if wd.stopped.CompareAndSwap(false, true) {
+		close(wd.done)
+	}
 }
 
 // wrapBody 把 resp.Body 包一层「读到字节即刷新活动时间」的 reader；
@@ -298,6 +335,7 @@ func (c *Client) ChatStream(
 		// SSE 逐行解析（body 空闲超过 streamIdleTimeout 时 watchdog 取消请求 → 读报错 → EventError）。
 		// 把 resp.Body 换成带活动刷新的包装 reader；defer 关闭的是包装前捕获的原始 body。
 		wd := newIdleWatchdog(cancelStream, c.logger, idleTimeoutFor(p, model))
+		defer wd.stop() // #122：本次请求读完即退出巡检 goroutine，杜绝 9 分钟后的假告警
 		resp.Body = io.NopCloser(wd.wrapBody(resp.Body))
 		// parseSSE 返回是否发生过错误事件：仅当流完全正常结束（无 EventError）时
 		// 才喂入熔断器的成功探针（Half-Open 回 Closed），空闲超时等软错误不回血。

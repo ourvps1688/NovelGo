@@ -5,6 +5,7 @@ package mcp_tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -42,7 +43,7 @@ func TestPostWriteDebouncerDropsStaleTimer(t *testing.T) {
 	d.latest["k"] = 2 // 已被后续编辑覆盖
 	d.mu.Unlock()
 	ran := false
-	d.fire("k", 1, func() { ran = true })
+	d.fire("k", 1, func() error { ran = true; return nil })
 	assert.False(t, ran, "旧 timer 已触发但被覆盖时，回调必须作废")
 	assert.False(t, d.running["k"])
 }
@@ -59,7 +60,7 @@ func TestPostWriteDebouncerSerializesAndCoalesces(t *testing.T) {
 	var mu sync.Mutex
 	var order []string
 
-	first := func() {
+	first := func() error {
 		mu.Lock()
 		order = append(order, "first-start")
 		mu.Unlock()
@@ -68,12 +69,14 @@ func TestPostWriteDebouncerSerializesAndCoalesces(t *testing.T) {
 		mu.Lock()
 		order = append(order, "first-end")
 		mu.Unlock()
+		return nil
 	}
-	second := func() {
+	second := func() error {
 		mu.Lock()
 		order = append(order, "second-start")
 		mu.Unlock()
 		close(secondRan)
+		return nil
 	}
 
 	go d.fire("27:2910", 1, first)
@@ -107,16 +110,18 @@ func TestPostWriteDebouncerScheduleKeepsLastEdit(t *testing.T) {
 	var mu sync.Mutex
 	var got []int
 	done := make(chan struct{})
-	d.Schedule("k", func() {
+	d.Schedule("k", func() error {
 		mu.Lock()
 		got = append(got, 1)
 		mu.Unlock()
+		return nil
 	})
-	d.Schedule("k", func() {
+	d.Schedule("k", func() error {
 		mu.Lock()
 		got = append(got, 2)
 		mu.Unlock()
 		close(done)
+		return nil
 	})
 	select {
 	case <-done:
@@ -150,4 +155,49 @@ func TestPostWriteDebouncerWiring(t *testing.T) {
 	} {
 		assert.NotContains(t, string(policy), banned, "去抖单源不得含自动修复/执行体/上传")
 	}
+	// #122：job 失败即收口；两处接线必须把派发错误回传，不许吞掉。
+	assert.Contains(t, string(policy), "if err := job(); err != nil")
+	assert.Contains(t, string(ci), "return runChapterL1(")
+	assert.Contains(t, string(rw), "return runStateSync(")
+}
+
+// TestPostWriteDebouncerStopsAfterFailedJob 锁住 #122：后台维护失败后不得自动补跑，
+// 否则一次 9 分钟空闲超时会被放大成同章多轮子 Agent 活动（11-14 实测 3 次派发）。
+func TestPostWriteDebouncerStopsAfterFailedJob(t *testing.T) {
+	d := newPostWriteDebouncer(time.Hour)
+	d.mu.Lock()
+	d.latest["27:2911"] = 1
+	d.mu.Unlock()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondRan := make(chan struct{})
+
+	first := func() error {
+		close(firstStarted)
+		<-releaseFirst
+		return errors.New("chapter-ci 子 Agent 派发失败")
+	}
+	second := func() error {
+		close(secondRan)
+		return nil
+	}
+
+	go d.fire("27:2911", 1, first)
+	<-firstStarted
+	d.mu.Lock()
+	d.latest["27:2911"] = 2
+	d.mu.Unlock()
+	d.fire("27:2911", 2, second) // 在飞期间的新编辑：只登记为 pending
+	close(releaseFirst)
+
+	select {
+	case <-secondRan:
+		t.Fatal("job 失败后不得自动补跑同章维护")
+	case <-time.After(200 * time.Millisecond):
+	}
+	assert.False(t, d.running["27:2911"])
+	d.mu.Lock()
+	assert.Nil(t, d.pending["27:2911"])
+	d.mu.Unlock()
 }

@@ -55,10 +55,16 @@ func detachedPostWriteSubAgent(run RunSubAgentFunc) RunSubAgentFunc {
 // 照样会再派发一次 ⇒ 同章两个子 Agent 并发。03:16 实测 L1 已 checked 后 25 秒
 // 又有一次 chapterci 派发失败，就是这条竞态。
 //
-// 这里保证三件事，不新增任何执行体、不改变派发时机与模型：
+// 这里保证四件事，不新增任何执行体、不改变派发时机与模型：
 //   - 连续编辑按 delay 去抖，被覆盖的旧 timer 回调直接作废（seq 判定）；
 //   - 同一 key 任意时刻只有一个 job 在飞；
-//   - 在飞期间的新编辑只留最后一次，等前一个收口后再跑一次（合并而非丢弃）。
+//   - 在飞期间的新编辑只留最后一次，等前一个**成功**收口后再跑一次（合并而非丢弃）；
+//   - #122：job 返回错误（派发失败 / 回执坏 / 独立预算到期）时立即收口，
+//     丢弃 pending 不再自动补跑。后台维护是非阻断的，失败后重试只会把
+//     9 分钟空闲预算 ×N 放大成主轮结束后几十分钟的后台活动；用户可在
+//     检测面板显式点「重新检测本章」。零自动修复、结果保留上一轮。
+type postWriteJob func() error
+
 type postWriteDebouncer struct {
 	mu      sync.Mutex
 	delay   time.Duration
@@ -66,7 +72,7 @@ type postWriteDebouncer struct {
 	latest  map[string]uint64
 	timers  map[string]*time.Timer
 	running map[string]bool
-	pending map[string]func()
+	pending map[string]postWriteJob
 }
 
 func newPostWriteDebouncer(delay time.Duration) *postWriteDebouncer {
@@ -75,12 +81,12 @@ func newPostWriteDebouncer(delay time.Duration) *postWriteDebouncer {
 		latest:  map[string]uint64{},
 		timers:  map[string]*time.Timer{},
 		running: map[string]bool{},
-		pending: map[string]func(){},
+		pending: map[string]postWriteJob{},
 	}
 }
 
 // Schedule 登记一次编辑；同 key 的待触发 timer 被覆盖，只有最后一次编辑会真正派发。
-func (d *postWriteDebouncer) Schedule(key string, job func()) {
+func (d *postWriteDebouncer) Schedule(key string, job postWriteJob) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.next++
@@ -93,7 +99,7 @@ func (d *postWriteDebouncer) Schedule(key string, job func()) {
 }
 
 // fire 是到点回调：作废过期 timer、把在飞期间的后来者合并为一次重跑。
-func (d *postWriteDebouncer) fire(key string, seq uint64, job func()) {
+func (d *postWriteDebouncer) fire(key string, seq uint64, job postWriteJob) {
 	d.mu.Lock()
 	if d.latest[key] != seq {
 		d.mu.Unlock()
@@ -110,7 +116,7 @@ func (d *postWriteDebouncer) fire(key string, seq uint64, job func()) {
 	d.runQueued(key, job)
 }
 
-func (d *postWriteDebouncer) runQueued(key string, first func()) {
+func (d *postWriteDebouncer) runQueued(key string, first postWriteJob) {
 	defer func() {
 		d.mu.Lock()
 		delete(d.running, key)
@@ -119,7 +125,9 @@ func (d *postWriteDebouncer) runQueued(key string, first func()) {
 	}()
 	job := first
 	for {
-		job()
+		if err := job(); err != nil {
+			return // #122：失败即收口，pending 由 defer 清空，绝不自动补跑
+		}
 		d.mu.Lock()
 		next, ok := d.pending[key]
 		delete(d.pending, key)

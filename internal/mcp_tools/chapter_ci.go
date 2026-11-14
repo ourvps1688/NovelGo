@@ -65,11 +65,12 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 		return // 无子 Agent 能力：L1 降级不跑（零提示）
 	}
 	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
-	chapterCIDebouncer.Schedule(key, func() {
+	chapterCIDebouncer.Schedule(key, func() error {
 		// #119 P0：脱离主 ctx 取消，但自带独立预算；超时不写 L1，保留上一轮结果。
 		bgCtx, cancel := detachedPostWriteContext(ctx)
 		defer cancel()
-		runChapterL1(bgCtx, tc, tc.NovelID, ch.ID)
+		// #122：把派发错误回传给去抖队列，失败即收口、不再自动补跑。
+		return runChapterL1(bgCtx, tc, tc.NovelID, ch.ID)
 	})
 }
 
@@ -208,16 +209,18 @@ func chapterCIPowerLevels(ctx context.Context, tc ToolContext) []quality.PowerLe
 }
 
 // runChapterL1 去抖到点后派发 L1 增量检查（回执落档案在派发链内完成）。
-func runChapterL1(ctx context.Context, tc ToolContext, novelID, chapterID int64) {
+func runChapterL1(ctx context.Context, tc ToolContext, novelID, chapterID int64) error {
 	if tc.RunSubAgent == nil {
-		return
+		return nil
 	}
-	_ = RunChapterCIForChapter(ctx, detachedPostWriteSubAgent(tc.RunSubAgent),
+	err := RunChapterCIForChapter(ctx, detachedPostWriteSubAgent(tc.RunSubAgent),
 		tc.SkillStore, tc.DB, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
 	if ctx.Err() != nil {
 		tc.LoggerOrDefault().Warn("chapter-ci 写后维护超时收口（非阻断，保留上一轮 L1）",
 			"err", ctx.Err(), "novelID", novelID, "chapterID", chapterID)
+		return ctx.Err()
 	}
+	return err
 }
 
 // chapterCIFindings 读取本章当前档案的未消除发现，供写后自检技法定向（#116）。

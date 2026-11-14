@@ -80,6 +80,7 @@ func (c *Client) GenerateText(
 	defer resp.Body.Close()
 
 	wd := newIdleWatchdog(cancelGen, c.logger, idleTimeoutFor(p, model))
+	defer wd.stop() // #122：与 ChatStream 同口径，非流式路径也不留巡检 goroutine
 	respBody, err := io.ReadAll(wd.wrapBody(resp.Body))
 	if err != nil {
 		var idleErr *idleTimeoutError

@@ -1009,11 +1009,12 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 		return
 	}
 	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
-	stateSyncDebouncer.Schedule(key, func() {
+	stateSyncDebouncer.Schedule(key, func() error {
 		// #119 P0：脱离主 ctx 取消，但自带独立预算，主轮结束后不再无限续命。
 		bgCtx, cancel := detachedPostWriteContext(ctx)
 		defer cancel()
-		runStateSync(bgCtx, tc, tc.NovelID, ch.ID)
+		// #122：把派发错误回传给去抖队列，失败即收口、不再自动补跑。
+		return runStateSync(bgCtx, tc, tc.NovelID, ch.ID)
 	})
 }
 
@@ -1131,16 +1132,18 @@ func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, skillStore *skill.
 }
 
 // runStateSync 写后由后端自动派发（见 scheduleStateSync），委托 RunStateSyncForChapter 完成实际工作。
-func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) {
+func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) error {
 	if tc.RunSubAgent == nil {
-		return
+		return nil
 	}
-	_ = RunStateSyncForChapter(ctx, tc.DB, tc.SkillStore,
+	err := RunStateSyncForChapter(ctx, tc.DB, tc.SkillStore,
 		detachedPostWriteSubAgent(tc.RunSubAgent), tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
 	if ctx.Err() != nil {
 		tc.LoggerOrDefault().Warn("state-sync 写后维护超时收口（非阻断）",
 			"err", ctx.Err(), "novelID", novelID, "chapterID", chapterID)
+		return ctx.Err()
 	}
+	return err
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {

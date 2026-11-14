@@ -533,8 +533,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 							reminderAdded = true
 						}
 
-						// 走自动重试路径（复用 P2 退避机制）
-						if retryCount < maxRetries {
+						// 走自动重试路径（复用 P2 退避机制）；#122 后台 Detached 不重试。
+						if !opts.Detached && retryCount < maxRetries {
 							retryCount++
 							backoff := computeBackoff(retryCount, 0)
 							a.logger.Warn("agent retrying llm call (tool_args_invalid)",
@@ -579,7 +579,11 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					// 连续空闲超时/掉线达上限，或本轮重试累计耗时超预算 → 快速失败。
 					// #118 P1：旧判定只认 Kind=="idle_timeout"，漏掉「吐字节后掉线」
 					// （StatusCode==0 且 Retryable）这一路，会一路重试到硬超时。
-					stopRetry := shouldStopRetrying(apiErr, idleTimeouts, time.Since(retryWindowStart))
+					// #122：Detached 写后维护一次失败即收口。后台检查本来非阻断，
+					// 9 分钟空闲预算 ×N 次重试会把主轮结束后的后台活动放大到几十分钟；
+					// 失败时保留上一轮 L1，由用户在检测面板显式点「重新检测本章」。
+					// 主 chat 与前台 run_subagent 的重试矩阵逐字不动。
+					stopRetry := opts.Detached || shouldStopRetrying(apiErr, idleTimeouts, time.Since(retryWindowStart))
 					if apiErr != nil && apiErr.Retryable && !stopRetry && retryCount < maxRetries {
 						retryCount++
 						backoff := computeBackoff(retryCount, apiErr.RetryAfter)
