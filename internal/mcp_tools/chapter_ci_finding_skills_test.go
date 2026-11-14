@@ -13,10 +13,15 @@ import (
 // #116 P1 写后自检定向：旧链路每章固定注入 4 个技法（实测占技能字符 66%），
 // 与本章实际发现维度并不对应。这里只改注入集合，检查项/回执契约/执行体一律不动。
 
-func TestChapterCIFindingSkillsFallsBackToFullSet(t *testing.T) {
-	require.Equal(t, chapterCISelfCheckSkills, chapterCIFindingSkills(nil),
-		"新章/档案未落库/测试直调：零发现回落原全量 4 技法，首章首次检测不受影响")
-	require.Equal(t, chapterCISelfCheckSkills, chapterCIFindingSkills([]quality.Finding{}))
+// #126 A：零发现不再回落全量 4 技法（实测每章固定 4837 rune、#116 定向注入
+// 真实运行零样本），改为最小评审清单；首章仍有自检清单，L0 真有发现时定向照常生效。
+func TestChapterCIFindingSkillsZeroFindingsMinimalSet(t *testing.T) {
+	minimal := []string{"review"}
+	require.Equal(t, minimal, chapterCIFindingSkills(nil),
+		"新章/档案未落库/测试直调：零发现只挂最小集 review")
+	require.Equal(t, minimal, chapterCIFindingSkills([]quality.Finding{}))
+	require.Equal(t, minimal, chapterCIFindingSkills([]quality.Finding{{Check: "unknown_check"}}),
+		"命中但不落映射仍是同一最小集，两路口径一致")
 }
 
 func TestChapterCIFindingSkillsRoutesByFinding(t *testing.T) {
@@ -53,19 +58,30 @@ func TestChapterCIFindingSkillsDeterministicUnion(t *testing.T) {
 
 func TestChapterCISelfCheckBlockDirectedByFindings(t *testing.T) {
 	s := newCISkillStore(t)
-	full := chapterCISelfCheckBlock(s, 1, 7)
-	require.NotEmpty(t, full)
-	for _, n := range chapterCISelfCheckSkills {
-		require.Contains(t, full, "【写后自检·"+n+"】")
+	// #126 A：零发现块只剩最小评审清单。
+	minimal := chapterCISelfCheckBlock(s, 1, 7)
+	require.NotEmpty(t, minimal)
+	require.Contains(t, minimal, "【写后自检·review】")
+	for _, n := range []string{"deai-flavor", "revision-pass", "dialogue-subtext"} {
+		require.NotContains(t, minimal, "【写后自检·"+n+"】")
 	}
+
+	// 多发现组合仍能触发全量 4 技法：#126 A 只改「零发现」分支，不删任何技法。
+	all := chapterCISelfCheckBlock(s, 1, 7,
+		quality.Finding{Check: quality.CheckAIFlavor},
+		quality.Finding{Check: "immersion_anchor"},
+		quality.Finding{Check: quality.CheckOpeningSlope})
+	for _, n := range chapterCISelfCheckSkills {
+		require.Contains(t, all, "【写后自检·"+n+"】")
+	}
+	require.Less(t, len([]rune(minimal)), len([]rune(all)),
+		"零发现最小集必须真的省下写后自检字符，而不是只换个函数名")
 
 	directed := chapterCISelfCheckBlock(s, 1, 7, quality.Finding{Check: quality.CheckAIFlavor})
 	require.Contains(t, directed, "【写后自检·deai-flavor】")
 	require.NotContains(t, directed, "【写后自检·revision-pass】")
 	require.NotContains(t, directed, "【写后自检·dialogue-subtext】")
 	require.NotContains(t, directed, "【写后自检·review】")
-	require.Less(t, len([]rune(directed)), len([]rune(full)),
-		"定向注入必须真的省下写后自检字符，而不是只换个函数名")
 
 	// 定向块真实进入 L1 指令，且仍在回执契约之前、「只报告不改写」纪律不丢。
 	instruction := buildChapterCIInstruction(s, 1, 7, "", quality.Finding{Check: quality.CheckAIFlavor})

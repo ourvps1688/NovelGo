@@ -375,6 +375,12 @@ var chapterCISelfCheckSkills = []string{"deai-flavor", "revision-pass", "dialogu
 
 const chapterCISelfCheckSkillCap = 1500 // 单技能自检正文上限（rune）
 
+// chapterCIMethodCap 是 chapter-ci 方法论正文的单帽（#126 B）。此前该正文直接全文
+// 注入、无截断（实测 2612 rune），而 selfcheck 有 1500 帽、statesync 有 1200/400 帽。
+// 取 1200 与 statesync collect 同口径；回执契约由 L1ReceiptFormatLine 单独拼装，
+// 不依赖技能正文尾部，截断只影响方法论详略，不影响「只报告不改写」与回执格式。
+const chapterCIMethodCap = 1200
+
 // chapterCIFindingSkillRoutes 是 #116 写后自检「按本章发现定向」的单源映射。
 // 旧链路每章固定注入 4 个技法（实测 chapter_ci_selfcheck 42 万 rune、占技能
 // 字符 66%），但产出的 L1 发现维度（continuity/task_card/foreshadow）与这
@@ -397,11 +403,14 @@ var chapterCIFindingSkillRoutes = map[string][]string{
 }
 
 // chapterCIFindingSkills 按本章确定性/主观发现选自检技法。无发现项（新章、
-// 档案未落库、测试直接调用）时回落全量 4 个，保证首章首次检测仍有完整
-// 自检清单；命中但不落映射时给最小集 review。输出保持单源顺序（确定性）。
+// 档案未落库、测试直接调用）时只挂最小集 review（#126 A）：旧实现回落全量
+// 4 技法（4837 rune）本意是「保证首章首次检测有完整清单」，但验收通过的章
+// 每次写稿都零发现，定向注入在真实运行中零样本，反而成了每章固定开销；
+// 且与「命中但不落映射 → review」同口径，首章仍有自检清单，L0 真有发现时
+// 定向照常生效。命中但不落映射时同样给最小集 review。输出保持单源顺序（确定性）。
 func chapterCIFindingSkills(findings []quality.Finding) []string {
 	if len(findings) == 0 {
-		return chapterCISelfCheckSkills
+		return []string{"review"}
 	}
 	seen := map[string]bool{}
 	for _, f := range findings {
@@ -484,14 +493,25 @@ func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64
 		"climax|conflict|hook|dialogue|flat|transition（climax=爽点/情绪峰）。可只标部分段，宁缺勿错。\n")
 	if skillStore != nil {
 		if sk, ok := skillStore.Get(0, "chapter-ci"); ok && strings.TrimSpace(sk.Content) != "" {
+			// #126 B / #108 洁净化：与 statesync 同款统一为 LF，再按单帽截断并如实标注。
+			runes := []rune(strings.ReplaceAll(sk.Content, "\r\n", "\n"))
+			truncated := false
+			if len(runes) > chapterCIMethodCap {
+				runes = runes[:chapterCIMethodCap]
+				truncated = true
+			}
 			b.WriteString("\n# 本次任务方法论\n")
-			b.WriteString(sk.Content)
+			b.WriteString(string(runes))
+			if truncated {
+				b.WriteString("\n（章节方法论节选，完整以技能原文为准）")
+			}
 			b.WriteString("\n")
 			// #111 P0 统一账本：chapter-ci 走 RunSubAgent，不进 exec_run_stats，
-			// 在注入点直接记账（口径陷阱之一）。
+			// 在注入点直接记账（口径陷阱之一）。Runes 记实际注入的截断后长度，
+			// 与 selfcheck / statesync 同口径，不再虚报技能全文字符数。
 			activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
 				Skill: "chapter-ci", Channel: "chapter_ci", Mount: "chapter_ci",
-				NovelID: novelID, ChapterID: chapterID, Runes: len([]rune(sk.Content)),
+				NovelID: novelID, ChapterID: chapterID, Runes: len(runes),
 			})
 		}
 	}

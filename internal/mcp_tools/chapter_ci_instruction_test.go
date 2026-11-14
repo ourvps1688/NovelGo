@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/novelgo/novelgo/internal/quality"
 	"github.com/novelgo/novelgo/internal/skill"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +48,11 @@ func TestBuildChapterCIInstruction_EmptySelfCheckVerbatim(t *testing.T) {
 // 受单帽截断，并真实进入 L1 指令（回执契约之前）。
 func TestChapterCISelfCheckBlock_NonEmpty(t *testing.T) {
 	s := newCISkillStore(t)
-	block := chapterCISelfCheckBlock(s, 1, 7)
+	// #126 A：零发现只挂最小集，故用覆盖全 4 技法的多发现组合验证「全量注入」路径。
+	block := chapterCISelfCheckBlock(s, 1, 7,
+		quality.Finding{Check: quality.CheckAIFlavor},
+		quality.Finding{Check: "immersion_anchor"},
+		quality.Finding{Check: quality.CheckOpeningSlope})
 	require.NotEmpty(t, block)
 	for _, n := range chapterCISelfCheckSkills {
 		require.Contains(t, block, "【写后自检·"+n+"】")
