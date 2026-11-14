@@ -254,8 +254,11 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 	if runSub == nil {
 		return nil
 	}
-	instruction := buildChapterCIInstruction(skillStore, novelID, chapterID,
-		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID),
+	// #117 P1 方案 C：派发前一次性取齐语料（纯本地毫秒级读），让 chapterci 子 Agent
+	// 不再用 6 轮工具往返自取。取不到证据时返回空串，指令逐字回落旧的自取文案。
+	corpus := buildChapterCICorpus(ctx, db, logger, novelID, chapterID)
+	instruction := buildChapterCIInstructionWithCorpus(skillStore, novelID, chapterID,
+		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID), corpus,
 		chapterCIFindings(ctx, db, logger, novelID, chapterID)...)
 	report, err := runSub(ctx, SubAgentRequest{
 		AgentType:   "chapterci",
@@ -468,17 +471,37 @@ func chapterCISelfCheckBlock(skillStore *skill.Store, novelID, chapterID int64, 
 		b.String() + "\n"
 }
 
-// buildChapterCIInstruction 构造 L1 增量检查指令：小上下文范围 + 检查项 + 情绪曲线
-// 标注（P0-2，段号对照对齐分段）+ 回执契约，有 chapter-ci 技能时注入方法论正文（单源），
+// buildChapterCIInstruction 是「语料未内联」降级路径的薄包装：corpus 恒为空，
+// 输出与 #126 逐字一致。现有契约测试全部经由本函数，不因方案 C 改动。
+func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string, findings ...quality.Finding) string {
+	return buildChapterCIInstructionWithCorpus(skillStore, novelID, chapterID, segHints, "", findings...)
+}
+
+// buildChapterCIInstructionWithCorpus 构造 L1 增量检查指令：小上下文范围 + 检查项 +
+// 情绪曲线标注（P0-2）+ 回执契约，有 chapter-ci 技能时注入方法论正文（单源），
 // 无技能时内联最小指令（降级）。segHints 为空回落通用分段说明。
 // #111 P1 追加写后自检块（#116 按本章发现定向）；空块时输出与 P0 逐字一致，
 // L1ReceiptFormatLine 契约不动。
-func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string, findings ...quality.Finding) string {
+// #117 P1 方案 C：corpus 非空时只替换「检查范围」一段并内联证据块，其余各段
+// （检查项/只报告/收敛要求/情绪曲线/方法论/自检/回执契约）逐字不动；corpus 为空
+// 时全部文案逐字保持旧口径，模型仍可自取 —— 不新增任何「跳过落盘」分支。
+func buildChapterCIInstructionWithCorpus(skillStore *skill.Store, novelID, chapterID int64,
+	segHints, corpus string, findings ...quality.Finding) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "章节（chapter_id=%d）正文刚刚修改并落盘。请对该章执行 L1 增量质检。\n", chapterID)
-	b.WriteString("检查范围（小上下文，严禁全书通读）：本章正文（read 路径 chapters/id_" +
-		fmt.Sprint(chapterID) + ".md）、前一章结尾/次一章开头片段（get_chapter_list 定位）、" +
-		"本章计划卡（get_chapter_task_card）、涉及台账条目（get_* 定点读取）。\n")
+	if corpus != "" {
+		b.WriteString("检查范围（小上下文，严禁全书通读）：本次复核所需证据已由后端一次性取齐并内联在下方【本章质检语料】。\n")
+		b.WriteString("**禁止调用任何工具（read / get_chapter_list / get_chapter_task_card / get_* / search）：" +
+			"不得再自行取数、不得反复检索同一来源；请直接通读语料，一轮推理后在最终回复末尾输出回执。**\n")
+		b.WriteString(corpus)
+		if !strings.HasSuffix(corpus, "\n") {
+			b.WriteString("\n")
+		}
+	} else {
+		b.WriteString("检查范围（小上下文，严禁全书通读）：本章正文（read 路径 chapters/id_" +
+			fmt.Sprint(chapterID) + ".md）、前一章结尾/次一章开头片段（get_chapter_list 定位）、" +
+			"本章计划卡（get_chapter_task_card）、涉及台账条目（get_* 定点读取）。\n")
+	}
 	b.WriteString("检查项：continuity 一致性/连贯、pacing 节奏、foreshadow 伏笔 lifecycle、" +
 		"reader_state 读者认知态、task_card 任务卡兑现、immersion_anchor 代入感锚点。\n")
 	b.WriteString("只报告不改写：不调用任何写工具、不评分、不给 verdict；零发现报空清单。\n")
