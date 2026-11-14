@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -1000,10 +999,8 @@ func getChapterRecord(ctx context.Context, db *gorm.DB, novelID, id int64) (*cha
 // 把本章涉及的角色/地点/弧线/时间线/读者认知增量同步到结构化台账。
 // 用 debounce 合并同一章节连续多次编辑，避免每次 edit 都起一个子 Agent。
 
-var (
-	stateSyncMu     sync.Mutex
-	stateSyncTimers = map[string]*time.Timer{}
-)
+// #121：statesync 与 chapterci 共用串行化去抖单源，同章同时只允许一个子 Agent 在飞。
+var stateSyncDebouncer = newPostWriteDebouncer(stateSyncDebounce)
 
 const stateSyncDebounce = 6 * time.Second
 
@@ -1012,20 +1009,12 @@ func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter)
 		return
 	}
 	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
-	stateSyncMu.Lock()
-	if t, ok := stateSyncTimers[key]; ok {
-		t.Stop()
-	}
-	stateSyncTimers[key] = time.AfterFunc(stateSyncDebounce, func() {
-		stateSyncMu.Lock()
-		delete(stateSyncTimers, key)
-		stateSyncMu.Unlock()
+	stateSyncDebouncer.Schedule(key, func() {
 		// #119 P0：脱离主 ctx 取消，但自带独立预算，主轮结束后不再无限续命。
 		bgCtx, cancel := detachedPostWriteContext(ctx)
 		defer cancel()
 		runStateSync(bgCtx, tc, tc.NovelID, ch.ID)
 	})
-	stateSyncMu.Unlock()
 }
 
 // stateSyncSkills 是写后状态同步的前置技能单源（#111 P2，§3.1）。

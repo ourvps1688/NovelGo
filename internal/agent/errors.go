@@ -26,6 +26,12 @@ func truncateErrMsg(s string, maxLen int) string {
 // 避免「已写成却被判失败」时用户误以为整章丢了。
 const deadlineFriendlyMessage = "本轮对话已超时（普通对话 30 分钟 / 写章 60 分钟上限），已停止；中断前生成的内容（如有）已存为草稿，未落盘为章节正文。请先查看章节列表确认正文是否已写入，再决定重试或新建会话。"
 
+// detachedDeadlineFriendlyMessage 是写后维护子 Agent「独立预算」到期的提示（#121）。
+// 03:16 实测：chapter-ci 的 8 分钟独立预算到期后，DeadlineExceeded 经 FriendlyError
+// 被包装成「本轮对话已超时（30/60 分钟上限）…正文未落盘」，与事实完全相反——
+// 正文和上一轮 L1 都已落盘，主对话根本没超时。后台错误不得借用主对话文案。
+const detachedDeadlineFriendlyMessage = "后台写后维护（台账同步 / 章节检测）已到独立预算上限并停止；这轮后台检查未完成，但章节正文与上一轮检测结果都已落盘、不受影响。如需最新结论，请在检测面板点「重新检测本章」。"
+
 // FriendlyError 将 LLM 错误转换为用户友好的消息。
 // 原始 error 应由调用方另行记录日志。
 func FriendlyError(err error) string {

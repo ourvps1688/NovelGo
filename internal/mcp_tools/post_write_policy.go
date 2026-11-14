@@ -15,13 +15,20 @@ package mcp_tools
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
-// postWriteSubAgentTimeout 是写后维护子 Agent 的独立预算。
-// 8 分钟覆盖一次正常的思考模型调用（现有 idle watchdog 为 9 分钟），
+// postWriteIdleBudget 与 internal/llm.thinkingIdleTimeout（9 分钟）同源。
+// #121：旧值 8 分钟比 idle watchdog 还短，供应商静默时预算先到期、看门狗随后才触发，
+// 03:17–03:18 出现 8 条 idle watchdog 与预算到期日志交错，后台检查必然半途而废。
+// 预算必须大于单次空闲预算，让「一次 idle → 停止重试 → 收口」跑在同一个生命周期里。
+const postWriteIdleBudget = 9 * time.Minute
+
+// postWriteSubAgentTimeout 是写后维护子 Agent 的独立预算：
+// 一次完整空闲预算 + 1 分钟收口余量（agent.maxRetryWindow=8min 会在 idle 后停止重试），
 // 同时保证主轮结束后后台不会无限挂住。
-const postWriteSubAgentTimeout = 8 * time.Minute
+const postWriteSubAgentTimeout = postWriteIdleBudget + time.Minute
 
 // detachedPostWriteContext 派生「脱离主 ctx 取消、但自带超时」的写后维护上下文。
 // 调用方必须 defer cancel()。
@@ -38,5 +45,88 @@ func detachedPostWriteSubAgent(run RunSubAgentFunc) RunSubAgentFunc {
 	return func(ctx context.Context, req SubAgentRequest) (string, error) {
 		req.Detached = true
 		return run(ctx, req)
+	}
+}
+
+// postWriteDebouncer 是 chapterci / statesync 两处写后维护去抖的共用单源（#121）。
+//
+// 旧实现每处各有一个 map[string]*time.Timer：新编辑来时 Stop() 旧 timer，
+// 但旧 timer 一旦已经触发（Stop 返回 false），回调已经在跑或已排队，新 timer
+// 照样会再派发一次 ⇒ 同章两个子 Agent 并发。03:16 实测 L1 已 checked 后 25 秒
+// 又有一次 chapterci 派发失败，就是这条竞态。
+//
+// 这里保证三件事，不新增任何执行体、不改变派发时机与模型：
+//   - 连续编辑按 delay 去抖，被覆盖的旧 timer 回调直接作废（seq 判定）；
+//   - 同一 key 任意时刻只有一个 job 在飞；
+//   - 在飞期间的新编辑只留最后一次，等前一个收口后再跑一次（合并而非丢弃）。
+type postWriteDebouncer struct {
+	mu      sync.Mutex
+	delay   time.Duration
+	next    uint64
+	latest  map[string]uint64
+	timers  map[string]*time.Timer
+	running map[string]bool
+	pending map[string]func()
+}
+
+func newPostWriteDebouncer(delay time.Duration) *postWriteDebouncer {
+	return &postWriteDebouncer{
+		delay:   delay,
+		latest:  map[string]uint64{},
+		timers:  map[string]*time.Timer{},
+		running: map[string]bool{},
+		pending: map[string]func(){},
+	}
+}
+
+// Schedule 登记一次编辑；同 key 的待触发 timer 被覆盖，只有最后一次编辑会真正派发。
+func (d *postWriteDebouncer) Schedule(key string, job func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.next++
+	seq := d.next
+	d.latest[key] = seq
+	if t, ok := d.timers[key]; ok {
+		t.Stop()
+	}
+	d.timers[key] = time.AfterFunc(d.delay, func() { d.fire(key, seq, job) })
+}
+
+// fire 是到点回调：作废过期 timer、把在飞期间的后来者合并为一次重跑。
+func (d *postWriteDebouncer) fire(key string, seq uint64, job func()) {
+	d.mu.Lock()
+	if d.latest[key] != seq {
+		d.mu.Unlock()
+		return // 已被后续编辑覆盖，由它的 timer 负责跑最新一次
+	}
+	delete(d.timers, key)
+	if d.running[key] {
+		d.pending[key] = job // 只保留最后一次：L1 读的是落盘后的当前档案
+		d.mu.Unlock()
+		return
+	}
+	d.running[key] = true
+	d.mu.Unlock()
+	d.runQueued(key, job)
+}
+
+func (d *postWriteDebouncer) runQueued(key string, first func()) {
+	defer func() {
+		d.mu.Lock()
+		delete(d.running, key)
+		delete(d.pending, key)
+		d.mu.Unlock()
+	}()
+	job := first
+	for {
+		job()
+		d.mu.Lock()
+		next, ok := d.pending[key]
+		delete(d.pending, key)
+		d.mu.Unlock()
+		if !ok {
+			return
+		}
+		job = next
 	}
 }

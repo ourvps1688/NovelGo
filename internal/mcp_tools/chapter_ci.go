@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -30,8 +29,9 @@ import (
 )
 
 var (
-	chapterCIMu     sync.Mutex
-	chapterCITimers = map[string]*time.Timer{}
+	// #121：chapterci 去抖与 statesync 共用串行化单源，杜绝「旧 timer 已触发、
+	// Stop 来不及」导致的同章两次 L1 并发派发。
+	chapterCIDebouncer = newPostWriteDebouncer(chapterCIDebounce)
 	// chapterCIMaxTurns 是单章 L1 复核的工具循环上限（#115 P0）。真实语料实测收敛约
 	// 8 轮，留 12 轮余量；旧的 100 轮通用上限让一次检测可跑 36 次 LLM 调用 / 15 分钟。
 	// 以 var 暴露便于按平台/模型调参与测试收缩。
@@ -65,20 +65,12 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 		return // 无子 Agent 能力：L1 降级不跑（零提示）
 	}
 	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
-	chapterCIMu.Lock()
-	if t, ok := chapterCITimers[key]; ok {
-		t.Stop()
-	}
-	chapterCITimers[key] = time.AfterFunc(chapterCIDebounce, func() {
-		chapterCIMu.Lock()
-		delete(chapterCITimers, key)
-		chapterCIMu.Unlock()
+	chapterCIDebouncer.Schedule(key, func() {
 		// #119 P0：脱离主 ctx 取消，但自带独立预算；超时不写 L1，保留上一轮结果。
 		bgCtx, cancel := detachedPostWriteContext(ctx)
 		defer cancel()
 		runChapterL1(bgCtx, tc, tc.NovelID, ch.ID)
 	})
-	chapterCIMu.Unlock()
 }
 
 // runChapterL0 跑 L0 确定性检查并同步落档案（UpsertL0 只写 L0 列），

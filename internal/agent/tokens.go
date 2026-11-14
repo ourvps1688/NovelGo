@@ -61,16 +61,26 @@ func (a *Agent) updateUsage(ctx context.Context, apiUsage map[string]any, runnin
 		}
 	}
 
+	// #121：后台子 Agent（app.backgroundRunOptions）只带模型、没有会话归属，
+	// opts.SessionID 为空串。对空串查 sessions 必然 record not found，
+	// 03:09–03:48 实测反复打 9 条 WARN，且 session.Usage 本就是主 chat 的
+	// 上下文占用指标，对后台链路没有意义。purpose 级用量已由 recordTokenUsage
+	// 落在 llm_usage_daily（真相源），零会话归属时跳过 session 级读写：
+	// 不造空串查询、不误报、不改任何统计口径。
+	hasSessionScope := opts.SessionID != ""
+
 	// 累计 session 级缓存命中/未命中 token
 	accHit, accMiss := float64(0), float64(0)
-	if sess, err := a.session.GetSession(ctx, opts.SessionID); err == nil && sess.Usage != "" {
-		var old map[string]any
-		if json.Unmarshal([]byte(sess.Usage), &old) == nil {
-			if v, _ := old["prompt_cache_hit_tokens"].(float64); v > 0 {
-				accHit = v
-			}
-			if v, _ := old["prompt_cache_miss_tokens"].(float64); v > 0 {
-				accMiss = v
+	if hasSessionScope {
+		if sess, err := a.session.GetSession(ctx, opts.SessionID); err == nil && sess.Usage != "" {
+			var old map[string]any
+			if json.Unmarshal([]byte(sess.Usage), &old) == nil {
+				if v, _ := old["prompt_cache_hit_tokens"].(float64); v > 0 {
+					accHit = v
+				}
+				if v, _ := old["prompt_cache_miss_tokens"].(float64); v > 0 {
+					accMiss = v
+				}
 			}
 		}
 	}
@@ -97,9 +107,11 @@ func (a *Agent) updateUsage(ctx context.Context, apiUsage map[string]any, runnin
 		usage["cache_hit_ratio"] = accHit / (accHit + accMiss) * 100
 	}
 
-	if b, err := json.Marshal(usage); err == nil {
-		if err := a.session.UpdateSessionUsage(ctx, opts.SessionID, string(b)); err != nil {
-			a.logger.Warn("持久化 usage 失败", "err", err)
+	if hasSessionScope {
+		if b, err := json.Marshal(usage); err == nil {
+			if err := a.session.UpdateSessionUsage(ctx, opts.SessionID, string(b)); err != nil {
+				a.logger.Warn("持久化 usage 失败", "err", err)
+			}
 		}
 	}
 

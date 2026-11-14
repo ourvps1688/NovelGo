@@ -1,14 +1,19 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/novelgo/novelgo/internal/activity"
+	"github.com/novelgo/novelgo/internal/event"
 	"github.com/novelgo/novelgo/internal/llm"
+	"github.com/novelgo/novelgo/internal/session"
 )
 
 func TestRecordTokenUsage(t *testing.T) {
@@ -79,4 +84,41 @@ func TestRecordTokenUsageMissingFieldsAndFailure(t *testing.T) {
 			require.NotPanics(t, func() { a.recordTokenUsage(context.Background(), raw, opts) })
 		})
 	}
+}
+
+// #121：后台子 Agent（app.backgroundRunOptions）没有 SessionID，旧实现对空串
+// 查 sessions 反复打 "record not found"；跳过 session 级读写，但 purpose 级
+// 用量仍落 llm_usage_daily，主 chat 的 session.Usage 口径逐字不变。
+func TestUpdateUsageSkipsSessionlessBackgroundAgent(t *testing.T) {
+	a := newCompressTestAgent(t, "usage-main")
+	a.emitter = event.NopEmitter{}
+	require.NoError(t, a.db.AutoMigrate(&activity.DailyLLMUsage{}))
+	var logs bytes.Buffer
+	a.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	ctx := context.Background()
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal([]byte(`{"prompt_tokens":100,"completion_tokens":20,"total_tokens":125}`), &raw))
+	running := map[string]int{"system": 10, "user": 20, "assistant": 30, "tool": 40}
+
+	bg := RunOptions{ProviderName: "provider", Model: &llm.ModelInfo{ID: "model", ContextWindow: 1000}, AgentType: "chapterci"}
+	require.NotPanics(t, func() { a.updateUsage(ctx, raw, running, bg) })
+	require.NotContains(t, logs.String(), "持久化 usage 失败")
+	var sessions []session.Session
+	require.NoError(t, a.db.Find(&sessions).Error)
+	require.Len(t, sessions, 1, "零会话归属不得造空串 session 行")
+	require.Equal(t, "usage-main", sessions[0].SessionID)
+	var daily activity.DailyLLMUsage
+	require.NoError(t, a.db.Where("purpose = ?", "chapterci").First(&daily).Error)
+	require.EqualValues(t, 125, daily.TotalTokens, "purpose 级用量仍是真相源")
+
+	main := RunOptions{SessionID: "usage-main", TurnID: 3, ProviderName: "provider", Model: &llm.ModelInfo{ID: "model", ContextWindow: 1000}, AgentType: "main"}
+	a.updateUsage(ctx, raw, running, main)
+	sess, err := a.session.GetSession(ctx, "usage-main")
+	require.NoError(t, err)
+	require.Contains(t, sess.Usage, "usage_ratio", "主 chat 的 session 级用量不受影响")
+
+	src, err := os.ReadFile("tokens.go")
+	require.NoError(t, err)
+	require.Contains(t, string(src), `hasSessionScope := opts.SessionID != ""`)
+	require.Contains(t, string(src), "if hasSessionScope {")
 }

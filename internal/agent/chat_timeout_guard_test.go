@@ -143,3 +143,28 @@ func TestDeadlineMessageCoversBothTiersAndDetachedSubAgent(t *testing.T) {
 		assert.Contains(t, s, want, "agent.go 缺少后台子 Agent 接线 "+want)
 	}
 }
+
+// #121：03:16 实测 chapter-ci 的 8 分钟独立预算到期，日志却显示
+// 「本轮对话已超时（30/60 分钟）…正文未落盘」。后台预算与主 chat 超时必须分文案。
+func TestDetachedDeadlineMessageIsNotMainChatTimeout(t *testing.T) {
+	main := FriendlyError(context.DeadlineExceeded)
+	assert.Contains(t, main, "30 分钟")
+	assert.Contains(t, main, "60 分钟")
+
+	bg := detachedDeadlineFriendlyMessage
+	assert.Contains(t, bg, "独立预算")
+	assert.Contains(t, bg, "重新检测本章")
+	assert.Contains(t, bg, "都已落盘")
+	for _, banned := range []string{"30 分钟", "60 分钟", "未落盘为章节正文", "对话出错"} {
+		assert.NotContains(t, bg, banned, "后台预算到期不得借用主 chat 超时/兜底文案")
+	}
+
+	agentSrc, err := os.ReadFile("agent.go")
+	require.NoError(t, err)
+	assert.Contains(t, string(agentSrc),
+		"subOpts.Detached && errors.Is(err, context.DeadlineExceeded)",
+		"Detached 专属文案必须在 RunSubAgent 的友好化出口接线")
+	errSrc, err := os.ReadFile("errors.go")
+	require.NoError(t, err)
+	assert.Contains(t, string(errSrc), "detachedDeadlineFriendlyMessage")
+}

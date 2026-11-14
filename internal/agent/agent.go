@@ -158,7 +158,13 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		// 供 run_subagent 工具存入 ToolResult.Error，历史回放与实时流式显示一致
 		// 截断到 200 字符：此处 error 经 run_subagent 转 ToolResult 后作为 tool response 进入 LLM 上下文，
 		// 截断防服务商返回的过长 message 传播为注入载体（其余 AgentEvent.ErrMsg 调用方不进 LLM，不截断）
-		return result.FinalText, fmt.Errorf("%s", truncateErrMsg(FriendlyError(err), 200))
+		friendly := FriendlyError(err)
+		// #121：Detached 子 Agent 的 DeadlineExceeded 来自写后维护的独立预算，
+		// 不是主 chat 超时；换成后台专用文案，避免日志与工具回执误导用户去查正文。
+		if subOpts.Detached && errors.Is(err, context.DeadlineExceeded) {
+			friendly = detachedDeadlineFriendlyMessage
+		}
+		return result.FinalText, fmt.Errorf("%s", truncateErrMsg(friendly, 200))
 	}
 	return result.FinalText, nil
 }
