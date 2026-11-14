@@ -32,5 +32,5 @@
 - 白屏真根因=SubagentCard `getAgentMeta` 未映射 statesync/chapterci 致 React19 卸载 #root（已修：类型放宽+降级+双 ErrorBoundary）；浏览器直开 5173 白屏正常；render 禁 Date.now()/new Date()；ONNX 仅 bge-small-zh-v1.5。
 
 ## 当前状态 / 待办（2026-11-14 12:55）
-- #121 已落地、全闸绿；提交/推送/冷启动核验结论见当日日志。历史代码提交 `#118 297fa0a9` / `#119 6e7c193d` / `#120 4d144d99`，台账 `a97c6768`、`59fccd15`、`43a483f5`、`28ba83e2`。
+- #121 已落地、全闸绿、已推送、dev 已冷启动核验（13:01:15 双 200 / FATAL=0）；结论见当日日志。历史代码提交 `#118 297fa0a9` / `#119 6e7c193d` / `#120 4d144d99`，台账 `a97c6768`、`59fccd15`、`43a483f5`、`28ba83e2`。
 - **剩余挂起**：①#117 P1 技能治理（写后自检 65.9% 字符压成按 check 的 300–500 rune 短处方、技能正文与 L0 双口径、chapter_ci_selfcheck 用 context.Background() 致 finding_keys 恒空）；②#117 P2 架构（写后维护/评分装配双轨、前端三处轮询收口、写前对齐/大纲审批/正文拆多 turn 各自独立 ctx）；③#115 局部 patch 不评分（P1.5）、chat 直接输入修复 beat_gap 不自动注入处方；④`llm_signal_daily` 不覆盖 idle watchdog / 主 ctx 超时；⑤按 novel_id 的 602 行孤儿另案；⑥#119 三个运行噪声已由 #121 修复（见上）；仍待用户在新二进制上真实跑一轮写章/重检验证日志消失。
