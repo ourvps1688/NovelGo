@@ -517,9 +517,24 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		if rerr := mcp_tools.RecalcChapterL0FromDisk(ctx, a.db, a.logger, novelID, chapterID); rerr != nil {
 			a.logger.Warn("章节检测：L0 重算失败（非阻断，继续 L1）", "err", rerr, "novelID", novelID, "chapterID", chapterID)
 		}
+		// #123：手动「重新检测本章」不设 Detached（前台可见），但自带 8min 硬超时。
+		// 专属文案只注入这一条链路，主 chat / 前台 run_subagent / 写后维护逐字不动。
+		detectSubAgent := func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
+			req.DeadlineMessage = chapterDetectDeadlineFriendlyMessage
+			return a.runBackgroundSubAgent(c, req)
+		}
+		err := mcp_tools.RunChapterCIForChapter(ctx, detectSubAgent,
+			a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID)
+		if err == nil {
+			return nil
+		}
 		// #115 P0：失败附可读分类码，完成事件透给前端（不传 LLM 原文、不让用户翻日志）。
-		return classifyChapterDetectError(mcp_tools.RunChapterCIForChapter(ctx, a.runBackgroundSubAgent,
-			a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID))
+		// #123：底层 err 已被友好化成字符串、DeadlineExceeded 取不回来，改按检测 ctx
+		// 判定硬超时挂哨兵，让日志 reason 与前端完成事件的 reason=timeout 同源。
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("%w: %s", errChapterDetectTimeout, err)
+		}
+		return classifyChapterDetectError(err)
 	})
 	// 注入编辑反馈工单落单器（P1-1 反馈回流）：record_editor_feedback 拆解出的 F 系
 	// issue 经此落成 pipeline 工单（feedback 容器）走既有修复闭环。mcp_tools 不能反向

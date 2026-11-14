@@ -53,6 +53,10 @@ type SubAgentRequest struct {
 	// 超时后它们仍会往会话里写「正在思考」、把界面挂住，且结果无人收口。
 	// 前台 run_subagent 工具与手动重检保持 false，行为逐字不变。
 	Detached bool
+	// DeadlineMessage 是调用方为「本次子 Agent 自带硬超时」注入的专属文案（#123）。
+	// 空值时沿用 agent 包默认：Detached 用写后维护文案，其余用主 chat 文案。
+	// 只影响 context.DeadlineExceeded 的友好化结果，不改变任何重试/预算/派发语义。
+	DeadlineMessage string
 }
 
 // RunSubAgentFunc 由 agent 包注入，避免循环依赖。

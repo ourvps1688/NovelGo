@@ -22,6 +22,19 @@ import (
 // 上层据此把失败归类为 model，前端提示去设置里检查模型，而不是笼统「稍后重试」。
 var errBackgroundModelUnavailable = errors.New("后台子 Agent 模型不可用")
 
+// chapterDetectDeadlineFriendlyMessage 是「重新检测本章」自带硬超时到期的提示（#123）。
+// 15:28 实测：检测 ctx 的 8 分钟上限到期后，DeadlineExceeded 经 FriendlyError
+// 被包装成「本轮对话已超时（30/60 分钟上限）…未落盘为章节正文」，与事实相反——
+// 那是主对话预算，正文早已落盘，检测也根本不写正文。检测是只读复核，
+// 失败只保留上一轮档案，必须明说可手动重检。
+const chapterDetectDeadlineFriendlyMessage = "本章检测已到执行时限并停止；这轮复核未完成，但章节正文与上一轮检测结果都已落盘、不受影响。如需最新结论，请在检测面板点「重新检测本章」。"
+
+// errChapterDetectTimeout 是检测 ctx 硬超时的可判定哨兵（#123）。
+// RunSubAgent 把底层错误友好化成普通字符串（%s 而非 %w），DeadlineExceeded
+// 无法再靠 errors.Is 从 err 里取出；改由 app 层按 ctx.Err() 挂哨兵，
+// 让 classifyChapterDetectError 给出与前端完成事件同源的 timeout 分类码。
+var errChapterDetectTimeout = errors.New("章节检测硬超时")
+
 // backgroundRunOptions 按当前设置构造后台子 Agent 的最小必要 RunOptions。
 // 每次派发现取，用户在设置里切换模型后立即生效；NovelID/SessionID/TurnID 由
 // RunSubAgent 依请求或零值处理，保持既有后台行为不变。
@@ -71,6 +84,11 @@ func classifyChapterDetectError(err error) error {
 	}
 	code := "llm"
 	switch {
+	// #123：检测 ctx 硬超时由 app 层按 ctx.Err() 挂哨兵（底层错误已被
+	// RunSubAgent 友好化、DeadlineExceeded 不再可 errors.Is），使 detect.go
+	// 日志的 reason 与前端完成事件的 reason=timeout 同源。
+	case errors.Is(err, errChapterDetectTimeout):
+		code = "timeout"
 	case errors.Is(err, errBackgroundModelUnavailable):
 		code = "model"
 	case errors.Is(err, quality.ErrL1ReceiptNotFound):

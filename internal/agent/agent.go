@@ -161,7 +161,12 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		friendly := FriendlyError(err)
 		// #121：Detached 子 Agent 的 DeadlineExceeded 来自写后维护的独立预算，
 		// 不是主 chat 超时；换成后台专用文案，避免日志与工具回执误导用户去查正文。
-		if subOpts.Detached && errors.Is(err, context.DeadlineExceeded) {
+		// #123：手动章节检测自带 8min 硬超时且不设 Detached，此前漏掉这条链路，
+		// 仍套主 chat「30/60 分钟…正文未落盘」文案。由调用方注入的专属文案优先，
+		// 其余两条分支逐字保持 #121 后的行为。
+		if req.DeadlineMessage != "" && errors.Is(err, context.DeadlineExceeded) {
+			friendly = req.DeadlineMessage
+		} else if subOpts.Detached && errors.Is(err, context.DeadlineExceeded) {
 			friendly = detachedDeadlineFriendlyMessage
 		}
 		return result.FinalText, fmt.Errorf("%s", truncateErrMsg(friendly, 200))
