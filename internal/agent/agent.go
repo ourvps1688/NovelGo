@@ -143,6 +143,7 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		EventSeq:        parentOpts.EventSeq,
 		EventPrefix:     parentOpts.EventPrefix,
 		MaxTurns:        maxTurns,
+		MaxTokens:       req.MaxTokens,
 		Detached:        req.Detached,
 		Model:           parentOpts.Model,
 		ProviderName:    parentOpts.ProviderName,

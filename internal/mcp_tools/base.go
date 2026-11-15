@@ -48,6 +48,11 @@ type SubAgentRequest struct {
 	// MaxTurns 可选轮次上限（0 = 沿用 RunSubAgent 默认 100 轮）。#115 P0：
 	// 单章 L1 复核是只读短任务，后台链路用它避免多轮检索拖到十几分钟。
 	MaxTurns int
+	// MaxTokens 可选「单次 LLM 调用输出 token 上限」（0 = 沿用模型/stream 默认）。
+	// 思考模型的思维块计入输出预算；不设帽时子 Agent 会回落到模型的
+	// MaxOutputTokens（MiMo 为 128k），单条思维链可膨胀到十几分钟。
+	// 只由调用方按任务特性给值：0 时 subOpts 不覆盖，其余子 Agent 行为逐字不变。
+	MaxTokens int
 	// Detached 标记「写后维护」的异步派发（statesync / chapterci 的 debounce 链）。
 	// #119 P0：这类子 Agent 不该继承主 chat 的流式事件前缀与前端可见性——主 ctx
 	// 超时后它们仍会往会话里写「正在思考」、把界面挂住，且结果无人收口。

@@ -34,6 +34,22 @@ import (
 // 以 var 暴露便于按平台/模型调参与测试收缩。
 var chapterCIMaxTurns = 12
 
+// chapterCIMaxTokens 是单章 L1 复核的单次输出 token 上界（思考 + 回答共享预算）。
+//
+// 为什么是 48k 而不是更小的「提速帽」：MiMo 的 max_completion_tokens 把思维块和
+// 回答算在同一份预算里，且思维块先生成；detect.go 的 verifyMaxTokens 注释已记录
+// 同类事故——6k 帽把回执硬切在半条 JSON，整批复验失败。本地实测 L1 成功收口样本的
+// output 为 10,895 / 11,707 / 15,727 / 27,419 / 36,150 token，回执仅约 1k；任何低于
+// 36,150 的帽都会把思维链在回执之前截断，令本版 L1 停在 pending（比原来更差）。
+//
+// 因此本帽的职责是「消除无帽失控」而非压缩耗时：不设时 RunSubAgent 回落到模型
+// MaxOutputTokens（mimo-v2.6-flash 为 128,000），单条思维链可膨胀到几十分钟；
+// 48k（与 patrolSynthesizeMaxTokens 同档）把最坏生成时长钉在通用 60min 兜底之内，
+// 且完整覆盖全部历史成功样本。项目既有结论「预算帽救不了长思维」（detect.go I7）
+// 在此同样成立：真正压缩单次推理耗时需另行治理输入体量 / 推理档 / 模型选型，
+// 不能靠调小这个值，也不在本次接线范围内。
+const chapterCIMaxTokens = 48_000
+
 // TensionTicketLanderFunc 把一章的曲线四查发现落成/刷新 pipeline 情绪账工单
 // （E 系，tension 容器），返回落库条数。
 // 由 app 启动时注入（pipeline.LandTensionTickets）——mcp_tools 不能反向 import pipeline
@@ -259,6 +275,7 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 		Instruction: instruction,
 		ToolID:      toolID,
 		MaxTurns:    chapterCIMaxTurns,
+		MaxTokens:   chapterCIMaxTokens,
 	})
 
 	// 落档案公共路径：readingNumber 取不到按 0（发现不带作用域，降级不阻断）。

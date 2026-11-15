@@ -66,6 +66,8 @@ func TestRunChapterCIForChapterInlinesCorpus(t *testing.T) {
 	require.Equal(t, "chapterci", got.AgentType)
 	require.Equal(t, chapterCIMaxTurns, got.MaxTurns, "方案 C 不动 12 轮上限")
 	require.Equal(t, 12, got.MaxTurns)
+	require.Equal(t, chapterCIMaxTokens, got.MaxTokens,
+		"显式 L1 必须带上推理预算帽，否则回落到模型 128k 无帽")
 	require.Contains(t, got.Instruction, "【本章质检语料")
 	require.Contains(t, got.Instruction, "禁止调用任何工具")
 	require.Contains(t, got.Instruction, "本章章尾钩子：门外没有人。")
