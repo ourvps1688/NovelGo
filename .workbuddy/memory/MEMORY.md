@@ -33,7 +33,7 @@
 - 日志 `build/bin/novelgo.log`（主）/ `novelgo-llm.log`；**日志会轮转**，按旧行号切片可能读空，改用 DB + 新日志头尾时间判定。
 
 ## 当前状态 / 待办（2026-11-15 17:25）
-- **终态**：#118–#129 全部落地、全闸绿、已推送；#130 ②+③ 全闸绿（Go 0 issues、前端 429 用例），待双提交 / push / 冷启动核验（见当日日志补记）。改 Go 前已精确停 dev，端口释放。
+- **终态**：#118–#130 全部落地、全闸绿、已推送（代码 `d979e53c` + 台账 `485a2341`）；`0 0`、工作树干净；dev exe **17:26:41 / 80,134,908 B**（含 #130 新符号）、34115/5173 双 200、启动窗口 ERROR/FATAL/WARN 全 0、Wails 3 生成物噪声已还原。改 Go 前已精确停 dev。
 - **口径（勿混说）**：12min 硬墙**只管手动「重新检测本章」**（`beginDetectCtx`）；写后 chapterci/statesync 各 10min（`postWriteSubAgentTimeout`，从 job 实际开跑计时）。两个去抖器（`chapterCIDebouncer 10s`/`stateSyncDebouncer 6s`）**彼此独立**、跨 kind 仍并发 ＝ ⑧ 结构根因。手动重检零 statesync；写稿落盘才派发写后维护。
 - **17:00 三点反馈更正（勿再沿用旧结论）**：book-pitch 常驻**不是用户在技能面板勾选**，是 `BookPitchWorkflowView.tsx` 的 `ADOPT_SKILLS = ["book-pitch"]` 在「新建孵化器」(:252)/「采纳建书」(:507) 两处自动 `SetEnabledSkills` 写 `novels/<id>/skills/.enabled.json`（`app/skill_api.go` → `skill.SaveEnabled`），孵化完成后无清理；实测 21/22/23/27 四本全是 `["book-pitch"]`。技能 frontmatter 是 `mode: manual`，`channel=always / runes=0` 来自 `system_messages.go` 记账（runes=0 是设计）、每轮 system 约 3175r 与写稿无关。**旧建议「去面板取消勾选」是治标**；正确治理点＝收敛/删除两处自动 set 或孵化完成后清理（待拍板，未改代码）。② 重新判分的 1879 是陈旧 L1 desc 被当验收处方（#130 已修）；③ 结论条旧条件 `archive?.exists` 把 L0 落档误当整轮完成（#130 已修）。
 - **运行期索引**：#119 第 7 章 `id_2912.md`《抽签》曾 1879 字 ⇒「放行不退回整章重写、不自动补写、chat 定点补写」✅；#120 手写 `【本章验收条件】`+`- l0|ai_flavor|#0`+「换思路」⇒ 3 次 `search_replace` 零 `full_replace` ✅（卡片「去修复」在 `repeat_count≥3` 会先追问轮次保护）。评分 `source=full_replace` 是评分字段**不是工具调用**。
