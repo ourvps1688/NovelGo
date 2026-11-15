@@ -2927,6 +2927,7 @@ export namespace pipeline {
 	    new_count: number;
 	    guard_keys: string[];
 	    finding_keys: string[];
+	    pending_l1: boolean;
 	    // Go type: time
 	    checked_at?: any;
 	    exists: boolean;
@@ -2950,6 +2951,7 @@ export namespace pipeline {
 	        this.new_count = source["new_count"];
 	        this.guard_keys = source["guard_keys"];
 	        this.finding_keys = source["finding_keys"];
+	        this.pending_l1 = source["pending_l1"];
 	        this.checked_at = this.convertValues(source["checked_at"], null);
 	        this.exists = source["exists"];
 	    }

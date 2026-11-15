@@ -452,4 +452,40 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
         .chapterDoneFailedTimeout,
     ).toContain("12 min");
   });
+
+  it("#130 结论条只在 running=false 且本轮 L1 收口时才说已完成", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain("archive?.exists");
+    expect(view).toContain("chapterDetectDone");
+    expect(view).toContain("chapterDetectRunning");
+    expect(view).toContain("chapterDetectL1Pending");
+    expect(view).toContain("!running");
+    expect(view).toContain('archive?.l1_status === "checked"');
+    expect(view).toContain("!archive?.pending_l1");
+    expect(view).toContain("chapterResultL0L1Running");
+    expect(view).toContain("chapterResultL1Pending");
+    expect(view).toContain("chapterResultFinishedAt");
+    expect(view).toContain("archiveL0UpdatedAt");
+    // #127 的零发现/发现数结论不回退，只是不再在 L1 在跑或超时时冒充完成。
+    expect(view).toContain("chapterResultNoFindings");
+    expect(view).toContain('data-testid="chapter-detect-result"');
+    // Wails 生成物须同步透出 pending_l1，否则前端拿不到本轮 L1 是否收口。
+    const models = read("lib/wailsjs/go/models.ts");
+    expect(models).toContain("pending_l1: boolean;");
+    expect(models).toContain('this.pending_l1 = source["pending_l1"];');
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      for (const k of [
+        "chapterResultFinishedAt",
+        "archiveL0UpdatedAt",
+        "chapterResultL0L1Running",
+        "chapterResultRunningHint",
+        "chapterResultL1Pending",
+        "chapterResultL1PendingHint",
+      ]) {
+        expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
+      }
+    }
+  });
 });

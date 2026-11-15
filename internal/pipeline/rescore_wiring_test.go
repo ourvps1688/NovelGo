@@ -20,7 +20,8 @@ func TestRescoreChapterWiring(t *testing.T) {
 		{"rescore.go", []string{
 			"func RescoreChapter(", "git.ChapterPath(", "git.OutlinePath(",
 			"text.ComputeStats", "ChapterWords(ctx, novelID)", "quality.BuildPrescriptions(",
-			"ScoreChapterWithPrescriptions(", "ScoreSourceRescore", "AppendScoreEvent(",
+			"quality.ReconcileStaleWordCountFindings(", "ScoreChapterWithPrescriptions(",
+			"ScoreSourceRescore", "AppendScoreEvent(",
 			"quality_score", "JudgeToAuditScores(",
 		}},
 		{"../quality/score_event.go", []string{`ScoreSourceRescore     = "rescore"`}},
@@ -53,6 +54,13 @@ func TestRescoreChapterWiring(t *testing.T) {
 	} {
 		assert.NotContains(t, rescore, banned, "重判分必须是只读-评分-记账，不得 %s", banned)
 	}
+	// #130：历史字数净化只发生在重判分消费侧；key 快照仍取原始档案，
+	// quality.Prescription 单源与 chat 改稿/评分门禁文案逐字不动。
+	assert.Contains(t, rescore, "keys = quality.FindingKeys(l0, l1)",
+		"净化不得伪造或丢弃真实发现项 key")
+	prescription := readChapterDetectSource(t, "../quality/prescription.go")
+	assert.NotContains(t, prescription, "ReconcileStaleWordCountFindings",
+		"处方单源不得被改成重判分专用口径")
 	// edit 评分门禁的阻断语义不能被放宽到局部改稿上。
 	rw := readChapterDetectSource(t, "../mcp_tools/rw_tools.go")
 	assert.Contains(t, rw, `a.ChangeType != "full_replace"`,

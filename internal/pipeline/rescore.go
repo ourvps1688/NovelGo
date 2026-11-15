@@ -62,9 +62,14 @@ func RescoreChapter(ctx context.Context, db *gorm.DB, client review.LLMClient, l
 	if row, rerr := qs.GetByChapter(ctx, novelID, chapterID); rerr == nil && row != nil {
 		l0 := quality.ParseFindings(row.L0Findings)
 		l1 := quality.ParseFindings(row.L1Findings)
+		// key 快照取原始档案：净化只改描述文案，不伪造/丢弃任何真实发现项。
 		keys = quality.FindingKeys(l0, l1)
 		all := append(l0, l1...)
 		if len(all) > 0 {
+			// #130：重新判分以当前落盘正文为准。L1 超时会「保留上一轮 L1」，
+			// 其 desc 可能仍写着首写时的权威字数，判官被「不得自行更换数字」
+			// 锁死后照抄历史字数。注入处方前先按现场 wordCount 剔除陈旧陈述。
+			all = quality.ReconcileStaleWordCountFindings(all, stats.WordCount, words)
 			lines = quality.RenderPrescriptions(quality.BuildPrescriptions(all,
 				quality.BuildTensionCurve(content), stats.WordCount, words))
 		}

@@ -378,9 +378,14 @@ type ChapterQualityArchive struct {
 	// FindingKeys 是本轮全部发现的稳定 key（P1 单源 quality.FindingKeys），供前端
 	// 把选中项对应的 key 拼进改稿消息，再由 app 侧绑进技能账本（#114 P2）。
 	// 旧档案无快照时为空，前端按「无可关联标识」降级。
-	FindingKeys []string   `json:"finding_keys"`
-	CheckedAt   *time.Time `json:"checked_at,omitempty"`
-	Exists      bool       `json:"exists"`
+	FindingKeys []string `json:"finding_keys"`
+	// PendingL1 是本轮 L0 已落档、L1 尚未收口（#113 跨轮快照口径）。检测超时
+	// 「保留上一轮 L1」时该标记仍为 true，而 l1_status 可能仍是 checked；
+	// 前端据此区分「整轮完成」与「仅 L0 更新、L1 沿用旧结果」，不再用单列
+	// checked_at 冒充整轮完成（#130）。
+	PendingL1 bool       `json:"pending_l1"`
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	Exists    bool       `json:"exists"`
 }
 
 // GetChapterQualityArchive 返回指定章节的质量档案详情（L0 指标 + L0/L1 发现清单）。
@@ -415,6 +420,7 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 		all, curve, out.L0Metrics.WordCount, s.qualityStore.ChapterWords(ctx, novelID)))
 	// #114 P1：把写侧算好的跨轮三态直接透出（读侧不重算、不猜上一轮）。
 	round := quality.ParseFindingRound(row.FindingRound)
+	out.PendingL1 = round.PendingL1
 	out.ResolvedCount = len(round.Resolved)
 	out.PersistedCount = len(round.Persisted)
 	out.NewCount = len(round.New)

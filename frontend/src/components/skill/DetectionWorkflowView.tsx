@@ -353,6 +353,18 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   // 事件丢失 / 切走页面再回来时也能看到最近一次 checked_at 与发现数。
   const chapterFindingCount =
     (archive?.l0_findings?.length ?? 0) + (archive?.l1_findings?.length ?? 0);
+  // #130：结论条与底部进行态必须同源。archive.checked_at 由 UpsertL0 / UpsertL1
+  // 共同刷新，只看 archive.exists 会在 L0 秒级落档时误报「本章检测已完成」；
+  // 检测超时「保留上一轮 L1」时 l1_status 仍可能是 checked，故再叠加
+  // finding_round.pending_l1 判断本轮 L1 是否真的收口。零新增执行体。
+  const chapterDetectDone =
+    !!archive?.exists &&
+    !running &&
+    archive?.l1_status === "checked" &&
+    !archive?.pending_l1;
+  const chapterDetectRunning = !!archive?.exists && running;
+  const chapterDetectL1Pending =
+    !!archive?.exists && !running && !chapterDetectDone;
   const scopeReady =
     kind === "chapter"
       ? effChapterId != null
@@ -540,29 +552,66 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                   })}
                 </p>
               ) : null}
-              {/* #127：数据驱动的完成结论——一次性事件丢失、或本次零发现时仍明确可见；
-                  档案 checked_at / 发现数来自 DB，切章回来也能看到最近一次结果。 */}
+              {/* #127 / #130：数据驱动的结论条——一次性事件丢失或零发现时仍可见；
+                  但只在 running=false 且本轮 L1 真收口时才说「已完成」，
+                  L0 落档秒级刷新 checked_at 不再冒充整轮完成。 */}
               {archive?.exists ? (
                 <div
                   data-testid="chapter-detect-result"
                   className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs"
                 >
-                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                  <span className="font-medium text-foreground">
-                    {t("journey.quality.detect.chapterResultDone")}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {t("journey.quality.detect.archiveCheckedAt", {
-                      at: fmtTime(archive.checked_at) || "—",
-                    })}
-                  </span>
-                  <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-foreground/80">
-                    {chapterFindingCount > 0
-                      ? t("journey.quality.detect.chapterResultFindings", {
-                          count: chapterFindingCount,
-                        })
-                      : t("journey.quality.detect.chapterResultNoFindings")}
-                  </span>
+                  {chapterDetectDone ? (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                      <span className="font-medium text-foreground">
+                        {t("journey.quality.detect.chapterResultDone")}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {t("journey.quality.detect.chapterResultFinishedAt", {
+                          at: fmtTime(archive?.checked_at) || "—",
+                        })}
+                      </span>
+                      <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-foreground/80">
+                        {chapterFindingCount > 0
+                          ? t("journey.quality.detect.chapterResultFindings", {
+                              count: chapterFindingCount,
+                            })
+                          : t("journey.quality.detect.chapterResultNoFindings")}
+                      </span>
+                    </>
+                  ) : null}
+                  {chapterDetectRunning ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                      <span className="font-medium text-foreground">
+                        {t("journey.quality.detect.chapterResultL0L1Running")}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {t("journey.quality.detect.archiveL0UpdatedAt", {
+                          at: fmtTime(archive?.checked_at) || "—",
+                        })}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {t("journey.quality.detect.chapterResultRunningHint")}
+                      </span>
+                    </>
+                  ) : null}
+                  {chapterDetectL1Pending ? (
+                    <>
+                      <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                      <span className="font-medium text-foreground">
+                        {t("journey.quality.detect.chapterResultL1Pending")}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {t("journey.quality.detect.archiveL0UpdatedAt", {
+                          at: fmtTime(archive?.checked_at) || "—",
+                        })}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {t("journey.quality.detect.chapterResultL1PendingHint")}
+                      </span>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
               <div className="mt-3 flex flex-col gap-3">
