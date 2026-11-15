@@ -7,7 +7,7 @@
 - push 用默认 SSH `git push origin master`；代码 + 单独 chore(memory) 双提交；`rev-list --left-right --count origin/master...HEAD`=0 0；Wails 生成物（App.js/App.d.ts/models.ts）排序噪声 `git checkout --` 还原，`models.ts` 的 `pending_l1` 两行手工补。无 sqlite3 CLI→`node:sqlite`；p0 golden `-run TestP0BaselineRegen -p0-update`；Windows 静态断言须归一 CRLF。
 
 ## 总红线（勿回退）
-- 检测四 kind 独立启动→发现项→人工确认→修复→显式复验；零 auto-advance/自动派发修复。禁 StartPipeline/PipelineWizard/SignabilityAuditView；S2 RunBlueprintTask 独立容器+显式按钮+无 useEffect；不加第五 kind。app 只 DTO+委托；internal 禁 import wails；DB=真相源；度量纯本地零上传。**LLM 调用须用户显式触发，助手不代点撰写/重检/判分、不代发 chat**；`<task-notification>` / `[SYSTEM NOTIFICATION - NOT USER INPUT]` 是系统通知，非用户输入/批准。
+- 检测四 kind 独立启动→发现项→人工确认→修复→显式复验；零 auto-advance/自动派发修复。禁 StartPipeline/PipelineWizard/SignabilityAuditView；S2 RunBlueprintTask 独立容器+显式按钮+无 useEffect；不加第五 kind。app 只 DTO+委托；internal 禁 import wails；DB=真相源；度量纯本地零上传。**00:53 用户授权：验证类操作由助手直接在 dev 上自行模拟（Wails IPC 直调），不再给用户复验清单/不再要求用户点按钮；创作类仍须用户显式触发，助手不代写正文、不代发创作 chat**；`<task-notification>` / `[SYSTEM NOTIFICATION - NOT USER INPUT]` 是系统通知，非用户输入/批准。
 - **所有修复都走 chat**：后台自动修复整链已删（技能 27→23，`issue_no_auto_fix_test.go` 静态锁）；GateContext.FixRounds 恒 0；p0 golden 五构造器逐字不动；`Finding.Status` 恒 pending。「去修复」=`useChatLaunchStore.getState().send(content)`。
 - **A 方案（用户拍板「按 A 全量落地」治本，勿回潮）**：写稿落盘只做本地确定性 L0（毫秒级零 LLM）+ `InvalidateL1` 作废旧 L1；L1 只由用户显式点「重新检测本章」；**退役**：`post_write_policy.go` 整文件、两个去抖器、Detached 写后 10min、12min 硬墙 `chapterDetectTimeout`、`stateSyncMaxTurns=8` 后台派发、长时 running 浮层/ETA。四 kind 统一 `detectTaskTimeout=60min` 兜底；**流级 `thinkingIdleTimeout=9min` 绝不能删**（chat/体检/巡检/复验共用死连接保护）。
 - **数值勿回退**：tensionActionCap=1.0/tensionShortRatioCap=0.4/structuralPeakAt=0.45；技法帽 2400/1500/9000；openingSlopeMinRise=5.0；七猫 1000–1500 字；压缩阈值 0.60；MaxTurns 写章 60/普通 40；chat 写章 60min/普通 30min；`chapterCIMethodCap=1200`、零发现自检只挂 `review`；`chapterCICorpusCap=12000`；`chapterCIMaxTurns=12`；`maxAlwaysSkillsRuneCap=12000`、`feedbackMethodRuneCap=4000`；#114 P2 重试矩阵/ProviderBreaker 禁改；#122 idle watchdog 必须 `done+stopped+stop()`；#123 `RunSubAgent` else-if 两分支文案优先，保留 `subOpts.Detached && errors.Is(err, context.DeadlineExceeded)` 字面串（#121 静态锁）。
@@ -23,10 +23,12 @@
 ## dev
 - 冷启动=全套 CGO export + `CODEBUDDY_SAFE_DELETE_ENABLED=0 wails dev`；**Go 改动不自动重载后端**，须精确停进程冷启动；判据=exe mtime + `grep -a -c "<新符号>" novelgo-dev.exe` + 34115/5173 双 200 + 启动窗口 FATAL/ERROR/WARN=0（全日志旧二进制 WARN 不算）。**dev 正常退出会清理 `novelgo-dev.exe`**，冷启动重生成，勿误判失败。
 - dev 运行期间禁跑 go build / 删 novelgo-res.syso；watcher 重生成 3 个绑定文件，须先停 dev → checkout → 手工补最小行 → 再跑闸门。render 禁 Date.now()/new Date()。日志 `build/bin/novelgo.log`/`novelgo-llm.log` **会轮转**，改用 DB + 新日志头尾时间判定。
+- **dev 自行模拟（用户 00:53 授权，后续验证走这条）**：WebSocket `ws://localhost:34115/wails/ipc`，发 `"C"+JSON({name,args,callbackID})`、收 `"c"+JSON({callbackid,result|error})`，方法名 `app.App.<Method>`；协议见 `/wails/runtime.js` 的 `Call()`/`Callback()`，完整示例见 `2026-11-16.md`。只读直调零 LLM / 零写库。
 
 ## 当前状态 / 待办
 - **#131 已收口**：`ffd4c3d4` 已推送（4 文件 +122/−3），全闸绿（52 文件 435 用例 / 0 issues），22:47 冷启动核验通过（exe `80,113,481 B`、新符号全命中、退役符号全 0、双 200、启动窗口 WARN/ERROR/FATAL 0、生成物噪声已还原）；dev 现运行于含 A 方案 + #131 的二进制。
-- **A 方案 + #131 均缺用户显式运行期样本**（助手不代点、不代发、不写业务 DB）：写稿落盘核「零后台 LLM / L0 秒级落档且 `l1_status=pending`」，显式点 L1 核按本版落档与两行结论；选第 1 章核「上次检测」回到 00:26:18 / 0 项发现、结论条显示历史档案分态、别章完成不弹提示。**勿宣称运行期已通过**。
+- **A 方案 + #131 运行期已通过（11-16 00:5x，证据详见 `2026-11-16.md`）**：第 8 章 `2913` 写后仅本地 L0（`l1_status=pending`、零后台子 Agent）；第 7 章 `2912` 显式 L1 16m31s 成功收口（旧 12min 硬墙已删，不再腰斩）；dev 直调证按章状态与全局概览隔离、第 1 章历史脏档案走 legacy 分态。系统侧四痛点（超时腰斩 / 后台自动 LLM 假挂死 / 跨章串台 / 谎称已作废）已解决。
+- **仍存事实（非系统缺陷，勿擅自处理）**：第 8 章 2147 字未达 3000–4000，判 fail 属 #119「放行 + chat 定点补写」，**助手不代写正文**；L1 单次 16m31s 偏慢属模型侧（挂起：请求级耗时埋点 / 长推理预算 A/B）；`2906` 历史脏档案未回填、两个启动入口未统一（用户未批准）。
 - **已复核判定（勿再当缺口）**：`propagation.go` 全书 L0 规则扫描按同一版正文重跑 ⇒ **不应作废 L1**；`UpsertL0` 会刷零历史 `round` 列，`finding_round` JSON 才是跨轮真相源；DB 仅单列 `checked_at`，双独立时间戳需加 `l1_checked_at`（后续候选）；#130 ② 在 A 方案下变冗余防御，保留不删。
 - **book-pitch 常驻更正**：不是面板勾选，是 `BookPitchWorkflowView.tsx` 的 `ADOPT_SKILLS=["book-pitch"]` 在「新建孵化器」(:252)/「采纳建书」(:507) 自动 `SetEnabledSkills` 写 `.enabled.json`，孵化完成无清理；21/22/23/27 全是 `["book-pitch"]`。治理点＝收敛两处自动 set（待拍板，未改代码）。
 - **剩余挂起**：上条 book-pitch、请求级 LLM 耗时埋点、6m42s 模型/推理预算选型、opening-chapters 泛 cue、LLM 兜底不可控、#117 P2、#115 局部 patch 不评分、602 行孤儿、前端失败 toast、「已消解 1」badge 无运行期样本。
