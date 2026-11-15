@@ -12,6 +12,8 @@ author: builtin
 version: 3
 notWhen:
   - "动笔前"
+  - "选一条再动笔"
+  - "不要重复整章"
 useWhen:
   - intent: "写下一章 / 继续创作 / 开始动笔"
     cues:

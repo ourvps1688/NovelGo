@@ -13,6 +13,11 @@ import (
 // 造成"规则越多执行越差"的退化。显式 mode=always 的技能优先保留，其次才轮到勾选启用的。
 const MaxAlwaysSkillsResident = 3
 
+// maxAlwaysSkillsRuneCap 是常驻块注入 system 消息的正文总 rune 帽（#128 防御性补帽）。
+// 数量上限只限制「几个技能」，挡不住用户自定义或勾选的超长技能正文；与 chat 单轮
+// 总帽（chatAutoInjectRuneCap=12000）同口径，按 resident 顺序累加，超出即节选/停注。
+const maxAlwaysSkillsRuneCap = 12000
+
 // BuildSkillCatalog 将 auto 模式的 skill 元数据格式化为**说明性**技能目录（#111 P3）。
 // manual 和 always 模式的 skill 不出现在目录中。
 // 目录降级后不承担正文通道职责：不再要求 LLM 用 read 自读、不再建议用户手动启用；
@@ -204,11 +209,28 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 	b.WriteString(strconv.Itoa(MaxAlwaysSkillsResident))
 	b.WriteString(" 个。\n\n")
 
+	// #128 字符总帽：数量上限只挡「几个」，还需挡住用户自定义/勾选的超长正文。
+	// 按 resident 顺序累加，额度内全文、超额节选、耗尽即停；只给一行提示，不阻塞不 WARN。
+	usedRunes := 0
+	capNotice := ""
 	for _, m := range resident {
 		sk, ok := store.Get(novelID, m.Name)
 		if !ok {
 			continue
 		}
+		body := []rune(sk.Content)
+		truncated := false
+		if usedRunes+len(body) > maxAlwaysSkillsRuneCap {
+			room := maxAlwaysSkillsRuneCap - usedRunes
+			if room <= 0 {
+				capNotice = "⚠️ 常驻技能正文已达 " + strconv.Itoa(maxAlwaysSkillsRuneCap) +
+					" 字符上限，其余常驻技能本次不注入（仅可 / 手动触发）。\n"
+				break
+			}
+			body = body[:room]
+			truncated = true
+		}
+		usedRunes += len(body)
 		b.WriteString("--- ")
 		b.WriteString(sk.Name)
 		b.WriteString(" ---\n")
@@ -218,12 +240,20 @@ func BuildAlwaysSkillsContent(meta []skill.SkillMeta, store *skill.Store, novelI
 		b.WriteString("【来源：")
 		b.WriteString(skillReadPath(m.Source, sk.Name))
 		b.WriteString("（只读，正文已注入上方，无需再 read）】\n")
-		b.WriteString(sk.Content)
+		b.WriteString(string(body))
+		if truncated {
+			b.WriteString("\n（常驻技能正文已按字符上限节选，完整以技能原文为准）")
+			capNotice = "⚠️ 常驻技能正文已达 " + strconv.Itoa(maxAlwaysSkillsRuneCap) +
+				" 字符上限，超长部分已节选，其余常驻技能本次不注入（仅可 / 手动触发）。\n"
+		}
 		b.WriteString("\n\n")
 	}
 
 	if warning != "" {
 		b.WriteString(warning)
+	}
+	if capNotice != "" {
+		b.WriteString(capNotice)
 	}
 
 	return strings.TrimSpace(b.String())

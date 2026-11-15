@@ -47,7 +47,10 @@ type Skill struct {
 	// —— 技能装配契约（#111 P0）：能力清单 manifest，健康检查 CI 闸据此断言 ——
 	// Mounts 声明该技能被哪些确定性装配点消费；为空且未标 Deprecated → 健康检查失败。
 	// InternalOnly 仅约束 chat 路由与 catalog 可见性，不约束流水线挂载。
-	// Budget 是该技能正文注入的 rune 上限（P0 只声明，装配器 P1 起消费）。
+	// Budget 是 chat_intent 通道按 capSkillRunes 截断正文的 rune 帽（#111 P1），
+	// **不是技能正文长度上限**：pipeline_dispatch / chapter_ci / feedback 等通道各有
+	// 自身帽，manual 与 always 的全文注入也不受其截断。故 internalOnly 技能正文可长于
+	// budget（如 signability-audit 10100r / budget 4000），健康检查只校验其为正数。
 	Mounts       []string `json:"mounts,omitempty" yaml:"mounts,omitempty"`
 	InternalOnly bool     `json:"internal_only" yaml:"internalOnly"`
 	Budget       int      `json:"budget" yaml:"budget"`
@@ -81,7 +84,7 @@ type SkillMeta struct {
 	Source       string         `json:"source"`           // "builtin" | "user" | "novel"
 	Mounts       []string       `json:"mounts,omitempty"` // 装配契约：该技能被哪些挂载点消费
 	InternalOnly bool           `json:"internal_only"`    // 仅禁 chat 路由/catalog 可见性，不禁流水线挂载
-	Budget       int            `json:"budget"`           // 正文注入 rune 上限
+	Budget       int            `json:"budget"`           // chat_intent 通道的正文注入 rune 帽（非正文长度上限，见 Skill 注释）
 	Deprecated   bool           `json:"deprecated"`       // 显式占位/待下线（健康检查允许 mounts 为空）
 
 	// —— 以下为 V3 跨书聚合派生字段（仅 Aggregated=true 时有意义）——

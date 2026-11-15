@@ -28,6 +28,11 @@ import (
 	"github.com/novelgo/novelgo/internal/skill"
 )
 
+// feedbackMethodRuneCap 与 editor-feedback 的 frontmatter budget 同口径（#128 防御性补帽）。
+// 该通道派发零工具纯推理子 Agent，方法论正文此前全文无帽写入指令，用户自定义同名
+// 超长技能可无限灌入；截断后账本 Runes 记实际注入长度（与 #126 同纪律）。
+const feedbackMethodRuneCap = 4000
+
 // FeedbackTicketLanderFunc 把 F 系反馈 issue 落成 pipeline 工单，返回（runID, 落库条数）。
 // 由 app 启动时注入（pipeline.LandFeedbackTickets）——mcp_tools 不能反向 import pipeline
 // （pipeline→agent→mcp_tools 会成环），与 RunSubAgentFunc 同一避免循环依赖的纪律。
@@ -170,13 +175,24 @@ func buildFeedbackInstruction(skillStore *skill.Store, row *quality.EditorFeedba
 	if skillStore != nil {
 		if sk, ok := skillStore.Get(0, "editor-feedback"); ok && strings.TrimSpace(sk.Content) != "" {
 			b.WriteString("\n# 本次任务方法论\n")
-			b.WriteString(sk.Content)
+			// #128 防御性补帽：与 chapter-ci 同纪律，超额节选并如实标注；
+			// 账本 Runes 记截断后的实际注入长度，不虚报全文长度。
+			runes := []rune(sk.Content)
+			truncated := false
+			if len(runes) > feedbackMethodRuneCap {
+				runes = runes[:feedbackMethodRuneCap]
+				truncated = true
+			}
+			b.WriteString(string(runes))
+			if truncated {
+				b.WriteString("\n（技能正文节选，完整以技能原文为准）")
+			}
 			b.WriteString("\n")
 			// #111 P2 统一账本：editor-feedback 走 RunSubAgent，不进 exec_run_stats；
 			// 与 chapter-ci 同纪律，在技能正文注入点直接记账。
 			activity.RecordSkillInvocation(context.Background(), activity.SkillInvocation{
 				Skill: "editor-feedback", Channel: "feedback", Mount: "feedback",
-				NovelID: row.NovelID, Runes: len([]rune(sk.Content)),
+				NovelID: row.NovelID, Runes: len(runes),
 			})
 		}
 	}
