@@ -81,7 +81,13 @@ func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter,
 // 题材卡参数（R2b-3）：章尾钩子必需/禁忌清单取本书检查器配置，未配置/读取失败回落缺省
 // （=现行行为，逐字一致）。
 func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content string) {
+	// #129：同一份落盘正文被多条写后链重复处理时，整套副作用结果完全相同，
+	// 短路掉重复的 UpsertL0 / 曲线重算 / 工单替换。手动重检不走本函数。
+	if chapterL0AlreadyComputed(tc.DB, tc.NovelID, chapterID, content) {
+		return
+	}
 	findings, err := recalcChapterL0(ctx, tc, chapterID, content)
+	complete := err == nil
 	if err != nil {
 		tc.LoggerOrDefault().Warn("章节 CI L0 落档案失败（非阻断）", "err", err, "novelID", tc.NovelID, "chapterID", chapterID)
 	}
@@ -91,14 +97,20 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 	// L0 行整体重算、既有 L1 行一并作废（正文已变）；失败仅告警，不阻断写入主链路。
 	if terr := quality.NewStore(tc.DB, tc.LoggerOrDefault()).
 		RefreshTensionCurve(ctx, tc.NovelID, chapterID, readingNumber, content); terr != nil {
+		complete = false
 		tc.LoggerOrDefault().Warn("章节 CI 张力曲线落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
 	}
 	// P0-2 情绪账：曲线四查发现落工单（E 系，tension 容器；四查过滤在落单侧）。
 	// 按章整批替换：零发现=清该章旧工单；未装配落单钩子=降级不落（零提示零报错）。
 	if tensionTicketLander != nil {
 		if _, terr := tensionTicketLander(ctx, tc.DB, tc.NovelID, readingNumber, findings); terr != nil {
+			complete = false
 			tc.LoggerOrDefault().Warn("章节 CI 情绪账工单落库失败（非阻断）", "err", terr, "novelID", tc.NovelID, "chapterID", chapterID)
 		}
+	}
+	// 只有三步全成功才登记指纹；任一步失败都不缓存，下次同正文可自愈重跑。
+	if complete {
+		chapterL0MarkComputed(tc.DB, tc.NovelID, chapterID, content)
 	}
 }
 
