@@ -51,7 +51,7 @@ budget: 4000
 - `beat_type` 取 `climax`（爽点/情绪峰）|`conflict`（冲突对抗）|`hook`（钩子/悬念）|`dialogue`（对话节奏）|`flat`（平缓）|`transition`（过渡）。
 
 ## 输出格式
-简短小结后，最终回复末尾**必须**附一个 ```json 代码块上报回执，格式：
+**输出从简**：直接给结论，正文说明不超过 3 句，不要长篇推理。**回答第一段必须是**一个 ```json 代码块的 L1 回执（回执在前、说明在后——输出可能被截断，回执放最前才能保证送达），格式：
 
 `{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"tension_curve":[{"seg":0,"tension":62.5,"emotion":48,"beat_type":"climax|conflict|hook|dialogue|flat|transition"}],"summary":"一句话小结"}`
 

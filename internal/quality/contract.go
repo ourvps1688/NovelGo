@@ -81,14 +81,22 @@ func L1ReceiptFormatLine() string {
 	return `{"findings":[{"id":"L1-1","check":"continuity|pacing|foreshadow|reader_state|task_card|immersion_anchor","desc":"...","chapter_ids":[12],"ledger_refs":[]}],"tension_curve":[{"seg":0,"tension":62.5,"emotion":48,"beat_type":"climax|conflict|hook|dialogue|flat|transition"}],"summary":"一句话小结"}`
 }
 
-// l1JSONBlockRe 匹配 ```json 或裸 ``` 围栏内的 JSON 块（回执在最终回复末尾）。
+// l1JSONBlockRe 匹配 ```json 或裸 ``` 围栏内的 JSON 块。回执已前置到回答第一段
+// （#362），但历史/降级输出仍可能把回执放在末尾，故两者都要认。
 var l1JSONBlockRe = regexp.MustCompile("(?s)```(?:json)?[ \t]*\n?(\\{.*?\\})\n?```")
 
 // ErrL1ReceiptNotFound 是「输出里没有可解析的 L1 回执块」的可判定哨兵。
 // 上层据此把章节检测失败归类为 receipt（模型输出格式问题），与供应商调用失败区分开。
 var ErrL1ReceiptNotFound = errors.New("quality contract: 未找到可解析的 L1 回执 JSON 块")
 
-// ParseL1Receipt 从 LLM 输出提取末尾 ```json 回执块并解析（多个块时取最后一个可解析的）。
+// ParseL1Receipt 从 LLM 输出提取 ```json 回执块并解析（多个块时取最后一个可解析的）。
+//
+// 截断抢救（#362，照 pipeline.parseVerifyReceipt 范式）：thinking 模型把思维块与回答
+// 算在同一份输出预算里，回答可能在回执之后被硬切——闭合围栏丢失或尾部挂半句话时，
+// 围栏正则会整块失配。故追加一道「无围栏抢救」：从每个 '{' 起用 json.Decoder 只解
+// 第一个完整 JSON 值（自动忽略其后残句），且头部须含 "findings"、解出的回执须非空。
+// 纪律：只接受**完整对象**，绝不从半条数组拼凑不完整发现并伪装成「已复核」。
+//
 // 降级纪律：找不到回执块 / 解析失败 → 返回 error，由调用方静默降级（零提示零报错）。
 func ParseL1Receipt(out string) (*L1Receipt, error) {
 	matches := l1JSONBlockRe.FindAllStringSubmatch(out, -1)
@@ -99,7 +107,32 @@ func ParseL1Receipt(out string) (*L1Receipt, error) {
 		}
 		return &r, nil
 	}
+	for i := strings.LastIndex(out, "{"); i >= 0; i = strings.LastIndex(out[:i], "{") {
+		cand := out[i:]
+		if !looksLikeL1Receipt(cand) {
+			continue
+		}
+		var r L1Receipt
+		if err := json.NewDecoder(strings.NewReader(cand)).Decode(&r); err != nil {
+			continue
+		}
+		// {} 等无关 JSON 对象不是回执；零发现回执的 findings 是非 nil 空数组。
+		if r.Findings == nil && strings.TrimSpace(r.Summary) == "" {
+			continue
+		}
+		return &r, nil
+	}
 	return nil, ErrL1ReceiptNotFound
+}
+
+// looksLikeL1Receipt 判定候选串是否 L1 回执形状（头部近处含 "findings"），
+// 与 pipeline.looksLikeVerifyReceipt 同款：避免对正文里的无关 JSON 误触发抢救。
+func looksLikeL1Receipt(cand string) bool {
+	head := cand
+	if len(head) > 96 {
+		head = head[:96]
+	}
+	return strings.Contains(head, `"findings"`)
 }
 
 // ToFindings 把回执发现投影为档案发现：Level 恒 warning（P1）、Status 恒 pending

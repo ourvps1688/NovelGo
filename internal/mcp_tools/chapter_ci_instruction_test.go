@@ -39,9 +39,13 @@ func TestBuildChapterCIInstruction_EmptySelfCheckVerbatim(t *testing.T) {
 	require.NotContains(t, got, "本次任务方法论", "无 store 时章节方法论块也必须缺席")
 	require.Contains(t, got, "章节（chapter_id=7）正文刚刚修改并落盘")
 	require.Contains(t, got, "只报告不改写：不调用任何写工具")
-	require.Contains(t, got, "最终回复末尾必须附")
+	require.Contains(t, got, "回答第一段必须是")
+	// #362：回执前置 + 输出从简，防思维块膨胀后把回执硬切在末尾。
+	require.Contains(t, got, "输出从简")
+	require.Contains(t, got, "回执在前、说明在后")
+	require.NotContains(t, got, "最终回复末尾必须附", "回执不得再要求放在回复末尾")
 	require.Less(t, strings.Index(got, "检查项："), strings.Index(got, "情绪曲线标注"))
-	require.Less(t, strings.Index(got, "情绪曲线标注"), strings.Index(got, "最终回复末尾必须附"))
+	require.Less(t, strings.Index(got, "情绪曲线标注"), strings.Index(got, "回答第一段必须是"))
 }
 
 // TestChapterCISelfCheckBlock_NonEmpty #111 P1：三个写后自检技法按单源顺序注入、
@@ -63,6 +67,6 @@ func TestChapterCISelfCheckBlock_NonEmpty(t *testing.T) {
 
 	got := buildChapterCIInstruction(s, 1, 7, "")
 	require.Contains(t, got, "写后自检清单")
-	require.Less(t, strings.Index(got, "写后自检清单"), strings.Index(got, "最终回复末尾必须附"))
+	require.Less(t, strings.Index(got, "写后自检清单"), strings.Index(got, "回答第一段必须是"))
 	require.Contains(t, got, "只报告不改写：不调用任何写工具", "回执契约与「只报告」纪律不得被自检块冲掉")
 }

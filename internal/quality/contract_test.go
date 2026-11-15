@@ -95,6 +95,43 @@ func TestParseL1Receipt(t *testing.T) {
 	assert.Error(t, err, "坏 JSON 应报错（调用方降级）")
 }
 
+// TestParseL1ReceiptTruncationSalvage #362：回执前置后输出仍可能在回执之后被硬切。
+// 闭合围栏丢失 / 尾部挂残句不应让一份完整回执作废；半条数组、无关 JSON 不得误收，
+// 绝不把截断结果拼成「已复核」的完整清单。
+func TestParseL1ReceiptTruncationSalvage(t *testing.T) {
+	// 闭合围栏被切掉，但 JSON 对象本身完整。
+	cutFence := "```json\n" +
+		`{"findings":[{"id":"L1-1","check":"pacing","desc":"中段拖沓","chapter_ids":[7]}],"summary":"1 项"}` +
+		"\n后面还有补充说明但被硬切了"
+	r, err := ParseL1Receipt(cutFence)
+	require.NoError(t, err)
+	require.Len(t, r.Findings, 1)
+	assert.Equal(t, "pacing", r.Findings[0].Check)
+	assert.Equal(t, []int64{7}, r.Findings[0].ChapterIDs)
+	assert.Equal(t, "1 项", r.Summary)
+
+	// 完全无围栏 + 尾部残句：json.Decoder 只解第一个完整值。
+	r0, err := ParseL1Receipt(`{"findings":[],"summary":"零发现"}` + "\n（以下省略）")
+	require.NoError(t, err)
+	assert.Empty(t, r0.Findings)
+	assert.Equal(t, "零发现", r0.Summary)
+
+	// 半条 findings 数组：不得拼凑不完整发现冒充已复核。
+	_, err = ParseL1Receipt(`{"findings":[{"id":"L1-1","check":"pacing","desc":"写了一半"`)
+	assert.ErrorIs(t, err, ErrL1ReceiptNotFound)
+
+	// 无关 JSON / 空对象：不得误判为回执。
+	_, err = ParseL1Receipt(`{"other":1}`)
+	assert.ErrorIs(t, err, ErrL1ReceiptNotFound)
+	_, err = ParseL1Receipt(`{}`)
+	assert.ErrorIs(t, err, ErrL1ReceiptNotFound)
+
+	// 正文先出现一段无关 JSON、后出现完整回执：抢救须跳过前者取后者。
+	rm, err := ParseL1Receipt(`{"notes":"一些分析"}` + "\n" + `{"findings":[],"summary":"最终结论"}`)
+	require.NoError(t, err)
+	assert.Equal(t, "最终结论", rm.Summary)
+}
+
 // TestL1ReceiptToFindings 档案发现投影：ID 补号、Level/Status 恒定、作用域回填。
 func TestL1ReceiptToFindings(t *testing.T) {
 	r := &L1Receipt{Findings: []L1Finding{

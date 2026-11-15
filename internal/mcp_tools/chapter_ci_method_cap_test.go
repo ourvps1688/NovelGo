@@ -35,8 +35,8 @@ func TestChapterCIMethodCapContract(t *testing.T) {
 
 	// 截断不得冲掉 P0 纪律与回执契约，顺序亦不变。
 	require.Contains(t, got, "只报告不改写：不调用任何写工具")
-	require.Contains(t, got, "最终回复末尾必须附")
-	require.Less(t, strings.Index(got, "# 本次任务方法论"), strings.Index(got, "最终回复末尾必须附"))
+	require.Contains(t, got, "回答第一段必须是")
+	require.Less(t, strings.Index(got, "# 本次任务方法论"), strings.Index(got, "回答第一段必须是"))
 
 	idx := -1
 	for i := range *invs {

@@ -7,8 +7,9 @@ package mcp_tools
 // 该字段，导致显式 L1 回落到模型 MaxOutputTokens（MiMo 为 128k）——完全无帽，
 // 单条思维链可膨胀到几十分钟。本次补齐三段接线，只给显式 L1 设帽。
 //
-// 帽值的数据依据与「不得调小」的边界见 chapterCIMaxTokens 注释：历史成功收口样本
-// 最大 output 36,150 token，回执在回复末尾，帽 < 36,150 会把回执在生成之前截断。
+// #362「回执前置 + 小帽 + 截断抢救」：首轮 12k 小帽配合回执前置逼思维收敛；
+// 调用成功但拿不到回执时，回落 48k 完整预算复跑一次（预算层截断抢救）。
+// 派发失败/超时不重试，其余链路零波及。帽值数据依据见 chapter_ci.go 常量注释。
 
 import (
 	"os"
@@ -47,21 +48,33 @@ func TestChapterCIL1BudgetWiring(t *testing.T) {
 		"MiMo 思考+回答共享预算的映射不得退役")
 }
 
-// TestChapterCIL1BudgetCoversObservedThinking 帽值必须覆盖全部历史成功样本，
-// 防止后人以「提速」为由调小，把 16m31s 的成功变成回执被截断的失败。
+// TestChapterCIL1BudgetCoversObservedThinking 两级预算边界：
+//   - 首轮小帽必须明显小于历史最大成功思维量，才是一次真正的「逼收敛」试验；
+//   - 回落预算必须完整覆盖历史最大成功样本，否则试验失败时本版 L1 会停在 pending；
+//   - 两者都必须真的小于模型无帽回落值，否则等于没设帽。
 func TestChapterCIL1BudgetCoversObservedThinking(t *testing.T) {
 	const largestObservedSuccess = 36_150 // 2026-11-15 21:43 chapterci 成功回执的 output token
 	const modelMaxOutput = 128_000        // mimo-v2.6-flash MaxOutputTokens（无帽回落值）
 
-	assert.Greater(t, chapterCIMaxTokens, largestObservedSuccess,
-		"帽必须大于历史最大成功 thinking 量，否则回执会在末尾被截掉")
-	assert.Less(t, chapterCIMaxTokens, modelMaxOutput,
-		"帽必须真的比模型无帽回落值小，否则等于没设")
-	assert.Equal(t, 48_000, chapterCIMaxTokens, "与 patrolSynthesizeMaxTokens 同档，改动需重跑数据核算")
+	assert.Less(t, chapterCIMaxTokens, largestObservedSuccess,
+		"首轮小帽必须小于历史最大成功思维量，才是真正的收敛试验")
+	assert.Greater(t, chapterCIFallbackMaxTokens, largestObservedSuccess,
+		"回落预算必须覆盖历史最大成功样本，否则回执会在生成之前被截断")
+	assert.Less(t, chapterCIFallbackMaxTokens, modelMaxOutput,
+		"回落预算也必须比模型无帽回落值小，否则等于没设")
+	assert.Less(t, chapterCIMaxTokens, chapterCIFallbackMaxTokens,
+		"两级预算必须严格递增，回落才有意义")
+	assert.Equal(t, 12_000, chapterCIMaxTokens, "首轮小帽，改动需重跑数据核算")
+	assert.Equal(t, 48_000, chapterCIFallbackMaxTokens, "与 patrolSynthesizeMaxTokens 同档")
 
 	ci := readL1BudgetSource(t, "chapter_ci.go")
-	assert.Contains(t, ci, "const chapterCIMaxTokens = 48_000")
+	assert.Contains(t, ci, "const chapterCIMaxTokens = 12_000")
+	assert.Contains(t, ci, "const chapterCIFallbackMaxTokens = 48_000")
 	assert.Contains(t, ci, "36,150", "数据依据必须留在注释里，避免拍脑袋调帽")
+	assert.Contains(t, ci, "req.MaxTokens = chapterCIFallbackMaxTokens",
+		"预算层截断抢救接线不得退役")
+	assert.Contains(t, ci, "MaxTokens:   chapterCIMaxTokens", "首轮必须带小帽")
+	assert.Contains(t, ci, "ctx.Err() == nil", "ctx 已取消时不得复跑")
 }
 
 // TestChapterCIL1BudgetScopeIsExplicitDetectOnly 主 chat / 写章 / 前台 run_subagent /

@@ -22,13 +22,13 @@ func TestBuildChapterCIInstructionCorpusBranch(t *testing.T) {
 	require.NotContains(t, got, "（get_chapter_list 定位）", "corpus 非空时不得再让模型自取材料")
 	for _, want := range []string{
 		"检查项：", "只报告不改写：不调用任何写工具", "收敛要求",
-		"情绪曲线标注", "最终回复末尾必须附", quality.L1ReceiptFormatLine(),
+		"情绪曲线标注", "回答第一段必须是", quality.L1ReceiptFormatLine(),
 	} {
 		require.Contains(t, got, want, "方案 C 不得冲掉既有静态契约: "+want)
 	}
 	require.Less(t, strings.Index(got, "【本章质检语料"), strings.Index(got, "检查项："))
 	require.Less(t, strings.Index(got, "检查项："), strings.Index(got, "情绪曲线标注"))
-	require.Less(t, strings.Index(got, "情绪曲线标注"), strings.Index(got, "最终回复末尾必须附"))
+	require.Less(t, strings.Index(got, "情绪曲线标注"), strings.Index(got, "回答第一段必须是"))
 
 	legacy := buildChapterCIInstruction(nil, 27, 2, "")
 	require.Equal(t, legacy, buildChapterCIInstructionWithCorpus(nil, 27, 2, "", ""),
@@ -44,8 +44,8 @@ func TestBuildChapterCIInstructionCorpusBranch(t *testing.T) {
 	require.Contains(t, full, "（章节方法论节选，完整以技能原文为准）")
 	require.Contains(t, full, "写后自检清单")
 	require.Contains(t, full, "【写后自检·review】")
-	require.Less(t, strings.Index(full, "# 本次任务方法论"), strings.Index(full, "最终回复末尾必须附"))
-	require.Less(t, strings.Index(full, "写后自检清单"), strings.Index(full, "最终回复末尾必须附"))
+	require.Less(t, strings.Index(full, "# 本次任务方法论"), strings.Index(full, "回答第一段必须是"))
+	require.Less(t, strings.Index(full, "写后自检清单"), strings.Index(full, "回答第一段必须是"))
 	require.Contains(t, full, "只报告不改写：不调用任何写工具")
 	require.Contains(t, full, "收敛要求")
 }

@@ -87,6 +87,6 @@ func TestChapterCISelfCheckBlockDirectedByFindings(t *testing.T) {
 	instruction := buildChapterCIInstruction(s, 1, 7, "", quality.Finding{Check: quality.CheckAIFlavor})
 	require.Contains(t, instruction, "【写后自检·deai-flavor】")
 	require.NotContains(t, instruction, "【写后自检·review】")
-	require.Less(t, strings.Index(instruction, "写后自检清单"), strings.Index(instruction, "最终回复末尾必须附"))
+	require.Less(t, strings.Index(instruction, "写后自检清单"), strings.Index(instruction, "回答第一段必须是"))
 	require.Contains(t, instruction, "只报告不改写：不调用任何写工具")
 }
