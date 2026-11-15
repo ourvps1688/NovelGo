@@ -473,6 +473,7 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
     expect(view).toContain("chapterDetectDone");
     expect(view).toContain("chapterDetectRunning");
     expect(view).toContain("chapterDetectL1Pending");
+    expect(view).toContain("chapterDetectLegacyL1");
     expect(view).toContain("!running");
     expect(view).toContain('archive?.l1_status === "checked"');
     expect(view).toContain("!archive?.pending_l1");
@@ -497,6 +498,8 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
         "chapterResultRunningHint",
         "chapterResultL1Pending",
         "chapterResultL1PendingHint",
+        "chapterResultLegacyL1",
+        "chapterResultLegacyL1Hint",
       ]) {
         expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
       }
@@ -518,6 +521,7 @@ describe("A 方案 章节检测按版本的结果视图", () => {
       "chapterDetectDone",
       "chapterDetectRunning",
       "chapterDetectL1Pending",
+      "chapterDetectLegacyL1",
       "!running",
       'archive?.l1_status === "checked"',
       "!archive?.pending_l1",
@@ -560,6 +564,8 @@ describe("A 方案 章节检测按版本的结果视图", () => {
         "chapterResultRunningHint",
         "chapterResultL1Pending",
         "chapterResultL1PendingHint",
+        "chapterResultLegacyL1",
+        "chapterResultLegacyL1Hint",
       ]) {
         expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
       }
@@ -580,5 +586,59 @@ describe("A 方案 章节检测按版本的结果视图", () => {
       JSON.parse(read("i18n/locales/en.json")).journey.quality.detect
         .chapterResultL1PendingHint,
     ).toContain("invalidated");
+  });
+});
+
+// #131：章节面板的状态此前走 ListDetectionTaskStatuses 的 kind 级概览
+// （scopeID=nil，后端取全书 checked_at 最新一行），会把别的章的检测结果与
+// 进行态挂到当前章；A 方案上线前的存量档案又从未被 InvalidateL1 作废，
+// 结论条却一律宣称「已作废」，与档案卡片的「L1 已检查」自相矛盾。
+describe("#131 章节状态按章归属与历史档案分态", () => {
+  it("章节面板改走按 scope 的状态查询，卷/结构仍用全局概览", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    for (const want of [
+      "GetDetectionTaskStatus",
+      'queryKey: ["detection-task-status", novelId, "chapter", effChapterId]',
+      'GetDetectionTaskStatus(novelId, "chapter", effChapterId)',
+      'queryKey: ["detection-task-status"]',
+      'kind !== "chapter" &&',
+      "chapterStatus",
+    ]) {
+      expect(view, `missing: ${want}`).toContain(want);
+    }
+    expect(view).toContain("ListDetectionTaskStatuses");
+    expect(view).toContain("detectionKeys.list(novelId)");
+  });
+
+  it("完成事件按 chapter_id 过滤，别章收口不在本面板弹完成提示", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain(
+      "if (p.chapter_id != null && p.chapter_id !== effChapterId) return;",
+    );
+    expect(view).toContain("effChapterId, queryClient, t");
+  });
+
+  it("历史档案单独一态：只有 l1_status=pending 才说已作废", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain("chapterDetectLegacyL1");
+    expect(view).toContain('archive?.l1_status !== "pending"');
+    expect(view).toContain("!chapterDetectLegacyL1");
+    expect(view).toContain("chapterResultLegacyL1");
+    expect(view).toContain("chapterResultLegacyL1Hint");
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      expect(
+        d.chapterResultLegacyL1,
+        `missing legacy title in ${f}`,
+      ).toBeTruthy();
+      expect(
+        d.chapterResultLegacyL1Hint,
+        `missing legacy hint in ${f}`,
+      ).toBeTruthy();
+      expect(d.chapterResultLegacyL1Hint).not.toMatch(
+        /已作废|was invalidated|保留上一轮结果/,
+      );
+    }
   });
 });

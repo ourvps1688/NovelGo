@@ -2248,6 +2248,8 @@
         "chapterResultRunningHint": "L0 is saved for this version; the review runs only when you start it and can be cancelled anytime",
         "chapterResultL1Pending": "L1 review has not run for this version",
         "chapterResultL1PendingHint": "The previous version's results were invalidated; there is no L1 verdict for this version. Click Re-check this chapter to start one",
+        "chapterResultLegacyL1": "The L1 verdict still belongs to a previous text version",
+        "chapterResultLegacyL1Hint": "This ledger predates version-aware bookkeeping, so the old verdict was not invalidated; the L1 badge below is a historical result. Re-check this chapter to invalidate it and review the current text",
         "chapterDoneToast": "Check completed for this version; see the result below. A clean run is stated explicitly",
         "chapterDoneFailed": "L0 saved for this version; L1 did not finish and previous-version results were invalidated. Re-check later",
         "chapterDoneFailedModel": "L0 saved for this version; L1 did not run because the model is missing or invalid. Check the model in Settings and retry (previous-version results were invalidated)",

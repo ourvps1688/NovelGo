@@ -2208,6 +2208,8 @@
         "chapterResultRunningHint": "本版 L0 已落档；复核只在你显式发起后运行，可随时取消",
         "chapterResultL1Pending": "本版正文尚未做 L1 复核",
         "chapterResultL1PendingHint": "上一版结论已按正文版本作废，档案里没有本版 L1 结论；点「重新检测本章」发起",
+        "chapterResultLegacyL1": "档案中的 L1 结论仍属于上一版正文",
+        "chapterResultLegacyL1Hint": "这份档案在按版本记账上线前生成，旧结论尚未作废；下方「L1 发现 已检查」是历史结果。点「重新检测本章」会先作废旧结论，再按当前正文复核",
         "chapterDoneToast": "本版正文检测已完成，请查看下方结论；零发现也会明确写出",
         "chapterDoneFailed": "本版 L0 已落档；L1 复核未完成，上一版结论已作废，可稍后重新检测本章",
         "chapterDoneFailedModel": "本版 L0 已落档；L1 未运行：模型未配置或已失效，请在设置中检查模型后重试（上一版结论已作废）",

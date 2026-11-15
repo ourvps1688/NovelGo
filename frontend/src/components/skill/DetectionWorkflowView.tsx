@@ -15,6 +15,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GetChapterQualityArchive,
+  GetDetectionTaskStatus,
   GetPatrolReport,
   ListDetectionTaskStatuses,
   ListIssueTickets,
@@ -74,6 +75,10 @@ function invalidateChapterViews(
   void queryClient.invalidateQueries({ queryKey: ["score-trend"] });
   void queryClient.invalidateQueries({ queryKey: ["score-history"] });
   void queryClient.invalidateQueries({ queryKey: ["feature-usage"] });
+  // #131：按章状态是独立 query，必须与档案一起失效，否则「上次检测」会停在旧章。
+  void queryClient.invalidateQueries({
+    queryKey: ["detection-task-status"],
+  });
   void queryClient.invalidateQueries({ queryKey: detectionKeys.list(novelId) });
 }
 
@@ -110,12 +115,34 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     queryKey: detectionKeys.list(novelId),
     queryFn: async () => (await ListDetectionTaskStatuses(novelId)) ?? [],
     enabled: !!novelId,
+    // #131：章节进行态改由下面的按章 query 轮询；全局列表只服务卷/书/结构。
     refetchInterval: (q) =>
+      kind !== "chapter" &&
       (q.state.data ?? []).some((s) => s.kind === kind && s.running)
         ? 3000
         : false,
   });
-  const st = (statuses ?? []).find((s) => s.kind === kind);
+
+  // #131：章节面板的「进行态 / 上次检测 / 发现数」必须按本章归属。
+  // ListDetectionTaskStatuses 走 scopeID=nil 的 kind 级概览口径，后端取全书
+  // checked_at 最新的一行 —— 别的章刚检测完，结果就会挂在当前章面板上，
+  // running 也是任意作用域的合并值。改走 GetDetectionTaskStatus(novelId,
+  // "chapter", effChapterId)：后端按 (kind, scopeID) 取本章进行态 + 本章档案。
+  const { data: chapterStatus } = useQuery({
+    queryKey: ["detection-task-status", novelId, "chapter", effChapterId],
+    queryFn: async () => {
+      if (effChapterId == null) return null;
+      return (
+        (await GetDetectionTaskStatus(novelId, "chapter", effChapterId)) ?? null
+      );
+    },
+    enabled: kind === "chapter" && !!novelId && effChapterId != null,
+    refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
+  });
+  const st =
+    kind === "chapter"
+      ? chapterStatus
+      : (statuses ?? []).find((s) => s.kind === kind);
   const running = !!st?.running;
 
   // 就地内联结果数据源：卷/结构检测落发现项工单（按 run_id 取本种类最近一次结果）；
@@ -272,6 +299,9 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
         reason?: string;
       }) => {
         if (p.novel_id !== novelId) return;
+        // #131：完成事件带 chapter_id，只处理当前选中章。别的章收口不得在
+        // 本面板弹「本章检测已完成」，也不得借机把本面板的状态刷成别章结果。
+        if (p.chapter_id != null && p.chapter_id !== effChapterId) return;
         invalidateChapterViews(queryClient, novelId);
         if (p.ok === false) {
           // A 方案：失败时本版 L0 已落档、上一版 L1 已作废，档案里没有可沿用的
@@ -298,7 +328,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     return () => {
       off?.();
     };
-  }, [novelId, kind, queryClient, t]);
+  }, [novelId, kind, effChapterId, queryClient, t]);
 
   // A 方案：章节视图不再挂「长时运行」浮层（已运行 N 分钟 / 预计 3–8 分钟 /
   // 第 N 步工具进度）。L1 只由作者显式点「重新检测本章」触发，结果一律按
@@ -341,8 +371,20 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     archive?.l1_status === "checked" &&
     !archive?.pending_l1;
   const chapterDetectRunning = !!archive?.exists && running;
+  // #131：A 方案上线前的存量档案从未经过 InvalidateL1 —— l1_status 仍是
+  // checked（或 skipped），finding_round.pending_l1 也可能为 true。它属于
+  // 上一版正文但**并未被作废**，不能沿用「已作废」文案，否则与档案卡片里
+  // 「L1 已检查」自相矛盾。只有 l1_status=pending 才是确定被作废过的本版档案。
+  const chapterDetectLegacyL1 =
+    !!archive?.exists &&
+    !running &&
+    !chapterDetectDone &&
+    archive?.l1_status !== "pending";
   const chapterDetectL1Pending =
-    !!archive?.exists && !running && !chapterDetectDone;
+    !!archive?.exists &&
+    !running &&
+    !chapterDetectDone &&
+    !chapterDetectLegacyL1;
   const scopeReady =
     kind === "chapter"
       ? effChapterId != null
@@ -589,6 +631,19 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                         </span>
                         <span className="text-muted-foreground">
                           {t("journey.quality.detect.chapterResultRunningHint")}
+                        </span>
+                      </>
+                    ) : null}
+                    {chapterDetectLegacyL1 ? (
+                      <>
+                        <AlertTriangle className="h-3.5 w-3.5 text-tag-amber-foreground" />
+                        <span className="font-medium text-foreground">
+                          {t("journey.quality.detect.chapterResultLegacyL1")}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {t(
+                            "journey.quality.detect.chapterResultLegacyL1Hint",
+                          )}
                         </span>
                       </>
                     ) : null}
