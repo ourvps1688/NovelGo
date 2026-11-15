@@ -27,12 +27,12 @@
 - **dev 运行期间禁跑 go build / 删 novelgo-res.syso**（已在 `.git/info/exclude`）；watcher 重生成 3 个绑定文件，须先停 dev → `git checkout --` → 手工补最小行 → 再跑闸门。白屏根因=SubagentCard `getAgentMeta` 未映射 statesync/chapterci 致 React19 卸载 #root（已修）；render 禁 Date.now()/new Date()。
 - 日志 `build/bin/novelgo.log`（主）/ `novelgo-llm.log`；**日志会轮转**，按旧行号切片可能读空，改用 DB + 新日志头尾时间判定。
 
-## 当前状态 / 待办（2026-11-15 18:05）
-- **终态**：#118–#130 全部落地、全闸绿、已推送（代码 `d979e53c` + 台账 `485a2341` + 冷启动补记 `d8abf8ed`）；`0 0`、工作树干净。17:26 冷启动核验通过（exe 17:26:41 / 80,134,908 B 含新符号、双 200、ERROR/FATAL/WARN 全 0、生成物噪声已还原）。
-- **18:01 dev 已退出**：`YPk5TC` 于 18:01:17 正常结束（`应用关闭，释放资源` + `Development mode exited`，exit 0 / 35m8s），非崩溃；端口无 LISTEN、无 dev 进程。要复验须先重新冷启动 wails dev。
+## 当前状态 / 待办（2026-11-15 18:17）
+- **终态**：#118–#130 全部落地、全闸绿、已推送（代码 `d979e53c` + 台账 `485a2341` + 冷启动补记 `d8abf8ed` + 状态更正 `e698df75`）；`0 0`、工作树干净。
+- **dev 现运行中**：18:01 `YPk5TC` 正常退出（exit 0 / 35m8s，非崩溃）后，按用户「冷启动」指令于 **18:12:59** 重新冷启动（`JHpq4U`）；exe `80,134,908 B` 与 17:26 同尺寸（代码未变）、新符号 #129/#130 全部命中、双 200、启动窗口 ERROR/FATAL/WARN 全 0、生成物噪声已还原。`novelgo-dev.exe` 退出时被清理属正常，冷启动会重生成，勿误判构建失败。
 - **#130 复验仍未发生**：17:26–18:01 窗口 `chapter_score_events` 0 新增（仍 108 条 / 最新 16:51）、`tasks` 0 新增、`chapter_quality` 2912 仍是 `id=1660 / 16:49:19 / pending_l1=true`（档案里 1879 硬编码符合设计，#130 只净化注入判官的处方）、非 DEBUG 日志零判分/检测、ERROR/FATAL 0 ⇒ ②③ 目前**只有契约 + 二进制核验，无运行期样本**，勿宣称已运行期通过。
 - **口径（勿混说）**：12min 硬墙**只管手动「重新检测本章」**（`beginDetectCtx`）；写后 chapterci/statesync 各 10min（`postWriteSubAgentTimeout`，从 job 实际开跑计时）。两个去抖器（`chapterCIDebouncer 10s`/`stateSyncDebouncer 6s`）**彼此独立**、跨 kind 仍并发 ＝ ⑧ 结构根因。手动重检零 statesync；写稿落盘才派发写后维护。
 - **17:00 三点反馈更正（勿再沿用旧结论）**：book-pitch 常驻**不是用户在技能面板勾选**，是 `BookPitchWorkflowView.tsx` 的 `ADOPT_SKILLS = ["book-pitch"]` 在「新建孵化器」(:252)/「采纳建书」(:507) 两处自动 `SetEnabledSkills` 写 `novels/<id>/skills/.enabled.json`（`app/skill_api.go` → `skill.SaveEnabled`），孵化完成后无清理；实测 21/22/23/27 四本全是 `["book-pitch"]`。技能 frontmatter 是 `mode: manual`，`channel=always / runes=0` 来自 `system_messages.go` 记账（runes=0 是设计）、每轮 system 约 3175r 与写稿无关。**旧建议「去面板取消勾选」是治标**；正确治理点＝收敛/删除两处自动 set 或孵化完成后清理（待拍板，未改代码）。② 重新判分的 1879 是陈旧 L1 desc 被当验收处方（#130 已修）；③ 结论条旧条件 `archive?.exists` 把 L0 落档误当整轮完成（#130 已修）。
 - **运行期索引**：#119 第 7 章 `id_2912.md`《抽签》曾 1879 字 ⇒「放行不退回整章重写、不自动补写、chat 定点补写」✅；#120 手写 `【本章验收条件】`+`- l0|ai_flavor|#0`+「换思路」⇒ 3 次 `search_replace` 零 `full_replace` ✅（卡片「去修复」在 `repeat_count≥3` 会先追问轮次保护）。评分 `source=full_replace` 是评分字段**不是工具调用**。
-- **待用户显式动作（助手不代发 / 不代点；dev 已退出，须先重新冷启动）**：① 第 7 章补写模板已交付（两条真实 key + `【本章验收条件】` + 显式人工决策；cue 预检仅命中 `dialogue-subtext` 封住 LLM 兜底，`next` 被 `notWhen` 否决）；② #130 复验：再点「重新判分」核 critique 不再出现 1879/1100+；「重新检测本章」运行中显示「L0 已落档，L1 复核中」、超时后「L1 复核未完成」、L1 真收口才「已完成」；③ #129 复验：写后链同正文重复 edit 不再反复覆盖档案、手动重检仍强制重算。
+- **待用户显式动作（助手不代发 / 不代点；dev 已就绪）**：① 第 7 章补写模板已交付（两条真实 key + `【本章验收条件】` + 显式人工决策；cue 预检仅命中 `dialogue-subtext` 封住 LLM 兜底，`next` 被 `notWhen` 否决）；② #130 复验：再点「重新判分」核 critique 不再出现 1879/1100+；「重新检测本章」运行中显示「L0 已落档，L1 复核中」、超时后「L1 复核未完成」、L1 真收口才「已完成」；③ #129 复验：写后链同正文重复 edit 不再反复覆盖档案、手动重检仍强制重算。
 - **剩余挂起**：`opening-chapters` 泛 cue（8 次 23,848r，因开篇坡度确需改首段）、收敛 book-pitch 两处自动 set、结构性「修复轮跳过 cue 注入」（省 55% 但碰「零新增执行体」红线）、LLM 兜底不可控、#117 P2、#115 局部 patch 不评分、602 行孤儿、前端失败 toast、请求级 LLM 耗时埋点、6m42s 模型/推理预算选型、「已消解 1」badge 无运行期样本、L0/L1 双时间戳新列。**已关闭**：#117 P1 主体、E（`context.Background()` 子 Agent 不属 chat turn）、budget 虚标、跨 kind 串行锁、#127-B、⑧、#129。
