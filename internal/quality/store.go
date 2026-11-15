@@ -118,6 +118,29 @@ func (s *Store) UpsertL1(ctx context.Context, e *ChapterQuality) error {
 	return nil
 }
 
+// InvalidateL1 作废该章上一轮 L1 结果（A 方案：档案按「正文版本」记账的等价轻实现）。
+//
+// L0 是按落盘正文现场重算的确定性结果；上一轮 L1 复核的是**旧正文**，一旦正文变化
+// 就不再适用于本版，绝不能继续展示、注入判官处方或冒充本轮已收口。这里只清 L1 两列：
+//   - l1_findings → 空清单（旧描述里的历史字数等硬编码随之消失）；
+//   - l1_status   → pending（本版 L1 待用户显式复核）。
+//
+// checked_at / finding_round / round 与 L0 列一律不动：它们由 UpsertL0 维护，
+// finding_round.pending_l1=true 正好表达「本版 L0 已落档、L1 未收口」。
+// 纯本地 UPDATE，零 LLM、零上传、零新增执行体。
+func (s *Store) InvalidateL1(ctx context.Context, novelID, chapterID int64) error {
+	if err := s.DB.WithContext(ctx).
+		Model(&ChapterQuality{}).
+		Where("novel_id = ? AND chapter_id = ?", novelID, chapterID).
+		Updates(map[string]any{
+			"l1_findings": MarshalFindings(nil),
+			"l1_status":   L1StatusPending,
+		}).Error; err != nil {
+		return fmt.Errorf("quality store: invalidate L1: %w", err)
+	}
+	return nil
+}
+
 // GetByChapter 返回某书某章的质量档案；不存在返回 (nil, nil)。
 func (s *Store) GetByChapter(ctx context.Context, novelID, chapterID int64) (*ChapterQuality, error) {
 	var e ChapterQuality

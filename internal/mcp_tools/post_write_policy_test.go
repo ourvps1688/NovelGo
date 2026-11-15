@@ -1,14 +1,12 @@
 package mcp_tools
 
-// #119 契约：字数本地确定性判定不再触发整章自动重写；写后维护子 Agent
-// 有独立预算、脱离主 chat 可见流。纯函数单测 + 静态全链锁防回潮。
+// #119 契约：字数本地确定性判定不再触发整章自动重写；
+// A 方案：写后链零后台 LLM 派发。纯函数单测 + 静态全链锁防回潮。
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,36 +42,7 @@ func TestWordShortfallPrescription(t *testing.T) {
 	assert.Empty(t, wordShortfallPrescription(500, noWindow))
 }
 
-func TestDetachedPostWriteContextIsIndependentAndBounded(t *testing.T) {
-	parent, cancel := context.WithCancel(context.Background())
-	cancel()
-	bg, cancelBG := detachedPostWriteContext(parent)
-	defer cancelBG()
-	require.NoError(t, bg.Err(), "主 ctx 已取消，写后维护仍应能收口")
-	deadline, ok := bg.Deadline()
-	require.True(t, ok, "必须有独立超时，不得无限续命")
-	assert.InDelta(t, postWriteSubAgentTimeout.Seconds(), time.Until(deadline).Seconds(), 2)
-}
-
-func TestDetachedPostWriteSubAgentMarksRequest(t *testing.T) {
-	var got SubAgentRequest
-	wrapped := detachedPostWriteSubAgent(func(_ context.Context, req SubAgentRequest) (string, error) {
-		got = req
-		return "ok", nil
-	})
-	require.NotNil(t, wrapped)
-	report, err := wrapped(context.Background(), SubAgentRequest{
-		AgentType: "chapterci", NovelID: 27, MaxTurns: 12,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, "ok", report)
-	assert.True(t, got.Detached)
-	assert.Equal(t, "chapterci", got.AgentType, "其余字段逐字不动")
-	assert.Equal(t, 12, got.MaxTurns)
-	assert.Nil(t, detachedPostWriteSubAgent(nil))
-}
-
-func TestNoAutoRewriteAndDetachedWiring(t *testing.T) {
+func TestNoAutoRewriteAndNoBackgroundLLMWiring(t *testing.T) {
 	read := func(name string) string {
 		b, err := os.ReadFile(name)
 		require.NoError(t, err)
@@ -94,22 +63,29 @@ func TestNoAutoRewriteAndDetachedWiring(t *testing.T) {
 	assert.Contains(t, rw, `data["word_shortfall"] = p`)
 	assert.Contains(t, rw, `ref.IsNew || a.ChangeType == "full_replace"`)
 
-	policy := read("post_write_policy.go")
-	for _, want := range []string{
-		"context.WithoutCancel(ctx)", "context.WithTimeout",
-		"postWriteSubAgentTimeout", "req.Detached = true",
-	} {
-		assert.Contains(t, policy, want, "写后维护策略缺少 "+want)
-	}
-
+	// A 方案：写后只做本地确定性 L0，零后台子 Agent 派发 / 零去抖 / 零 Detached 预算。
 	ci := read("chapter_ci.go")
-	assert.Contains(t, ci, "detachedPostWriteContext(ctx)")
-	assert.Contains(t, ci, "detachedPostWriteSubAgent(tc.RunSubAgent)")
-	assert.NotContains(t, ci, "runChapterL1(context.WithoutCancel(ctx)")
-	assert.NotContains(t, rw, "runStateSync(context.WithoutCancel(ctx)")
-	assert.Contains(t, ci, "chapter-ci 写后维护超时收口")
-	assert.Contains(t, rw, "state-sync 写后维护超时收口")
+	assert.Contains(t, rw, "ScheduleChapterCI(ctx, tc, ch, proposed)")
+	assert.NotContains(t, rw, "scheduleStateSync(")
+	assert.Contains(t, ci, "runChapterL0(ctx, tc, ch.ID, content)")
+	for _, banned := range []string{
+		"chapterCIDebouncer", "detachedPostWriteContext(", "detachedPostWriteSubAgent(",
+		"runChapterL1(", "newPostWriteDebouncer(",
+	} {
+		assert.NotContains(t, ci, banned, "chapter_ci.go 不得复活后台调度：%s", banned)
+	}
+	for _, banned := range []string{
+		"stateSyncDebouncer", "detachedPostWriteContext(", "runStateSync(",
+	} {
+		assert.NotContains(t, rw, banned, "rw_tools.go 不得复活后台调度：%s", banned)
+	}
+	// 显式执行体仍在（用户点按钮 / S0 对齐），只是不再由写钩子自动派发。
+	assert.Contains(t, ci, "func RunChapterCIForChapter(")
+	assert.Contains(t, rw, "func RunStateSyncForChapter(")
+	// 本版 L0 重算即作废旧版 L1。
+	assert.Contains(t, ci, "qs.InvalidateL1(ctx, tc.NovelID, chapterID)")
 
+	// Detached 字段保留在请求结构上（agent 层流级分支仍消费），但不再由写后链设置。
 	assert.Contains(t, read("base.go"), "Detached bool")
 	pres := read("word_count_prescription.go")
 	for _, banned := range []string{

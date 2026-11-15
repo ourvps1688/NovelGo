@@ -228,18 +228,13 @@ const detectContainerStage = "detect"
 // 以 var 暴露便于测试收缩与后续按 kind 细分。
 var detectTaskTimeout = 60 * time.Minute
 
-// chapterDetectTimeout 是「章节检测」专属硬超时（#115 P0 / #125 方案 3 调整）：
-// L1 chapterci 子 Agent 是多轮工具循环，实测一次可跑 36 次 LLM 调用 / 近 15 分钟，
-// 60min 的通用上限形同虚设，用户只能干等「检测中… 已运行 N 分钟」。章节是单章只读复核；
-// 超时会发 ok=false/reason=timeout 的完成事件并保留上一轮 L1，绝不静默。
+// A 方案：章节专属硬墙（原 12 分钟短墙钟）已撤销。
 //
-// 2026-11-15 经用户批准由 8min 调整为 12min：8min 短于 thinkingIdleTimeout(9min)，
-// 慢供应商下硬墙会先于 idle 看门狗到期，来不及走完「一次 idle → 停止重试 → 收口」，
-// 三次手动重检样本有两次（15:28 / 20:02）在 8min 被腰斩。12min > 9min 让看门狗先触发，
-// 本预算只兜「活着但慢」的轮次，取值纪律与 verifyTicketTimeout 一致。
-// 注意写后维护是另一条独立的 10min 预算（postWriteSubAgentTimeout），不受此值影响。
-// 以 var 暴露便于测试收缩，也便于后续按平台/模型调参。
-var chapterDetectTimeout = 12 * time.Minute
+// 旧设计把「一次不可控时长的 LLM 长推理」当可预测任务，用固定墙钟兜底，超时后
+// 又「保留上一轮 L1」，于是正文改成 3135 字、档案结论还写着上一版 1879 字。
+// 现在写后零后台 LLM、L0 重算即作废旧 L1，L1 只由用户显式触发；章节检测与其余
+// 三类同走 detectTaskTimeout 通用安全兜底，死连接由流级 9min idle watchdog 处理，
+// 超时后档案诚实停在 pending（本版 L1 未复核），不再有「保留旧结论」的假完成。
 
 // verifyCallTimeout 是「单轮复验执行体」的硬超时上限（对应审计 P0）：复验已改为按 run
 // 后台逐工单顺序复验，整体墙钟随工单数线性增长——本应给较宽的安全兜底，防止慢供应商/
@@ -408,8 +403,8 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 				return // 取消由 CancelDetectionTask 的 EvDetectCancelled 负责
 			}
 			if timedOut {
-				// #115 P0：硬超时必须如实回执，不能像取消那样静默；失败不写 L1，
-				// 上一轮 checked 档案保持不动（chapter_ci 的失败保留语义）。
+				// A 方案：硬超时/通用兜底到期必须如实回执；失败不写 L1，
+				// 本版档案保持 pending（旧版 L1 已在 L0 重算时作废）。
 				ok = false
 				reason = "timeout"
 			}
@@ -438,7 +433,9 @@ func (s *Service) dispatchChapterDetect(novelID, chapterID int64) *DetectionTask
 			s.logger.Warn("检测任务：章节检测执行失败（非阻断）", "novel_id", novelID, "chapter_id", chapterID, "reason", reason, "err", err)
 		}
 		if timedOut {
-			s.logger.Warn("检测任务：章节检测硬超时，已保留上一轮 L1 档案", "novel_id", novelID, "chapter_id", chapterID)
+			// A 方案：超时就是「本版 L1 未复核」。旧版结论已在 L0 重算时作废，
+			// 档案停在 pending，绝不拿旧正文的 checked 冒充本轮完成。
+			s.logger.Warn("检测任务：章节检测执行超时，本版 L1 保持待复核（旧版结论已作废）", "novel_id", novelID, "chapter_id", chapterID)
 		}
 	}()
 	res.Dispatched = true

@@ -22,12 +22,10 @@ import (
 // 上层据此把失败归类为 model，前端提示去设置里检查模型，而不是笼统「稍后重试」。
 var errBackgroundModelUnavailable = errors.New("后台子 Agent 模型不可用")
 
-// chapterDetectDeadlineFriendlyMessage 是「重新检测本章」自带硬超时到期的提示（#123）。
-// 15:28 实测：检测 ctx 的 8 分钟上限到期后，DeadlineExceeded 经 FriendlyError
-// 被包装成「本轮对话已超时（30/60 分钟上限）…未落盘为章节正文」，与事实相反——
-// 那是主对话预算，正文早已落盘，检测也根本不写正文。检测是只读复核，
-// 失败只保留上一轮档案，必须明说可手动重检。
-const chapterDetectDeadlineFriendlyMessage = "本章检测已到执行时限并停止；这轮复核未完成，但章节正文与上一轮检测结果都已落盘、不受影响。如需最新结论，请在检测面板点「重新检测本章」。"
+// chapterDetectDeadlineFriendlyMessage 是「重新检测本章」执行时限到期的提示。
+// A 方案：不再说「上一轮结果不受影响」——上一版 L1 已在 L0 重算时作废，
+// 本版 L1 未完成就是未完成，档案如实停在 pending。
+const chapterDetectDeadlineFriendlyMessage = "本章检测已到执行时限并停止；本版正文的本地确定性检查（L0）已落盘，上一轮检测结果已按正文版本作废、本版 L1 智能复核未完成。如需最新结论，请在检测面板点「重新检测本章」。"
 
 // errChapterDetectTimeout 是检测 ctx 硬超时的可判定哨兵（#123）。
 // RunSubAgent 把底层错误友好化成普通字符串（%s 而非 %w），DeadlineExceeded

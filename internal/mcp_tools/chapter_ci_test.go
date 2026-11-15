@@ -51,12 +51,13 @@ func seedCIChapter(t *testing.T, db *gorm.DB, id int64) *chapter.Chapter {
 	return ch
 }
 
-// TestScheduleChapterCIWritesL0 写后钩子：L0 同步落档案，L1 侧待查（无子 Agent 能力不派发）。
+// TestScheduleChapterCIWritesL0 写后钩子（A 方案）：只同步落 L0，本版 L1 保持待查，
+// 零子 Agent / 零后台派发。
 func TestScheduleChapterCIWritesL0(t *testing.T) {
 	db, tc, ctx := setupCIEnv(t)
 	ch := seedCIChapter(t, db, 5)
 
-	// RunSubAgent 为 nil：只跑 L0，不排 L1 定时器（降级零提示）。
+	// A 方案：写钩子恒只跑 L0，与 tc.RunSubAgent 是否存在无关。
 	mcp_tools.ScheduleChapterCI(ctx, tc, ch, "他推开门走进院子。")
 
 	got, err := quality.NewStore(db, ciLogger()).GetByChapter(ctx, 1, 5)
@@ -65,7 +66,7 @@ func TestScheduleChapterCIWritesL0(t *testing.T) {
 	assert.NotEmpty(t, got.L0Metrics, "L0 指标全集落档")
 	assert.NotEmpty(t, got.L0Findings, "短文应有 C 系发现（字数偏短/章尾无钩）")
 	assert.Equal(t, quality.L1StatusPending, got.L1Status, "L1 未跑=待查（规范化 pending）")
-	assert.Empty(t, got.L1Findings)
+	assert.Empty(t, quality.ParseFindings(got.L1Findings), "本版尚未复核，L1 发现清单为空")
 	assert.False(t, got.CheckedAt.IsZero())
 
 	// ch 为 nil / DB 为 nil：整体跳过（不 panic 不写）。

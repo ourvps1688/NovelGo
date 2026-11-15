@@ -1,8 +1,7 @@
 package pipeline
 
-// #125 方案 3 契约：章节检测专属硬超时必须长于思考模型的 idle 空闲预算。
-// 旧值 8min < thinkingIdleTimeout(9min)，慢供应商下硬墙先到期，来不及走完
-// 「一次 idle → 停止重试 → 收口」，15:28 / 20:02 两次手动重检被腰斩。
+// A 方案契约：章节专属硬墙（原 12min）已撤销，四类检测统一只走通用安全兜底。
+// 流级 9min idle watchdog 是 chat/体检/巡检/复验共用的死连接保护，必须保留。
 
 import (
 	"testing"
@@ -11,9 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestChapterDetectTimeoutCoversIdleWatchdog(t *testing.T) {
-	assert.Equal(t, 12*time.Minute, chapterDetectTimeout)
-	assert.Greater(t, chapterDetectTimeout, 9*time.Minute, "须大于 internal/llm.thinkingIdleTimeout")
-	// beginDetectCtx 取两者较小值，仍须由章节专属上限决定（其余三类走 60min 通用兜底）。
-	assert.Less(t, chapterDetectTimeout, detectTaskTimeout)
+func TestChapterHasNoDedicatedHardTimeout(t *testing.T) {
+	assert.Equal(t, 60*time.Minute, detectTaskTimeout)
+	detect := readChapterDetectSource(t, "detect.go")
+	status := readChapterDetectSource(t, "detect_status.go")
+	for _, src := range []string{detect, status} {
+		assert.NotContains(t, src, "chapterDetectTimeout", "章节专属墙钟不得回潮")
+	}
+	assert.Contains(t, status, "context.WithTimeout(s.appCtx, detectTaskTimeout)")
+	// 超时后档案诚实停在 pending，不再「保留上一轮 L1」冒充完成。
+	assert.Contains(t, detect, "本版 L1 保持待复核（旧版结论已作废）")
+	// 流级死连接保护不得随章节墙钟一起被删。
+	llm := readChapterDetectSource(t, "../llm/stream.go")
+	assert.Contains(t, llm, "const thinkingIdleTimeout = 9 * time.Minute")
 }

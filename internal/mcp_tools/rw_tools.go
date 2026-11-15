@@ -594,8 +594,9 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	// 正文（非大纲）落盘后的维护链路：向量/搜索缓存/字数/写作日志
 	if !ref.IsOutline {
 		maintainChapterAfterEdit(ctx, tc, ch, current, proposed)
-		scheduleStateSync(ctx, tc, ch)
-		// 章节 CI（R2）：L0 确定性检查同步落档案 + L1 增量检查去抖派发
+		// A 方案：写后只做本地确定性 L0（毫秒级零 LLM）并按本版正文作废旧 L1。
+		// statesync / chapterci 的后台自动子 Agent 派发已整链撤销：L1 复核与台账同步
+		// 都只由用户显式触发，不再抢主 chat 的 LLM 通道、不再产生长时 running 任务。
 		ScheduleChapterCI(ctx, tc, ch, proposed)
 		// 落库评分结果（评分门禁判分后在此写入章节记录；nil 表示未评分或评分被跳过）
 		if pendingScore != nil {
@@ -648,10 +649,10 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 	if ref.IsOutline && taskCardNote != "" {
 		injects = append(injects, InjectMessage{Role: "user", Content: taskCardNote})
 	}
-	// 写后状态维护已由后端自动派发 statesync 子 Agent 处理（见 scheduleStateSync），
-	// 不再要求主 Agent 内联执行维护写工具——否则主 Agent 容易陷入「反复 get_* 确认」的
-	// 只读循环，被 isStuckLoop 守卫强制中断（见之前 dev 日志 turn 39/41 卡死）。
-	// 这里只注入一条说明，提示主 Agent 无需手动维护，直接基于本次修改向用户汇报即可。
+	// A 方案：写后不再自动派发「状态同步子 Agent」。给主 Agent 的回执必须如实——
+	// 本地确定性 L0 已按本版正文落档、旧 L1 已作废；台账同步与 L1 复核都需用户在
+	// chat / 检测面板显式触发。既不骗它「后台有人维护」，也不让它陷入反复 get_* 的
+	// 只读循环（isStuckLoop 守卫曾在此卡死 turn 39/41）。
 	if !ref.IsOutline && a.ChangeType == "full_replace" && len([]rune(proposed)) > 500 {
 		reminder := fmt.Sprintf("你刚刚完成了《%s》的全量替换。", ch.Title)
 		if number, err := chStore.GetReadingNumberByID(ctx, nil, tc.NovelID, ch.ID); err != nil {
@@ -660,8 +661,9 @@ func (t *EditTool) editChapterLike(ctx context.Context, a *EditArgs, tc ToolCont
 			reminder = fmt.Sprintf("你刚刚完成了《%s》（第%d章）的全量替换。", ch.Title, number)
 		}
 		injects = append(injects, InjectMessage{
-			Role:    "user",
-			Content: reminder + "系统已在后台自动派发「状态同步子 Agent」负责维护（更新角色/关系/地点/弧线/时间线/读者认知台账）。你无需手动调用任何维护写工具，直接基于本次修改向用户做简要汇报即可。",
+			Role: "user",
+			Content: reminder + "系统只按本版正文完成了本地确定性检查（L0 已落档，上一版 L1 结论已作废）；" +
+				"不会在后台自动派发任何子 Agent。台账同步与 L1 智能复核需要作者显式触发，你无需手动调用维护写工具，直接基于本次修改向用户做简要汇报即可。",
 		})
 	}
 	if a.ChangeType == "line_range_replace" {
@@ -994,38 +996,19 @@ func getChapterRecord(ctx context.Context, db *gorm.DB, novelID, id int64) (*cha
 
 // maintainChapterAfterEdit 章节正文落盘后的维护链路：向量刷新、搜索缓存、字数统计。
 // 向量与搜索按 chapter_id 键控；写作日志将在其所属领域迁移时切换。
-// ── 状态同步（写章后自动回填台账）─────────────────────────
-// 章节正文落盘后，后端自动（而非依赖 LLM 自觉）派发 state-sync 子 Agent，
-// 把本章涉及的角色/地点/弧线/时间线/读者认知增量同步到结构化台账。
-// 用 debounce 合并同一章节连续多次编辑，避免每次 edit 都起一个子 Agent。
+//
+// A 方案：写后自动派发的状态同步子 Agent 与去抖调度已整链撤销。台账同步只在
+// 用户显式触发时走 RunStateSyncForChapter（S0 对齐 / chat 显式工具），
+// 这里的指令构造与轮数帽原样保留，零后台 LLM、零自动执行体。
 
-// #121：statesync 与 chapterci 共用串行化去抖单源，同章同时只允许一个子 Agent 在飞。
-var stateSyncDebouncer = newPostWriteDebouncer(stateSyncDebounce)
-
-const stateSyncDebounce = 6 * time.Second
-
-// stateSyncMaxTurns 是写后台账同步子 Agent 的工具循环上限（#125 方案 1）。
+// stateSyncMaxTurns 是台账同步子 Agent 的工具循环上限（#125 方案 1）。
 // 此前请求不设 MaxTurns，走 RunSubAgent 默认 100 轮；2026-11-15 turn40 实测它
 // 跑了 11 轮、撞 10min 独立预算非阻断收口（台账同步未完成），且与 chapterci
 // 并发抢同一供应商近 9 分钟、反复读同一批材料。chapterci 已有 12 轮帽，这里对齐收紧。
 // 以 var 暴露便于按平台/模型调参与测试收缩。
 var stateSyncMaxTurns = 8
 
-func scheduleStateSync(ctx context.Context, tc ToolContext, ch *chapter.Chapter) {
-	if tc.RunSubAgent == nil || ch == nil {
-		return
-	}
-	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
-	stateSyncDebouncer.Schedule(key, func() error {
-		// #119 P0：脱离主 ctx 取消，但自带独立预算，主轮结束后不再无限续命。
-		bgCtx, cancel := detachedPostWriteContext(ctx)
-		defer cancel()
-		// #122：把派发错误回传给去抖队列，失败即收口、不再自动补跑。
-		return runStateSync(bgCtx, tc, tc.NovelID, ch.ID)
-	})
-}
-
-// stateSyncSkills 是写后状态同步的前置技能单源（#111 P2，§3.1）。
+// stateSyncSkills 是台账同步的前置技能单源（#111 P2，§3.1）。
 // collect 提供逐类核对清单，memory 提供归档口径：二者原本 30 天零使用，
 // 挂到 statesync 后每次写章同步都确定性进入子 Agent 上下文，而非塞进 chat cue。
 // cap 是单技能 rune 帽，避免写后同步指令被技能正文稀释。
@@ -1083,7 +1066,9 @@ func stateSyncSkillBlock(skillStore *skill.Store, novelID, chapterID int64) (str
 	return b.String(), true
 }
 
-// RunStateSyncForChapter 对指定章节执行后台状态同步（statesync 子 Agent）。
+// RunStateSyncForChapter 只在用户显式触发时执行台账同步（statesync 子 Agent）。
+// A 方案：写后自动派发已撤销；本函数仍供 S0 对齐（pipeline）与 chat 显式工具使用，
+// 不再挂任何去抖器 / Detached 独立预算 / 后台续命逻辑。
 // runSub 为实际派发子 Agent 的函数（调用方决定用 ToolContext.RunSubAgent 还是 agent.RunSubAgent）；
 // db 用于写前本地派生 characters.alive（#103，nil 时优雅降级跳过派生，不阻断同步）；
 // skillStore 用于注入 collect 前置收集清单（#111 P2，nil 时指令逐字不变）；
@@ -1141,21 +1126,6 @@ func RunStateSyncForChapter(ctx context.Context, db *gorm.DB, skillStore *skill.
 		"status":     "done",
 	})
 	return nil
-}
-
-// runStateSync 写后由后端自动派发（见 scheduleStateSync），委托 RunStateSyncForChapter 完成实际工作。
-func runStateSync(ctx context.Context, tc ToolContext, novelID, chapterID int64) error {
-	if tc.RunSubAgent == nil {
-		return nil
-	}
-	err := RunStateSyncForChapter(ctx, tc.DB, tc.SkillStore,
-		detachedPostWriteSubAgent(tc.RunSubAgent), tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
-	if ctx.Err() != nil {
-		tc.LoggerOrDefault().Warn("state-sync 写后维护超时收口（非阻断）",
-			"err", ctx.Err(), "novelID", novelID, "chapterID", chapterID)
-		return ctx.Err()
-	}
-	return err
 }
 
 func maintainChapterAfterEdit(ctx context.Context, tc ToolContext, ch *chapter.Chapter, previous, content string) {

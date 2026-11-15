@@ -426,6 +426,11 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
     expect(view).toContain("chapterResultDone");
     expect(view).toContain("chapterResultFindings");
     expect(view).toContain("chapterResultNoFindings");
+    // A 方案：结论条按「维度 × 正文版本」分两行，本版 L0 恒显。
+    expect(view).toContain("chapterVersionL0Saved");
+    expect(view).toContain("chapterVersionL0Findings");
+    expect(view).toContain("l0FindingCount");
+    expect(view).toContain("l1FindingCount");
     // 一次性完成事件丢失时，running true→false 边沿必须显式重拉档案。
     expect(view).toContain("queryClient.refetchQueries");
     expect(view).toContain('queryKey: ["chapter-quality-archive"]');
@@ -439,18 +444,27 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
       ]) {
         expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
       }
-      // #125 已把检测预算调到 12min，失败文案不得再写 8 分钟误导用户。
+      // A 方案：章节专属短墙钟已撤销，失败文案不得再写任何固定分钟数；
+      // 上一版结论已作废，不得再宣称「保留上一轮结果」，ETA/步骤键已退役。
       expect(d.chapterDoneFailedTimeout).not.toContain("8 分钟");
+      expect(d.chapterDoneFailedTimeout).not.toContain("12 分钟");
       expect(d.chapterDoneFailedTimeout).not.toContain("8 min");
+      expect(d.chapterDoneFailedTimeout).not.toContain("12 min");
+      expect(d.chapterDoneFailedTimeout).not.toContain("保留上一轮结果");
+      expect(d.chapterDoneFailedTimeout).not.toContain(
+        "previous results were kept",
+      );
+      expect(d.etaHint).toBeUndefined();
+      expect(d.progress).toBeUndefined();
     }
     expect(
       JSON.parse(read("i18n/locales/zh-CN.json")).journey.quality.detect
         .chapterDoneFailedTimeout,
-    ).toContain("12 分钟");
+    ).toContain("上一版结论已作废");
     expect(
       JSON.parse(read("i18n/locales/en.json")).journey.quality.detect
         .chapterDoneFailedTimeout,
-    ).toContain("12 min");
+    ).toContain("invalidated");
   });
 
   it("#130 结论条只在 running=false 且本轮 L1 收口时才说已完成", () => {
@@ -487,5 +501,84 @@ describe("#116 轮次保护的人工出口与零自动修复", () => {
         expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
       }
     }
+  });
+});
+
+// A 方案：撤销后台自动 LLM 与章节专属短墙钟后，结论条按「维度 × 正文版本」
+// 记账，长时 running 浮层（已运行 N 分钟 / ETA / 工具步骤）整链退役。
+describe("A 方案 章节检测按版本的结果视图", () => {
+  it("结论条恒显本版 L0，L1 三态仍与 running 同源", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    for (const want of [
+      'data-testid="chapter-detect-result"',
+      "chapterVersionL0Saved",
+      "chapterVersionL0Findings",
+      "l0FindingCount",
+      "l1FindingCount",
+      "chapterDetectDone",
+      "chapterDetectRunning",
+      "chapterDetectL1Pending",
+      "!running",
+      'archive?.l1_status === "checked"',
+      "!archive?.pending_l1",
+      "CancelDetectionTask",
+    ]) {
+      expect(view, `missing: ${want}`).toContain(want);
+    }
+  });
+
+  it("长时 running 浮层已退役：无计时、无 ETA、无工具步骤进度", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    for (const banned of [
+      "DetectRunningHint",
+      "etaHint",
+      "detectStep",
+      "detectTool",
+      "agent:0",
+      "progress",
+    ]) {
+      expect(view, `must not contain: ${banned}`).not.toContain(banned);
+    }
+    // 组件本身仍服务旅程检测卡 / 签约潜力视图，不删除、只从章节视图解绑。
+    expect(read("components/journey/DetectionTasks.tsx")).toContain(
+      "DetectRunningHint",
+    );
+  });
+
+  it("中英文案按版本记账，不再宣称保留上一轮结果或固定墙钟", () => {
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      for (const k of [
+        "chapterVersionL0Saved",
+        "chapterVersionL0Findings",
+        "chapterResultDone",
+        "chapterResultNoFindings",
+        "chapterResultFinishedAt",
+        "archiveL0UpdatedAt",
+        "chapterResultL0L1Running",
+        "chapterResultRunningHint",
+        "chapterResultL1Pending",
+        "chapterResultL1PendingHint",
+      ]) {
+        expect(d[k], `missing ${k} in ${f}`).toBeTruthy();
+      }
+      expect(d.chapterResultL1PendingHint).not.toMatch(
+        /保留上一轮|previous results were kept/,
+      );
+      expect(d.chapterDoneFailedTimeout).not.toMatch(
+        /12 分钟|12 min|8 分钟|8 min/,
+      );
+      expect(d.etaHint).toBeUndefined();
+      expect(d.progress).toBeUndefined();
+    }
+    expect(
+      JSON.parse(read("i18n/locales/zh-CN.json")).journey.quality.detect
+        .chapterResultL1PendingHint,
+    ).toContain("上一版结论已按正文版本作废");
+    expect(
+      JSON.parse(read("i18n/locales/en.json")).journey.quality.detect
+        .chapterResultL1PendingHint,
+    ).toContain("invalidated");
   });
 });

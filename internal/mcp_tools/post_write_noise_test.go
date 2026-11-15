@@ -1,203 +1,86 @@
 package mcp_tools
 
-// #121 契约：写后维护独立预算必须覆盖 idle watchdog；两处去抖必须串行化，
-// 且纯本地、零自动修复、零新增执行体、零上传。
+// A 方案契约：写后链零后台 LLM 派发。
+//
+// 旧 #119/#121/#122 的 Detached 独立预算、去抖器串行化、失败不补跑策略已随
+// 「撤销后台自动 LLM」整链退役（post_write_policy.go 删除）。这里锁住新不变量：
+// 写稿落盘只做本地确定性 L0，L1 / 台账同步只由用户显式触发，调度脚手架不得回潮。
 
 import (
-	"context"
-	"errors"
 	"os"
-	"sync"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPostWriteBudgetCoversIdleWatchdog(t *testing.T) {
-	// internal/llm.thinkingIdleTimeout = 9min；旧值 8min 比它短，
-	// 预算先到期、watchdog 后触发，后台检查必然半途而废。
-	assert.Equal(t, 9*time.Minute, postWriteIdleBudget)
-	assert.Equal(t, 10*time.Minute, postWriteSubAgentTimeout)
-	assert.Greater(t, postWriteSubAgentTimeout, postWriteIdleBudget)
-
-	parent, cancel := context.WithCancel(context.Background())
-	cancel()
-	bg, cancelBG := detachedPostWriteContext(parent)
-	defer cancelBG()
-	require.NoError(t, bg.Err(), "主 ctx 取消后写后维护仍应能收口")
-	deadline, ok := bg.Deadline()
-	require.True(t, ok)
-	assert.InDelta(t, postWriteSubAgentTimeout.Seconds(), time.Until(deadline).Seconds(), 2)
-
-	src, err := os.ReadFile("post_write_policy.go")
-	require.NoError(t, err)
-	assert.Contains(t, string(src), "postWriteIdleBudget")
-	assert.NotContains(t, string(src), "8 * time.Minute", "旧 8 分钟预算不得回潮")
+func readWriteChainSource(t *testing.T, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile(rel)
+	require.NoError(t, err, "读取写后链源文件 %s", rel)
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
-func TestPostWriteDebouncerDropsStaleTimer(t *testing.T) {
-	d := newPostWriteDebouncer(time.Hour)
-	d.mu.Lock()
-	d.latest["k"] = 2 // 已被后续编辑覆盖
-	d.mu.Unlock()
-	ran := false
-	d.fire("k", 1, func() error { ran = true; return nil })
-	assert.False(t, ran, "旧 timer 已触发但被覆盖时，回调必须作废")
-	assert.False(t, d.running["k"])
-}
-
-func TestPostWriteDebouncerSerializesAndCoalesces(t *testing.T) {
-	d := newPostWriteDebouncer(time.Hour)
-	d.mu.Lock()
-	d.latest["27:2910"] = 1
-	d.mu.Unlock()
-
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	secondRan := make(chan struct{})
-	var mu sync.Mutex
-	var order []string
-
-	first := func() error {
-		mu.Lock()
-		order = append(order, "first-start")
-		mu.Unlock()
-		close(firstStarted)
-		<-releaseFirst
-		mu.Lock()
-		order = append(order, "first-end")
-		mu.Unlock()
-		return nil
-	}
-	second := func() error {
-		mu.Lock()
-		order = append(order, "second-start")
-		mu.Unlock()
-		close(secondRan)
-		return nil
-	}
-
-	go d.fire("27:2910", 1, first)
-	<-firstStarted
-
-	// 第一次 L1 在飞时同章又改了一稿：只合并，绝不能并发派发第二个子 Agent。
-	d.mu.Lock()
-	d.latest["27:2910"] = 2
-	d.mu.Unlock()
-	d.fire("27:2910", 2, second)
-	select {
-	case <-secondRan:
-		t.Fatal("同章第二个 job 不得与第一个并发运行")
-	default:
-	}
-
-	close(releaseFirst)
-	select {
-	case <-secondRan:
-	case <-time.After(2 * time.Second):
-		t.Fatal("在飞结束后必须补跑最后一次编辑")
-	}
-	mu.Lock()
-	assert.Equal(t, []string{"first-start", "first-end", "second-start"}, order)
-	mu.Unlock()
-	assert.False(t, d.running["27:2910"])
-}
-
-func TestPostWriteDebouncerScheduleKeepsLastEdit(t *testing.T) {
-	d := newPostWriteDebouncer(20 * time.Millisecond)
-	var mu sync.Mutex
-	var got []int
-	done := make(chan struct{})
-	d.Schedule("k", func() error {
-		mu.Lock()
-		got = append(got, 1)
-		mu.Unlock()
-		return nil
-	})
-	d.Schedule("k", func() error {
-		mu.Lock()
-		got = append(got, 2)
-		mu.Unlock()
-		close(done)
-		return nil
-	})
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("最后一次编辑的 timer 必须触发")
-	}
-	mu.Lock()
-	assert.Equal(t, []int{2}, got, "连续编辑只应保留最后一次")
-	mu.Unlock()
-}
-
-func TestPostWriteDebouncerWiring(t *testing.T) {
-	ci, err := os.ReadFile("chapter_ci.go")
-	require.NoError(t, err)
-	rw, err := os.ReadFile("rw_tools.go")
-	require.NoError(t, err)
-	assert.Contains(t, string(ci), "chapterCIDebouncer.Schedule(key,")
-	assert.Contains(t, string(rw), "stateSyncDebouncer.Schedule(key,")
-	assert.NotContains(t, string(ci), "chapterCITimers", "旧裸 timer map 不得回潮")
-	assert.NotContains(t, string(rw), "stateSyncTimers")
-	assert.NotContains(t, string(ci), "time.AfterFunc(")
-	assert.NotContains(t, string(rw), "time.AfterFunc(")
-	// 独立预算仍在两处 job 内派生，主 ctx 死后不会无限续命。
-	assert.Contains(t, string(ci), "detachedPostWriteContext(ctx)")
-	assert.Contains(t, string(rw), "detachedPostWriteContext(ctx)")
-
-	policy, err := os.ReadFile("post_write_policy.go")
-	require.NoError(t, err)
+// TestNoBackgroundLLMAfterChapterWrite 写钩子不得再挂任何子 Agent / 去抖 / 后台预算。
+func TestNoBackgroundLLMAfterChapterWrite(t *testing.T) {
+	rw := readWriteChainSource(t, "rw_tools.go")
+	ci := readWriteChainSource(t, "chapter_ci.go")
 	for _, banned := range []string{
-		"StartIssueFixTickets", "StartPipeline", "autoFix", "Upload", "http.Post",
+		"scheduleStateSync(", "stateSyncDebouncer", "chapterCIDebouncer",
+		"detachedPostWriteContext(", "detachedPostWriteSubAgent(",
+		"runChapterL1(", "runStateSync(", "newPostWriteDebouncer(",
+		"stateSyncDebounce", "chapterCIDebounce",
 	} {
-		assert.NotContains(t, string(policy), banned, "去抖单源不得含自动修复/执行体/上传")
+		assert.NotContains(t, rw, banned, "rw_tools.go 不得复活后台派发/调度：%s", banned)
+		assert.NotContains(t, ci, banned, "chapter_ci.go 不得复活后台派发/调度：%s", banned)
 	}
-	// #122：job 失败即收口；两处接线必须把派发错误回传，不许吞掉。
-	assert.Contains(t, string(policy), "if err := job(); err != nil")
-	assert.Contains(t, string(ci), "return runChapterL1(")
-	assert.Contains(t, string(rw), "return runStateSync(")
+	// 显式执行体必须仍在：L1 复核由用户点「重新检测本章」触发，台账同步由 S0/chat 触发。
+	assert.Contains(t, ci, "func RunChapterCIForChapter(")
+	assert.Contains(t, rw, "func RunStateSyncForChapter(")
+	assert.Contains(t, rw, "ScheduleChapterCI(ctx, tc, ch, proposed)")
+	// 已退役的调度脚手架文件不得复活。
+	_, err := os.Stat("post_write_policy.go")
+	assert.True(t, os.IsNotExist(err), "post_write_policy.go 已退役，不得重建")
 }
 
-// TestPostWriteDebouncerStopsAfterFailedJob 锁住 #122：后台维护失败后不得自动补跑，
-// 否则一次 9 分钟空闲超时会被放大成同章多轮子 Agent 活动（11-14 实测 3 次派发）。
-func TestPostWriteDebouncerStopsAfterFailedJob(t *testing.T) {
-	d := newPostWriteDebouncer(time.Hour)
-	d.mu.Lock()
-	d.latest["27:2911"] = 1
-	d.mu.Unlock()
-
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	secondRan := make(chan struct{})
-
-	first := func() error {
-		close(firstStarted)
-		<-releaseFirst
-		return errors.New("chapter-ci 子 Agent 派发失败")
+// TestChapterWriteHookIsPureLocalL0 写钩子函数体零派发、零 goroutine、零 LLM。
+func TestChapterWriteHookIsPureLocalL0(t *testing.T) {
+	ci := readWriteChainSource(t, "chapter_ci.go")
+	start := strings.Index(ci, "func ScheduleChapterCI(")
+	require.GreaterOrEqual(t, start, 0)
+	rest := ci[start:]
+	end := strings.Index(rest, "\n}\n")
+	require.Greater(t, end, 0)
+	body := rest[:end]
+	assert.Contains(t, body, "runChapterL0(ctx, tc, ch.ID, content)")
+	for _, banned := range []string{
+		"RunSubAgent", "RunChapterCIForChapter", "go func",
+		"Schedule(", "time.AfterFunc", "context.WithoutCancel",
+	} {
+		assert.NotContains(t, body, banned, "写钩子必须纯本地：%s", banned)
 	}
-	second := func() error {
-		close(secondRan)
-		return nil
-	}
+}
 
-	go d.fire("27:2911", 1, first)
-	<-firstStarted
-	d.mu.Lock()
-	d.latest["27:2911"] = 2
-	d.mu.Unlock()
-	d.fire("27:2911", 2, second) // 在飞期间的新编辑：只登记为 pending
-	close(releaseFirst)
+// TestL0RecalcInvalidatesPreviousL1 按正文版本记账：L0 重算成功即作废旧版 L1。
+func TestL0RecalcInvalidatesPreviousL1(t *testing.T) {
+	ci := readWriteChainSource(t, "chapter_ci.go")
+	assert.Contains(t, ci, "qs.InvalidateL1(ctx, tc.NovelID, chapterID)")
+	st := readWriteChainSource(t, "../quality/store.go")
+	assert.Contains(t, st, "func (s *Store) InvalidateL1(")
+	assert.Contains(t, st, `"l1_status":   L1StatusPending`)
+	assert.Contains(t, st, `"l1_findings": MarshalFindings(nil)`)
+}
 
-	select {
-	case <-secondRan:
-		t.Fatal("job 失败后不得自动补跑同章维护")
-	case <-time.After(200 * time.Millisecond):
+// TestNoAutoFixAfterWrite 纯本地链不得夹带自动修复 / 自动派发 / 上传。
+func TestNoAutoFixAfterWrite(t *testing.T) {
+	src := readWriteChainSource(t, "rw_tools.go") +
+		readWriteChainSource(t, "chapter_ci.go") +
+		readWriteChainSource(t, "../quality/store.go")
+	for _, banned := range []string{
+		"StartIssueFixTickets", "StartManualIssueFixTickets", "autoFix",
+		"StartPipeline", "Upload", "http.Post",
+	} {
+		assert.NotContains(t, src, banned, "写后链不得含自动修复/执行体/上传：%s", banned)
 	}
-	assert.False(t, d.running["27:2911"])
-	d.mu.Lock()
-	assert.Nil(t, d.pending["27:2911"])
-	d.mu.Unlock()
 }

@@ -35,7 +35,7 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 			"AlreadyRunning bool", "tryBeginDetect(", "res.AlreadyRunning = true",
 			"emitChapterDetectDone(s.appCtx", "errors.Is(ctxErr, context.Canceled)",
 			"chapterDetectFailureReason(", `payload["reason"]`,
-			"chapterDetectTimeout", `reason = "timeout"`,
+			"detectTaskTimeout", `reason = "timeout"`,
 		}},
 		{"../../app/handler.go", []string{
 			"a.runBackgroundSubAgent", "classifyChapterDetectError(",
@@ -45,7 +45,7 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 		}},
 		{"detect_status.go", []string{
 			"func (s *Service) tryBeginDetect(", "LoadOrStore(", "prescriptionCurveForChapter(ctx, s, novelID, chapterID)",
-			"chapterDetectTimeout < timeout",
+			"context.WithTimeout(s.appCtx, detectTaskTimeout)",
 		}},
 		{"chapter_prescription_curve.go", []string{
 			"git.ReadFile", "git.ChapterPath", "quality.BuildTensionCurve", "TensionSourceL0",
@@ -60,17 +60,17 @@ func TestChapterDetectP3Wiring(t *testing.T) {
 			"pipeline:chapter_detect_done", "invalidateChapterViews", "already_running",
 			"chapterDoneToast", "chapterDoneFailed", "chapterDoneFailedModel",
 			"CHAPTER_DETECT_TOAST_ID", "toastError(", "chapterDoneFailedTimeout",
-			"agent:0", "CancelDetectionTask", "detectStep", "etaHint",
+			"CancelDetectionTask", "chapterVersionL0Saved", "chapterVersionL0Findings",
 		}},
 		{"../../frontend/src/i18n/locales/zh-CN.json", []string{
 			"alreadyRunning", "chapterDoneToast", "chapterDoneFailed",
 			"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt",
-			"chapterDoneFailedTimeout", "etaHint", "progress",
+			"chapterDoneFailedTimeout", "chapterVersionL0Saved", "chapterVersionL0Findings",
 		}},
 		{"../../frontend/src/i18n/locales/en.json", []string{
 			"alreadyRunning", "chapterDoneToast", "chapterDoneFailed",
 			"chapterDoneFailedModel", "chapterDoneFailedLLM", "chapterDoneFailedReceipt",
-			"chapterDoneFailedTimeout", "etaHint", "progress",
+			"chapterDoneFailedTimeout", "chapterVersionL0Saved", "chapterVersionL0Findings",
 		}},
 		{"../../frontend/src/lib/wailsjs/go/models.ts", []string{"already_running"}},
 	}
@@ -109,4 +109,35 @@ func TestChapterDetectP3NeverAutoFixes(t *testing.T) {
 	} {
 		assert.NotContains(t, src, banned, "P3 链路不得复活后台自动修复/自动派发：%s", banned)
 	}
+}
+
+// TestChapterDetectVersionedResultView A 方案：章节结论条按「维度 × 正文版本」
+// 展示——本版 L0 恒显，本版 L1 分三态；长时 running 浮层、ETA 与固定墙钟
+// 文案整链退役。前端不得再宣称「保留上一轮结果」把旧版 L1 冒充本版结论。
+func TestChapterDetectVersionedResultView(t *testing.T) {
+	view := readChapterDetectSource(t, "../../frontend/src/components/skill/DetectionWorkflowView.tsx")
+	for _, want := range []string{
+		"chapterVersionL0Saved", "chapterVersionL0Findings",
+		"l0FindingCount", "l1FindingCount", "chapterFindingCount",
+		"chapterDetectDone", "chapterDetectRunning", "chapterDetectL1Pending",
+		"!running", "!archive?.pending_l1", "CancelDetectionTask",
+	} {
+		assert.Contains(t, view, want, "章节结论条缺少按版本接线 %q", want)
+	}
+	for _, banned := range []string{
+		"DetectRunningHint", "etaHint", "detectStep", "detectTool", "agent:0", "progress",
+	} {
+		assert.NotContains(t, view, banned, "长时 running 浮层不得回潮：%s", banned)
+	}
+
+	zh := readChapterDetectSource(t, "../../frontend/src/i18n/locales/zh-CN.json")
+	en := readChapterDetectSource(t, "../../frontend/src/i18n/locales/en.json")
+	for _, banned := range []string{"etaHint", "3–8 分钟", "3–8 min", "12 分钟", "12 min"} {
+		assert.NotContains(t, zh, banned, "zh 检测文案不得回潮旧机制：%s", banned)
+		assert.NotContains(t, en, banned, "en 检测文案不得回潮旧机制：%s", banned)
+	}
+	assert.NotContains(t, zh, "保留上一轮结果", "zh 不得宣称保留旧版 L1")
+	assert.NotContains(t, en, "previous results were kept", "en 不得宣称保留旧版 L1")
+	assert.Contains(t, zh, "上一版结论已按正文版本作废")
+	assert.Contains(t, en, "invalidated")
 }

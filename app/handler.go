@@ -517,8 +517,9 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 		if rerr := mcp_tools.RecalcChapterL0FromDisk(ctx, a.db, a.logger, novelID, chapterID); rerr != nil {
 			a.logger.Warn("章节检测：L0 重算失败（非阻断，继续 L1）", "err", rerr, "novelID", novelID, "chapterID", chapterID)
 		}
-		// #123：手动「重新检测本章」不设 Detached（前台可见），但自带 8min 硬超时。
-		// 专属文案只注入这一条链路，主 chat / 前台 run_subagent / 写后维护逐字不动。
+		// A 方案：手动「重新检测本章」不设 Detached（前台可见），且已无章节专属
+		// 短墙钟；只保留通用安全兜底 + 流级 9min idle watchdog。本版 L0 已在
+		// RecalcChapterL0FromDisk 重算并作废旧 L1，超时就停在 pending，诚实收口。
 		detectSubAgent := func(c context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 			req.DeadlineMessage = chapterDetectDeadlineFriendlyMessage
 			return a.runBackgroundSubAgent(c, req)

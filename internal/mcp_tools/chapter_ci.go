@@ -1,14 +1,15 @@
 package mcp_tools
 
-// chapter_ci.go —— 章节 CI（R2 提案 §4.2）：写后质检钩子。
+// chapter_ci.go —— 章节 CI（R2 提案 §4.2）：写后质检钩子 / 显式 L1 复核执行体。
 //
-// 每章正文落盘后：
-//   - L0 确定性检查**同步**跑（毫秒级零 LLM）→ 指标/发现落质量档案（UpsertL0 不动 L1 列）；
-//   - L1 增量检查**异步** debounced 派发 chapter-ci 子 Agent（小上下文、只报告不改写），
-//     回执按 quality/contract.go 契约解析后落档案（UpsertL1 不动 L0 列）。
+// A 方案（根治「单次长 LLM + 固定墙钟 + 保留旧 L1」）：
+//   - 写后钩子：只跑 L0 确定性检查并同步落档案（毫秒级零 LLM），按落盘正文作废上一版 L1；
+//     零后台子 Agent、零去抖调度、零 Detached 预算。
+//   - L1 增量检查：只由用户显式点「重新检测本章」触发（RunChapterCIForChapter），
+//     不写进任何自动派发路径。
+//   - 全书 L0 规则扫描（pipeline/propagation.go）仍直接走 UpsertL0，不受写钩子影响。
 //
-// 降级逐字一致（宁缺勿错）：任何失败（存储错/派发失败/回执坏）静默降级，
-// 零提示零报错、不影响写入主链路；日志仅 Warn 供排查。
+// 降级逐字一致（宁缺勿错）：本地落档失败仅 Warn，不影响写入主链路、零提示零报错。
 
 import (
 	"context"
@@ -28,15 +29,10 @@ import (
 	"github.com/novelgo/novelgo/internal/voice"
 )
 
-var (
-	// #121：chapterci 去抖与 statesync 共用串行化单源，杜绝「旧 timer 已触发、
-	// Stop 来不及」导致的同章两次 L1 并发派发。
-	chapterCIDebouncer = newPostWriteDebouncer(chapterCIDebounce)
-	// chapterCIMaxTurns 是单章 L1 复核的工具循环上限（#115 P0）。真实语料实测收敛约
-	// 8 轮，留 12 轮余量；旧的 100 轮通用上限让一次检测可跑 36 次 LLM 调用 / 15 分钟。
-	// 以 var 暴露便于按平台/模型调参与测试收缩。
-	chapterCIMaxTurns = 12
-)
+// chapterCIMaxTurns 是单章 L1 复核的工具循环上限（#115 P0）。真实语料实测收敛约
+// 8 轮，留 12 轮余量；旧的 100 轮通用上限让一次检测可跑 36 次 LLM 调用 / 15 分钟。
+// 以 var 暴露便于按平台/模型调参与测试收缩。
+var chapterCIMaxTurns = 12
 
 // TensionTicketLanderFunc 把一章的曲线四查发现落成/刷新 pipeline 情绪账工单
 // （E 系，tension 容器），返回落库条数。
@@ -50,28 +46,16 @@ var tensionTicketLander TensionTicketLanderFunc
 // SetTensionTicketLander 装配情绪账落单回调（app 启动时注入 pipeline.LandTensionTickets）。
 func SetTensionTicketLander(fn TensionTicketLanderFunc) { tensionTicketLander = fn }
 
-// chapterCIDebounce 是 L1 派发去抖窗口。比 stateSyncDebounce（6s）长，
-// 让 L1 检查在 statesync 台账回填之后跑（「涉及台账条目」已是本章同步后状态）。
-const chapterCIDebounce = 10 * time.Second
-
-// ScheduleChapterCI 章落盘钩子入口（R2）：L0 同步落档案 + L1 异步去抖派发。
+// ScheduleChapterCI 章落盘钩子入口（A 方案）：只做本地确定性 L0。
 // content 是刚落盘的正文（直接喂 L0，避免回读）；ch 为 nil 时整体跳过。
+//
+// 写稿落盘后零后台 LLM 派发：L1 复核只由用户显式点「重新检测本章」触发。
+// 台账同步（statesync）同理不再自动派发；两者都不再抢主 chat 的 LLM 通道。
 func ScheduleChapterCI(ctx context.Context, tc ToolContext, ch *chapter.Chapter, content string) {
 	if ch == nil || tc.DB == nil {
 		return
 	}
 	runChapterL0(ctx, tc, ch.ID, content)
-	if tc.RunSubAgent == nil {
-		return // 无子 Agent 能力：L1 降级不跑（零提示）
-	}
-	key := fmt.Sprintf("%d:%d", tc.NovelID, ch.ID)
-	chapterCIDebouncer.Schedule(key, func() error {
-		// #119 P0：脱离主 ctx 取消，但自带独立预算；超时不写 L1，保留上一轮结果。
-		bgCtx, cancel := detachedPostWriteContext(ctx)
-		defer cancel()
-		// #122：把派发错误回传给去抖队列，失败即收口、不再自动补跑。
-		return runChapterL1(bgCtx, tc, tc.NovelID, ch.ID)
-	})
 }
 
 // runChapterL0 跑 L0 确定性检查并同步落档案（UpsertL0 只写 L0 列），
@@ -114,9 +98,13 @@ func runChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content 
 	}
 }
 
-// recalcChapterL0 是 L0 重算的单一实现：按正文跑确定性检查并覆盖该章 L0 档案
-// （UpsertL0 只写 L0 列，L1 列不动）。写后链路与显式「重新检测本章」共用，
-// 保证两处的字数口径、检查器配置、题材/台账投影完全一致。
+// recalcChapterL0 是 L0 重算的单一实现：按正文跑确定性检查并覆盖该章 L0 档案。
+// 写后链路与显式「重新检测本章」共用，保证两处的字数口径、检查器配置、
+// 题材/台账投影完全一致。
+//
+// A 方案：UpsertL0 成功后立即 InvalidateL1 作废上一版正文的 L1 结论
+// （只清 l1_findings / l1_status=pending；checked_at 与 finding_round 仍归 UpsertL0）。
+// 这是「档案按维度 × 正文版本记账」的等价轻实现，零 schema 迁移。
 func recalcChapterL0(ctx context.Context, tc ToolContext, chapterID int64, content string) ([]quality.Finding, error) {
 	readingNumber, _ := chapter.NewStore(tc.DB, tc.LoggerOrDefault()).
 		GetReadingNumberByID(ctx, nil, tc.NovelID, chapterID)
@@ -138,7 +126,8 @@ func recalcChapterL0(ctx context.Context, tc ToolContext, chapterID int64, conte
 		Profile:          cfg.Profile(),
 		BeatDensityMin:   cfg.EffectiveBeatDensityMin(),
 	})
-	err := quality.NewStore(tc.DB, tc.LoggerOrDefault()).UpsertL0(ctx, &quality.ChapterQuality{
+	qs := quality.NewStore(tc.DB, tc.LoggerOrDefault())
+	err := qs.UpsertL0(ctx, &quality.ChapterQuality{
 		NovelID:       tc.NovelID,
 		ChapterID:     chapterID,
 		ReadingNumber: readingNumber,
@@ -146,6 +135,12 @@ func recalcChapterL0(ctx context.Context, tc ToolContext, chapterID int64, conte
 		L0Findings:    quality.MarshalFindings(findings),
 		CheckedAt:     time.Now(),
 	})
+	if err == nil {
+		// 本版 L0 已落档 ⇒ 旧正文的 L1 立即作废，绝不让它冒充本版结论。
+		if ierr := qs.InvalidateL1(ctx, tc.NovelID, chapterID); ierr != nil {
+			tc.LoggerOrDefault().Warn("章节 CI 作废上一版 L1 失败（非阻断）", "err", ierr, "novelID", tc.NovelID, "chapterID", chapterID)
+		}
+	}
 	return findings, err
 }
 
@@ -154,8 +149,8 @@ func recalcChapterL0(ctx context.Context, tc ToolContext, chapterID int64, conte
 // 显式「重新检测本章」若不重算 L0，改稿后的字数/开篇/钩子发现会停留在旧值，
 // 闭环看到的仍是修改前的问题。故在章节检测执行器派发前调用本函数。
 //
-// 边界：只动 L0 列；**不**刷新张力曲线、**不**重复落情绪账工单
-// （E 系工单可能已被人工收口，重跑检测不得把它们唤醒）；
+// 边界：只重算 L0 并作废上一版 L1（A 方案按正文版本记账）；**不**刷新张力曲线、
+// **不**重复落情绪账工单（E 系工单可能已被人工收口，重跑检测不得把它们唤醒）；
 // 读正文/落库失败仅返回 error 由调用方告警，绝不阻断后续 L1 检测。
 func RecalcChapterL0FromDisk(ctx context.Context, db *gorm.DB, logger *slog.Logger, novelID, chapterID int64) error {
 	if db == nil {
@@ -220,21 +215,6 @@ func chapterCIPowerLevels(ctx context.Context, tc ToolContext) []quality.PowerLe
 	return out
 }
 
-// runChapterL1 去抖到点后派发 L1 增量检查（回执落档案在派发链内完成）。
-func runChapterL1(ctx context.Context, tc ToolContext, novelID, chapterID int64) error {
-	if tc.RunSubAgent == nil {
-		return nil
-	}
-	err := RunChapterCIForChapter(ctx, detachedPostWriteSubAgent(tc.RunSubAgent),
-		tc.SkillStore, tc.DB, tc.LoggerOrDefault(), tc.ToolID, novelID, chapterID)
-	if ctx.Err() != nil {
-		tc.LoggerOrDefault().Warn("chapter-ci 写后维护超时收口（非阻断，保留上一轮 L1）",
-			"err", ctx.Err(), "novelID", novelID, "chapterID", chapterID)
-		return ctx.Err()
-	}
-	return err
-}
-
 // chapterCIFindings 读取本章当前档案的未消除发现，供写后自检技法定向（#116）。
 // 只读、零派发：读失败 / 新章尚无档案 → nil，调用方回落全量自检，绝不阻断 L1。
 func chapterCIFindings(ctx context.Context, db *gorm.DB, logger *slog.Logger, novelID, chapterID int64) []quality.Finding {
@@ -256,11 +236,12 @@ func chapterCIFindings(ctx context.Context, db *gorm.DB, logger *slog.Logger, no
 // 还是 agent.RunSubAgent）；skillStore 用于注入 chapter-ci 技能方法论（可空，降级为
 // 内联最小指令）；db 是质量档案存储。返回派发/回执错误（非阻断调用方可忽略）。
 //
-// 落档案口径（#115 P0：失败绝不覆盖上一轮结果）：
+// 落档案口径（A 方案：只有本版正文的显式复核成功才算收口）：
 //   - 回执解析成功 → UpsertL1（findings + l1_status=checked）；
-//   - 派发失败 / 回执坏 → 不写 L1，保留上一轮 checked 发现项与状态，仅记日志并返回错误。
-//     UpsertL1 的 DoUpdates 含 l1_findings，旧实现会把有效发现清空并把状态打成 skipped，
-//     用户点「重新检测」反而丢数据；检测失败不等于上一轮结果作废。
+//   - 派发失败 / 回执坏 / 超时 → 不写 L1，档案停留在 L0 重算时作废后的 pending 态，
+//     如实表示「本版 L1 未复核」，不再把旧正文的 checked 结果摆出来。
+//     历史实现（#115 P0）失败时会「保留上一轮 L1」，那正是「正文已改成 3135 字、
+//     结论却还写着上一版 1879 字」的根因；A 方案以「L0 重算即作废 L1」取而代之。
 func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillStore *skill.Store,
 	db *gorm.DB, logger *slog.Logger, toolID string, novelID, chapterID int64) error {
 	if runSub == nil {
@@ -291,14 +272,14 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 
 	if err != nil {
 		if logger != nil {
-			logger.Warn("chapter-ci 子 Agent 派发失败（非阻断，保留上一轮 L1）", "err", err, "novelID", novelID, "chapterID", chapterID)
+			logger.Warn("chapter-ci 子 Agent 派发失败（非阻断，本版 L1 保持待复核）", "err", err, "novelID", novelID, "chapterID", chapterID)
 		}
 		return err
 	}
 	receipt, perr := quality.ParseL1Receipt(report)
 	if perr != nil {
 		if logger != nil {
-			logger.Warn("chapter-ci 回执解析失败（非阻断，保留上一轮 L1）", "err", perr, "novelID", novelID, "chapterID", chapterID)
+			logger.Warn("chapter-ci 回执解析失败（非阻断，本版 L1 保持待复核）", "err", perr, "novelID", novelID, "chapterID", chapterID)
 		}
 		return perr
 	}

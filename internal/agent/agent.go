@@ -584,9 +584,10 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 					// 连续空闲超时/掉线达上限，或本轮重试累计耗时超预算 → 快速失败。
 					// #118 P1：旧判定只认 Kind=="idle_timeout"，漏掉「吐字节后掉线」
 					// （StatusCode==0 且 Retryable）这一路，会一路重试到硬超时。
-					// #122：Detached 写后维护一次失败即收口。后台检查本来非阻断，
-					// 9 分钟空闲预算 ×N 次重试会把主轮结束后的后台活动放大到几十分钟；
-					// 失败时保留上一轮 L1，由用户在检测面板显式点「重新检测本章」。
+					// #122：Detached 子 Agent 一次失败即收口，不做 9 分钟 ×N 重试。
+					// A 方案：写后后台子 Agent 整链已撤销，Detached 仅作兼容分支保留；
+					// 失败时本版 L1 停在 pending，由作者显式点「重新检测本章」发起，
+					// 不再「保留上一轮 L1」把旧正文结论当本版结果。
 					// 主 chat 与前台 run_subagent 的重试矩阵逐字不动。
 					stopRetry := opts.Detached || shouldStopRetrying(apiErr, idleTimeouts, time.Since(retryWindowStart))
 					if apiErr != nil && apiErr.Retryable && !stopRetry && retryCount < maxRetries {

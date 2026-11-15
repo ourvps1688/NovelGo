@@ -39,7 +39,6 @@ import type {
 } from "@/lib/wailsjs/go/models";
 import type { AuditData } from "@/types/pipeline";
 import PatrolReportPanel from "@/components/pipeline/PatrolReportPanel";
-import DetectRunningHint from "@/components/journey/DetectRunningHint";
 import SignabilityAssessmentCard from "./SignabilityAssessmentCard";
 import ScoreTrendPanel from "./ScoreTrendPanel";
 import TensionCurveCard from "./TensionCurveCard";
@@ -275,8 +274,8 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
         if (p.novel_id !== novelId) return;
         invalidateChapterViews(queryClient, novelId);
         if (p.ok === false) {
-          // L0 已按落盘正文重算；L1 失败时档案保留上一轮结果，故提示要说明
-          // 「已有更新」与「哪一步没完成」，并给出可执行的下一步。
+          // A 方案：失败时本版 L0 已落档、上一版 L1 已作废，档案里没有可沿用的
+          // 旧结论；提示要说明「已完成哪一步」与「下一步点哪里重新发起」。
           let msg = t("journey.quality.detect.chapterDoneFailed");
           if (p.reason === "model") {
             msg = t("journey.quality.detect.chapterDoneFailedModel");
@@ -301,33 +300,10 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     };
   }, [novelId, kind, queryClient, t]);
 
-  // #115 P0：章节 L1 是多轮只读工具循环，复用 agent 层本就 emit 的 agent:0
-  // 工具事件显示真实阶段（零后端改动）。按 sub_task_id 过滤，避免与 statesync /
-  // editorfeedback 等同样走 agent:0 的后台链路串台；只数 selected 阶段，一次工具
-  // 调用算一步，不重复计数，也不显示模型输出内容。
-  const [detectStep, setDetectStep] = useState(0);
-  const [detectTool, setDetectTool] = useState("");
-  useEffect(() => {
-    if (!novelId || kind !== "chapter") return;
-    const off = EventsOn(
-      "agent:0",
-      (p: { sub_task_id?: string; tool_name?: string; phase?: string }) => {
-        if (p?.sub_task_id !== "pipeline-detect") return;
-        if (p.phase !== "selected" || !p.tool_name) return;
-        setDetectStep((n) => n + 1);
-        setDetectTool(p.tool_name);
-      },
-    );
-    return () => {
-      off?.();
-    };
-  }, [novelId, kind]);
-  useEffect(() => {
-    if (!running) {
-      setDetectStep(0);
-      setDetectTool("");
-    }
-  }, [running]);
+  // A 方案：章节视图不再挂「长时运行」浮层（已运行 N 分钟 / 预计 3–8 分钟 /
+  // 第 N 步工具进度）。L1 只由作者显式点「重新检测本章」触发，结果一律按
+  // 本版正文记在质量档案里；运行态只保留一行简洁状态 + 取消入口，避免用
+  // 计时与 ETA 把一次不可控长推理包装成「正常后台任务」。
 
   // 进行态 true→false 边沿仅作兜底（事件丢失/旧进程）：刷新同一份视图清单，
   // 不弹 toast——边沿区分不了「完成/取消/失败」，误报不如不报。
@@ -350,13 +326,15 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   // 处理发现项；卷/结构仍按「有检测结果」才展示结果区。
   const showChapterArchive = kind === "chapter" && effChapterId != null;
   // #127：完成结论条的数据源就是质量档案本身（不依赖一次性完成事件），
-  // 事件丢失 / 切走页面再回来时也能看到最近一次 checked_at 与发现数。
-  const chapterFindingCount =
-    (archive?.l0_findings?.length ?? 0) + (archive?.l1_findings?.length ?? 0);
-  // #130：结论条与底部进行态必须同源。archive.checked_at 由 UpsertL0 / UpsertL1
-  // 共同刷新，只看 archive.exists 会在 L0 秒级落档时误报「本章检测已完成」；
-  // 检测超时「保留上一轮 L1」时 l1_status 仍可能是 checked，故再叠加
-  // finding_round.pending_l1 判断本轮 L1 是否真的收口。零新增执行体。
+  // 事件丢失 / 切走页面再回来时也能看到本版 checked_at 与发现数。
+  const l0FindingCount = archive?.l0_findings?.length ?? 0;
+  const l1FindingCount = archive?.l1_findings?.length ?? 0;
+  const chapterFindingCount = l0FindingCount + l1FindingCount;
+  // A 方案 / #130：档案按「维度 × 正文版本」记账。写稿落盘只重算本地确定性 L0
+  // 并作废旧 L1（清空 l1_findings、l1_status=pending），上一版结论不会再冒充
+  // 本版结论展示或注入判官。故结论条恒显「本版 L0」，L1 分三态；只有本版 L1
+  // 真收口（checked 且 !pending_l1）且不在 running 时才说复核完成。
+  // 超时/失败时档案诚实停在 pending，零「保留上一轮结果」的旧语义。
   const chapterDetectDone =
     !!archive?.exists &&
     !running &&
@@ -374,9 +352,9 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   const effScope: number | null =
     kind === "chapter" ? effChapterId : kind === "volume" ? effVolumeId : null;
 
-  // #115 P0：章节检测视图此前没有取消入口（只在旅程质量页的任务卡里有），
-  // 单章 L1 跑十几分钟时用户只能干等。这里补一个就地取消，复用既有
-  // CancelDetectionTask（ctx 级联会中断在飞的 LLM 请求并即时注销进行态）。
+  // #115 P0：章节检测视图的就地取消入口，复用既有 CancelDetectionTask
+  // （ctx 级联会中断在飞的 LLM 请求并即时注销进行态）。A 方案下 L1 只由作者
+  // 显式发起，取消仍是唯一的人工中断手段，不设自动超时/自动收口。
   const handleCancelDetect = useCallback(async () => {
     if (!novelId) return;
     try {
@@ -552,66 +530,82 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                   })}
                 </p>
               ) : null}
-              {/* #127 / #130：数据驱动的结论条——一次性事件丢失或零发现时仍可见；
-                  但只在 running=false 且本轮 L1 真收口时才说「已完成」，
-                  L0 落档秒级刷新 checked_at 不再冒充整轮完成。 */}
+              {/* #127 / #130 / A 方案：数据驱动的「按版本」结果视图——一次性事件丢失
+                  或零发现时仍可见。第一行恒为本版 L0（写稿落盘即落档），第二行才是
+                  本版 L1 的三态；旧版 L1 已在 L0 重算时作废，故再不会「上方完成 /
+                  下方检测中」，也不会把上一版结论当成本版结论。 */}
               {archive?.exists ? (
                 <div
                   data-testid="chapter-detect-result"
-                  className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs"
+                  className="mt-2 flex flex-col gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs"
                 >
-                  {chapterDetectDone ? (
-                    <>
-                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                      <span className="font-medium text-foreground">
-                        {t("journey.quality.detect.chapterResultDone")}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {t("journey.quality.detect.chapterResultFinishedAt", {
-                          at: fmtTime(archive?.checked_at) || "—",
-                        })}
-                      </span>
-                      <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-foreground/80">
-                        {chapterFindingCount > 0
-                          ? t("journey.quality.detect.chapterResultFindings", {
-                              count: chapterFindingCount,
-                            })
-                          : t("journey.quality.detect.chapterResultNoFindings")}
-                      </span>
-                    </>
-                  ) : null}
-                  {chapterDetectRunning ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                      <span className="font-medium text-foreground">
-                        {t("journey.quality.detect.chapterResultL0L1Running")}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {t("journey.quality.detect.archiveL0UpdatedAt", {
-                          at: fmtTime(archive?.checked_at) || "—",
-                        })}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {t("journey.quality.detect.chapterResultRunningHint")}
-                      </span>
-                    </>
-                  ) : null}
-                  {chapterDetectL1Pending ? (
-                    <>
-                      <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
-                      <span className="font-medium text-foreground">
-                        {t("journey.quality.detect.chapterResultL1Pending")}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {t("journey.quality.detect.archiveL0UpdatedAt", {
-                          at: fmtTime(archive?.checked_at) || "—",
-                        })}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {t("journey.quality.detect.chapterResultL1PendingHint")}
-                      </span>
-                    </>
-                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                    <span className="font-medium text-foreground">
+                      {t("journey.quality.detect.chapterVersionL0Saved")}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {t("journey.quality.detect.archiveL0UpdatedAt", {
+                        at: fmtTime(archive?.checked_at) || "—",
+                      })}
+                    </span>
+                    <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-foreground/80">
+                      {t("journey.quality.detect.chapterVersionL0Findings", {
+                        count: l0FindingCount,
+                      })}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {chapterDetectDone ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                        <span className="font-medium text-foreground">
+                          {t("journey.quality.detect.chapterResultDone")}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {t("journey.quality.detect.chapterResultFinishedAt", {
+                            at: fmtTime(archive?.checked_at) || "—",
+                          })}
+                        </span>
+                        <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-foreground/80">
+                          {chapterFindingCount > 0
+                            ? t(
+                                "journey.quality.detect.chapterResultFindings",
+                                {
+                                  count: chapterFindingCount,
+                                },
+                              )
+                            : t(
+                                "journey.quality.detect.chapterResultNoFindings",
+                              )}
+                        </span>
+                      </>
+                    ) : null}
+                    {chapterDetectRunning ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                        <span className="font-medium text-foreground">
+                          {t("journey.quality.detect.chapterResultL0L1Running")}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {t("journey.quality.detect.chapterResultRunningHint")}
+                        </span>
+                      </>
+                    ) : null}
+                    {chapterDetectL1Pending ? (
+                      <>
+                        <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+                        <span className="font-medium text-foreground">
+                          {t("journey.quality.detect.chapterResultL1Pending")}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {t(
+                            "journey.quality.detect.chapterResultL1PendingHint",
+                          )}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               <div className="mt-3 flex flex-col gap-3">
@@ -666,24 +660,10 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
           </div>
         )}
         {running ? (
-          <div className="mb-2 flex flex-col gap-1">
-            <p className="flex flex-wrap items-center gap-1.5 text-xs text-primary/80">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>{t("journey.quality.detect.running")}</span>
-              <DetectRunningHint status={st} />
-              {detectStep > 0 ? (
-                <span className="text-muted-foreground">
-                  {t("journey.quality.detect.progress", {
-                    step: detectStep,
-                    tool: detectTool,
-                  })}
-                </span>
-              ) : null}
-            </p>
-            <p className="text-[11px] text-muted-foreground">
-              {t("journey.quality.detect.etaHint")}
-            </p>
-          </div>
+          <p className="mb-2 flex items-center gap-1.5 text-xs text-primary/80">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span>{t("journey.quality.detect.running")}</span>
+          </p>
         ) : null}
         <div className="flex items-center gap-2">
           <button

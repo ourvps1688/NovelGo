@@ -150,13 +150,13 @@ func TestChapterDetectCancelSkipsDoneEvent(t *testing.T) {
 	}
 }
 
-// TestChapterDetectTimeoutEmitsDoneEvent #115 P0：章节专属硬超时到点时，收口必须
-// 如实发 ok=false/reason=timeout 的完成事件并注销进行态。旧代码把 DeadlineExceeded
-// 一并判成 cancelled，完成/取消事件都不发，前端会永远停在「检测中… 已运行 N 分钟」。
+// TestChapterDetectTimeoutEmitsDoneEvent A 方案：通用安全兜底到期时，收口仍必须
+// 如实发 ok=false/reason=timeout 的完成事件并注销进行态（章节专属短墙钟已撤销）。
+// 旧代码把 DeadlineExceeded 一并判成 cancelled，完成/取消事件都不发。
 func TestChapterDetectTimeoutEmitsDoneEvent(t *testing.T) {
-	old := chapterDetectTimeout
-	chapterDetectTimeout = 40 * time.Millisecond
-	t.Cleanup(func() { chapterDetectTimeout = old })
+	old := detectTaskTimeout
+	detectTaskTimeout = 40 * time.Millisecond
+	t.Cleanup(func() { detectTaskTimeout = old })
 
 	db := newTestDB(t)
 	svc := NewService(db, nil, nil, nil, "", "", context.Background(), slog.Default())

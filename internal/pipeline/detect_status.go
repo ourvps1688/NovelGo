@@ -207,14 +207,11 @@ func (s *Service) anyDetectRunning(kind string, novelID int64) bool {
 // beginDetectCtx 为一次检测执行体创建「带超时+取消」的派生 ctx：从 appCtx 派生，
 // 挂 detectTaskTimeout 硬上限，并把 cancel 存入 detectCancelFns（key=detectKey），
 // 供 CancelDetectionTask 按 key 取出触发。返回派生 ctx 供执行体使用。
+// A 方案：章节专属硬墙已撤销，四类检测统一只挂 detectTaskTimeout 通用安全兜底。
+// 章节 L1 现在只由用户显式触发，且失败/超时后档案停在 pending，无需再用短墙钟
+// 掩盖「旧版 L1 冒充本版结论」；真正卡死的流由 internal/llm 的 9min idle watchdog 处理。
 func (s *Service) beginDetectCtx(kind string, novelID int64, scopeID *int64) context.Context {
-	// #115 P0：章节检测用更短的专属上限；其余三类仍走 60min 通用兜底。
-	// 取两者较小值，保证测试把 detectTaskTimeout 缩短时依旧能触发 deadline。
-	timeout := detectTaskTimeout
-	if kind == DetectionKindChapter && chapterDetectTimeout < timeout {
-		timeout = chapterDetectTimeout
-	}
-	ctx, cancel := context.WithTimeout(s.appCtx, timeout)
+	ctx, cancel := context.WithTimeout(s.appCtx, detectTaskTimeout)
 	s.detectCancelFns.Store(detectKey(kind, novelID, scopeID), cancel)
 	return ctx
 }
