@@ -23,13 +23,14 @@ import { useUpdateNovel } from "@/components/novel/useUpdateNovel";
 import { useNovelStore } from "@/components/novel/useNovelStore";
 import { savePitchPreferences } from "@/components/preference/pitchPreferences";
 import {
+  GetEnabledSkills,
   GetSessionMessages,
   SetEnabledSkills,
   UpdateNovel,
 } from "@/lib/wailsjs/go/app/App";
 import { toastError, toastInfo, toastSuccess } from "@/utils/toast";
 import { toErrorMessage } from "@/utils/error";
-import { novelKeys, preferenceKeys } from "@/lib/queryKeys";
+import { novelKeys, preferenceKeys, skillKeys } from "@/lib/queryKeys";
 import {
   extractPitchJSON,
   pitchSignature,
@@ -42,7 +43,9 @@ const SKILL_NAME = "book-pitch";
 // 仅承载阶段 key；技能标识与 kickoff 提示均经 i18n 注入（避免硬编码中文）。
 const STAGES = ["stage0", "stage1", "stage2", "stage3"];
 
-// 建书后默认启用的技能集（让本书后续能继续用 book-pitch 打磨外包装）。
+// 孵化期启用的技能集：book-pitch 只是「开新书讨论场」的编排技能，孵化完成
+// （handleAdopt）会把它从启用清单移除，避免外包装方法论等效 always 常驻注入
+// 后续每一轮 chat（占常驻 rune 帽）。新建孵化器时全量覆盖是安全的（新书无既有勾选）。
 const ADOPT_SKILLS = ["book-pitch"];
 
 interface Props {
@@ -502,13 +505,6 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         },
       });
 
-      // 启用 book-pitch（新书无既有技能，直接 set）。
-      try {
-        await SetEnabledSkills({ novel_id: n.id, names: ADOPT_SKILLS });
-      } catch {
-        // 技能启用失败不阻塞建书，静默忽略。
-      }
-
       // 引导项：平台 / 风格 / 标签 / 方向 / 一句话卖点 非空则写入本书偏好
       // （题材已写入 novel.genre 字段；书名/简介随小说主体更新）。
       await persistPitchPreferences(n.id, {
@@ -521,6 +517,20 @@ export default function BookPitchWorkflowView({ novelId, onCreated }: Props) {
         style,
         oneLiner,
       });
+
+      // 孵化完成：book-pitch 只在讨论场里需要，转正后移除，避免等效 always
+      // 常驻注入后续每轮 chat。按后端当前清单过滤（保留用户自行勾选的其他技能），
+      // 绝不写死空数组；清理失败不阻塞建书，且不改任何历史小说的启用清单。
+      try {
+        const current = (await GetEnabledSkills(n.id)) ?? [];
+        const rest = current.filter((name) => name !== SKILL_NAME);
+        if (rest.length !== current.length) {
+          await SetEnabledSkills({ novel_id: n.id, names: rest });
+          qc.setQueryData(skillKeys.enabled(n.id), rest);
+        }
+      } catch {
+        // 技能清理失败不阻塞建书，静默忽略。
+      }
 
       // 孵化完成：清空孵化器，避免已建好的书被再次当成孵化器。
       setIncubatorId(null);
