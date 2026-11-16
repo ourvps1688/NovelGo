@@ -1,6 +1,8 @@
 // 单章张力曲线卡（P0-2 情绪账前端消费面）：段落粒度的情绪/张力曲线 SVG +
 // 发现标记（拖沓段区间/情绪峰/开篇窗口），标记位由后端 quality.MarkTensionCurve
-// 与曲线三查判定同源计算，图上标记与工单发现不漂移。
+// 按生效曲线（同 seg L1 标注优先于 L0 基线）计算：判定式与曲线三查同源，
+// 但输入曲线与 L0 检测所用的本地确定性基线不同源 ⇒ 图上情绪峰计数与 L0
+// 「爽点断档」允许不一致。口径差异由 chartHint/desc 明示，不硬凑成同一个数。
 // 拖沓段标记可点击跳转该章原文（openChapterByReadingNumber 阅读序号口径）。
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
