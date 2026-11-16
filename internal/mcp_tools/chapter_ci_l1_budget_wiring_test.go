@@ -7,9 +7,11 @@ package mcp_tools
 // 该字段，导致显式 L1 回落到模型 MaxOutputTokens（MiMo 为 128k）——完全无帽，
 // 单条思维链可膨胀到几十分钟。本次补齐三段接线，只给显式 L1 设帽。
 //
-// #362「回执前置 + 小帽 + 截断抢救」：首轮 12k 小帽配合回执前置逼思维收敛；
-// 调用成功但拿不到回执时，回落 48k 完整预算复跑一次（预算层截断抢救）。
-// 派发失败/超时不重试，其余链路零波及。帽值数据依据见 chapter_ci.go 常量注释。
+// #362 的双调用已撤回：2026-11-16 16:36 第 8 章真实 A/B 证明 12k 小帽首轮必然
+// truncated_by_length、每次都要回落 48k，总 25m56s / 45,243 token，比单次基线
+// 16m31s / 27,419 慢 57% / 贵 65%。保留实证有效的「回执前置 + 输出从简 +
+// ParseL1Receipt 无围栏抢救」，预算回到单次 48k；派发失败/超时不重试（#122）。
+// 帽值数据依据见 chapter_ci.go 常量注释。
 
 import (
 	"os"
@@ -48,33 +50,40 @@ func TestChapterCIL1BudgetWiring(t *testing.T) {
 		"MiMo 思考+回答共享预算的映射不得退役")
 }
 
-// TestChapterCIL1BudgetCoversObservedThinking 两级预算边界：
-//   - 首轮小帽必须明显小于历史最大成功思维量，才是一次真正的「逼收敛」试验；
-//   - 回落预算必须完整覆盖历史最大成功样本，否则试验失败时本版 L1 会停在 pending；
-//   - 两者都必须真的小于模型无帽回落值，否则等于没设帽。
+// TestChapterCIL1BudgetCoversObservedThinking 单帽边界：
+//   - 必须完整覆盖历史最大成功思维量，否则回执会在生成之前被截断；
+//   - 必须真的小于模型无帽回落值，否则等于没设帽。
 func TestChapterCIL1BudgetCoversObservedThinking(t *testing.T) {
 	const largestObservedSuccess = 36_150 // 2026-11-15 21:43 chapterci 成功回执的 output token
 	const modelMaxOutput = 128_000        // mimo-v2.6-flash MaxOutputTokens（无帽回落值）
 
-	assert.Less(t, chapterCIMaxTokens, largestObservedSuccess,
-		"首轮小帽必须小于历史最大成功思维量，才是真正的收敛试验")
-	assert.Greater(t, chapterCIFallbackMaxTokens, largestObservedSuccess,
-		"回落预算必须覆盖历史最大成功样本，否则回执会在生成之前被截断")
-	assert.Less(t, chapterCIFallbackMaxTokens, modelMaxOutput,
-		"回落预算也必须比模型无帽回落值小，否则等于没设")
-	assert.Less(t, chapterCIMaxTokens, chapterCIFallbackMaxTokens,
-		"两级预算必须严格递增，回落才有意义")
-	assert.Equal(t, 12_000, chapterCIMaxTokens, "首轮小帽，改动需重跑数据核算")
-	assert.Equal(t, 48_000, chapterCIFallbackMaxTokens, "与 patrolSynthesizeMaxTokens 同档")
+	assert.Greater(t, chapterCIMaxTokens, largestObservedSuccess,
+		"帽必须大于历史最大成功 thinking 量，否则回执会在生成之前被截掉")
+	assert.Less(t, chapterCIMaxTokens, modelMaxOutput,
+		"帽必须真的比模型无帽回落值小，否则等于没设")
+	assert.Equal(t, 48_000, chapterCIMaxTokens, "与 patrolSynthesizeMaxTokens 同档，改动需重跑数据核算")
 
 	ci := readL1BudgetSource(t, "chapter_ci.go")
-	assert.Contains(t, ci, "const chapterCIMaxTokens = 12_000")
-	assert.Contains(t, ci, "const chapterCIFallbackMaxTokens = 48_000")
+	assert.Contains(t, ci, "const chapterCIMaxTokens = 48_000")
 	assert.Contains(t, ci, "36,150", "数据依据必须留在注释里，避免拍脑袋调帽")
-	assert.Contains(t, ci, "req.MaxTokens = chapterCIFallbackMaxTokens",
-		"预算层截断抢救接线不得退役")
-	assert.Contains(t, ci, "MaxTokens:   chapterCIMaxTokens", "首轮必须带小帽")
-	assert.Contains(t, ci, "ctx.Err() == nil", "ctx 已取消时不得复跑")
+	assert.Contains(t, ci, "MaxTokens:   chapterCIMaxTokens", "单次派发必须带帽")
+}
+
+// TestChapterCINoFallbackRerunAfterAB #362 首个真实 A/B 证伪后的防回潮锁：
+// 12k 小帽首轮 + 48k 回落双调用已撤回（首轮必然 truncated_by_length、每次必回落，
+// 慢 57% / 贵 65%）。保留的是回执前置 + 输出从简 + 解析层无围栏抢救。
+func TestChapterCINoFallbackRerunAfterAB(t *testing.T) {
+	ci := readL1BudgetSource(t, "chapter_ci.go")
+	assert.NotContains(t, ci, "chapterCIFallbackMaxTokens", "回落常量已退役")
+	assert.NotContains(t, ci, "req.MaxTokens = chapterCIFallbackMaxTokens", "不得再复跑")
+	assert.NotContains(t, ci, "首轮小帽未拿到回执", "回落告警已退役")
+	assert.NotContains(t, ci, "const chapterCIMaxTokens = 12_000", "12k 小帽已证伪")
+	assert.Contains(t, ci, "truncated_by_length", "A/B 证伪依据必须留在注释里")
+	assert.Contains(t, ci, "回答第一段必须是", "回执前置经实证有效，不得退役")
+
+	contract := readL1BudgetSource(t, "../quality/contract.go")
+	assert.Contains(t, contract, "json.NewDecoder", "解析层无围栏截断抢救不得退役")
+	assert.Contains(t, contract, "只接受**完整对象**", "半条 JSON 不得冒充已复核")
 }
 
 // TestChapterCIL1BudgetScopeIsExplicitDetectOnly 主 chat / 写章 / 前台 run_subagent /

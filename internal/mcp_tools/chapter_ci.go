@@ -34,23 +34,24 @@ import (
 // 以 var 暴露便于按平台/模型调参与测试收缩。
 var chapterCIMaxTurns = 12
 
-// chapterCIMaxTokens 是显式 L1 **首轮**的单次输出 token 上界（思考 + 回答共享预算）。
+// chapterCIMaxTokens 是显式 L1 的单次输出 token 上界（思考 + 回答共享预算）。
 //
-// #362「回执前置 + 小帽 + 截断抢救」：历史成功收口样本 output 为
-// 10,895 / 11,707 / 15,727 / 27,419 / 36,150 token，其中 16m31s 那轮思维块
-// 26,343 token 占 96%，回执仅约 1k 却排在回答末尾 —— 思维吃满时回执必被切掉。
-// 现把回执移到回答第一段并加「输出从简」约束，首轮用 12k 小帽逼思维收敛；
-// 若模型没能收敛（拿不到回执），RunChapterCIForChapter 会用完整预算复跑一次。
+// 为什么是单次 48k、且不再做「小帽首轮 + 回落复跑」：
+//   - 不设帽时 RunSubAgent 回落到模型 MaxOutputTokens（mimo-v2.6-flash 为 128,000），
+//     单条思维链可膨胀到几十分钟；48k 与 patrolSynthesizeMaxTokens 同档，完整覆盖
+//     全部历史成功收口样本（output 10,895 / 11,707 / 15,727 / 27,419 / 36,150）。
+//   - #362 曾试「回执前置 + 12k 小帽首轮 + 48k 回落复跑」。2026-11-16 16:36 第 8 章
+//     首个真实 A/B 证伪：首轮 thinking 仍 35,599 字符、token 恰好卡 11,892≈12k 并落
+//     truncated_by_length，回执被切在 summary 半句；模型没有收敛思维，只是被硬切，
+//     回落不是偶发而是每次必触发。总 25m56s / 45,243 token，比单次基线 16m31s /
+//     27,419 token 慢 57% / 贵 65% —— 每次都要白付一次注定失败的调用。
+//   - 故撤回双调用：保留实证有效的「回执前置 + 输出从简 + ParseL1Receipt 无围栏抢救」
+//     （截断只切尾部闲笔，findings / tension_curve 主体已送达；半条 JSON 仍拒绝，
+//     绝不冒充完整结论），预算回到单次 48k。派发失败 / 超时 / 回执残缺一律即收口（#122）。
 //
-// 不设时 RunSubAgent 回落到模型 MaxOutputTokens（mimo-v2.6-flash 为 128,000），
-// 单条思维链可膨胀到几十分钟。项目既有结论「预算帽救不了长思维」（detect.go I7）
-// 对未收敛的思考模型仍成立，故小帽只是首轮尝试，绝不能当唯一预算。
-const chapterCIMaxTokens = 12_000
-
-// chapterCIFallbackMaxTokens 是首轮被截断、没拿到回执时的完整预算（兜底复跑一次）。
-// 48k 与 patrolSynthesizeMaxTokens 同档，完整覆盖全部历史成功样本（最大 36,150），
-// 保证提速试验失败时本版 L1 仍能收口，不会因小帽停在 pending。
-const chapterCIFallbackMaxTokens = 48_000
+// 项目既有结论「预算帽救不了长思维」（detect.go I7）依然成立：真要压缩单次耗时，
+// 只能另走降推理档 / 换非思考模型 / 缩输入语料，不能靠调小这个值。
+const chapterCIMaxTokens = 48_000
 
 // TensionTicketLanderFunc 把一章的曲线四查发现落成/刷新 pipeline 情绪账工单
 // （E 系，tension 容器），返回落库条数。
@@ -279,22 +280,11 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 		MaxTurns:    chapterCIMaxTurns,
 		MaxTokens:   chapterCIMaxTokens,
 	}
+	// 单次派发：17:0x 首个真实 A/B 证伪「12k 小帽首轮 + 48k 回落复跑」——小帽让
+	// 思维链落在 truncated_by_length、回执必被切在半句，回落每次必触发，净效果慢 57% /
+	// 贵 65%。现回到一次 48k 调用；派发失败 / 超时 / 回执残缺一律即收口（#122），
+	// 本版 L1 如实保持 pending，由用户下次显式重检再试，零自动重试、零后台派发。
 	report, err := runSub(ctx, req)
-	if err == nil {
-		// 预算层截断抢救（#362）：首轮小帽没让思维收敛、或回执围栏被硬切掉时，
-		// 用历史完整预算复跑一次。只在「调用成功但没拿到回执」时触发——派发失败/
-		// 超时绝不重试（#122 失败即收口纪律），ctx 已取消也不重跑。同一次用户显式
-		// 触发内的同一执行体，零新增后台派发、零自动修复。
-		if _, perr := quality.ParseL1Receipt(report); perr != nil && ctx.Err() == nil {
-			if logger != nil {
-				logger.Warn("chapter-ci 首轮小帽未拿到回执，回落完整预算复跑一次",
-					"novelID", novelID, "chapterID", chapterID,
-					"firstMaxTokens", chapterCIMaxTokens, "fallbackMaxTokens", chapterCIFallbackMaxTokens)
-			}
-			req.MaxTokens = chapterCIFallbackMaxTokens
-			report, err = runSub(ctx, req)
-		}
-	}
 
 	// 落档案公共路径：readingNumber 取不到按 0（发现不带作用域，降级不阻断）。
 	readingNumber, _ := chapter.NewStore(db, logger).GetReadingNumberByID(ctx, nil, novelID, chapterID)

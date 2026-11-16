@@ -301,48 +301,46 @@ func TestRunChapterCIEmptyFindingsChecked(t *testing.T) {
 	assert.Equal(t, "[]", got.L1Findings, "零发现=已查空清单（区别于未查）")
 }
 
-// TestRunChapterCITwoStageBudget #362：首轮小帽没拿到回执时，回落完整预算复跑一次；
-// 复跑用同一份指令，成功后如实收口。小帽是提速试验，失败不得让本版 L1 停在 pending。
-func TestRunChapterCITwoStageBudget(t *testing.T) {
+// TestRunChapterCINoFallbackOnTruncatedReceipt 17:0x A/B 证伪后的行为锁：
+// 单次 48k 调用；即便回执被截断（围栏没闭合 / 半条 JSON），也绝不发起第二次 LLM。
+// 本版 L1 如实保持未复核态（A 方案），由用户下次显式重检再试。
+func TestRunChapterCINoFallbackOnTruncatedReceipt(t *testing.T) {
 	db, _, ctx := setupCIEnv(t)
 	seedCIChapter(t, db, 7)
 
 	var calls []mcp_tools.SubAgentRequest
 	runSub := func(_ context.Context, req mcp_tools.SubAgentRequest) (string, error) {
 		calls = append(calls, req)
-		if len(calls) == 1 {
-			// 首轮 12k 把思维链/回执硬切断：围栏没闭合、JSON 不完整。
-			return "```json\n{\"findings\":[{\"id\":\"L1-1\",\"check\":\"pacing\"", nil
-		}
-		return "```json\n{\"findings\":[{\"id\":\"L1-1\",\"check\":\"pacing\",\"desc\":\"完整预算才拿到\",\"chapter_ids\":[7]}],\"summary\":\"1 项\"}\n```", nil
+		return "```json\n{\"findings\":[{\"id\":\"L1-1\",\"check\":\"pacing\"", nil
 	}
-	require.NoError(t, mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 7))
-	require.Len(t, calls, 2, "首轮无回执必须回落完整预算复跑一次")
-	assert.Equal(t, 12_000, calls[0].MaxTokens, "首轮小帽")
-	assert.Equal(t, 48_000, calls[1].MaxTokens, "回落完整预算")
-	assert.Equal(t, calls[0].Instruction, calls[1].Instruction, "复跑用同一份指令，不重建上下文")
-	assert.Equal(t, calls[0].MaxTurns, calls[1].MaxTurns, "12 轮上限不变")
+	require.Error(t, mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 7))
+	require.Len(t, calls, 1, "截断回执不得触发第二次 LLM（12k 小帽双调用已证伪并撤回）")
+	assert.Equal(t, 48_000, calls[0].MaxTokens, "单次完整预算，不再有 12k 首轮")
 
 	got, err := quality.NewStore(db, ciLogger()).GetByChapter(ctx, 1, 7)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, quality.L1StatusChecked, got.L1Status, "回落成功须如实收口")
-	findings := quality.ParseFindings(got.L1Findings)
-	require.Len(t, findings, 1)
-	assert.Equal(t, "完整预算才拿到", findings[0].Desc)
+	if err == nil && got != nil {
+		assert.NotEqual(t, quality.L1StatusChecked, got.L1Status,
+			"残缺回执不得把本版 L1 摆成 checked")
+	}
 }
 
-// TestRunChapterCIFirstStageSuccessKeepsSingleCall 首轮就拿到回执时不得多跑一次。
-func TestRunChapterCIFirstStageSuccessKeepsSingleCall(t *testing.T) {
+// TestRunChapterCISingleCallOnSuccess 正常收口只发一次 LLM，且档案如实 checked。
+func TestRunChapterCISingleCallOnSuccess(t *testing.T) {
 	db, _, ctx := setupCIEnv(t)
 	seedCIChapter(t, db, 8)
-	calls := 0
-	runSub := func(_ context.Context, _ mcp_tools.SubAgentRequest) (string, error) {
-		calls++
+	var calls []mcp_tools.SubAgentRequest
+	runSub := func(_ context.Context, req mcp_tools.SubAgentRequest) (string, error) {
+		calls = append(calls, req)
 		return "```json\n{\"findings\":[],\"summary\":\"零发现\"}\n```", nil
 	}
 	require.NoError(t, mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 8))
-	assert.Equal(t, 1, calls, "首轮收口不得复跑")
+	require.Len(t, calls, 1)
+	assert.Equal(t, 48_000, calls[0].MaxTokens)
+
+	got, err := quality.NewStore(db, ciLogger()).GetByChapter(ctx, 1, 8)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, quality.L1StatusChecked, got.L1Status)
 }
 
 // TestRunChapterCINoRetryOnDispatchFailure #122：派发失败/超时即收口，绝不补跑。
@@ -358,8 +356,8 @@ func TestRunChapterCINoRetryOnDispatchFailure(t *testing.T) {
 	assert.Equal(t, 1, calls, "派发失败不得复跑")
 }
 
-// TestRunChapterCINoRetryAfterContextCancel 首轮返回时 ctx 已取消，不得再发第二次 LLM。
-func TestRunChapterCINoRetryAfterContextCancel(t *testing.T) {
+// TestRunChapterCISingleCallAfterContextCancel ctx 已取消时也不得新增任何调用。
+func TestRunChapterCISingleCallAfterContextCancel(t *testing.T) {
 	db, _, base := setupCIEnv(t)
 	seedCIChapter(t, db, 10)
 	ctx, cancel := context.WithCancel(base)
@@ -371,7 +369,7 @@ func TestRunChapterCINoRetryAfterContextCancel(t *testing.T) {
 		return "没有回执块", nil
 	}
 	require.Error(t, mcp_tools.RunChapterCIForChapter(ctx, runSub, nil, db, ciLogger(), "tool-1", 1, 10))
-	assert.Equal(t, 1, calls, "ctx 已取消不得复跑")
+	assert.Equal(t, 1, calls, "ctx 已取消不得再发 LLM")
 }
 
 // TestScheduleChapterCIUsesCheckerConfig 题材卡机制化（R2b-3）：L0 消费本书检查器配置——
