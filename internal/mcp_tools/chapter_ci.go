@@ -163,12 +163,51 @@ func recalcChapterL0(ctx context.Context, tc ToolContext, chapterID int64, conte
 		CheckedAt:     time.Now(),
 	})
 	if err == nil {
+		// 定向修复闭环（零 LLM）：按刚落盘的新正文逐条核验上一轮 L1 目标原句
+		// 是否还在。必须在 InvalidateL1 清空 l1_findings 之前读旧清单。
+		report := anchorReportForChapter(ctx, qs, tc.NovelID, chapterID, content)
+		if rerr := qs.SetAnchorReport(ctx, tc.NovelID, chapterID, report); rerr != nil {
+			tc.LoggerOrDefault().Warn("章节 CI 锚点复验回写失败（非阻断）", "err", rerr, "novelID", tc.NovelID, "chapterID", chapterID)
+		}
 		// 本版 L0 已落档 ⇒ 旧正文的 L1 立即作废，绝不让它冒充本版结论。
 		if ierr := qs.InvalidateL1(ctx, tc.NovelID, chapterID); ierr != nil {
 			tc.LoggerOrDefault().Warn("章节 CI 作废上一版 L1 失败（非阻断）", "err", ierr, "novelID", tc.NovelID, "chapterID", chapterID)
 		}
 	}
 	return findings, err
+}
+
+// anchorReportForChapter 把上一轮 L1 发现投影成逐条「原句改没改」的本地结论。
+// 纯确定性：有锚点原句就按新正文 Contains 判定；老档案无锚点一律如实标
+// unlocated，绝不拿当前正文反抽一句来冒充旧锚点（那会把「已改」误判成「未动」）。
+// 每行 "<稳定key>|<changed|untouched|unlocated>|<原句>"，供前端结论条常驻显示。
+func anchorReportForChapter(ctx context.Context, qs *quality.Store, novelID, chapterID int64, content string) []string {
+	row, err := qs.GetByChapter(ctx, novelID, chapterID)
+	if err != nil || row == nil {
+		return []string{}
+	}
+	prev := quality.ParseFindings(row.L1Findings)
+	if len(prev) == 0 {
+		return []string{}
+	}
+	keys := quality.FindingKeys(nil, prev)
+	out := make([]string, 0, len(prev))
+	for i, f := range prev {
+		key := fmt.Sprintf("L1-%d", i+1)
+		if i < len(keys) {
+			key = keys[i]
+		}
+		status := "unlocated"
+		if f.Anchor != "" {
+			if quality.AnchorPresent(content, f.Anchor) {
+				status = "untouched"
+			} else {
+				status = "changed"
+			}
+		}
+		out = append(out, key+"|"+status+"|"+f.Anchor)
+	}
+	return out
 }
 
 // RecalcChapterL0FromDisk 按「当前已落盘的章节正文」重算并覆盖该章 L0 档案。
@@ -270,15 +309,18 @@ func chapterCIFindings(ctx context.Context, db *gorm.DB, logger *slog.Logger, no
 //     历史实现（#115 P0）失败时会「保留上一轮 L1」，那正是「正文已改成 3135 字、
 //     结论却还写着上一版 1879 字」的根因；A 方案以「L0 重算即作废 L1」取而代之。
 func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillStore *skill.Store,
-	db *gorm.DB, logger *slog.Logger, toolID string, novelID, chapterID int64) error {
+	db *gorm.DB, logger *slog.Logger, toolID string, novelID, chapterID int64,
+	prevTargets ...string) error {
 	if runSub == nil {
 		return nil
 	}
 	// #117 P1 方案 C：派发前一次性取齐语料（纯本地毫秒级读），让 chapterci 子 Agent
 	// 不再用 6 轮工具往返自取。取不到证据时返回空串，指令逐字回落旧的自取文案。
 	corpus := buildChapterCICorpus(ctx, db, logger, novelID, chapterID)
-	instruction := buildChapterCIInstructionWithCorpus(skillStore, novelID, chapterID,
-		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID), corpus,
+	// prevTargets 由调用方在 RecalcChapterL0FromDisk 作废旧 L1 **之前**读出；
+	// 为空时本函数输出与改动前逐字一致（既有契约测试全部走空目标路径）。
+	instruction := buildChapterCIInstructionWithTargets(skillStore, novelID, chapterID,
+		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID), corpus, prevTargets,
 		chapterCIFindings(ctx, db, logger, novelID, chapterID)...)
 	thinkingOff := false // L1 显式关闭思考：结构化回执任务不走思维链
 	req := SubAgentRequest{
@@ -320,7 +362,15 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 		return perr
 	}
 	record.L1Status = quality.L1StatusChecked
-	record.L1Findings = quality.MarshalFindings(receipt.ToFindings(readingNumber))
+	// 定向修复：按本版落盘正文给每条 L1 发现补本地锚点（不进回执契约、不调 LLM）。
+	// 有了 Anchor，稳定 key 才携带问题身份，跨轮 diff 不再把「换一批新题」误算成
+	// 「同一条一直没修」；写后复验也能逐条回答「原句改了没」。读盘失败则降级为空，
+	// 老口径逐字可用，绝不臆造锚点。
+	findings := receipt.ToFindings(readingNumber)
+	if content, rerr := git.ReadFile(novelID, git.ChapterPath(chapterID)); rerr == nil && content != "" {
+		findings = quality.WithAnchors(findings, content, quality.BuildTensionCurve(content))
+	}
+	record.L1Findings = quality.MarshalFindings(findings)
 	upsertL1(ctx, db, logger, record, novelID, chapterID)
 	landL1TensionCurve(ctx, db, logger, novelID, chapterID, readingNumber, receipt)
 	return nil
@@ -504,6 +554,53 @@ func chapterCISelfCheckBlock(skillStore *skill.Store, novelID, chapterID int64, 
 // 输出与 #126 逐字一致。现有契约测试全部经由本函数，不因方案 C 改动。
 func buildChapterCIInstruction(skillStore *skill.Store, novelID, chapterID int64, segHints string, findings ...quality.Finding) string {
 	return buildChapterCIInstructionWithCorpus(skillStore, novelID, chapterID, segHints, "", findings...)
+}
+
+// PreviousL1Targets 在显式检测重算 L0（会作废旧 L1）**之前**读取上一轮 L1 发现，
+// 投影成逐条目标行。零 LLM、零写操作：读不到档案/零发现返回 nil。
+// 没有这一步，每次「重新检测本章」都是一次开放式全量评审，模型重新找一批新
+// 问题，用户改好 A 却看到 B/C/D，跨轮 key 又把它们算成「一直没修好」。
+func PreviousL1Targets(ctx context.Context, db *gorm.DB, logger *slog.Logger, novelID, chapterID int64) []string {
+	if db == nil {
+		return nil
+	}
+	row, err := quality.NewStore(db, logger).GetByChapter(ctx, novelID, chapterID)
+	if err != nil || row == nil {
+		return nil
+	}
+	findings := quality.ParseFindings(row.L1Findings)
+	if len(findings) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(findings))
+	for _, f := range findings {
+		line := "[" + f.Check + "] " + strings.TrimSpace(f.Desc)
+		if f.Anchor != "" {
+			line += "（上轮锚点原句「" + f.Anchor + "」）"
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// buildChapterCIInstructionWithTargets 在既有 L1 指令末尾追加「上轮待核验目标」块。
+// 无目标时逐字返回原指令，所有既有契约测试（含 P0 golden 相关文案）不受影响；
+// 回执格式串 L1ReceiptFormatLine 一字不动，不新增任何 LLM 调用。
+func buildChapterCIInstructionWithTargets(skillStore *skill.Store, novelID, chapterID int64,
+	segHints, corpus string, prevTargets []string, findings ...quality.Finding) string {
+	base := buildChapterCIInstructionWithCorpus(skillStore, novelID, chapterID, segHints, corpus, findings...)
+	if len(prevTargets) == 0 {
+		return base
+	}
+	var b strings.Builder
+	b.WriteString(base)
+	b.WriteString("\n【上轮待核验目标】用户已按上一轮报告改稿，请逐条核对当前正文：\n")
+	for i, line := range prevTargets {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, line)
+	}
+	b.WriteString("已消解的目标不要再报；仍未消解的照常报并注明；本轮真正的新发现单独列出。" +
+		"不要为凑数重报已解决的问题，也不要把同一问题换个措辞再报一遍。回执格式不变。\n")
+	return b.String()
 }
 
 // buildChapterCIInstructionWithCorpus 构造 L1 增量检查指令：小上下文范围 + 检查项 +

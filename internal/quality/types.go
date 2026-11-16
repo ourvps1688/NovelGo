@@ -71,6 +71,10 @@ type Finding struct {
 	ChapterIDs []int64 `json:"chapter_ids,omitempty"`
 	// LedgerRefs 是影响/涉及的台账条目（提案 §4.1「影响的台账条目」）。
 	LedgerRefs []string `json:"ledger_refs,omitempty"`
+	// Anchor 是 L1 语义发现在本章正文里逐字命中的原句（本地从 Desc 引号抽取，
+	// 见 anchor.go）。只用于定向处方、落盘本地核验与稳定 key 身份；老档案无此
+	// 字段时为空，所有消费侧按「未定位」降级，绝不臆造。不进 L1 回执契约。
+	Anchor string `json:"anchor,omitempty"`
 	// Status 是修复状态（FindingStatus*）。
 	Status string `json:"status"`
 }

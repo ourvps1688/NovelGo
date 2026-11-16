@@ -47,18 +47,28 @@ func TestPrescriptionWiredEndToEnd(t *testing.T) {
 		{"../../app/finding_prescription_inject.go", []string{
 			AcceptanceMarker, "quality.AcceptanceMarker", "严禁整章 full_replace",
 		}},
+		// 定向修复：处方必须按发现清单原始索引逐条绑定，禁止退回「按 check 名
+		// 匹配 + 去重」——那会让同章两条 continuity 共用一份通用处方。
 		{"../../frontend/src/components/skill/DetectionWorkflowView.tsx", []string{
-			"archive.prescriptions", "acceptanceTitle", "startsWith(`[${f.check}]`)",
+			"archive.prescriptions", "acceptanceTitle", "archive.prescriptions?.[idx]",
+			"anchor_report", "idx: l0.length + i",
 		}},
-		{"../../frontend/src/i18n/locales/zh-CN.json", []string{"acceptanceTitle", AcceptanceMarker}},
-		{"../../frontend/src/i18n/locales/en.json", []string{"acceptanceTitle", AcceptanceMarker}},
-		{"../../frontend/src/lib/wailsjs/go/models.ts", []string{"prescriptions: string[]"}},
+		{"../../frontend/src/i18n/locales/zh-CN.json", []string{"acceptanceTitle", AcceptanceMarker, "anchorReportTitle"}},
+		{"../../frontend/src/i18n/locales/en.json", []string{"acceptanceTitle", AcceptanceMarker, "anchorReportTitle"}},
+		{"../../frontend/src/lib/wailsjs/go/models.ts", []string{"prescriptions: string[]", "anchor_report: string[]"}},
 	}
 	for _, c := range checks {
 		src := readPrescriptionSource(t, c.path)
 		for _, want := range c.want {
 			assert.Contains(t, src, want, "%s 缺少接线 %q", c.path, want)
 		}
+	}
+	for _, banned := range []string{
+		"startsWith(`[${f.check}]`)", // 按 check 串条/去重是「盲修」根因，不得回潮
+	} {
+		assert.NotContains(t,
+			readPrescriptionSource(t, "../../frontend/src/components/skill/DetectionWorkflowView.tsx"),
+			banned, "前端处方绑定不得退回 %q", banned)
 	}
 }
 

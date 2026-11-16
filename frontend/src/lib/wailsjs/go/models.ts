@@ -2927,6 +2927,7 @@ export namespace pipeline {
 	    new_count: number;
 	    guard_keys: string[];
 	    finding_keys: string[];
+	    anchor_report: string[];
 	    pending_l1: boolean;
 	    // Go type: time
 	    checked_at?: any;
@@ -2951,6 +2952,7 @@ export namespace pipeline {
 	        this.new_count = source["new_count"];
 	        this.guard_keys = source["guard_keys"];
 	        this.finding_keys = source["finding_keys"];
+	        this.anchor_report = source["anchor_report"];
 	        this.pending_l1 = source["pending_l1"];
 	        this.checked_at = this.convertValues(source["checked_at"], null);
 	        this.exists = source["exists"];
@@ -3463,12 +3465,13 @@ export namespace quality {
 	    desc: string;
 	    chapter_ids?: number[];
 	    ledger_refs?: string[];
+	    anchor?: string;
 	    status: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Finding(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -3477,6 +3480,7 @@ export namespace quality {
 	        this.desc = source["desc"];
 	        this.chapter_ids = source["chapter_ids"];
 	        this.ledger_refs = source["ledger_refs"];
+	        this.anchor = source["anchor"];
 	        this.status = source["status"];
 	    }
 	}

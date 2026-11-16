@@ -141,6 +141,25 @@ func (s *Store) InvalidateL1(ctx context.Context, novelID, chapterID int64) erro
 	return nil
 }
 
+// SetAnchorReport 把写后本地复验结论挂到跨轮快照上（纯本地 UPDATE，零 LLM）。
+// 必须在 UpsertL0 之后、InvalidateL1 之前/之后调用均可：它只读+回写 finding_round
+// 一列，不触碰 L0/L1 发现清单与跨轮三态。读不到档案时静默跳过（宁缺勿错）。
+func (s *Store) SetAnchorReport(ctx context.Context, novelID, chapterID int64, report []string) error {
+	if s.DB == nil {
+		return nil
+	}
+	row, err := s.GetByChapter(ctx, novelID, chapterID)
+	if err != nil || row == nil {
+		return err
+	}
+	r := ParseFindingRound(row.FindingRound)
+	r.AnchorReport = report
+	return s.DB.WithContext(ctx).
+		Model(&ChapterQuality{}).
+		Where("novel_id = ? AND chapter_id = ?", novelID, chapterID).
+		Update("finding_round", MarshalFindingRound(r)).Error
+}
+
 // GetByChapter 返回某书某章的质量档案；不存在返回 (nil, nil)。
 func (s *Store) GetByChapter(ctx context.Context, novelID, chapterID int64) (*ChapterQuality, error) {
 	var e ChapterQuality

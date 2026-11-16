@@ -2240,6 +2240,12 @@
           "persisted": "仍在 {{count}} 条",
           "new": "新增 {{count}} 条"
         },
+        "anchorReportTitle": "本轮改稿核验（{{count}} 条上轮目标；本地逐句比对原句，未调用 AI）：",
+        "anchorStatus": {
+          "changed": "原句已改 · 待重新检测确认",
+          "untouched": "原句未动",
+          "unlocated": "未定位（上轮档案无锚点）"
+        },
         "roundGuardHint": "以下验收条件已连续 3 轮未消除（{{keys}}）：这可能是判定器阈值冲突，不是「再改一次」能解决的。请先人工选择「豁免 / 调整阈值 / 换思路」之一，再决定是否继续改稿；系统不会自动改阈值或派发修复。",
         "roundGuardExempt": "豁免这些项",
         "roundGuardExemptDone": "已豁免 {{count}} 项：仅在本机不再显示与勾选，检测器仍照常判定、阈值与档案均不变。",

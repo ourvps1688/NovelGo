@@ -40,6 +40,11 @@ type FindingRound struct {
 	L0Keys      []string       `json:"l0_keys"`
 	PendingL1   bool           `json:"pending_l1,omitempty"`
 	RepeatCount map[string]int `json:"repeat_count,omitempty"`
+	// AnchorReport 是写后本地确定性复验的逐条结论（零 LLM）：上一轮 L1 目标原句
+	// 在新正文里是否还在。每行 "<稳定key>|<changed|untouched|unlocated>|<原句>"。
+	// 由 Store.SetAnchorReport 在 UpsertL0 之后单独回写，不参与跨轮 diff 计算；
+	// 旧档案缺该字段时为空，前端按「无复验数据」降级。
+	AnchorReport []string `json:"anchor_report,omitempty"`
 }
 
 // MarshalFindingRound 序列化跨轮快照；失败返回空串（宁缺勿错）。

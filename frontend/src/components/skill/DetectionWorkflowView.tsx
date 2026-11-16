@@ -933,6 +933,13 @@ function ChapterQualityArchiveCard({
   onArchiveInvalidate: () => void;
 }) {
   const { t } = useTranslation();
+  // 本地复验状态文案全部用静态 i18n key（动态拼接会绕开 i18n:check 的键校验）。
+  const anchorStatusText = (status: string) =>
+    status === "changed"
+      ? t("journey.quality.detect.anchorStatus.changed")
+      : status === "untouched"
+        ? t("journey.quality.detect.anchorStatus.untouched")
+        : t("journey.quality.detect.anchorStatus.unlocated");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [rerunning, setRerunning] = useState(false);
   const [guardExemptions, setGuardExemptions] =
@@ -943,13 +950,16 @@ function ChapterQualityArchiveCard({
     [guardExemptions, guardScope],
   );
 
-  const l0 = archive?.l0_findings ?? [];
-  const l1 = archive?.l1_findings ?? [];
+  // 引用稳定：避免 `?? []` 每次 render 生成新数组，让下方 useMemo 依赖抖动。
+  const l0 = useMemo(() => archive?.l0_findings ?? [], [archive]);
+  const l1 = useMemo(() => archive?.l1_findings ?? [], [archive]);
   const allFindings = useMemo(
     () =>
       [
-        ...l0.map((f) => ({ key: `l0:${f.id}`, f })),
-        ...l1.map((f) => ({ key: `l1:${f.id}`, f })),
+        // idx 是「处方/稳定 key 与发现清单同序」的原始索引：不能用 check 名匹配，
+        // 否则同章两条 continuity 会拿到同一份通用处方、按内容去重后只剩一条。
+        ...l0.map((f, i) => ({ key: `l0:${f.id}`, f, idx: i })),
+        ...l1.map((f, i) => ({ key: `l1:${f.id}`, f, idx: l0.length + i })),
       ].filter(({ f }) => !exemptedChecks.has(f.check)),
     [l0, l1, exemptedChecks],
   );
@@ -994,9 +1004,11 @@ function ChapterQualityArchiveCard({
       : t("journey.quality.detect.currentChapter");
     // #114：把选中发现对应的确定性验收处方一并发出——阈值/实测值/目标/
     // 位置/避免动作与检测侧同源，LLM 不再只拿到一句人读描述凭语感重写。
-    const criteria = (archive.prescriptions ?? [])
-      .filter((line) => rows.some(({ f }) => line.startsWith(`[${f.check}]`)))
-      .filter((line, i, arr) => arr.indexOf(line) === i);
+    // 逐条精确绑定：处方由后端按「L0 发现 + L1 发现」同序渲染，直接按原始索引取，
+    // 同类多条各拿自己的定向处方（位置/原句/动作按条不同），不去重、不按 check 串条。
+    const criteria = rows
+      .map(({ idx }) => archive.prescriptions?.[idx] ?? "")
+      .filter((line) => line !== "");
     const criteriaBlock =
       criteria.length > 0
         ? `\n${t("journey.quality.detect.acceptanceTitle")}\n${criteria
@@ -1018,8 +1030,10 @@ function ChapterQualityArchiveCard({
         : "";
     // #114 P2：把选中项对应的 P1 单源稳定 key 一并发出，app 侧据此把本轮
     // 目标发现项绑进技能账本；不自行造 key、不作为给模型的修改指令。
-    const targetKeys = (archive.finding_keys ?? []).filter((key) =>
-      rows.some(({ f }) => key.split("|")[1] === f.check),
+    // 与处方同源：稳定 key 序列同序于发现清单，按 idx 取本轮选中项，
+    // 不再按 check 名捞（同类多条会互相串号）。
+    const targetKeys = (archive.finding_keys ?? []).filter((_, i) =>
+      rows.some(({ idx }) => idx === i),
     );
     const keysBlock =
       targetKeys.length > 0
@@ -1222,6 +1236,40 @@ function ChapterQualityArchiveCard({
               })}
             </span>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* 定向修复：写后本地逐条复验（零 LLM），常驻显示「上轮目标原句改没改」，
+          不再只靠一次性 toast 或整轮开放式重检才能知道改了哪几条。 */}
+      {(archive.anchor_report ?? []).length > 0 ? (
+        <div className="mt-2 rounded-md border border-border bg-background px-2 py-1.5 text-[11px] leading-relaxed text-foreground/80">
+          <p className="font-medium text-foreground">
+            {t("journey.quality.detect.anchorReportTitle", {
+              count: (archive.anchor_report ?? []).length,
+            })}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {(archive.anchor_report ?? []).map((line) => {
+              const [key, status, quote] = line.split("|");
+              const tone =
+                status === "changed"
+                  ? "text-primary"
+                  : status === "untouched"
+                    ? "text-destructive"
+                    : "text-muted-foreground";
+              return (
+                <li key={`${key}-${status}`} className="flex flex-wrap gap-1">
+                  <span className={tone}>{anchorStatusText(status)}</span>
+                  <span className="text-muted-foreground">{key}</span>
+                  {quote ? (
+                    <span className="text-muted-foreground">
+                      「{quote.slice(0, 40)}」
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         </div>
       ) : null}
 

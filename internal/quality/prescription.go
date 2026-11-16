@@ -54,6 +54,7 @@ func RenderPrescriptions(list []Prescription) []string {
 // curve 必须是与检测同源的 L0 基线曲线（BuildTensionCurve 或 chapter_tension
 // 的 source=l0 行）；wordCount 是 text.ComputeStats 口径；words 是本书生效字数口径。
 // 任何输入缺失都降级为通用处方，绝不报错、绝不臆造数值。
+// 判官评分门禁走这条零锚点路径，输出与锚点改造前逐字一致。
 func BuildPrescriptions(findings []Finding, curve []TensionPoint, wordCount int, words ChapterWordsTarget) []Prescription {
 	out := make([]Prescription, 0, len(findings))
 	for _, f := range findings {
@@ -64,7 +65,46 @@ func BuildPrescriptions(findings []Finding, curve []TensionPoint, wordCount int,
 	return out
 }
 
+// BuildPrescriptionsAnchored 是给「去修复」消息用的定向版：额外传入当前落盘正文，
+// 为每条 L1 语义发现算出可在正文逐字命中的原句锚点，处方里的位置/动作/避免项
+// 因此按条不同、可 search_replace 直改。L0 处方与旧 L1 模板逐字不变。
+//
+// 只有档案详情视图调用本函数；判官评分门禁仍走 BuildPrescriptions（零锚点），
+// 保证评分 prompt 与历史 golden 不受影响。纯函数、零 LLM、零写操作。
+func BuildPrescriptionsAnchored(findings []Finding, curve []TensionPoint, wordCount int, words ChapterWordsTarget, content string) []Prescription {
+	out := make([]Prescription, 0, len(findings))
+	for _, f := range findings {
+		var p Prescription
+		if L1CheckValid(f.Check) {
+			// 定向路径下 L1 一律走定向处方：抽不到锚点也如实标「未定位」，
+			// 绝不退回会把纯正文数字/措辞问题导向「去更新台账」的旧通用模板。
+			p = l1AnchoredPrescription(f, anchoredForFinding(f, content, curve))
+		} else {
+			p = prescriptionFor(f, curve, wordCount, words)
+		}
+		p.Check = f.Check
+		out = append(out, p)
+	}
+	return out
+}
+
+// anchoredForFinding 只给 L1 语义发现算锚点；L0 发现一律零值（其处方本就带段级
+// 实测，不走锚点分支）。档案里已有 Anchor 且仍命中正文时直接定位，不重抽 Desc。
+func anchoredForFinding(f Finding, content string, curve []TensionPoint) Anchor {
+	if !L1CheckValid(f.Check) || strings.TrimSpace(content) == "" {
+		return Anchor{Seg: -1}
+	}
+	if a, ok := LocateAnchor(content, f.Anchor, curve); ok {
+		return a
+	}
+	if a, ok := ExtractAnchor(f.Desc, content, curve); ok {
+		return a
+	}
+	return Anchor{Seg: -1}
+}
+
 // prescriptionFor 单条投影：所有阈值/区间均直接引用检测侧常量。
+// 判官评分侧与 L0 处方共用；L1 语义发现的定向版见 l1AnchoredPrescription。
 func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words ChapterWordsTarget) Prescription {
 	switch f.Check {
 	case CheckTailHook:
@@ -171,6 +211,8 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 		}
 
 	case "reader_state", "continuity", "foreshadow", "pacing", "immersion_anchor", "task_card":
+		// 判官评分门禁（零锚点路径）专用：输出与锚点改造前逐字一致，历史 golden
+		// 不受影响。「去修复」消息走 BuildPrescriptionsAnchored 的定向处方，不经过这里。
 		return Prescription{
 			Criterion: "台账/前章事实与本章正文一致（L1 子 Agent 判定）",
 			Current:   f.Desc,
@@ -190,6 +232,44 @@ func prescriptionFor(f Finding, curve []TensionPoint, wordCount int, words Chapt
 			Avoid:     "不要整体推翻重写无关段落",
 		}
 	}
+}
+
+// l1AnchoredPrescription 是 L1 语义发现的定向处方：位置给到 seg/字区间/原文，
+// 动作给到「用 search_replace 只改这一句」，避免项按检查项分流。
+//
+// 旧模板把 6 类 L1 发现压成同一句「二选一：改正文或更新台账」，位置恒为空，
+// 于是「六千七百步折算差」「首句分工措辞」这类纯正文问题也被导向改台账；用户
+// 勾 5 条拿到 5 行几乎相同的模板，模型只能凭语感整章重写（第 12 章 9 轮实证）。
+// 这里不引入任何新数值、不调用 LLM、不改判定式，只把已存在的原句交出去。
+func l1AnchoredPrescription(f Finding, a Anchor) Prescription {
+	p := Prescription{
+		Criterion: "L1 语义判定：本章正文与计划卡/前章/台账的事实、数字或表述互相印证",
+		Current:   f.Desc,
+		Target:    "锚点原句被改写后该检查项不再命中；其余正文逐字不动",
+		Where:     a.Where(),
+	}
+	switch f.Check {
+	case "continuity":
+		p.Criterion = "L1 语义判定：本章正文内部或与前章/台账的数字、称谓、动作主体、分工表述互相矛盾"
+		p.Do = "用 search_replace 只把上列原句改成自洽写法（数字/称谓/动作主体与前后文一致）：只改这一句，不补解释段、不动其它段落"
+		p.Avoid = "不要去改台账、不要整章 full_replace、不要反复换措辞碰运气；与该句无关的段落一律不动"
+	case "task_card":
+		p.Criterion = "L1 语义判定：计划卡点名的爽点/动作细节未在正文兑现"
+		p.Do = "在锚点所在段定点补写计划卡指定的具体动作或短句节奏（search_replace 该句或其紧邻句），补齐点名细节即可"
+		p.Avoid = "不要扩写整章、不要把计划卡条目当成新情节重写、不要堆直白情绪词或感叹号（会触发去 AI 味）"
+	case "foreshadow":
+		p.Criterion = "L1 语义判定：伏笔/计划卡口径（精简、专属信号、生命周期）与正文落点不一致"
+		p.Do = "用 search_replace 只把上列原句对齐计划卡口径（删多余项或补专属信号），保持该段原有功能"
+		p.Avoid = "不要为对齐口径扩写整段、不要改动该伏笔在别处的回收点、不要整章 full_replace"
+	case "pacing":
+		p.Criterion = "L1 语义判定：同一动作/句式在邻近段落重复出现，稀释了唯一性"
+		p.Do = "用 search_replace 删掉或改写上列重复原句中的一处（保留首次出现），其余正文原样"
+		p.Avoid = "不要整段重写、不要把两处都删掉、不要顺手调整无关节奏"
+	default: // reader_state / immersion_anchor
+		p.Do = "用 search_replace 只改上列原句，使读者认知/代入感锚点与前后文一致"
+		p.Avoid = "不要整章 full_replace、不要改动无关段落、不要靠加解释性旁白绕过"
+	}
+	return p
 }
 
 // beatActionHitsNeeded 把动作密度帽换算成「一个 400 字 beat 段要写几处具体动作」。

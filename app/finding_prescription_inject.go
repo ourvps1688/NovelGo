@@ -25,7 +25,7 @@ func buildAcceptanceGuard(message string) string {
 	b.WriteString("<system-reminder>\n")
 	b.WriteString("本轮消息带有【本章验收条件】块，来自本地确定性检测器（不是模型主观评分），是本轮必须逐条满足的硬约束：\n")
 	b.WriteString("1. 动笔前先逐条复述「当前实测值 → 目标值 → 要改的位置」，确认判定式后再改。\n")
-	b.WriteString("2. 只做定点修改（search_replace / line_range_replace）：严禁整章 full_replace 推翻重写，那会让其它已达标项回退，正是反复改稿消不掉问题的主因。\n")
+	b.WriteString("2. 只做定点修改（search_replace / line_range_replace）：把每条验收条件「位置」里给出的原句直接作为 search_text，一次只改一处；严禁整章 full_replace 推翻重写，那会让其它已达标项回退，正是反复改稿消不掉问题的主因。\n")
 	b.WriteString("3. 严禁采用每条「避免」项列出的写法；尤其不要靠堆直白情绪词或感叹号抬张力（会同时触发去 AI 味），改用具体动作细节、对抗升级与短句节奏。\n")
 	b.WriteString("4. 不得自行更换数字、另立目标或把未达标项解释成「已通过」；判官主观分数不能替代这些确定性条件。\n")
 	b.WriteString("5. 改完逐条回报「已达成 / 未达成 + 依据」；未达成要说明是判定器冲突还是改动不足。用户确认前不要落盘。\n")

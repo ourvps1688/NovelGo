@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/novelgo/novelgo/internal/git"
 	"github.com/novelgo/novelgo/internal/llm"
 	"github.com/novelgo/novelgo/internal/quality"
 )
@@ -376,6 +377,10 @@ type ChapterQualityArchive struct {
 	// 把选中项对应的 key 拼进改稿消息，再由 app 侧绑进技能账本（#114 P2）。
 	// 旧档案无快照时为空，前端按「无可关联标识」降级。
 	FindingKeys []string `json:"finding_keys"`
+	// AnchorReport 是写后本地复验的逐条结论（零 LLM）：上一轮 L1 目标原句在
+	// 新正文里是否还在。每行 "<稳定key>|<changed|untouched|unlocated>|<原句>"，
+	// 用基础类型避免 Wails 生成物新增结构体噪声。旧档案为空，前端按无数据降级。
+	AnchorReport []string `json:"anchor_report"`
 	// PendingL1 是本轮 L0 已落档、L1 尚未收口（#113 跨轮快照口径）。检测超时
 	// 「保留上一轮 L1」时该标记仍为 true，而 l1_status 可能仍是 checked；
 	// 前端据此区分「整轮完成」与「仅 L0 更新、L1 沿用旧结果」，不再用单列
@@ -412,9 +417,17 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 	// 不再读可能停留在上一次评分时点的 DB source=l0 旧快照（详见
 	// chapter_prescription_curve.go）。读盘失败才降级回 DB 基线行。
 	curve := prescriptionCurveForChapter(ctx, s, novelID, chapterID)
+	// 定向修复：按当前落盘正文现场补锚点（老档案没有 anchor 字段也能立刻定位），
+	// 处方因此逐条带 seg/字区间/可复制原句，而不是 6 类 L1 共用一句通用模板。
+	// 纯只读：现场投影进 DTO，不回写档案、不改 Finding.Status、零 LLM。
+	content := ""
+	if c, rerr := git.ReadFile(novelID, git.ChapterPath(chapterID)); rerr == nil {
+		content = c
+	}
+	out.L1Findings = quality.WithAnchors(out.L1Findings, content, curve)
 	all := append(append([]quality.Finding{}, out.L0Findings...), out.L1Findings...)
-	out.Prescriptions = quality.RenderPrescriptions(quality.BuildPrescriptions(
-		all, curve, out.L0Metrics.WordCount, s.qualityStore.ChapterWords(ctx, novelID)))
+	out.Prescriptions = quality.RenderPrescriptions(quality.BuildPrescriptionsAnchored(
+		all, curve, out.L0Metrics.WordCount, s.qualityStore.ChapterWords(ctx, novelID), content))
 	// #114 P1：把写侧算好的跨轮三态直接透出（读侧不重算、不猜上一轮）。
 	round := quality.ParseFindingRound(row.FindingRound)
 	out.PendingL1 = round.PendingL1
@@ -423,6 +436,7 @@ func (s *Service) GetChapterQualityArchive(ctx context.Context, novelID, chapter
 	out.NewCount = len(round.New)
 	out.GuardKeys = round.GuardKeys()
 	out.FindingKeys = round.CurrentKeys
+	out.AnchorReport = round.AnchorReport
 	return out, nil
 }
 

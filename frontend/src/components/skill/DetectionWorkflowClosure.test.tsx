@@ -116,7 +116,8 @@ describe("#113 章节质量档案闭环", () => {
     expect(c).toContain("archive.prescriptions");
     expect(c).toContain("acceptanceTitle");
     expect(c).toContain("criteriaBlock");
-    expect(c).toContain("startsWith(`[${f.check}]`)");
+    expect(c).toContain("archive.prescriptions?.[idx]");
+    expect(c).not.toContain("startsWith(`[${f.check}]`)");
     const zh = JSON.parse(read("i18n/locales/zh-CN.json"));
     const en = JSON.parse(read("i18n/locales/en.json"));
     expect(zh.journey.quality.detect.acceptanceTitle).toContain(
@@ -687,5 +688,28 @@ describe("A 方案：显式台账同步入口与 L1 失败常驻态", () => {
     expect(view).toContain(
       "[novelId, kind, effChapterId, queryClient, t, failureKey]",
     );
+  });
+
+  it("定向修复：处方按索引逐条绑定、复验结论常驻，禁止按 check 串条", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain("idx: l0.length + i");
+    expect(view).toContain("archive.prescriptions?.[idx]");
+    expect(view).not.toContain("startsWith(`[${f.check}]`)");
+    expect(view).toContain("archive.anchor_report");
+    expect(view).toContain("anchorStatusText");
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      expect(d.anchorReportTitle).toBeTruthy();
+      for (const key of ["changed", "untouched", "unlocated"]) {
+        expect(
+          d.anchorStatus?.[key],
+          `missing anchorStatus.${key} in ${f}`,
+        ).toBeTruthy();
+      }
+    }
+    const models = read("lib/wailsjs/go/models.ts");
+    expect(models).toContain("anchor_report: string[]");
+    expect(models).toContain('anchor = source["anchor"]');
   });
 });

@@ -16,11 +16,13 @@ import (
 //   - 作用域 l0/l1：避免同 check 跨层撞号；
 //   - Check：全部检测/处方/复验代码本来就以它做身份判定（单源）；
 //   - 归一化命中特征：只取 LedgerRefs（trim+排序），取不到就留空；
+//     L1 语义发现若无台账引用但有本地锚点，改用原句短哈希（见下），让 key 携带
+//     真实问题身份——否则「上一轮台阶数、这一轮步数折算」都叫 l1|continuity|#0；
 //   - 同组序号：同一 (scope, check, feature) 内按出现顺序编号。
 //
 // 绝不进 key：顺编 ID、Desc 全文、字数/段序/升幅/峰值数等本轮实测值、Status、
-// Level、ChapterIDs（随章节移动变化）、时间戳。固定阈值也不必进——它们只影响
-// 文案措辞，不影响「是不是同一条问题」。
+// Level、ChapterIDs（随章节移动变化）、时间戳、锚点原句本身（只进 8 位哈希）。
+// 固定阈值也不必进——它们只影响文案措辞，不影响「是不是同一条问题」。
 
 // FindingKeysMarker 是 #114 P2 改稿消息里「本轮目标发现项」块的标记。
 // 前端把 P1 单源生成的稳定 key 逐行列出，app 侧据此把本轮目标绑定进技能账本
@@ -50,7 +52,16 @@ func findingKeysForScope(scope string, list []Finding) []string {
 		if check == "" {
 			check = "unspecified"
 		}
-		base := scope + "|" + check + "|" + findingFeature(f)
+		feature := findingFeature(f)
+		// 无台账引用的 L1 语义发现原本恒为 l1|check|#0/#1：改好上一条后，本轮
+		// 换一批全新的 continuity 问题仍撞同一 key，被算成「一直没修」，
+		// repeat_count 每轮清零、3 轮保护永远触发不了（第 12 章 9 轮实证）。
+		// 有本地锚点时带一段原句短哈希：原句被改掉 → 该 key 自然消失（resolved）；
+		// 原句没动 → key 不变（真 persisted）。L0 与已有台账引用的发现逐字不变。
+		if scope == "l1" && feature == "" && f.Anchor != "" {
+			feature = "q" + AnchorHash(f.Anchor)
+		}
+		base := scope + "|" + check + "|" + feature
 		n := seen[base]
 		seen[base] = n + 1
 		out = append(out, base+"#"+strconv.Itoa(n))

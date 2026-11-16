@@ -2280,6 +2280,12 @@
           "persisted": "{{count}} still open",
           "new": "{{count}} new"
         },
+        "anchorReportTitle": "Edit verification ({{count}} targets from last round; local quote comparison, no AI call):",
+        "anchorStatus": {
+          "changed": "Quote changed · pending re-check",
+          "untouched": "Quote untouched",
+          "unlocated": "Unlocated (no anchor in last archive)"
+        },
         "roundGuardHint": "These criteria have stayed unresolved for 3 consecutive rounds ({{keys}}): this may be a detector threshold conflict, not something another rewrite will fix. Choose one of exempt / adjust the threshold / change approach before editing; the system never changes thresholds or dispatches fixes automatically.",
         "roundGuardExempt": "Exempt these",
         "roundGuardExemptDone": "Exempted {{count}} checks: hidden from selection on this device only; the detector still runs unchanged, and no thresholds or records were modified.",

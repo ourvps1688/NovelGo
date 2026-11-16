@@ -514,6 +514,10 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 	// #113：显式重跑前先按当前落盘正文重算 L0（写后链路之外的兜底），与写作侧共用
 	// 「单章字数口径」单源；失败仅告警，不阻断 L1（降级语义同章节 CI）。
 	a.pipeline.SetChapterCIRunner(func(ctx context.Context, novelID, chapterID int64) error {
+		// 定向修复：必须在 RecalcChapterL0FromDisk 作废旧 L1 **之前**读上轮目标，
+		// 否则派发时旧发现已清空，L1 又会变成一次开放式全量重评审、每轮换一批新题。
+		// 纯本地读取 + 字符串投影，零 LLM、零写库。
+		prevTargets := mcp_tools.PreviousL1Targets(ctx, a.db, a.logger, novelID, chapterID)
 		if rerr := mcp_tools.RecalcChapterL0FromDisk(ctx, a.db, a.logger, novelID, chapterID); rerr != nil {
 			a.logger.Warn("章节检测：L0 重算失败（非阻断，继续 L1）", "err", rerr, "novelID", novelID, "chapterID", chapterID)
 		}
@@ -525,7 +529,7 @@ func (a *App) initWithConfig(cfg *config.AppConfig) error {
 			return a.runBackgroundSubAgent(c, req)
 		}
 		err := mcp_tools.RunChapterCIForChapter(ctx, detectSubAgent,
-			a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID)
+			a.skill, a.db, a.logger, "pipeline-detect", novelID, chapterID, prevTargets...)
 		if err == nil {
 			return nil
 		}
