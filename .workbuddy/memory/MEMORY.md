@@ -23,8 +23,8 @@
 - **只读直调**：WebSocket `ws://localhost:34115/wails/ipc`，发 `"C"+JSON({name,args,callbackID})`、收 `"c"+JSON({callbackid,result|error})`，方法名 `app.App.<Method>`；示例 `C:/tools/wails-call2.js`、协议见 `/wails/runtime.js`。零 LLM / 零写库。
 
 ## 当前状态 / 待办
-- **#362 已落地（用户 02:40 拍板，03:1x 全闸绿）**：「回执前置 + 小帽 + 截断抢救」只改显式 L1 —— 指令要求 `回答第一段必须是` 回执 + 输出从简（照 `verifyPrompt` 范式）；`ParseL1Receipt` 加无围栏抢救（只收完整 JSON 对象，不拼半条数组）；首轮 12k 小帽，调用成功但拿不到回执且 ctx 未取消时以 48k 同一指令复跑一次，**派发失败/超时不重试（#122）**。`feedback_method_cap_test.go` 属编辑反馈指令，勿误改。
-- **关键事实（勿夸大）**：16m31s 真因＝思考模型超长思维链（26,343 reasoning token 占 96%）；MiMo 思考+回答共享预算且思维块先生成。无帽时不是 64k，是回落模型 `MaxOutputTokens=128,000`（`stream.go:390-398` + providers.go mimo-v2.6-flash）。历史成功样本 output 最高 36,150 token。**「12k 小帽能逼思维收敛」仍是未验证假设**，#362 只有契约 + 全闸 + 冷启动二进制核验，**无运行期 A/B 样本，勿宣称提速**；取证要用户下次显式点「重新检测本章」，看日志 `首轮小帽未拿到回执，回落完整预算复跑一次` 是否出现 + 单次耗时。
+- **#362 已落地（用户 02:40 拍板，03:1x 全闸绿；13:4x 补推送 + 冷启动核验）**：「回执前置 + 小帽 + 截断抢救」只改显式 L1 —— 指令要求 `回答第一段必须是` 回执 + 输出从简（照 `verifyPrompt` 范式）；`ParseL1Receipt` 加无围栏抢救（只收完整 JSON 对象，不拼半条数组）；首轮 12k 小帽，调用成功但拿不到回执且 ctx 未取消时以 48k 同一指令复跑一次，**派发失败/超时不重试（#122）**。`feedback_method_cap_test.go` 属编辑反馈指令，勿误改。
+- **关键事实（勿夸大）**：16m31s 真因＝思考模型超长思维链（26,343 reasoning token 占 96%）；MiMo 思考+回答共享预算且思维块先生成。无帽时不是 64k，是回落模型 `MaxOutputTokens=128,000`（`stream.go:390-398` + providers.go mimo-v2.6-flash）。历史成功样本 output 最高 36,150 token。**「12k 小帽能逼思维收敛」仍是未验证假设**，#362 只有契约 + 全闸 + 13:4x 冷启动二进制核验 + dev 只读直调，**无运行期 A/B 样本，勿宣称提速**；取证要用户下次显式点「重新检测本章」，看日志 `首轮小帽未拿到回执，回落完整预算复跑一次` 是否出现 + 单次耗时。
 - **`chapterCIMethodCap=1200` 截断技能正文**，「输出格式」段根本没注入；真正生效的是 `chapter_ci.go` 硬编码回执要求 ⇒ 改动面在 Go 常量串而非 md（`chapter-ci.md` 只同步口径）。`feedback_method_cap_test.go` 的「末尾」是编辑反馈技能，勿误改。
 - **已知闸门 flake**：`app.TestSkillFallbackHitRate` 是真实 deepseek 兜底基准，负面样本「我想写点东西」偶发误触发 1/6 ⇒ 外部模型漂移，按项目纪律**单跑为准**（`-run` 单跑 + `./app/ -skip`），**禁改阈值掩盖**。
 - **仍存事实（勿擅自处理）**：第 8 章 2147 字未达 3000–4000 判 fail 属 #119「放行 + chat 定点补写」；2906 脏档案未回填、两启动入口未统一（用户未批准）。`propagation.go` 全书 L0 规则扫描不应作废 L1；`UpsertL0` 会刷零历史 `round` 列，`finding_round` JSON 才是跨轮真相源；DB 仅单列 `checked_at`，双时间戳需加 `l1_checked_at`；#130 ② 在 A 方案下属冗余防御，保留不删。
