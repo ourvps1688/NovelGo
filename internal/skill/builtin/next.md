@@ -55,7 +55,7 @@ budget: 2000
 1. **蓝图对齐** — 调 `story-blueprint`：确认本章在卷纲/蓝图中的功能位置（推进/转折/收束），不偏离宏观结构。
 2. **人设加载** — 调 `character-design`：本章出场角色的教义档案（升级驱动/经营/情感/解谜/心理）+ 卖点化节点；用 `get_characters` 取已建档案，确保言行一致、不漂移。
 3. **设定校验** — 调 `worldbuilding-design`：本章涉及的设定/力量体系/金手指，写前用 `search_settings`（语义优先，按本章将涉及的实体/矛盾/地点检索最相关设定，返回带 `setting_id` 的条目）核对一致性、防吃书；也可配合 `get_locations` / `search_story_memory`。需要修正时拿返回的 `setting_id` 调 `upsert_setting` 合并更新，勿新建重复条目。
-4. **读者认知态** — 用 `get_reader_perspective` 取当前读者已知/误知态，据此决定本 reveal 还是 withhold（与 `reader-immersion` 的"好奇心缺口"配合）；关键 reveal/withhold 节点可即时用 `create_reader_perspective_entry` 落记录，章级增量亦由后台 statesync 自动同步。
+4. **读者认知态** — 用 `get_reader_perspective` 取当前读者已知/误知态，据此决定本 reveal 还是 withhold（与 `reader-immersion` 的"好奇心缺口"配合）；关键 reveal/withhold 节点可即时用 `create_reader_perspective_entry` 落记录；章级增量同步由作者显式触发（写后不会自动派发 statesync）。
 5. **前三章专项** — 若为新书第 1~3 章，调 `opening-chapters` 执行冷开场/前千字法则/首个甜头。
 6. **立章纲任务卡** — 调 `upsert_chapter_task_card` 立结构化四件套（机器校验缺一拒收）：**钩子任务**（本章埋/收哪个坑 + 章尾断章钩设计）、**爽点任务**（爽点类型与情绪落点）、**人设时刻**（谁的高光/反差）、**推进任务**（主线/卷纲功能位）。这是"本章为什么写"的机器可验契约；写后由章节 CI 对卡核验兑现（发现落章节质量档案），方向调整先改卡再改文。
 
@@ -73,7 +73,7 @@ budget: 2000
 
 ## 协作约定
 
-- **状态同步**：正文落盘后系统自动派发 statesync 子 Agent 回填台账（角色/地点/弧线/时间线/读者认知），无需手动逐条维护；若怀疑某章台账漂移，可手动 `run_subagent`（agent_type=statesync）触发一次补同步。
+- **状态同步**：正文落盘后**不会**自动派发 statesync；需要时由作者显式点「同步本章台账」，或手动 `run_subagent`（agent_type=statesync）触发一次增量补同步（角色/地点/弧线/时间线/读者认知）。未同步前不要假设台账已包含本章新增设定。
 - **输出约束**：不要在回复中重复输出「现在台账的状态」这类完整台账盘点；当用户未主动询问时，只给出与当前写作直接相关的结论和下一步动作。
 
 ## 对齐声明

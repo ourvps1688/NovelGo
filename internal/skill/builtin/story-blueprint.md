@@ -40,7 +40,7 @@ budget: 4000
 
 ## 工具口径（按执行身份分流）
 - **主 Agent 手动规划**（用户对话中加载本技能）：可用完整台账写工具落库——`update_chapter_plan`（章计划 next/near/far）、`create_story_arc` / `create_arc_node`（弧线）、`create_timeline_entry`（伏笔/计划）等。
-- **S2 流水线蓝图派发**（Blueprint Agent）：白名单仅 `create_volume` + `edit`（只写 `volumes/id_{卷id}.md` 卷纲）与只读工具——蓝图产物一律用「建卷 + 写卷纲」固化，**不要调用弧线/时间线/章计划等台账写工具**（会被拒）；那些台账落库由主 Agent 与后台 statesync 承接。
+- **S2 流水线蓝图派发**（Blueprint Agent）：白名单仅 `create_volume` + `edit`（只写 `volumes/id_{卷id}.md` 卷纲）与只读工具——蓝图产物一律用「建卷 + 写卷纲」固化，**不要调用弧线/时间线/章计划等台账写工具**（会被拒）；那些台账落库由主 Agent 手动规划或作者显式触发的 statesync 承接（写后不会自动同步）。
 
 ## 工作流
 

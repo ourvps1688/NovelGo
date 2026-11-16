@@ -642,3 +642,50 @@ describe("#131 章节状态按章归属与历史档案分态", () => {
     }
   });
 });
+
+// A 方案：写后台账不再自动同步，作者需要面板上的显式入口；
+// L1 失败也不能只靠一次性 toast，结论条要常驻说明「上次为什么没成功」。
+describe("A 方案：显式台账同步入口与 L1 失败常驻态", () => {
+  it("章节面板提供「同步本章台账」按钮，且只在选中章时显示", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain("SyncChapterLedger(novelId, effChapterId)");
+    expect(view).toContain("handleSyncLedger");
+    expect(view).toContain('kind === "chapter" && effChapterId != null');
+    expect(view).toContain("syncingLedger");
+    expect(view).toContain("syncLedgerDone");
+    expect(view).toContain("syncLedgerFailed");
+    // 显式入口不得复活写后自动派发/去抖/后台续命
+    expect(view).not.toContain("scheduleStateSync");
+    expect(view).not.toContain("stateSyncDebouncer");
+    for (const f of ["zh-CN", "en"]) {
+      const d = JSON.parse(read(`i18n/locales/${f}.json`)).journey.quality
+        .detect;
+      for (const key of [
+        "syncLedger",
+        "syncLedgerRunning",
+        "syncLedgerDone",
+        "syncLedgerFailed",
+        "syncLedgerHint",
+        "chapterLastFailurePrefix",
+      ]) {
+        expect(d[key], `missing ${key} in ${f}`).toBeTruthy();
+      }
+      expect(d.syncLedgerHint).toMatch(
+        f === "zh-CN" ? /不会自动同步/ : /no longer syncs/,
+      );
+    }
+  });
+
+  it("失败原因按章常驻，成功即清除，不靠一次性 toast", () => {
+    const view = read("components/skill/DetectionWorkflowView.tsx");
+    expect(view).toContain("CHAPTER_FAILURE_KEYS");
+    expect(view).toContain("chapter-detect-failure:");
+    expect(view).toContain("window.sessionStorage.setItem(failureKey, code)");
+    expect(view).toContain("window.sessionStorage.removeItem(failureKey)");
+    expect(view).toContain("chapterDetectL1Pending && lastFailure");
+    expect(view).toContain("chapterLastFailurePrefix");
+    expect(view).toContain(
+      "[novelId, kind, effChapterId, queryClient, t, failureKey]",
+    );
+  });
+});

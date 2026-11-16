@@ -36,7 +36,7 @@ type ChapterPlan struct {
 //  1. category 约束枚举（foreshadowing | user_directive）——系统级分类驱动不同的查询和注入策略，
 //     不同于偏好和角色关系的自由文本，这里需要精确的行为区分。
 //  2. target_chapter 必填（NOT NULL）作为主排序键，不作为过滤条件。
-//     LLM 估算不准确不影响（只排不滤），写后由 statesync 自动校准。
+//     LLM 估算不准确不影响（只排不滤），作者显式触发台账同步时由 statesync 校准。
 //  3. 混合注入：近期窗口全量 + 全局索引一行一条。不依赖 target_chapter 做过滤，
 //     只依赖它排序。不准确不会丢数据。
 //
@@ -65,7 +65,8 @@ type ChapterPlan struct {
 //   - 系统提示词强制要求：索引中如存在与当前章节相关的条目，必须在写作前调用
 //     get_timeline 获取完整信息，不得凭索引标题猜测内容
 //
-// 写后状态维护职责（statesync 子 agent 每章写完后自动触发）：
+// 显式台账同步职责（作者点「同步本章台账」/ S0 对齐 / 全量对齐后才跑 statesync 子 agent；
+// 写章落盘不会自动派发）：
 //  1. 故事进展超出预期 → 调整 target_chapter（第 200 章 → 第 250 章）
 //  2. 伏笔已被故事自然回收但未标记 → 标记 status=resolved, resolved_chapter=当前章
 //  3. 与当前剧情冲突的条目 → 上报主 agent，主 agent 决定修改或通知用户

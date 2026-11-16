@@ -42,9 +42,10 @@ func TestObservabilityWiredEndToEnd(t *testing.T) {
 			"SignalTruncatedByLength", "SignalToolArgsInvalid",
 			"SignalEmptyStream", "SignalBreakerOpen",
 		}},
-		{"../llm/types.go", []string{"TaskKind"}},
+		{"../llm/types.go", []string{"TaskKind", "MaxReasoningRunes"}},
 		{"../llm/stream.go", []string{
-			"TaskKindFromOptions(opts)", "parseSSE(ch, resp, providerName, model, taskKind)",
+			"TaskKindFromOptions(opts)", "parseSSE(ch, resp, providerName, model, taskKind, reasoningRunesLimit(opts))",
+			"reasoning_budget",
 			"SignalTruncatedByLength", "SignalToolArgsInvalid",
 			"SignalEmptyStream", "SignalBreakerOpen",
 		}},

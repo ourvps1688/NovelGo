@@ -21,6 +21,7 @@ import {
   ListIssueTickets,
   RunDetectionTask,
   CancelDetectionTask,
+  SyncChapterLedger,
 } from "@/lib/wailsjs/go/app/App";
 import { detectionKeys, patrolKeys } from "@/lib/queryKeys";
 import { ACTION_FEATURE_KEYS, trackFeature } from "@/lib/featureKeys";
@@ -56,6 +57,14 @@ const SELECT_CLS =
 // #115 P0：章节检测「已发起 → 完成 / 失败」共用同一 toast id，完成反馈原地替换
 // 发起提示；失败改用告警态并给出可执行原因，不再两条绿色提示叠加。
 const CHAPTER_DETECT_TOAST_ID = "chapter-detect";
+
+// 失败原因常驻态复用既有 toast 文案（reason → i18n key），不另造一套口径。
+const CHAPTER_FAILURE_KEYS: Record<string, string> = {
+  model: "journey.quality.detect.chapterDoneFailedModel",
+  receipt: "journey.quality.detect.chapterDoneFailedReceipt",
+  llm: "journey.quality.detect.chapterDoneFailedLLM",
+  timeout: "journey.quality.detect.chapterDoneFailedTimeout",
+};
 
 function fmtTime(v?: unknown): string {
   if (!v) return "";
@@ -110,6 +119,24 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
   const effVolumeId = scopeId ?? volumeOpts[0]?.id ?? null;
   const volumeName =
     volumeOpts.find((v) => v.id === effVolumeId)?.name ?? undefined;
+
+  // 「同步本章台账」是 A 方案下唯一的单章显式入口；写后不会自动跑。
+  const [syncingLedger, setSyncingLedger] = useState(false);
+  // 一次性 toast 切走页面就丢，结论条必须常驻保留「上次为什么没成功」。
+  // 只存稳定分类码（不存已翻译文案），切换语言后仍按当前语言渲染。
+  const [lastFailure, setLastFailure] = useState<string | null>(null);
+  const failureKey = `chapter-detect-failure:${novelId ?? 0}:${effChapterId ?? 0}`;
+  useEffect(() => {
+    if (kind !== "chapter" || effChapterId == null) {
+      setLastFailure(null);
+      return;
+    }
+    try {
+      setLastFailure(window.sessionStorage.getItem(failureKey));
+    } catch {
+      setLastFailure(null);
+    }
+  }, [kind, effChapterId, failureKey]);
 
   const { data: statuses } = useQuery({
     queryKey: detectionKeys.list(novelId),
@@ -316,9 +343,23 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
           } else if (p.reason === "timeout") {
             msg = t("journey.quality.detect.chapterDoneFailedTimeout");
           }
+          // 常驻失败态：一次性 toast 消失后，结论条仍要说明上次为什么没成功。
+          const code = p.reason ?? "unknown";
+          try {
+            window.sessionStorage.setItem(failureKey, code);
+          } catch {
+            // 存储不可用时退化为仅内存态，不影响检测收口
+          }
+          setLastFailure(code);
           toastError(msg, CHAPTER_DETECT_TOAST_ID);
           return;
         }
+        try {
+          window.sessionStorage.removeItem(failureKey);
+        } catch {
+          // 同上：清理失败不影响成功提示
+        }
+        setLastFailure(null);
         toastSuccess(
           t("journey.quality.detect.chapterDoneToast"),
           CHAPTER_DETECT_TOAST_ID,
@@ -328,7 +369,7 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
     return () => {
       off?.();
     };
-  }, [novelId, kind, effChapterId, queryClient, t]);
+  }, [novelId, kind, effChapterId, queryClient, t, failureKey]);
 
   // A 方案：章节视图不再挂「长时运行」浮层（已运行 N 分钟 / 预计 3–8 分钟 /
   // 第 N 步工具进度）。L1 只由作者显式点「重新检测本章」触发，结果一律按
@@ -445,6 +486,28 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
       setLaunching(false);
     }
   }, [novelId, hasModel, kind, effScope, queryClient, t]);
+
+  // A 方案：台账同步只在作者显式点按钮时跑一次，不挂写后钩子、不自动重试。
+  // 与「重新检测本章」并列但互不触发：同步只写结构化台账，不做 L1 复核。
+  const handleSyncLedger = useCallback(async () => {
+    if (!novelId || effChapterId == null || syncingLedger) return;
+    if (!hasModel) {
+      toastError(t("signability.configureModelFirst"));
+      return;
+    }
+    setSyncingLedger(true);
+    try {
+      await SyncChapterLedger(novelId, effChapterId);
+      invalidateChapterViews(queryClient, novelId);
+      toastSuccess(t("journey.quality.detect.syncLedgerDone"));
+    } catch (err) {
+      toastError(
+        toErrorMessage(err, t("journey.quality.detect.syncLedgerFailed")),
+      );
+    } finally {
+      setSyncingLedger(false);
+    }
+  }, [novelId, effChapterId, syncingLedger, hasModel, queryClient, t]);
 
   const noNovel = !novelId;
   const buttonDisabled =
@@ -660,6 +723,18 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
                         </span>
                       </>
                     ) : null}
+                    {chapterDetectL1Pending && lastFailure ? (
+                      <div className="flex w-full items-start gap-1.5 text-[11px] text-destructive">
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                        <span>
+                          {t("journey.quality.detect.chapterLastFailurePrefix")}
+                          {t(
+                            CHAPTER_FAILURE_KEYS[lastFailure] ??
+                              "journey.quality.detect.chapterDoneFailed",
+                          )}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -745,6 +820,24 @@ export default function DetectionWorkflowView({ novelId, kind }: Props) {
             >
               <X className="w-4 h-4" />
               {t("journey.quality.detect.cancel")}
+            </button>
+          ) : null}
+          {kind === "chapter" && effChapterId != null ? (
+            <button
+              type="button"
+              disabled={syncingLedger || buttonDisabled}
+              title={t("journey.quality.detect.syncLedgerHint")}
+              onClick={handleSyncLedger}
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {syncingLedger ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RotateCw className="w-4 h-4" />
+              )}
+              {syncingLedger
+                ? t("journey.quality.detect.syncLedgerRunning")
+                : t("journey.quality.detect.syncLedger")}
             </button>
           ) : null}
         </div>

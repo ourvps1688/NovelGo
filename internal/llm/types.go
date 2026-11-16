@@ -74,10 +74,15 @@ type CallOptions struct {
 	Temperature     *float64 // 不传走 Provider 默认
 	MaxTokens       *int     // 不传走 ModelInfo 默认
 	ReasoningEffort *string  // 不传从 ModelInfo 取
-	ThinkingEnabled *bool    // 不传从 ModelInfo 判断
-	ToolChoice      any      // OpenAI tool_choice payload; nil = provider default
-	SessionID       string   // 会话标识（如 NovelGo session_id），仅需要会话感知的服务商消费；空=无会话上下文（hook 内部兜底）
-	TaskKind        string   // #114 P2 观测用任务类型（agent.RunOptions.AgentType 同名）；只用于失败信号分类，不参与请求体/重试/熔断
+	ThinkingEnabled *bool    // 不传从 ModelInfo 判断；显式 false 会发 thinking.type=disabled
+	// MaxReasoningRunes 单次流式调用的推理内容累计上限（rune，0 = 不限）。
+	// 只用于「本任务不该产生思维链」的结构化输出场景：思考模型一旦失控，
+	// 会在 reasoning 阶段把 max_tokens 全部吃光、零最终内容（第 11 章 48k/25min）。
+	// 超限时主动中断并回不可重试错误，绝不静默等满预算；不影响其他调用。
+	MaxReasoningRunes int
+	ToolChoice        any    // OpenAI tool_choice payload; nil = provider default
+	SessionID         string // 会话标识（如 NovelGo session_id），仅需要会话感知的服务商消费；空=无会话上下文（hook 内部兜底）
+	TaskKind          string // #114 P2 观测用任务类型（agent.RunOptions.AgentType 同名）；只用于失败信号分类，不参与请求体/重试/熔断
 }
 
 // StreamEventType 流式事件的类型。

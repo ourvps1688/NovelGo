@@ -53,6 +53,13 @@ type SubAgentRequest struct {
 	// MaxOutputTokens（MiMo 为 128k），单条思维链可膨胀到十几分钟。
 	// 只由调用方按任务特性给值：0 时 subOpts 不覆盖，其余子 Agent 行为逐字不变。
 	MaxTokens int
+	// ThinkingEnabled 显式关闭本子 Agent 的思考模式（nil = 沿用主 chat 设置）。
+	// L1 章节复核是「读材料 → 直接给 JSON 回执」的结构化短任务，不需要思维链；
+	// 显式 false 会对默认开启思考的模型发 thinking.type=disabled。
+	ThinkingEnabled *bool
+	// MaxReasoningRunes 本次子 Agent 允许累计的推理内容 rune 上限（0 = 不限）。
+	// 供应商忽略 disabled 时的本地止损：超限即中断并如实失败，绝不空转到预算耗尽。
+	MaxReasoningRunes int
 	// Detached 标记「写后维护」的异步派发（statesync / chapterci 的 debounce 链）。
 	// #119 P0：这类子 Agent 不该继承主 chat 的流式事件前缀与前端可见性——主 ctx
 	// 超时后它们仍会往会话里写「正在思考」、把界面挂住，且结果无人收口。

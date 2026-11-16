@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // Client 是 LLM 流式调用的传输层。
@@ -339,7 +340,7 @@ func (c *Client) ChatStream(
 		resp.Body = io.NopCloser(wd.wrapBody(resp.Body))
 		// parseSSE 返回是否发生过错误事件：仅当流完全正常结束（无 EventError）时
 		// 才喂入熔断器的成功探针（Half-Open 回 Closed），空闲超时等软错误不回血。
-		hadError := c.parseSSE(ch, resp, providerName, model, taskKind)
+		hadError := c.parseSSE(ch, resp, providerName, model, taskKind, reasoningRunesLimit(opts))
 		if !hadError {
 			ProviderBreaker.RecordSuccess(providerName)
 		}
@@ -430,6 +431,11 @@ func (c *Client) buildPayload(
 		if reasoningEffort != "" {
 			payload["reasoning_effort"] = reasoningEffort
 		}
+	} else if opts != nil && opts.ThinkingEnabled != nil {
+		// 调用方显式要求关闭思考时必须发 disabled：MiMo 等模型默认开启深度思考，
+		// 「不传 thinking」会被服务端按默认开启处理，结构化短任务仍会先跑几十分钟思维链。
+		// nil（未指定）保持旧语义：不发 thinking 参数，行为逐字不变。
+		payload["thinking"] = map[string]string{"type": "disabled"}
 	}
 
 	// Provider 钩子改造
@@ -474,13 +480,23 @@ func mergeSystemMessages(messages []map[string]any) []map[string]any {
 	return out
 }
 
+// reasoningRunesLimit 取本次调用的推理内容上限（0 = 不限）。
+// 抽成函数让 ChatStream 的 parseSSE 调用点保持单一接线、便于静态契约断言。
+func reasoningRunesLimit(opts *CallOptions) int {
+	if opts == nil {
+		return 0
+	}
+	return opts.MaxReasoningRunes
+}
+
 // parseSSE 解析 SSE 流，产出 StreamEvent。返回 hadError：本次流是否产生过任何 EventError
-// （空闲超时 / tool_args_invalid / empty_stream 均计）。仅当流完全正常结束（hadError=false）
-// 时，调用方才喂入 provider 熔断器的成功探针——软错误不回血，避免误 healed 未恢复的供应商。
-func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerName, model, taskKind string) bool {
+// （空闲超时 / tool_args_invalid / empty_stream / reasoning_budget 均计）。仅当流完全正常结束
+// （hadError=false）时，调用方才喂入 provider 熔断器的成功探针——软错误不回血，避免误 healed 未恢复的供应商。
+func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerName, model, taskKind string, maxReasoningRunes int) bool {
 	hadError := false
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 行最长 2MB
+	reasoningRunes := 0
 
 	// 工具调用累积缓冲区：按 index 对齐
 	type accToolCall struct {
@@ -565,6 +581,23 @@ func (c *Client) parseSSE(ch chan<- StreamEvent, resp *http.Response, providerNa
 		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
 			ch <- StreamEvent{Type: EventThinking, Data: reasoning}
 			diag.hasReason = true
+			reasoningRunes += utf8.RuneCountInString(reasoning)
+			if maxReasoningRunes > 0 && reasoningRunes > maxReasoningRunes {
+				// 主动止损：本任务应直接给结构化结论，却持续只吐思维内容。
+				// 等预算耗尽只会拿到 finish_reason=length + 零最终内容（第 11 章 48k/25min）。
+				// 发不可重试错误，上层按 #122 一次收口、不自动重跑；软信号不驱动熔断。
+				c.logger.Warn("reasoning budget exceeded, aborting stream",
+					"provider", providerName, "model", model, "task_kind", taskKind,
+					"runes", reasoningRunes, "limit", maxReasoningRunes)
+				hadError = true
+				ch <- StreamEvent{Type: EventError, Error: &APIError{
+					StatusCode: 0,
+					Message:    "模型思考内容超出本次任务预算，已主动中断（未生成结论）",
+					Retryable:  false,
+					Kind:       "reasoning_budget",
+				}}
+				return hadError
+			}
 		}
 
 		// content → EventContent

@@ -6,8 +6,15 @@ package llm
 func minimaxBuildRequest(payload map[string]any) map[string]any {
 	payload["reasoning_split"] = true
 
-	if thinking, ok := payload["thinking"].(map[string]string); ok && thinking["type"] == "enabled" {
-		thinking["type"] = "adaptive"
+	if thinking, ok := payload["thinking"].(map[string]string); ok {
+		switch thinking["type"] {
+		case "enabled":
+			thinking["type"] = "adaptive"
+		case "disabled":
+			// MiniMax 无 disabled 语义：显式关闭思考时退化为「不传 thinking」，
+			// 避免把不被识别的 type 发给服务端；长思维由调用方的推理护栏兜底。
+			delete(payload, "thinking")
+		}
 	}
 
 	return payload

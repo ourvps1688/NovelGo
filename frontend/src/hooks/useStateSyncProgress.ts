@@ -13,9 +13,10 @@ interface StateSyncPayload {
 const STALE_MS = 60_000;
 
 /**
- * 订阅后端 statesync 子 Agent 的生命周期事件，返回是否有后台状态同步在进行中。
- * 写章（edit full_replace）后系统会自动 debounce 派发 statesync 子 Agent 同步台账，
- * 本 hook 让前端能轻量地提示「后台状态同步中…」，无需关心具体子 Agent 卡片。
+ * 订阅后端 statesync 子 Agent 的生命周期事件，返回是否有状态同步在进行中。
+ * A 方案后写章不再自动派发 statesync；只有作者显式点「同步本章台账」、
+ * S0 导入对齐或全量对齐才会发出 started/done 事件。本 hook 让前端能轻量地
+ * 提示「台账同步中…」，无需关心具体子 Agent 卡片；无事件时恒为 false。
  */
 export function useStateSyncProgress() {
   const [activeChapters, setActiveChapters] = useState<Set<number>>(

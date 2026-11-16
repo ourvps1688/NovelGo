@@ -53,6 +53,14 @@ var chapterCIMaxTurns = 12
 // 只能另走降推理档 / 换非思考模型 / 缩输入语料，不能靠调小这个值。
 const chapterCIMaxTokens = 48_000
 
+// chapterCIMaxReasoningRunes 是 L1 允许累计的推理内容上限（rune，约 9k token）。
+// L1 是「读材料 → 直接给 JSON 回执」的结构化短任务，不需要深度思考：
+// 上面注释里的「只能另走降推理档」即在此落地——调用方显式发
+// thinking.type=disabled（MiMo 官方文档：mimo-v2.6-flash 默认 enabled、可设 disabled）。
+// 这个护栏只兜底「供应商忽略 disabled」的情形：一旦仍在持续吐思维内容，
+// 立即中断并如实失败，不再空转到 48k 预算耗尽（第 11 章 25m32s / 48,002 reasoning token）。
+const chapterCIMaxReasoningRunes = 24_000
+
 // TensionTicketLanderFunc 把一章的曲线四查发现落成/刷新 pipeline 情绪账工单
 // （E 系，tension 容器），返回落库条数。
 // 由 app 启动时注入（pipeline.LandTensionTickets）——mcp_tools 不能反向 import pipeline
@@ -272,13 +280,16 @@ func RunChapterCIForChapter(ctx context.Context, runSub RunSubAgentFunc, skillSt
 	instruction := buildChapterCIInstructionWithCorpus(skillStore, novelID, chapterID,
 		chapterCITensionSegHints(ctx, db, logger, novelID, chapterID), corpus,
 		chapterCIFindings(ctx, db, logger, novelID, chapterID)...)
+	thinkingOff := false // L1 显式关闭思考：结构化回执任务不走思维链
 	req := SubAgentRequest{
-		AgentType:   "chapterci",
-		NovelID:     novelID,
-		Instruction: instruction,
-		ToolID:      toolID,
-		MaxTurns:    chapterCIMaxTurns,
-		MaxTokens:   chapterCIMaxTokens,
+		AgentType:         "chapterci",
+		NovelID:           novelID,
+		Instruction:       instruction,
+		ToolID:            toolID,
+		MaxTurns:          chapterCIMaxTurns,
+		MaxTokens:         chapterCIMaxTokens,
+		ThinkingEnabled:   &thinkingOff,
+		MaxReasoningRunes: chapterCIMaxReasoningRunes,
 	}
 	// 单次派发：17:0x 首个真实 A/B 证伪「12k 小帽首轮 + 48k 回落复跑」——小帽让
 	// 思维链落在 truncated_by_length、回执必被切在半句，回落每次必触发，净效果慢 57% /

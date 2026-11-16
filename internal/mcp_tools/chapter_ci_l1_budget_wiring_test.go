@@ -37,8 +37,8 @@ func TestChapterCIL1BudgetWiring(t *testing.T) {
 	ci := readL1BudgetSource(t, "chapter_ci.go")
 
 	assert.Contains(t, base, "MaxTokens int", "SubAgentRequest 必须暴露可选输出预算字段")
-	assert.Contains(t, agent, "MaxTokens:       req.MaxTokens", "RunSubAgent 必须把请求预算透传进 subOpts")
-	assert.Contains(t, ci, "MaxTokens:   chapterCIMaxTokens", "显式 L1 执行体必须设置章节专用帽")
+	assert.Regexp(t, `MaxTokens:\s+req\.MaxTokens`, agent, "RunSubAgent 必须把请求预算透传进 subOpts")
+	assert.Regexp(t, `MaxTokens:\s+chapterCIMaxTokens`, ci, "显式 L1 执行体必须设置章节专用帽")
 	assert.Contains(t, agent, "if opts.MaxTokens > 0 {", "agent.Run → callOpts.MaxTokens 接线不得退役")
 	assert.Contains(t, agent, "callOpts.MaxTokens = &mt")
 
@@ -66,7 +66,47 @@ func TestChapterCIL1BudgetCoversObservedThinking(t *testing.T) {
 	ci := readL1BudgetSource(t, "chapter_ci.go")
 	assert.Contains(t, ci, "const chapterCIMaxTokens = 48_000")
 	assert.Contains(t, ci, "36,150", "数据依据必须留在注释里，避免拍脑袋调帽")
-	assert.Contains(t, ci, "MaxTokens:   chapterCIMaxTokens", "单次派发必须带帽")
+	assert.Regexp(t, `MaxTokens:\s+chapterCIMaxTokens`, ci, "单次派发必须带帽")
+}
+
+// TestChapterCIExplicitThinkingOffWiring L1 关闭思考 + 推理护栏的四段接线。
+// 第 11 章真实样本（2026-11-16 22:05:16→22:30:48）：单次 48k 预算被
+// 48,002 reasoning token 全部吃光、content 为空、finish_reason=length。
+// 预算帽/回执前置/输出从简都治不了——模型在 reasoning 阶段就把预算耗尽。
+// 根治是发 thinking.type=disabled（MiMo 官方文档：默认 enabled、可设 disabled），
+// 护栏只兜底供应商忽略该参数的情形。
+func TestChapterCIExplicitThinkingOffWiring(t *testing.T) {
+	ci := readL1BudgetSource(t, "chapter_ci.go")
+	base := readL1BudgetSource(t, "base.go")
+	agent := readL1BudgetSource(t, "../agent/agent.go")
+	stream := readL1BudgetSource(t, "../llm/stream.go")
+	types := readL1BudgetSource(t, "../llm/types.go")
+
+	assert.Contains(t, ci, "const chapterCIMaxReasoningRunes = 24_000")
+	assert.Regexp(t, `ThinkingEnabled:\s+&thinkingOff`, ci, "L1 必须显式关闭思考")
+	assert.Regexp(t, `MaxReasoningRunes:\s+chapterCIMaxReasoningRunes`, ci)
+	assert.Contains(t, base, "ThinkingEnabled *bool")
+	assert.Contains(t, base, "MaxReasoningRunes int")
+	assert.Regexp(t, `ThinkingEnabled:\s+req\.ThinkingEnabled`, agent)
+	assert.Regexp(t, `MaxReasoningRunes:\s+req\.MaxReasoningRunes`, agent)
+	assert.Contains(t, agent, "callOpts.ThinkingEnabled = opts.ThinkingEnabled")
+	assert.Contains(t, agent, "callOpts.MaxReasoningRunes = opts.MaxReasoningRunes")
+	assert.Contains(t, types, "MaxReasoningRunes int")
+	assert.Contains(t, stream, `payload["thinking"] = map[string]string{"type": "disabled"}`)
+	assert.Contains(t, stream, `"reasoning_budget"`)
+	assert.Contains(t, stream, "reasoningRunesLimit(opts)")
+}
+
+// TestChapterCIThinkingOffIsScopedToExplicitL1 关闭思考不得波及写后链 / 主 chat /
+// 其他子 Agent：只有显式 L1 的构造器设置这两个字段。
+func TestChapterCIThinkingOffIsScopedToExplicitL1(t *testing.T) {
+	for _, rel := range []string{"rw_tools.go", "subagent_tools.go", "feedback_tools.go"} {
+		src := readL1BudgetSource(t, rel)
+		assert.NotContains(t, src, "ThinkingEnabled", "%s 不得改变思考模式", rel)
+		assert.NotContains(t, src, "MaxReasoningRunes", "%s 不得吃 L1 推理护栏", rel)
+	}
+	bg := readL1BudgetSource(t, "../../app/background_agent.go")
+	assert.NotContains(t, bg, "ThinkingEnabled", "后台模型单源不得设全局思考开关")
 }
 
 // TestChapterCINoFallbackRerunAfterAB #362 首个真实 A/B 证伪后的防回潮锁：

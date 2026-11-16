@@ -686,6 +686,10 @@ export function StartPipeline(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['StartPipeline'](arg1, arg2, arg3, arg4);
 }
 
+export function SyncChapterLedger(arg1, arg2) {
+  return window['go']['app']['App']['SyncChapterLedger'](arg1, arg2);
+}
+
 export function TestConnection(arg1) {
   return window['go']['app']['App']['TestConnection'](arg1);
 }

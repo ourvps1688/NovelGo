@@ -374,6 +374,8 @@ export function StartManualIssueFixTickets(arg1:number,arg2:Array<pipeline.Issue
 
 export function StartPipeline(arg1:number,arg2:string,arg3:any,arg4:boolean):Promise<pipeline.PipelineRun>;
 
+export function SyncChapterLedger(arg1:number,arg2:number):Promise<void>;
+
 export function TestConnection(arg1:app.TestConnectionInput):Promise<llm.TestConnectionResult>;
 
 export function UpdateArcNode(arg1:number,arg2:number,arg3:app.UpdateArcNodeInput):Promise<void>;

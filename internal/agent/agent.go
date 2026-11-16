@@ -62,6 +62,13 @@ type RunOptions struct {
 	// 思考模型的思维块计入输出：不限时可膨胀到十几万 token，把单调用巡检/归并拖到几十分钟。
 	// 调用方（如一致性巡检）可按任务特性给硬上限，逼模型精简思考、按时收口。
 	MaxTokens int
+	// ThinkingEnabled 显式控制单次调用的思考开关（nil = 沿用模型默认）。
+	// 结构化短任务传 false：MiMo 等默认开启思考的模型必须收到 thinking.type=disabled，
+	// 否则思维块会先吃光整个输出预算、零最终结论（第 11 章 48k/25min）。
+	ThinkingEnabled *bool
+	// MaxReasoningRunes 本次调用允许累计的推理内容 rune 上限（0 = 不限）。
+	// 与 ThinkingEnabled=false 配套兜底：供应商忽略 disabled 时快速止损，不空转。
+	MaxReasoningRunes int
 	// RunningTokens 由调用方预计算的 token 预算（来自持久化的 token_count 累加）。
 	// 非空时 Run 直接复用，跳过对整段历史消息的重新 BPE 编码；为空则退回 InitRunningTokens。
 	RunningTokens map[string]int
@@ -132,22 +139,24 @@ func (a *Agent) RunSubAgent(ctx context.Context, parentOpts RunOptions, req mcp_
 		maxTurns = req.MaxTurns
 	}
 	subOpts := RunOptions{
-		TurnID:          parentOpts.TurnID,
-		SessionID:       parentOpts.SessionID,
-		NovelID:         req.NovelID,
-		Messages:        msgs,
-		AllowedTools:    allowed,
-		ActiveVersion:   parentOpts.ActiveVersion,
-		AgentType:       req.AgentType,
-		SubTaskID:       req.ToolID,
-		EventSeq:        parentOpts.EventSeq,
-		EventPrefix:     parentOpts.EventPrefix,
-		MaxTurns:        maxTurns,
-		MaxTokens:       req.MaxTokens,
-		Detached:        req.Detached,
-		Model:           parentOpts.Model,
-		ProviderName:    parentOpts.ProviderName,
-		ReasoningEffort: parentOpts.ReasoningEffort,
+		TurnID:            parentOpts.TurnID,
+		SessionID:         parentOpts.SessionID,
+		NovelID:           req.NovelID,
+		Messages:          msgs,
+		AllowedTools:      allowed,
+		ActiveVersion:     parentOpts.ActiveVersion,
+		AgentType:         req.AgentType,
+		SubTaskID:         req.ToolID,
+		EventSeq:          parentOpts.EventSeq,
+		EventPrefix:       parentOpts.EventPrefix,
+		MaxTurns:          maxTurns,
+		MaxTokens:         req.MaxTokens,
+		ThinkingEnabled:   req.ThinkingEnabled,
+		MaxReasoningRunes: req.MaxReasoningRunes,
+		Detached:          req.Detached,
+		Model:             parentOpts.Model,
+		ProviderName:      parentOpts.ProviderName,
+		ReasoningEffort:   parentOpts.ReasoningEffort,
 	}
 	result, err := a.Run(ctx, subOpts)
 	if err != nil {
@@ -326,6 +335,8 @@ func (a *Agent) Run(ctx context.Context, opts RunOptions) (AgentLoopResult, erro
 			mt := opts.MaxTokens
 			callOpts.MaxTokens = &mt
 		}
+		callOpts.ThinkingEnabled = opts.ThinkingEnabled
+		callOpts.MaxReasoningRunes = opts.MaxReasoningRunes
 	RETRY_STREAM:
 		// 记录本轮 streamLoop 第一个事件 seq（前端据此清空本轮 partial segments）
 		// +1 是因为 emit 闭包是 `*eventSeq++; event.Seq = *eventSeq`（先自增再赋值）

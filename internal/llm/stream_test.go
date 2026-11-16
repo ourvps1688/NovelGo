@@ -346,30 +346,10 @@ func TestClampMaxTokens(t *testing.T) {
 // --- parseSSE / finish_reason=length 截断提示 ---
 
 // runParseSSE 用给定 HTTP 响应体驱动 parseSSE，收集全部 StreamEvent（parseSSE 自身不关闭 channel）。
+// 推理护栏默认关闭（cap=0），保留既有测试的原语义。
 func runParseSSE(t *testing.T, body string) []StreamEvent {
 	t.Helper()
-	resp := &http.Response{
-		StatusCode: 200,
-		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader(body)),
-	}
-	c := NewClient(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ch := make(chan StreamEvent, 64)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.parseSSE(ch, resp, "test-provider", "test-model", "test")
-		close(ch)
-	}()
-
-	var events []StreamEvent
-	for ev := range ch {
-		events = append(events, ev)
-	}
-	wg.Wait()
-	return events
+	return runParseSSEWithReasoningCap(t, body, 0)
 }
 
 // TestParseSSE_FinishReasonLength_TruncatedJSON_ReportsTruncation
@@ -625,5 +605,164 @@ func TestIdleTimeoutErrorGotBytes(t *testing.T) {
 	}
 	if !ie1.gotBytes {
 		t.Errorf("case2: 已收到字节应标记 gotBytes=true（保留可重试）")
+	}
+}
+
+// --- 显式关闭思考（thinking.type=disabled）与推理护栏 ---
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func payloadThinkingType(t *testing.T, payload map[string]any) string {
+	t.Helper()
+	m, ok := payload["thinking"].(map[string]string)
+	if !ok {
+		return ""
+	}
+	return m["type"]
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// TestBuildPayloadExplicitThinkingDisabled 默认（nil）沿用模型能力；显式 false 必须
+// 真的发 thinking.type=disabled。MiMo 服务端默认开启思考，「不传参数」等于没关。
+func TestBuildPayloadExplicitThinkingDisabled(t *testing.T) {
+	c := NewClient(nil, testLogger())
+	p := &Provider{Models: []ModelInfo{{ID: "m", SupportsThinking: true, MaxOutputTokens: 128_000}}}
+	msgs := []map[string]any{{"role": "user", "content": "hi"}}
+
+	if got := payloadThinkingType(t, c.buildPayload(p, msgs, nil, "m", nil)); got != "enabled" {
+		t.Fatalf("未指定 opts 时支持思考的模型应保持 enabled, got %q", got)
+	}
+	got := c.buildPayload(p, msgs, nil, "m", &CallOptions{ThinkingEnabled: boolPtr(false)})
+	if tt := payloadThinkingType(t, got); tt != "disabled" {
+		t.Fatalf("显式关闭思考必须发 disabled, got %q", tt)
+	}
+	if _, ok := got["reasoning_effort"]; ok {
+		t.Error("关闭思考时不得再带 reasoning_effort")
+	}
+	// 非思考模型 + 显式关闭：同样发 disabled，不因模型能力而静默丢失。
+	nonThinking := &Provider{Models: []ModelInfo{{ID: "n", SupportsThinking: false}}}
+	if tt := payloadThinkingType(t, c.buildPayload(nonThinking, msgs, nil, "n",
+		&CallOptions{ThinkingEnabled: boolPtr(false)})); tt != "disabled" {
+		t.Fatalf("非思考模型显式关闭也应发 disabled, got %q", tt)
+	}
+}
+
+// TestThinkingDisabledProviderHooks MiMo 透传 disabled；Qwen 转 enable_thinking=false；
+// MiniMax / Moonshot 不认识 disabled，必须删掉该参数，绝不能把非法值发给服务端。
+func TestThinkingDisabledProviderHooks(t *testing.T) {
+	c := NewClient(nil, testLogger())
+	msgs := []map[string]any{{"role": "user", "content": "hi"}}
+
+	mimo := &Provider{
+		Models:       []ModelInfo{{ID: "mimo-v2.6-flash", SupportsThinking: true, MaxOutputTokens: 128_000}},
+		BuildRequest: mimoBuildRequest,
+	}
+	payload := c.buildPayload(mimo, msgs, nil, "mimo-v2.6-flash",
+		&CallOptions{ThinkingEnabled: boolPtr(false)})
+	if tt := payloadThinkingType(t, payload); tt != "disabled" {
+		t.Fatalf("MiMo 必须收到 disabled, got %q", tt)
+	}
+	if payload["max_completion_tokens"] != payload["max_tokens"] {
+		t.Error("MiMo 思考+回答共享预算映射不得被关闭思考影响")
+	}
+
+	qwen := qwenBuildRequest(map[string]any{
+		"thinking": map[string]string{"type": "disabled"},
+		"stream":   true,
+	})
+	if qwen["enable_thinking"] != false {
+		t.Error("Qwen disabled 必须映射为 enable_thinking=false")
+	}
+	if _, ok := qwen["thinking"]; ok {
+		t.Error("Qwen 不得保留标准 thinking 参数")
+	}
+
+	minimax := minimaxBuildRequest(map[string]any{
+		"thinking": map[string]string{"type": "disabled"},
+	})
+	if _, ok := minimax["thinking"]; ok {
+		t.Error("MiniMax 不认识 disabled，必须删除 thinking")
+	}
+
+	moonshot := moonshotBuildRequest(map[string]any{
+		"model":    "kimi-k2.6",
+		"thinking": map[string]string{"type": "disabled"},
+	})
+	if _, ok := moonshot["thinking"]; ok {
+		t.Error("Moonshot K2 不认识 disabled，必须删除 thinking")
+	}
+}
+
+// runParseSSEWithReasoningCap 与 runParseSSE 同款，但可注入推理 rune 上限。
+func runParseSSEWithReasoningCap(t *testing.T, body string, cap int) []StreamEvent {
+	t.Helper()
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	c := NewClient(nil, testLogger())
+	ch := make(chan StreamEvent, 64)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.parseSSE(ch, resp, "test-provider", "test-model", "test", cap)
+		close(ch)
+	}()
+	var events []StreamEvent
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	wg.Wait()
+	return events
+}
+
+// TestParseSSEReasoningBudget 供应商忽略 disabled 时的本地止损：
+// 累计推理内容超限即发不可重试的 reasoning_budget 错误，绝不等到预算耗尽；
+// cap=0（未启用护栏）时同一段流仍正常产出最终内容，零误伤。
+func TestParseSSEReasoningBudget(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"choices":[{"delta":{"reasoning_content":"abcdefghijk"}}]}`,
+		`data: {"choices":[{"delta":{"content":"final answer"}}]}`,
+		`data: [DONE]`,
+		"", "",
+	}, "\n")
+
+	events := runParseSSEWithReasoningCap(t, body, 10)
+	var apiErr *APIError
+	for _, ev := range events {
+		if ev.Type == EventError {
+			if e, ok := ev.Error.(*APIError); ok {
+				apiErr = e
+			}
+		}
+		if ev.Type == EventContent {
+			t.Error("护栏触发后不应再产出最终内容")
+		}
+	}
+	if apiErr == nil {
+		t.Fatal("推理内容超限必须发 EventError")
+	}
+	if apiErr.Kind != "reasoning_budget" || apiErr.Retryable {
+		t.Errorf("必须发不可重试的 reasoning_budget，got kind=%q retryable=%v",
+			apiErr.Kind, apiErr.Retryable)
+	}
+
+	normal := runParseSSEWithReasoningCap(t, body, 0)
+	sawContent := false
+	for _, ev := range normal {
+		if ev.Type == EventContent {
+			sawContent = true
+		}
+		if ev.Type == EventError {
+			t.Errorf("cap=0 不得触发护栏: %v", ev.Error)
+		}
+	}
+	if !sawContent {
+		t.Error("cap=0 时正常流必须照常产出最终内容")
 	}
 }

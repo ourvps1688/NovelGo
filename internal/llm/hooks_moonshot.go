@@ -30,6 +30,11 @@ func moonshotBuildRequest(payload map[string]any) map[string]any {
 
 	// K2 系列分支：不使用 reasoning_effort，按模型处理 thinking
 	delete(payload, "reasoning_effort")
+	if thinking, ok := payload["thinking"].(map[string]string); ok && thinking["type"] == "disabled" {
+		// K2 官方要求「不传 thinking → 服务端默认开启」，disabled 属非法值；
+		// 退化为不传，长思维由调用方的推理护栏兜底。
+		delete(payload, "thinking")
+	}
 	if strings.HasPrefix(model, "kimi-k2.7-code") {
 		delete(payload, "thinking")
 	}
