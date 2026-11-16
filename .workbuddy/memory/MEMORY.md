@@ -23,7 +23,7 @@
 - **只读直调**：WebSocket `ws://localhost:34115/wails/ipc`，发 `"C"+JSON({name,args,callbackID})`、收 `"c"+JSON({callbackid,result|error})`，方法名 `app.App.<Method>`；示例 `C:/tools/wails-call2.js`、协议见 `/wails/runtime.js`。零 LLM / 零写库。
 
 ## 当前状态 / 待办
-- **#362 现态（17:2x 撤回双调用）**：只改显式 L1 —— **保留** `回答第一段必须是` 回执 + 输出从简（照 `verifyPrompt`）、`ParseL1Receipt` 无围栏抢救（只收完整 JSON 对象，不拼半条数组）、单次 `chapterCIMaxTokens=48_000`；**退役** 12k 首轮小帽与 `chapterCIFallbackMaxTokens` 回落复跑（17:0x A/B 证伪）。派发失败/超时/回执残缺一律即收口（#122），本版 L1 保持 pending。`feedback_method_cap_test.go` 属编辑反馈指令，勿误改。
+- **#362 现态（17:2x 撤回双调用 + 冷启动核验完成）**：只改显式 L1 —— **保留** `回答第一段必须是` 回执 + 输出从简（照 `verifyPrompt`）、`ParseL1Receipt` 无围栏抢救（只收完整 JSON 对象，不拼半条数组）、单次 `chapterCIMaxTokens=48_000`；**退役** 12k 首轮小帽与 `chapterCIFallbackMaxTokens` 回落复跑（17:0x A/B 证伪）。派发失败/超时/回执残缺一律即收口（#122），本版 L1 保持 pending。`feedback_method_cap_test.go` 属编辑反馈指令，勿误改。
 - **关键事实 / A/B 结论（勿夸大）**：16m31s 真因＝超长思维链（26,343 reasoning / 96%）；MiMo 思考+回答共享预算、思维块先生成，无帽回落 `128,000`（`stream.go:390-398`+providers.go），历史成功上限 36,150。**16:36 第 8 章首个真实 A/B：12k 首轮落 `truncated_by_length`（11,892 token / thinking 35,599 字符）、回执切在 summary 半句，必然回落 48k；总 25m56s / 45,243 token vs 基线 16m31s / 27,419 ⇒ 慢 57%、贵 65%，「小帽逼收敛」证伪、勿宣称提速**。回执前置与半条拒绝实证有效；功能正常（checked/0、评分 85、零 ERROR/FATAL/重试）。撤回后**无运行期样本**，下次显式 L1 应只见一次 chapterci 调用、无回落 WARN。真提速另走降推理档/换非思考模型/缩语料（影响复核质量，未拍板）。细节见 2026-11-16.md 17:0x/17:2x 段。
 - **`chapterCIMethodCap=1200` 截断技能正文**，「输出格式」段根本没注入；真正生效的是 `chapter_ci.go` 硬编码回执要求 ⇒ 改动面在 Go 常量串而非 md（`chapter-ci.md` 只同步口径）。`feedback_method_cap_test.go` 的「末尾」是编辑反馈技能，勿误改。
 - **已知闸门 flake**：`app.TestSkillFallbackHitRate` 是真实 deepseek 兜底基准，负面样本「我想写点东西」偶发误触发 1/6 ⇒ 外部模型漂移，按项目纪律**单跑为准**（`-run` 单跑 + `./app/ -skip`），**禁改阈值掩盖**。
